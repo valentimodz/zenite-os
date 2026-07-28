@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase, isMissingCredentials } from './supabaseClient';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
 import CeoDashboard from './components/CeoDashboard';
 import ResetPassword from './components/ResetPassword';
 
 function App() {
-  const isSupabaseConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
-
-  if (!isSupabaseConfigured) {
+  if (isMissingCredentials) {
     return <SupabaseConfigRequired />;
   }
 
