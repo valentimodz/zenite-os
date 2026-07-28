@@ -3516,8 +3516,22 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     try {
+      let targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+
+      if (!targetEmpresaId || targetEmpresaId === 'MASTER' || targetEmpresaId === '00000000-0000-0000-0000-000000000001') {
+        const { data: empList } = await supabase.from('empresas').select('id').limit(1);
+        if (empList && empList.length > 0) {
+          targetEmpresaId = empList[0].id;
+        }
+      }
+
+      if (!targetEmpresaId) {
+        alert('Erro: ID da empresa não encontrado na sessão. Faça login novamente.');
+        return;
+      }
+
       const payload = {
-        empresa_id: company.id,
+        empresa_id: targetEmpresaId,
         nome: nomeProduto,
         tipo: tipoProduto,
         categoria: categoriaProduto,
@@ -3564,8 +3578,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         console.log('=== DEBUG CATALOGO INSERT ===');
         console.log('profile.role:', profile?.role);
-        console.log('company.id:', company?.id);
-        console.log('get_user_empresa_id match:', 'payload.empresa_id === company.id?', payload.empresa_id === company?.id);
+        console.log('targetEmpresaId:', targetEmpresaId);
         console.log('payload:', JSON.stringify(payload, null, 2));
 
         let data = null;
@@ -3581,7 +3594,7 @@ export default function Dashboard({ session, profileDataProps }) {
             const { data: existing } = await supabase
               .from('produtos_catalogo')
               .select('*')
-              .eq('empresa_id', company.id)
+              .eq('empresa_id', targetEmpresaId)
               .eq('nome', nomeProduto)
               .single();
             data = existing;
@@ -3599,7 +3612,7 @@ export default function Dashboard({ session, profileDataProps }) {
             const { data: newProd, error: newProdErr } = await supabase
               .from('produtos')
               .insert({
-                empresa_id: company.id,
+                empresa_id: targetEmpresaId,
                 filial_id: catalogoFilialEstoque,
                 nome: data.nome,
                 tipo: data.tipo,
@@ -3617,7 +3630,7 @@ export default function Dashboard({ session, profileDataProps }) {
             if (data.tipo === 'CELULAR' && parsedImeis.length > 0) {
               const imeiRows = parsedImeis.map(imei => ({
                 produto_id: newProd.id,
-                empresa_id: company.id,
+                empresa_id: targetEmpresaId,
                 filial_id: catalogoFilialEstoque,
                 imei: imei,
                 cor: (data.cor || 'Preto').trim(),
@@ -3636,7 +3649,7 @@ export default function Dashboard({ session, profileDataProps }) {
             try {
               if (data.tipo === 'CELULAR') {
                 const movRows = parsedImeis.map(imei => ({
-                  empresa_id: company.id,
+                  empresa_id: targetEmpresaId,
                   produto_id: newProd.id,
                   imei: imei,
                   tipo_movimentacao: 'ENTRADA_AQUISICAO',
@@ -3648,7 +3661,7 @@ export default function Dashboard({ session, profileDataProps }) {
                 await supabase.from('estoque_movimentacoes').insert(movRows);
               } else {
                 await supabase.from('estoque_movimentacoes').insert({
-                  empresa_id: company.id,
+                  empresa_id: targetEmpresaId,
                   produto_id: newProd.id,
                   tipo_movimentacao: 'ENTRADA_AQUISICAO',
                   filial_destino_id: catalogoFilialEstoque,
