@@ -7764,12 +7764,12 @@ export default function Dashboard({ session, profileDataProps }) {
       items.push(sidebarItem('pdv', 'Frente de Caixa (PDV)', ShoppingBag));
     }
 
-    // 4. Clientes
-    if (['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'DONO', 'VENDEDOR'].includes(currentRole)) {
+    // 4. Clientes - Oculto para DONO
+    if (['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
       items.push(sidebarItem('clientes', 'Clientes', Users));
     }
 
-    // 4.6. Transferências (Liberado para Vendedores)
+    // 4.6. Transferências (Liberado para Vendedores) - Oculto para DONO
     if (currentRole === 'VENDEDOR') {
       items.push(sidebarItem('transferencias', 'Transferências', Truck));
     }
@@ -7787,8 +7787,8 @@ export default function Dashboard({ session, profileDataProps }) {
     // 5. Gestão de Estoque
     if (!isGerente && ['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
       const showEstoque = !isGerente;
-      const showTransferencias = !isGerente;
-      const showCategorias = !isGerente;
+      const showTransferencias = !isGerente && currentRole !== 'DONO';
+      const showCategorias = !isGerente && currentRole !== 'DONO';
 
       if (sidebarOpen) {
         items.push(
@@ -7805,7 +7805,7 @@ export default function Dashboard({ session, profileDataProps }) {
             </button>
             {estoqueSubMenuOpen && (
               <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
-                {showEstoque && sidebarItem('estoque', 'Entrada de Estoque', Database)}
+                {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
                 {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
                 {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
               </div>
@@ -7813,7 +7813,7 @@ export default function Dashboard({ session, profileDataProps }) {
           </div>
         );
       } else {
-        if (showEstoque) items.push(sidebarItem('estoque', 'Entrada de Estoque', Database));
+        if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
         if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
         if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
       }
@@ -7836,8 +7836,8 @@ export default function Dashboard({ session, profileDataProps }) {
     // 8. Configurações
     items.push(sidebarItem('configuracoes', 'Configurações', Settings));
 
-    // 9. Assinatura & Faturas
-    if (!isGerente && (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(currentRole) || isAdmin)) {
+    // 9. Assinatura & Faturas - Oculto para DONO
+    if (!isGerente && (['SUPER_ADMIN', 'OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
       items.push(sidebarItem('assinatura', 'Assinatura & Faturas', CreditCard));
     }
 
@@ -7847,6 +7847,12 @@ export default function Dashboard({ session, profileDataProps }) {
       if (isGerente) {
         const key = item.key;
         if (['estoque', 'transferencias', 'assinatura', 'pdv'].includes(key)) {
+          return false;
+        }
+      }
+      if (currentRole === 'DONO') {
+        const key = item.key;
+        if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura'].includes(key)) {
           return false;
         }
       }
@@ -9531,84 +9537,95 @@ export default function Dashboard({ session, profileDataProps }) {
                                 </div>
                               </div>
 
-                              {/* Lado Direito (Ações) */}
+                              {/* Lado Direito (Ações / Leitura) */}
                               <div className="flex flex-wrap items-center gap-3 w-full md:w-auto md:justify-end">
-                              {/* Grupo de Meta: Valor R$ + Tipo */}
-                                <div className="flex items-stretch gap-0 rounded-md border border-[#333] overflow-hidden h-10 w-full max-w-[260px] flex-shrink-0 bg-[#111]">
-                                  {/* Prefixo R$ ou Qtd */}
-                                  <span className="px-2 text-[10px] text-gray-400 font-bold flex items-center whitespace-nowrap bg-[#0A0A0A] border-r border-[#333]">
-                                    {(() => {
+                                {/* Grupo de Meta: Valor R$ + Tipo */}
+                                {profile?.role !== 'DONO' ? (
+                                  <div className="flex items-stretch gap-0 rounded-md border border-[#333] overflow-hidden h-10 w-full max-w-[260px] flex-shrink-0 bg-[#111]">
+                                    {/* Prefixo R$ ou Qtd */}
+                                    <span className="px-2 text-[10px] text-gray-400 font-bold flex items-center whitespace-nowrap bg-[#0A0A0A] border-r border-[#333]">
+                                      {(() => {
+                                        const dataAtual = new Date();
+                                        const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
+                                        const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
+                                        const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                        return isUnitMetric(tipoAtual) ? 'Meta Qtd' : 'Meta R$';
+                                      })()}
+                                    </span>
+                                    {/* Valor */}
+                                    <input 
+                                      type="number"
+                                      className="w-[70px] bg-transparent text-white text-xs outline-none py-1 px-2 border-r border-[#333]"
+                                      placeholder={(() => {
+                                        const dataAtual = new Date();
+                                        const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
+                                        const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
+                                        const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                        return isUnitMetric(tipoAtual) ? '90' : '15000';
+                                      })()}
+                                      defaultValue={(() => {
+                                        const dataAtual = new Date();
+                                        const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
+                                        const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
+                                        return m ? m.valor_meta : (v.meta_mensal || 0);
+                                      })()}
+                                      onBlur={(e) => {
+                                        const newVal = Number(e.target.value);
+                                        const dataAtual = new Date();
+                                        const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
+                                        const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
+                                        const currentVal = m ? Number(m.valor_meta) : Number(v.meta_mensal || 0);
+                                        const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                        if (newVal !== currentVal) {
+                                          handleUpdateMeta(v.id, newVal, tipoAtual);
+                                        }
+                                      }}
+                                    />
+                                    {/* Dropdown Tipo da Meta */}
+                                    <select
+                                      className="bg-transparent text-purple-300 text-[10px] font-semibold outline-none px-1 cursor-pointer flex-1 min-w-0"
+                                      title="Tipo da Meta"
+                                      value={(() => {
+                                        const dataAtual = new Date();
+                                        const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
+                                        const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
+                                        return metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                      })()}
+                                      onChange={(e) => {
+                                        const novoTipo = e.target.value;
+                                        const dataAtual = new Date();
+                                        const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
+                                        const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
+                                        const valorAtual = m ? Number(m.valor_meta) : Number(v.meta_mensal || 0);
+                                        setMetaTipoMap(prev => ({ ...prev, [v.id]: novoTipo }));
+                                        handleUpdateMeta(v.id, valorAtual, novoTipo);
+                                      }}
+                                    >
+                                      <option value="faturamento">Faturamento</option>
+                                      <option value="quantidade">Boleto Vendido</option>
+                                      <option value="ativacao">Ativações</option>
+                                    </select>
+                                  </div>
+                                ) : (
+                                  <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-[#111111] text-gray-300 border border-[#222222] font-mono whitespace-nowrap">
+                                    Meta: R$ {(() => {
                                       const dataAtual = new Date();
                                       const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
                                       const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                      const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
-                                      return isUnitMetric(tipoAtual) ? 'Meta Qtd' : 'Meta R$';
+                                      return (m ? Number(m.valor_meta) : Number(v.meta_mensal || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
                                     })()}
                                   </span>
-                                  {/* Valor */}
-                                  <input 
-                                    type="number"
-                                    className="w-[70px] bg-transparent text-white text-xs outline-none py-1 px-2 border-r border-[#333]"
-                                    placeholder={(() => {
-                                      const dataAtual = new Date();
-                                      const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                      const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                      const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
-                                      return isUnitMetric(tipoAtual) ? '90' : '15000';
-                                    })()}
-                                    defaultValue={(() => {
-                                      const dataAtual = new Date();
-                                      const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                      const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                      return m ? m.valor_meta : (v.meta_mensal || 0);
-                                    })()}
-                                    onBlur={(e) => {
-                                      const newVal = Number(e.target.value);
-                                      const dataAtual = new Date();
-                                      const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                      const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                      const currentVal = m ? Number(m.valor_meta) : Number(v.meta_mensal || 0);
-                                      const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
-                                      if (newVal !== currentVal) {
-                                        handleUpdateMeta(v.id, newVal, tipoAtual);
-                                      }
-                                    }}
-                                  />
-                                  {/* Dropdown Tipo da Meta */}
-                                  <select
-                                    className="bg-transparent text-purple-300 text-[10px] font-semibold outline-none px-1 cursor-pointer flex-1 min-w-0"
-                                    title="Tipo da Meta"
-                                    value={(() => {
-                                      const dataAtual = new Date();
-                                      const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                      const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                      return metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
-                                    })()}
-                                    onChange={(e) => {
-                                      const novoTipo = e.target.value;
-                                      const dataAtual = new Date();
-                                      const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                      const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                      const valorAtual = m ? Number(m.valor_meta) : Number(v.meta_mensal || 0);
-                                      // Atualiza o mapa local imediatamente para feedback visual
-                                      setMetaTipoMap(prev => ({ ...prev, [v.id]: novoTipo }));
-                                      // Persiste no banco
-                                      handleUpdateMeta(v.id, valorAtual, novoTipo);
-                                    }}
-                                  >
-                                    <option value="faturamento">Faturamento</option>
-                                    <option value="quantidade">Boleto Vendido</option>
-                                    <option value="ativacao">Ativações</option>
-                                  </select>
-                                </div>
+                                )}
 
-                                {/* Botão de Ação: Tornar Trainee / Promover com estilo Outline */}
-                                <button
-                                  onClick={() => toggleVendedorTrainee(v.id, v.is_treinner)}
-                                  className="px-4 h-10 text-xs font-bold border border-[#333333] hover:border-[#6A0DAD] hover:text-white rounded bg-transparent text-gray-300 transition-colors whitespace-nowrap flex-shrink-0"
-                                >
-                                  {v.is_treinner ? 'Promover' : 'Tornar Trainee'}
-                                </button>
+                                {/* Botão de Ação: Tornar Trainee / Promover */}
+                                {profile?.role !== 'DONO' && (
+                                  <button
+                                    onClick={() => toggleVendedorTrainee(v.id, v.is_treinner)}
+                                    className="px-4 h-10 text-xs font-bold border border-[#333333] hover:border-[#6A0DAD] hover:text-white rounded bg-transparent text-gray-300 transition-colors whitespace-nowrap flex-shrink-0"
+                                  >
+                                    {v.is_treinner ? 'Promover' : 'Tornar Trainee'}
+                                  </button>
+                                )}
 
                                 {/* Filial: Badge Minimalista de Informação */}
                                 {v.filial_id ? (
@@ -9622,13 +9639,15 @@ export default function Dashboard({ session, profileDataProps }) {
                                 )}
 
                                 {/* Botão Excluir (Lixeira) */}
-                                <button
-                                  onClick={() => handleDeleteVendedor(v.id, v.nome)}
-                                  className="h-10 w-10 flex items-center justify-center text-red-500 hover:bg-red-950/40 rounded border border-[#222222] hover:border-red-900/50 transition-colors flex-shrink-0"
-                                  title="Excluir Vendedor"
-                                >
-                                  <Trash2 size={15} />
-                                </button>
+                                {profile?.role !== 'DONO' && (
+                                  <button
+                                    onClick={() => handleDeleteVendedor(v.id, v.nome)}
+                                    className="h-10 w-10 flex items-center justify-center text-red-500 hover:bg-red-950/40 rounded border border-[#222222] hover:border-red-900/50 transition-colors flex-shrink-0"
+                                    title="Excluir Vendedor"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                )}
                               </div>
                             </div>
                           ))}
