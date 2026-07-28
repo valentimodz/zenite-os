@@ -7833,8 +7833,10 @@ export default function Dashboard({ session, profileDataProps }) {
       items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
     }
 
-    // 8. Configurações
-    items.push(sidebarItem('configuracoes', 'Configurações', Settings));
+    // 8. Configurações - Oculto para DONO
+    if (currentRole !== 'DONO') {
+      items.push(sidebarItem('configuracoes', 'Configurações', Settings));
+    }
 
     // 9. Assinatura & Faturas - Oculto para DONO
     if (!isGerente && (['SUPER_ADMIN', 'OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
@@ -7852,7 +7854,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
       if (currentRole === 'DONO') {
         const key = item.key;
-        if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura'].includes(key)) {
+        if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura', 'configuracoes'].includes(key)) {
           return false;
         }
       }
@@ -9426,92 +9428,96 @@ export default function Dashboard({ session, profileDataProps }) {
 
                   {/* CARD DE VENDEDORES */}
                   <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
-                      <Users size={18} className="text-[#6A0DAD]" />
-                      Cadastrar Funcionário / Vendedor
-                    </h3>
+                    {profile?.role !== 'DONO' && (
+                      <>
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
+                          <Users size={18} className="text-[#6A0DAD]" />
+                          Cadastrar Funcionário / Vendedor
+                        </h3>
 
-                    {!(profile?.empresa_id || company?.id || activeEmpresaId) ? (
-                      <div className="bg-red-950/20 border border-red-800/40 rounded-lg p-6 text-center my-4">
-                        <AlertCircle className="mx-auto text-red-500 mb-3" size={36} />
-                        <h4 className="text-white font-bold mb-2">Acesso Restrito</h4>
-                        <p className="text-sm text-gray-400">
-                          O seu utilizador de RH não está vinculado a nenhuma empresa. Contacte o administrador.
-                        </p>
-                      </div>
-                    ) : (
-                      <form onSubmit={handleAddVendedor} className="space-y-4 mb-6">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                              Nome Completo
-                            </label>
-                            <input
-                              type="text"
-                              value={nomeVendedor}
-                              onChange={(e) => setNomeVendedor(e.target.value)}
-                              className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
-                              placeholder="Ex: Pedro Silva"
-                              required
-                            />
+                        {!(profile?.empresa_id || company?.id || activeEmpresaId) ? (
+                          <div className="bg-red-950/20 border border-red-800/40 rounded-lg p-6 text-center my-4">
+                            <AlertCircle className="mx-auto text-red-500 mb-3" size={36} />
+                            <h4 className="text-white font-bold mb-2">Acesso Restrito</h4>
+                            <p className="text-sm text-gray-400">
+                              O seu utilizador de RH não está vinculado a nenhuma empresa. Contacte o administrador.
+                            </p>
                           </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                              Filial Vinculada
-                            </label>
-                            <select
-                              value={filialVendedor}
-                              onChange={(e) => setFilialVendedor(e.target.value)}
-                              className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                              required
+                        ) : (
+                          <form onSubmit={handleAddVendedor} className="space-y-4 mb-6">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                  Nome Completo
+                                </label>
+                                <input
+                                  type="text"
+                                  value={nomeVendedor}
+                                  onChange={(e) => setNomeVendedor(e.target.value)}
+                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                  placeholder="Ex: Pedro Silva"
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                  Filial Vinculada
+                                </label>
+                                <select
+                                  value={filialVendedor}
+                                  onChange={(e) => setFilialVendedor(e.target.value)}
+                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                                  required
+                                >
+                                  <option value="">Selecione...</option>
+                                  {filiais.map(f => (
+                                    <option key={f.id} value={f.id}>{f.nome} ({f.tipo})</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                  E-mail
+                                </label>
+                                <input
+                                  type="email"
+                                  value={emailVendedor}
+                                  onChange={(e) => setEmailVendedor(e.target.value)}
+                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                  placeholder="vendedor@loja.com"
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                  Senha
+                                </label>
+                                <input
+                                  type="password"
+                                  value={senhaVendedor}
+                                  onChange={(e) => setSenhaVendedor(e.target.value)}
+                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                  placeholder="••••••"
+                                  minLength={6}
+                                  required
+                                />
+                              </div>
+                            </div>
+
+                            <button
+                              type="submit"
+                              disabled={loadingVendedor || filiais.length === 0}
+                              className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm"
                             >
-                              <option value="">Selecione...</option>
-                              {filiais.map(f => (
-                                <option key={f.id} value={f.id}>{f.nome} ({f.tipo})</option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                              E-mail
-                            </label>
-                            <input
-                              type="email"
-                              value={emailVendedor}
-                              onChange={(e) => setEmailVendedor(e.target.value)}
-                              className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
-                              placeholder="vendedor@loja.com"
-                              required
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                              Senha
-                            </label>
-                            <input
-                              type="password"
-                              value={senhaVendedor}
-                              onChange={(e) => setSenhaVendedor(e.target.value)}
-                              className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
-                              placeholder="••••••"
-                              minLength={6}
-                              required
-                            />
-                          </div>
-                        </div>
-
-                        <button
-                          type="submit"
-                          disabled={loadingVendedor || filiais.length === 0}
-                          className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm"
-                        >
-                          <Plus size={16} />
-                          {filiais.length === 0 ? 'Cadastre uma filial primeiro' : loadingVendedor ? 'Cadastrando...' : 'Cadastrar Vendedor'}
-                        </button>
-                      </form>
+                              <Plus size={16} />
+                              {filiais.length === 0 ? 'Cadastre uma filial primeiro' : loadingVendedor ? 'Cadastrando...' : 'Cadastrar Vendedor'}
+                            </button>
+                          </form>
+                        )}
+                      </>
                     )}
 
                     <div className="flex-1">
