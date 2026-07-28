@@ -423,42 +423,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [torreSubTab, setTorreSubTab] = useState('visao'); // 'visao' | 'historico'
 
   // Estados para Auditoria de Descontos por Vendedor (Gerente & Admin)
-  const [descontosLogs, setDescontosLogs] = useState(() => {
-    try {
-      const stored = localStorage.getItem('zenite_descontos_logs');
-      if (stored) return JSON.parse(stored);
-    } catch (e) {}
-    return [
-      {
-        id: 'desc-1',
-        vendedor_id: 'v1',
-        vendedor_nome: 'Valentim',
-        filial_id: 'f1',
-        filial_nome: 'CRED CELL',
-        cliente_nome: 'Carlos Eduardo',
-        itens_resumo: 'iPhone 15 Pro Max 256GB (De R$ 7.499,00 por R$ 6.999,00)',
-        valor_tabela: 7499.00,
-        valor_final: 6999.00,
-        valor_desconto: 500.00,
-        percentual_desconto: 6.67,
-        created_at: new Date(Date.now() - 3600000 * 4).toISOString()
-      },
-      {
-        id: 'desc-2',
-        vendedor_id: 'v2',
-        vendedor_nome: 'Rodrigo',
-        filial_id: 'f2',
-        filial_nome: 'MONKEY SHOP',
-        cliente_nome: 'Fernanda Lima',
-        itens_resumo: 'Carregador USB-C 20W + Capa Magsafe (De R$ 349,00 por R$ 299,00)',
-        valor_tabela: 349.00,
-        valor_final: 299.00,
-        valor_desconto: 50.00,
-        percentual_desconto: 14.33,
-        created_at: new Date(Date.now() - 3600000 * 24).toISOString()
-      }
-    ];
-  });
+  const [descontosLogs, setDescontosLogs] = useState([]);
   const [filtroDescontoVendedor, setFiltroDescontoVendedor] = useState('');
   const [filtroDescontoFilial, setFiltroDescontoFilial] = useState('');
   const [buscaDesconto, setBuscaDesconto] = useState('');
@@ -1200,11 +1165,12 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [activeTab, profile, session]);
 
-  // Recarregar automaticamente a lista de colaboradores quando o empresa_id for carregado ou alternado no menu
+  // Recarregar automaticamente a lista de colaboradores e descontos quando o empresa_id for carregado ou alternado no menu
   useEffect(() => {
     const targetEmpresaId = profile?.empresa_id || company?.id;
     if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
+      fetchAuditoriaDescontos(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
     }
   }, [profile?.empresa_id, company?.id, activeTab]);
 
@@ -1274,6 +1240,88 @@ export default function Dashboard({ session, profileDataProps }) {
       alert('Erro: ' + err.message);
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  const fetchAuditoriaDescontos = async (empresaId) => {
+    const targetEmpresaId = empresaId || profile?.empresa_id || company?.id;
+    try {
+      let query = supabase
+        .from('vendas')
+        .select(`
+          id,
+          created_at,
+          valor_tabela,
+          valor_total,
+          desconto,
+          valor_desconto,
+          percentual_desconto,
+          cliente_nome,
+          produtos_descricao,
+          itens_resumo,
+          vendedor_id,
+          vendedor_nome,
+          filial_id,
+          filial_nome,
+          vendedor:usuarios!vendedor_id(nome),
+          filial:filiais!filial_id(nome)
+        `)
+        .or('desconto.gt.0,valor_desconto.gt.0')
+        .order('created_at', { ascending: false });
+
+      if (targetEmpresaId && targetEmpresaId !== 'MASTER') {
+        query = query.eq('empresa_id', targetEmpresaId);
+      }
+
+      let { data, error } = await query;
+
+      if (error) {
+        let fallbackQuery = supabase
+          .from('vendas')
+          .select('*')
+          .or('desconto.gt.0,valor_desconto.gt.0')
+          .order('created_at', { ascending: false });
+
+        if (targetEmpresaId && targetEmpresaId !== 'MASTER') {
+          fallbackQuery = fallbackQuery.eq('empresa_id', targetEmpresaId);
+        }
+
+        const resFallback = await fallbackQuery;
+        if (!resFallback.error && resFallback.data) {
+          data = resFallback.data;
+          error = null;
+        }
+      }
+
+      if (!error && data) {
+        const formatted = data.map(v => {
+          const valDesc = Number(v.desconto || v.valor_desconto || 0);
+          const valFinal = Number(v.valor_total || v.valor_vendido || v.total || 0);
+          const valTabela = Number(v.valor_tabela || 0) || (valFinal + valDesc);
+          const percDesc = Number(v.percentual_desconto || 0) || (valTabela > 0 ? (valDesc / valTabela) * 100 : 0);
+
+          return {
+            id: v.id,
+            vendedor_id: v.vendedor_id,
+            vendedor_nome: v.vendedor?.nome || v.vendedor_nome || 'Vendedor',
+            filial_id: v.filial_id,
+            filial_nome: v.filial?.nome || v.filial_nome || 'Filial',
+            cliente_nome: v.cliente_nome || 'Cliente Consumidor',
+            itens_resumo: v.produtos_descricao || v.itens_resumo || 'Venda com desconto',
+            valor_tabela: valTabela,
+            valor_final: valFinal,
+            valor_desconto: valDesc,
+            percentual_desconto: percDesc,
+            created_at: v.created_at
+          };
+        });
+        setDescontosLogs(formatted);
+      } else {
+        setDescontosLogs([]);
+      }
+    } catch (err) {
+      console.warn('Aviso ao carregar auditoria de descontos:', err);
+      setDescontosLogs([]);
     }
   };
 
