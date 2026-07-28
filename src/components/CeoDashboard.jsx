@@ -9,7 +9,12 @@ const CeoDashboard = ({ session, profile }) => {
 
   useEffect(() => {
     const fetchKpis = async () => {
-      if (!profile || !profile.empresa_id) return;
+      if (!profile) return;
+      if (!profile.empresa_id) {
+        setLoading(false);
+        setError("Perfil de sócio não vinculado a uma empresa ativa.");
+        return;
+      }
       
       try {
         setLoading(true);

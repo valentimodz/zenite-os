@@ -179,12 +179,8 @@ const RoleProtectedRoute = ({ session, isCeoRoute }) => {
     }
   }
 
-  if (isCeoRoute || ['OWNER', 'DONO'].includes(profile?.role)) {
+  if (isCeoRoute) {
     if (['OWNER', 'DONO', 'SUPER_ADMIN'].includes(profile?.role)) {
-      // Força a URL a refletir a página caso tenha entrado pela raiz
-      if (window.location.pathname !== '/dashboard/ceo') {
-        window.history.replaceState(null, '', '/dashboard/ceo');
-      }
       return <CeoDashboard session={session} profile={profile} />;
     } else {
       alert('Acesso Negado: Área Exclusiva para Sócios');
