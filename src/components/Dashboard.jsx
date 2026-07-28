@@ -9426,127 +9426,123 @@ export default function Dashboard({ session, profileDataProps }) {
                     </div>
                   )}
 
-                  {/* CARD DE VENDEDORES */}
-                  <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col">
-                    {profile?.role !== 'DONO' && (
-                      <>
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
-                          <Users size={18} className="text-[#6A0DAD]" />
-                          Cadastrar Funcionário / Vendedor
-                        </h3>
+                  {/* CARD DE VENDEDORES (Oculto para DONO) */}
+                  {profile?.role !== 'DONO' && (
+                    <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
+                        <Users size={18} className="text-[#6A0DAD]" />
+                        Cadastrar Funcionário / Vendedor
+                      </h3>
 
-                        {!(profile?.empresa_id || company?.id || activeEmpresaId) ? (
-                          <div className="bg-red-950/20 border border-red-800/40 rounded-lg p-6 text-center my-4">
-                            <AlertCircle className="mx-auto text-red-500 mb-3" size={36} />
-                            <h4 className="text-white font-bold mb-2">Acesso Restrito</h4>
-                            <p className="text-sm text-gray-400">
-                              O seu utilizador de RH não está vinculado a nenhuma empresa. Contacte o administrador.
-                            </p>
-                          </div>
-                        ) : (
-                          <form onSubmit={handleAddVendedor} className="space-y-4 mb-6">
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                                  Nome Completo
-                                </label>
-                                <input
-                                  type="text"
-                                  value={nomeVendedor}
-                                  onChange={(e) => setNomeVendedor(e.target.value)}
-                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
-                                  placeholder="Ex: Pedro Silva"
-                                  required
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                                  Filial Vinculada
-                                </label>
-                                <select
-                                  value={filialVendedor}
-                                  onChange={(e) => setFilialVendedor(e.target.value)}
-                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                                  required
-                                >
-                                  <option value="">Selecione...</option>
-                                  {filiais.map(f => (
-                                    <option key={f.id} value={f.id}>{f.nome} ({f.tipo})</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                                  E-mail
-                                </label>
-                                <input
-                                  type="email"
-                                  value={emailVendedor}
-                                  onChange={(e) => setEmailVendedor(e.target.value)}
-                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
-                                  placeholder="vendedor@loja.com"
-                                  required
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                                  Senha
-                                </label>
-                                <input
-                                  type="password"
-                                  value={senhaVendedor}
-                                  onChange={(e) => setSenhaVendedor(e.target.value)}
-                                  className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
-                                  placeholder="••••••"
-                                  minLength={6}
-                                  required
-                                />
-                              </div>
-                            </div>
-
-                            <button
-                              type="submit"
-                              disabled={loadingVendedor || filiais.length === 0}
-                              className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm"
-                            >
-                              <Plus size={16} />
-                              {filiais.length === 0 ? 'Cadastre uma filial primeiro' : loadingVendedor ? 'Cadastrando...' : 'Cadastrar Vendedor'}
-                            </button>
-                          </form>
-                        )}
-                      </>
-                    )}
-
-                    <div className="flex-1">
-                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Vendedores Ativos</h4>
-                      {vendedores.length === 0 ? (
-                        <p className="text-gray-600 text-sm italic">Nenhum vendedor cadastrado.</p>
+                      {!(profile?.empresa_id || company?.id || activeEmpresaId) ? (
+                        <div className="bg-red-950/20 border border-red-800/40 rounded-lg p-6 text-center my-4">
+                          <AlertCircle className="mx-auto text-red-500 mb-3" size={36} />
+                          <h4 className="text-white font-bold mb-2">Acesso Restrito</h4>
+                          <p className="text-sm text-gray-400">
+                            O seu utilizador de RH não está vinculado a nenhuma empresa. Contacte o administrador.
+                          </p>
+                        </div>
                       ) : (
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {vendedores.map(v => (
-                            <div key={v.id} className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-center w-full p-4 border border-gray-800 bg-black rounded-lg hover:border-[#6A0DAD]/30 transition-all">
-                              {/* Lado Esquerdo (Info) */}
-                              <div className="flex flex-col gap-1">
-                                <span className="font-semibold text-sm text-white">{v.nome}</span>
-                                <span className="text-[10px] text-gray-500 break-all">{v.email}</span>
-                                <div className="mt-1 flex gap-2">
-                                  <span className={`px-2 py-0.5 rounded-[4px] text-[9px] font-bold whitespace-nowrap ${
-                                    v.is_treinner 
-                                      ? 'bg-yellow-950/40 text-yellow-400 border border-yellow-800/30' 
-                                      : 'bg-green-950/40 text-green-400 border border-green-800/30'
-                                  }`}>
-                                    {v.is_treinner ? 'Trainee (2% comissão serviço)' : 'Profissional (3% comissão serviço)'}
-                                  </span>
-                                </div>
-                              </div>
+                        <form onSubmit={handleAddVendedor} className="space-y-4 mb-6">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                Nome Completo
+                              </label>
+                              <input
+                                type="text"
+                                value={nomeVendedor}
+                                onChange={(e) => setNomeVendedor(e.target.value)}
+                                className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                placeholder="Ex: Pedro Silva"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                Filial Vinculada
+                              </label>
+                              <select
+                                value={filialVendedor}
+                                onChange={(e) => setFilialVendedor(e.target.value)}
+                                className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                                required
+                              >
+                                <option value="">Selecione...</option>
+                                {filiais.map(f => (
+                                  <option key={f.id} value={f.id}>{f.nome} ({f.tipo})</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
 
-                              {/* Lado Direito (Ações / Leitura) */}
-                              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto md:justify-end">
-                                {/* Grupo de Meta: Valor R$ + Tipo */}
-                                {profile?.role !== 'DONO' ? (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                E-mail
+                              </label>
+                              <input
+                                type="email"
+                                value={emailVendedor}
+                                onChange={(e) => setEmailVendedor(e.target.value)}
+                                className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                placeholder="vendedor@loja.com"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                Senha
+                              </label>
+                              <input
+                                type="password"
+                                value={senhaVendedor}
+                                onChange={(e) => setSenhaVendedor(e.target.value)}
+                                className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                placeholder="••••••"
+                                minLength={6}
+                                required
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={loadingVendedor || filiais.length === 0}
+                            className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm"
+                          >
+                            <Plus size={16} />
+                            {filiais.length === 0 ? 'Cadastre uma filial primeiro' : loadingVendedor ? 'Cadastrando...' : 'Cadastrar Vendedor'}
+                          </button>
+                        </form>
+                      )}
+
+                      <div className="flex-1">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Vendedores Ativos</h4>
+                        {vendedores.length === 0 ? (
+                          <p className="text-gray-600 text-sm italic">Nenhum vendedor cadastrado.</p>
+                        ) : (
+                          <div className="space-y-2 max-h-60 overflow-y-auto">
+                            {vendedores.map(v => (
+                              <div key={v.id} className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-center w-full p-4 border border-gray-800 bg-black rounded-lg hover:border-[#6A0DAD]/30 transition-all">
+                                {/* Lado Esquerdo (Info) */}
+                                <div className="flex flex-col gap-1">
+                                  <span className="font-semibold text-sm text-white">{v.nome}</span>
+                                  <span className="text-[10px] text-gray-500 break-all">{v.email}</span>
+                                  <div className="mt-1 flex gap-2">
+                                    <span className={`px-2 py-0.5 rounded-[4px] text-[9px] font-bold whitespace-nowrap ${
+                                      v.is_treinner 
+                                        ? 'bg-yellow-950/40 text-yellow-400 border border-yellow-800/30' 
+                                        : 'bg-green-950/40 text-green-400 border border-green-800/30'
+                                    }`}>
+                                      {v.is_treinner ? 'Trainee (2% comissão serviço)' : 'Profissional (3% comissão serviço)'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Lado Direito (Ações / Leitura) */}
+                                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto md:justify-end">
+                                  {/* Grupo de Meta: Valor R$ + Tipo */}
                                   <div className="flex items-stretch gap-0 rounded-md border border-[#333] overflow-hidden h-10 w-full max-w-[260px] flex-shrink-0 bg-[#111]">
                                     {/* Prefixo R$ ou Qtd */}
                                     <span className="px-2 text-[10px] text-gray-400 font-bold flex items-center whitespace-nowrap bg-[#0A0A0A] border-r border-[#333]">
@@ -9612,40 +9608,27 @@ export default function Dashboard({ session, profileDataProps }) {
                                       <option value="ativacao">Ativações</option>
                                     </select>
                                   </div>
-                                ) : (
-                                  <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-[#111111] text-gray-300 border border-[#222222] font-mono whitespace-nowrap">
-                                    Meta: R$ {(() => {
-                                      const dataAtual = new Date();
-                                      const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                      const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                      return (m ? Number(m.valor_meta) : Number(v.meta_mensal || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-                                    })()}
-                                  </span>
-                                )}
 
-                                {/* Botão de Ação: Tornar Trainee / Promover */}
-                                {profile?.role !== 'DONO' && (
+                                  {/* Botão de Ação: Tornar Trainee / Promover */}
                                   <button
                                     onClick={() => toggleVendedorTrainee(v.id, v.is_treinner)}
                                     className="px-4 h-10 text-xs font-bold border border-[#333333] hover:border-[#6A0DAD] hover:text-white rounded bg-transparent text-gray-300 transition-colors whitespace-nowrap flex-shrink-0"
                                   >
                                     {v.is_treinner ? 'Promover' : 'Tornar Trainee'}
                                   </button>
-                                )}
 
-                                {/* Filial: Badge Minimalista de Informação */}
-                                {v.filial_id ? (
-                                  <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-[#111111] text-purple-400 border border-[#222222] whitespace-nowrap flex-shrink-0">
-                                    {filiais.find(f => f.id === v.filial_id)?.nome || 'Desconhecida'}
-                                  </span>
-                                ) : (
-                                  <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-yellow-950/20 text-yellow-500 border border-yellow-900/35 whitespace-nowrap flex-shrink-0">
-                                    ⚠️ Filial Pendente
-                                  </span>
-                                )}
+                                  {/* Filial: Badge Minimalista de Informação */}
+                                  {v.filial_id ? (
+                                    <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-[#111111] text-purple-400 border border-[#222222] whitespace-nowrap flex-shrink-0">
+                                      {filiais.find(f => f.id === v.filial_id)?.nome || 'Desconhecida'}
+                                    </span>
+                                  ) : (
+                                    <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-yellow-950/20 text-yellow-500 border border-yellow-900/35 whitespace-nowrap flex-shrink-0">
+                                      ⚠️ Filial Pendente
+                                    </span>
+                                  )}
 
-                                {/* Botão Excluir (Lixeira) */}
-                                {profile?.role !== 'DONO' && (
+                                  {/* Botão Excluir (Lixeira) */}
                                   <button
                                     onClick={() => handleDeleteVendedor(v.id, v.nome)}
                                     className="h-10 w-10 flex items-center justify-center text-red-500 hover:bg-red-950/40 rounded border border-[#222222] hover:border-red-900/50 transition-colors flex-shrink-0"
@@ -9653,14 +9636,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                   >
                                     <Trash2 size={15} />
                                   </button>
-                                )}
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                 </div>
 
@@ -9824,8 +9807,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
 
-                {/* AREA CATÁLOGO E TORRE DE CONTROLO (Oculto para GERENTE) */}
-                {profile?.role !== 'GERENTE' && (
+                {/* AREA CATÁLOGO E TORRE DE CONTROLO (Oculto para GERENTE e DONO no Dashboard Home) */}
+                {profile?.role !== 'GERENTE' && profile?.role !== 'DONO' && (
                   <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl overflow-hidden">
                     {profile?.role !== 'DONO' && (
                       <div className="flex border-b border-[#222222]">
