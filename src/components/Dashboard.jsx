@@ -359,6 +359,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [pdvValorUnitario, setPdvValorUnitario] = useState(0);
   const [pdvObsGarantia, setPdvObsGarantia] = useState('');
   const [pdvVendaTrainee, setPdvVendaTrainee] = useState(false);
+  const [treenersFilial, setTreenersFilial] = useState([]);
+  const [selectedTreenerId, setSelectedTreenerId] = useState('');
   const [pdvComissaoPrevia, setPdvComissaoPrevia] = useState(0);
   const [loadingPdvVenda, setLoadingPdvVenda] = useState(false);
 
@@ -736,6 +738,38 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
   }, [categorias, categoriaProduto]);
+
+  // Busca dos Treeners da Filial Ativa
+  useEffect(() => {
+    const fetchTreeners = async () => {
+      if (!activeFilialId) {
+        setTreenersFilial([]);
+        return;
+      }
+      try {
+        let { data, error } = await supabase
+          .from('usuarios')
+          .select('id, nome, role')
+          .eq('filial_id', activeFilialId)
+          .eq('status', 'ATIVO');
+
+        if (error || !data || data.length === 0) {
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('id, nome, role')
+            .eq('filial_id', activeFilialId);
+          if (profs && profs.length > 0) {
+            data = profs;
+          }
+        }
+        setTreenersFilial(data || []);
+      } catch (err) {
+        console.error('Erro ao carregar treeners da filial:', err);
+      }
+    };
+
+    fetchTreeners();
+  }, [activeFilialId]);
 
   useEffect(() => {
     if (pdvProdutoSelecionado) {
@@ -5740,8 +5774,8 @@ export default function Dashboard({ session, profileDataProps }) {
           console.error('Erro ao registrar histórico de movimentação de venda:', movErr);
         }
 
-        // Atualizar dados de cliente na venda recém-criada
-        if (pdvClienteNome || pdvClienteCpfCnpj || pdvClienteEmail || pdvClienteTelefone || selectedPdvClienteId) {
+        // Atualizar dados de cliente e treener na venda recém-criada
+        if (pdvClienteNome || pdvClienteCpfCnpj || pdvClienteEmail || pdvClienteTelefone || selectedPdvClienteId || selectedTreenerId) {
           const { error: clientUpdateErr } = await supabase
             .from('vendas')
             .update({
@@ -5749,7 +5783,8 @@ export default function Dashboard({ session, profileDataProps }) {
               cliente_cpf_cnpj: pdvClienteCpfCnpj || null,
               cliente_email: pdvClienteEmail || null,
               cliente_telefone: pdvClienteTelefone || null,
-              cliente_id: selectedPdvClienteId || null
+              cliente_id: selectedPdvClienteId || null,
+              treener_id: selectedTreenerId || null
             })
             .eq('id', rpcRes.venda_id);
  
@@ -5881,6 +5916,8 @@ export default function Dashboard({ session, profileDataProps }) {
       // Limpar estados do PDV
       setPdvCart([]);
       setPdvObsGarantia('');
+      setSelectedTreenerId('');
+      setPdvVendaTrainee(false);
       setPdvClienteNome('');
       setPdvClienteCpfCnpj('');
       setPdvClienteEmail('');
@@ -7475,18 +7512,33 @@ export default function Dashboard({ session, profileDataProps }) {
                                 ></textarea>
                               </div>
 
-                              {/* PARTICIPAÇÃO TRAINEE */}
-                              <div className="mt-3 flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  id="pdvTrainee"
-                                  checked={pdvVendaTrainee}
-                                  onChange={(e) => setPdvVendaTrainee(e.target.checked)}
-                                  className="accent-[#6A0DAD] cursor-pointer"
-                                />
-                                <label htmlFor="pdvTrainee" className="text-xs text-gray-400 cursor-pointer">
-                                  Teve participação de Trainee [F9]
+                              {/* PARTICIPAÇÃO TREENER */}
+                              <div className="mt-3 space-y-1 border-t border-[#222] pt-3">
+                                <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-gray-400 uppercase tracking-wide flex items-center justify-between">
+                                  <span>Treener Responsável (Participação)</span>
+                                  {selectedTreenerId && (
+                                    <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-800/40 font-mono">
+                                      Selecionado
+                                    </span>
+                                  )}
                                 </label>
+                                <select
+                                  id="pdvTreenerSelect"
+                                  value={selectedTreenerId}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setSelectedTreenerId(val);
+                                    setPdvVendaTrainee(!!val);
+                                  }}
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none cursor-pointer"
+                                >
+                                  <option value="">Sem participação de Treener</option>
+                                  {treenersFilial.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                      {t.nome} {t.role ? `(${t.role})` : ''}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
 
                               {/* RESUMO FINANCEIRO */}
