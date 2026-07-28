@@ -7759,8 +7759,8 @@ export default function Dashboard({ session, profileDataProps }) {
       items.push(sidebarItem('gestao', 'Dashboard (Home)', LayoutDashboard));
     }
 
-    // 3. Frente de Caixa (PDV)
-    if (!isGerente && ['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO', 'VENDEDOR'].includes(currentRole)) {
+    // 3. Frente de Caixa (PDV) - Oculto para DONO (perfil executivo somente leitura)
+    if (!isGerente && ['SUPER_ADMIN', 'ADMIN', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
       items.push(sidebarItem('pdv', 'Frente de Caixa (PDV)', ShoppingBag));
     }
 
@@ -8856,7 +8856,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         {systemErrors.map(err => (
                           <div key={err.id} className="bg-red-500/5 border border-red-500/20 p-4 rounded-lg">
                             <div className="flex justify-between items-start mb-2">
-                              <span className="text-red-400 font-bold text-sm bg-red-500/10 px-2 py-0.5 rounded">
+                            <span className="text-red-400 font-bold text-sm bg-red-500/10 px-2 py-0.5 rounded">
                                 {err.page_location}
                               </span>
                               <span className="text-xs text-gray-500">
@@ -8902,7 +8902,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           Dashboard Executivo Consolidado
                         </h2>
                         <p className="text-xs text-gray-400 mt-1">
-                          Acompanhamento em tempo real de faturamento, margem de lucro real, controle de descontos e comparativo entre filiais.
+                          Acompanhamento em tempo real de faturamento, margem de lucro real, ROI, desempenho por vendedor e auditorias da empresa.
                         </p>
                       </div>
 
@@ -8940,42 +8940,66 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       const lucroReal = faturamentoBruto - custoTotal;
                       const margemLucro = faturamentoBruto > 0 ? ((lucroReal / faturamentoBruto) * 100) : 0;
+                      const roiCalculado = custoTotal > 0 ? ((lucroReal / custoTotal) * 100) : 0;
 
                       const vendasComDesconto = vendasMes.filter(s => parseFloat(s.desconto || s.valor_desconto || 0) > 0 || s.desconto_autorizado_por);
                       const totalDescontosConcedidos = vendasMes.reduce((acc, s) => acc + (parseFloat(s.desconto || s.valor_desconto || 0)), 0);
 
-                      // Agrupamento por Vendedor
+                      // Agrupamento por Vendedor com Ticket Médio e Comissões Geradas
                       const vendedorMap = {};
                       vendasMes.forEach(s => {
                         const vId = s.vendedor_id || s.profiles?.id || 'outros';
                         const vNome = s.profiles?.nome || s.vendedor_nome || 'Vendedor';
                         if (!vendedorMap[vId]) {
-                          vendedorMap[vId] = { id: vId, nome: vNome, totalVendido: 0, qtdVendas: 0 };
+                          vendedorMap[vId] = { id: vId, nome: vNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
                         }
                         vendedorMap[vId].totalVendido += (parseFloat(s.valor_total) || 0);
                         vendedorMap[vId].qtdVendas += 1;
+                        vendedorMap[vId].comissaoTotal += (parseFloat(s.comissao) || 0);
                       });
 
                       const rankingVendedores = Object.values(vendedorMap).sort((a, b) => b.totalVendido - a.totalVendido);
 
-                      // Agrupamento por Filial
+                      // Agrupamento por Filial com Faturamento e Estoque Parado
                       const filialMap = {};
+                      filiais.forEach(f => {
+                        filialMap[f.id] = {
+                          id: f.id,
+                          nome: f.nome,
+                          totalVendido: 0,
+                          qtdVendas: 0,
+                          estoqueParadoQtd: 0,
+                          estoqueParadoValor: 0
+                        };
+                      });
+
                       vendasMes.forEach(s => {
                         const fId = s.filial_id || 'sem_filial';
-                        const fObj = filiais.find(f => f.id === fId);
-                        const fNome = fObj ? fObj.nome : 'Matriz / Loja Única';
                         if (!filialMap[fId]) {
-                          filialMap[fId] = { id: fId, nome: fNome, totalVendido: 0, qtdVendas: 0 };
+                          const fObj = filiais.find(f => f.id === fId);
+                          filialMap[fId] = { id: fId, nome: fObj ? fObj.nome : 'Matriz', totalVendido: 0, qtdVendas: 0, estoqueParadoQtd: 0, estoqueParadoValor: 0 };
                         }
                         filialMap[fId].totalVendido += (parseFloat(s.valor_total) || 0);
                         filialMap[fId].qtdVendas += 1;
+                      });
+
+                      produtos.forEach(p => {
+                        const fId = p.filial_id;
+                        if (filialMap[fId]) {
+                          const qty = p.tipo === 'CELULAR' 
+                            ? disponiveisImeis.filter(im => im.produto_id === p.id && im.filial_id === fId && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length
+                            : parseInt(p.quantidade || 0, 10);
+                          const unitPrice = parseFloat(p.preco_custo || p.preco || 0);
+                          filialMap[fId].estoqueParadoQtd += qty;
+                          filialMap[fId].estoqueParadoValor += (qty * unitPrice);
+                        }
                       });
 
                       const comparativoFiliais = Object.values(filialMap).sort((a, b) => b.totalVendido - a.totalVendido);
 
                       return (
                         <div className="space-y-6">
-                          {/* 4 CARDS DE TOPO */}
+                          {/* RELATÓRIO 1: FATURAMENTO TOTAL & ROI */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                             {/* Card a: Faturamento Bruto */}
                             <div className="bg-black/60 border border-[#222222] p-5 rounded-xl flex flex-col justify-between">
@@ -8991,23 +9015,37 @@ export default function Dashboard({ session, profileDataProps }) {
                               </div>
                             </div>
 
-                            {/* Card a2: Lucro Real */}
+                            {/* Card b: Lucro Real & ROI Executivo */}
                             <div className="bg-black/60 border border-[#222222] p-5 rounded-xl flex flex-col justify-between">
                               <div>
-                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Lucro Real (Líquido)</span>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Lucro Real &amp; ROI</span>
                                 <span className={`text-xl font-extrabold font-mono mt-1 block ${lucroReal >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                   R$ {lucroReal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
                               <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
-                                <span className="text-gray-400">Margem Estimada:</span>
-                                <span className={`font-bold ${margemLucro >= 20 ? 'text-green-400' : 'text-yellow-400'}`}>
-                                  {margemLucro.toFixed(1)}%
+                                <span className="text-gray-400">ROI Estimado:</span>
+                                <span className={`font-bold font-mono ${roiCalculado >= 20 ? 'text-green-400' : 'text-yellow-400'}`}>
+                                  {roiCalculado.toFixed(1)}% ({margemLucro.toFixed(1)}% margem)
                                 </span>
                               </div>
                             </div>
 
-                            {/* Card b: Descontos Concedidos */}
+                            {/* Card c: Custo de Mercadorias (Saídas) */}
+                            <div className="bg-black/60 border border-[#222222] p-5 rounded-xl flex flex-col justify-between">
+                              <div>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Custo de Produtos (CMV / Saídas)</span>
+                                <span className="text-xl font-extrabold text-gray-300 font-mono mt-1 block">
+                                  R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
+                                <span className="text-gray-400">Estoque Ativo:</span>
+                                <span className="font-bold text-gray-300">{disponiveisImeis.length} un. disponíveis</span>
+                              </div>
+                            </div>
+
+                            {/* Card d: Total em Descontos */}
                             <div className="bg-black/60 border border-[#222222] p-5 rounded-xl flex flex-col justify-between">
                               <div>
                                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Total em Descontos</span>
@@ -9016,43 +9054,29 @@ export default function Dashboard({ session, profileDataProps }) {
                                 </span>
                               </div>
                               <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
-                                <span className="text-gray-400">Vendas com Abatimento:</span>
+                                <span className="text-gray-400">Vendas com Desconto:</span>
                                 <span className="font-bold text-amber-400">{vendasComDesconto.length} ({totalVendasCount > 0 ? ((vendasComDesconto.length / totalVendasCount) * 100).toFixed(0) : 0}%)</span>
-                              </div>
-                            </div>
-
-                            {/* Card c: Custo de Mercadorias */}
-                            <div className="bg-black/60 border border-[#222222] p-5 rounded-xl flex flex-col justify-between">
-                              <div>
-                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Custo de Produtos (CMV)</span>
-                                <span className="text-xl font-extrabold text-gray-300 font-mono mt-1 block">
-                                  R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </span>
-                              </div>
-                              <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
-                                <span className="text-gray-400">Investimento Estoque:</span>
-                                <span className="font-bold text-gray-300">{disponiveisImeis.length} un. ativas</span>
                               </div>
                             </div>
                           </div>
 
-                          {/* SEÇÃO DUPLA: COMPARATIVO FILIAIS & RANKING VENDEDORES */}
+                          {/* RELATÓRIO 2: SEÇÃO DUPLA - DESEMPENHO POR VENDEDOR & VISÃO GERAL POR FILIAL */}
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Card e: Comparativo por Filial */}
+                            {/* Card e: Visão Geral por Filial & Estoque Parado */}
                             <div className="bg-black border border-[#222222] rounded-xl p-5 flex flex-col justify-between">
                               <div>
                                 <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
                                   <Store size={16} className="text-purple-400" />
-                                  Desempenho Consolidado por Filial
+                                  Visão Geral por Filial (Faturamento &amp; Estoque Parado)
                                 </h3>
                                 {comparativoFiliais.length === 0 ? (
                                   <p className="text-xs text-gray-500 italic py-6 text-center">Sem vendas registradas no mês.</p>
                                 ) : (
-                                  <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                                  <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                                     {comparativoFiliais.map((f, idx) => {
                                       const pct = faturamentoBruto > 0 ? ((f.totalVendido / faturamentoBruto) * 100) : 0;
                                       return (
-                                        <div key={idx} className="bg-[#0A0A0A] border border-[#222222] p-3 rounded-lg space-y-2">
+                                        <div key={idx} className="bg-[#0A0A0A] border border-[#222222] p-3.5 rounded-lg space-y-2">
                                           <div className="flex justify-between items-center text-xs">
                                             <span className="font-bold text-white flex items-center gap-2">
                                               <span className="w-5 h-5 rounded-full bg-purple-950/60 border border-purple-800/40 text-purple-400 text-[10px] font-extrabold flex items-center justify-center">
@@ -9070,9 +9094,11 @@ export default function Dashboard({ session, profileDataProps }) {
                                               style={{ width: `${Math.min(pct, 100)}%` }}
                                             />
                                           </div>
-                                          <div className="flex justify-between text-[10px] text-gray-500 font-mono">
-                                            <span>{f.qtdVendas} venda(s) realizada(s)</span>
-                                            <span>{pct.toFixed(1)}% do faturamento total</span>
+                                          <div className="flex justify-between items-center text-[10px] text-gray-400 font-mono border-t border-[#111] pt-1.5 mt-1">
+                                            <span>{f.qtdVendas} venda(s) ({pct.toFixed(1)}%)</span>
+                                            <span className="text-amber-400 font-bold">
+                                              Estoque Parado: {f.estoqueParadoQtd} un. (R$ {f.estoqueParadoValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                                            </span>
                                           </div>
                                         </div>
                                       );
@@ -9082,21 +9108,22 @@ export default function Dashboard({ session, profileDataProps }) {
                               </div>
                             </div>
 
-                            {/* Card d: Ranking de Vendedores */}
+                            {/* Card d: Desempenho por Vendedor (Ticket Médio & Comissões) */}
                             <div className="bg-black border border-[#222222] rounded-xl p-5 flex flex-col justify-between">
                               <div>
                                 <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
                                   <Award size={16} className="text-yellow-400" />
-                                  Ranking Geral de Vendedores & Metas
+                                  Desempenho por Vendedor (Vendas, Ticket Médio &amp; Comissões)
                                 </h3>
                                 {rankingVendedores.length === 0 ? (
                                   <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum vendedor faturou no mês.</p>
                                 ) : (
-                                  <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                                  <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                                     {rankingVendedores.map((v, idx) => {
                                       const metaObj = metas.find(m => m.vendedor_id === v.id);
                                       const metaValor = metaObj ? parseFloat(metaObj.valor_meta) : 15000;
                                       const pctMeta = metaValor > 0 ? ((v.totalVendido / metaValor) * 100) : 0;
+                                      const ticketMedio = v.qtdVendas > 0 ? (v.totalVendido / v.qtdVendas) : 0;
 
                                       return (
                                         <div key={idx} className="bg-[#0A0A0A] border border-[#222222] p-3 rounded-lg flex items-center justify-between gap-3">
@@ -9110,7 +9137,9 @@ export default function Dashboard({ session, profileDataProps }) {
                                             </div>
                                             <div className="truncate">
                                               <span className="block text-xs font-bold text-white truncate">{v.nome}</span>
-                                              <span className="text-[10px] text-gray-500 font-mono">{v.qtdVendas} venda(s)</span>
+                                              <span className="text-[10px] text-gray-400 font-mono">
+                                                {v.qtdVendas} venda(s) · Tkt Médio: R$ {ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                              </span>
                                             </div>
                                           </div>
 
@@ -9118,8 +9147,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                             <span className="block text-xs font-bold font-mono text-white">
                                               R$ {v.totalVendido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                             </span>
-                                            <span className={`text-[10px] font-bold ${pctMeta >= 100 ? 'text-green-400' : pctMeta >= 70 ? 'text-yellow-400' : 'text-gray-500'}`}>
-                                              {pctMeta.toFixed(0)}% da meta (R$ {metaValor.toLocaleString('pt-BR')})
+                                            <span className="block text-[10px] font-bold text-purple-400 font-mono">
+                                              Comissão: R$ {v.comissaoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({pctMeta.toFixed(0)}% meta)
                                             </span>
                                           </div>
                                         </div>
@@ -9131,64 +9160,109 @@ export default function Dashboard({ session, profileDataProps }) {
                             </div>
                           </div>
 
-                          {/* Card c: Tabela de Auditoria de Descontos Concedidos */}
-                          <div className="bg-black border border-[#222222] rounded-xl p-5 space-y-4">
-                            <div className="flex items-center justify-between">
-                              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                <Tag size={16} className="text-amber-400" />
-                                Auditoria de Descontos Concedidos no Mês
-                              </h3>
-                              <span className="text-[10px] bg-amber-950/40 text-amber-400 border border-amber-800/40 px-2 py-0.5 rounded font-bold uppercase">
-                                Auditoria CEO
-                              </span>
+                          {/* RELATÓRIO 3: AUDITORIA DE DESCONTOS & AUDITORIA DE ACESSOS DA EQUIPE */}
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Auditoria de Descontos */}
+                            <div className="bg-black border border-[#222222] rounded-xl p-5 space-y-4">
+                              <div className="flex items-center justify-between border-b border-[#222] pb-3">
+                                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                  <Tag size={16} className="text-amber-400" />
+                                  Auditoria de Descontos Concedidos
+                                </h3>
+                                <span className="text-[10px] bg-amber-950/40 text-amber-400 border border-amber-800/40 px-2 py-0.5 rounded font-bold uppercase">
+                                  Auditoria Executiva
+                                </span>
+                              </div>
+
+                              {vendasComDesconto.length === 0 ? (
+                                <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum desconto concedido neste mês.</p>
+                              ) : (
+                                <div className="overflow-x-auto max-h-60 overflow-y-auto">
+                                  <table className="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                      <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
+                                        <th className="pb-2">Data</th>
+                                        <th className="pb-2">Vendedor</th>
+                                        <th className="pb-2 text-right">Desconto (R$)</th>
+                                        <th className="pb-2 text-right">Autorizador</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-[#222222]/50">
+                                      {vendasComDesconto.slice(0, 10).map((sale) => (
+                                        <tr key={sale.id} className="hover:bg-white/5 transition-colors">
+                                          <td className="py-2 text-gray-400 font-mono text-[11px]">
+                                            {new Date(sale.created_at || sale.data).toLocaleDateString('pt-BR')}
+                                          </td>
+                                          <td className="py-2 text-gray-300 font-semibold text-[11px]">
+                                            {sale.profiles?.nome || sale.vendedor_nome || 'Vendedor'}
+                                          </td>
+                                          <td className="py-3 text-right font-mono font-bold text-amber-400">
+                                            - R$ {parseFloat(sale.desconto || sale.valor_desconto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          </td>
+                                          <td className="py-3 text-right font-semibold text-purple-300">
+                                            {sale.autorizador?.nome || sale.desconto_autorizado_por || 'Gerente / Dono'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
                             </div>
 
-                            {vendasComDesconto.length === 0 ? (
-                              <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum desconto concedido neste mês.</p>
-                            ) : (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs border-collapse">
-                                  <thead>
-                                    <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
-                                      <th className="pb-3">Data</th>
-                                      <th className="pb-3">Venda ID</th>
-                                      <th className="pb-3">Produto</th>
-                                      <th className="pb-3">Vendedor</th>
-                                      <th className="pb-3">Filial</th>
-                                      <th className="pb-3 text-right">Desconto (R$)</th>
-                                      <th className="pb-3 text-right">Autorizado Por</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-[#222222]/50">
-                                    {vendasComDesconto.slice(0, 10).map((sale) => (
-                                      <tr key={sale.id} className="hover:bg-white/5 transition-colors">
-                                        <td className="py-3 text-gray-400 font-mono">
-                                          {new Date(sale.created_at || sale.data).toLocaleDateString('pt-BR')}
-                                        </td>
-                                        <td className="py-3 font-mono text-[10px] text-purple-400">
-                                          {sale.id.slice(0, 8)}...
-                                        </td>
-                                        <td className="py-3 font-semibold text-white">
-                                          {sale.produtos?.nome || sale.produto_nome || 'Produto'}
-                                        </td>
-                                        <td className="py-3 text-gray-300">
-                                          {sale.profiles?.nome || sale.vendedor_nome || 'Vendedor'}
-                                        </td>
-                                        <td className="py-3 text-gray-400">
-                                          {filiais.find(f => f.id === sale.filial_id)?.nome || 'Matriz'}
-                                        </td>
-                                        <td className="py-3 text-right font-mono font-bold text-amber-400">
-                                          - R$ {parseFloat(sale.desconto || sale.valor_desconto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </td>
-                                        <td className="py-3 text-right font-semibold text-purple-300">
-                                          {sale.autorizador?.nome || sale.desconto_autorizado_por || 'Gerente / Dono'}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                            {/* Auditoria de Acessos & Logins da Equipe */}
+                            <div className="bg-black border border-[#222222] rounded-xl p-5 space-y-4">
+                              <div className="flex items-center justify-between border-b border-[#222] pb-3">
+                                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                  <Shield size={16} className="text-[#6A0DAD]" />
+                                  Auditoria de Acessos &amp; Atividade da Equipe
+                                </h3>
+                                <span className="text-[10px] bg-purple-950/40 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded font-bold uppercase">
+                                  Logs de Acesso
+                                </span>
                               </div>
-                            )}
+
+                              {teamMembers.length === 0 ? (
+                                <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum registro de acesso encontrado.</p>
+                              ) : (
+                                <div className="overflow-x-auto max-h-60 overflow-y-auto">
+                                  <table className="w-full text-left text-xs border-collapse">
+                                    <thead>
+                                      <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
+                                        <th className="pb-2">Colaborador</th>
+                                        <th className="pb-2">Cargo</th>
+                                        <th className="pb-2">Filial</th>
+                                        <th className="pb-2 text-right">Status Acesso</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-[#222222]/50">
+                                      {teamMembers.map((member) => {
+                                        const fObj = filiais.find(f => f.id === member.filial_id);
+                                        return (
+                                          <tr key={member.id} className="hover:bg-white/5 transition-colors">
+                                            <td className="py-2 font-bold text-white flex items-center gap-2 text-[11px]">
+                                              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                              <span>{member.nome}</span>
+                                            </td>
+                                            <td className="py-2 text-gray-400 font-mono text-[10px]">
+                                              {member.role}
+                                            </td>
+                                            <td className="py-2 text-gray-400 text-[11px]">
+                                              {fObj ? fObj.nome : 'Todas / Global'}
+                                            </td>
+                                            <td className="py-2 text-right text-[10px]">
+                                              <span className="bg-green-950/30 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono font-bold">
+                                                Autenticado / Ativo
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -11036,8 +11110,9 @@ export default function Dashboard({ session, profileDataProps }) {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                  {/* FORMULÁRIO DE ENTRADA DE ESTOQUE (PRODUTO E ITEM FÍSICO) */}
-                  <div className="lg:col-span-2 space-y-5">
+                  {/* FORMULÁRIO DE ENTRADA DE ESTOQUE (Oculto para DONO) */}
+                  {profile?.role !== 'DONO' && (
+                    <div className="lg:col-span-2 space-y-5">
                     <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2 border-b border-[#222222] pb-3 mb-2">
                         <Smartphone size={16} className="text-[#6A0DAD]" />
@@ -11167,9 +11242,10 @@ export default function Dashboard({ session, profileDataProps }) {
                       </button>
                     </div>
                   </div>
+                )}
 
                   {/* PAINEL DIREITO: Lista de IMEIs + Estoque */}
-                  <div className="lg:col-span-3 space-y-5">
+                  <div className={`${profile?.role === 'DONO' ? 'lg:col-span-5' : 'lg:col-span-3'} space-y-5`}>
                     {/* Últimas Entradas de Aparelhos (Histórico Recente) */}
                     <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2 mb-4 border-b border-[#222222] pb-3">
@@ -11310,7 +11386,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <td className="py-2.5 font-mono font-bold text-white text-[11px]">
                                       <div className="flex items-center gap-2">
                                         <span>R$ {p.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                        {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(profile?.role) && (
+                                        {profile?.role !== 'DONO' && ['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(profile?.role) && (
                                           <button 
                                             onClick={() => handleUpdateProdutoPreco(p.id, p.nome, p.preco)}
                                             className="text-gray-500 hover:text-[#6A0DAD] transition-colors"
@@ -11333,17 +11409,19 @@ export default function Dashboard({ session, profileDataProps }) {
                                         <span className="text-gray-300 font-semibold">{p.categoria === 'SERVICO' ? '∞' : p.quantidade}</span>
                                       )}
                                     </td>
-                                    <td className="py-2.5 text-right">
-                                      {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(profile?.role) && (
-                                        <button
-                                          onClick={() => handleDeleteProduto(p.id)}
-                                          className="p-1 border border-[#222222] hover:border-red-800/60 text-gray-600 hover:text-red-400 rounded bg-black transition-colors"
-                                          title="Remover produto"
-                                        >
-                                          <Trash2 size={12} />
-                                        </button>
-                                      )}
-                                    </td>
+                                    {profile?.role !== 'DONO' && (
+                                      <td className="py-2.5 text-right">
+                                        {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(profile?.role) && (
+                                          <button
+                                            onClick={() => handleDeleteProduto(p.id)}
+                                            className="p-1 border border-[#222222] hover:border-red-800/60 text-gray-600 hover:text-red-400 rounded bg-black transition-colors"
+                                            title="Remover produto"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        )}
+                                      </td>
+                                    )}
                                   </tr>
                                   {expandedProductImeis[p.id] && (
                                     <tr className="bg-black">
@@ -11957,20 +12035,22 @@ export default function Dashboard({ session, profileDataProps }) {
                       Gerencie e cadastre colaboradores, permissões de acesso e alocação por filial na sua empresa.
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setNewColabNome('');
-                      setNewColabEmail('');
-                      setNewColabSenha('');
-                      setNewColabRole('VENDEDOR');
-                      setNewColabFilialId(profile?.role === 'GERENTE' ? (profile?.filial_id || activeFilialId || '') : '');
-                      setIsAddCollaboratorModalOpen(true);
-                    }}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-[#6A0DAD]/20 cursor-pointer"
-                  >
-                    <Plus size={16} />
-                    Novo Colaborador
-                  </button>
+                  {profile?.role !== 'DONO' && (
+                    <button
+                      onClick={() => {
+                        setNewColabNome('');
+                        setNewColabEmail('');
+                        setNewColabSenha('');
+                        setNewColabRole('VENDEDOR');
+                        setNewColabFilialId(profile?.role === 'GERENTE' ? (profile?.filial_id || activeFilialId || '') : '');
+                        setIsAddCollaboratorModalOpen(true);
+                      }}
+                      className="bg-[#6A0DAD] hover:bg-[#500885] text-white px-5 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 shadow-lg shadow-[#6A0DAD]/20 cursor-pointer"
+                    >
+                      <Plus size={16} />
+                      Novo Colaborador
+                    </button>
+                  )}
                 </div>
 
                 {/* Filtros de Busca e Cargo */}
@@ -12031,7 +12111,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             <th className="pb-3.5">Cargo / Função</th>
                             <th className="pb-3.5">Filial Alocada</th>
                             <th className="pb-3.5">Status</th>
-                            <th className="pb-3.5 text-right">Ações</th>
+                            {profile?.role !== 'DONO' && <th className="pb-3.5 text-right">Ações</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#111111]">
@@ -12062,12 +12142,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               let roleBadgeStyle = 'bg-blue-950/40 text-blue-400 border-blue-800/40';
                               if (['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO'].includes(memberRole)) {
                                 roleBadgeStyle = 'bg-red-950/40 text-red-400 border-red-800/40';
-                              } else if (memberRole === 'GERENTE') {
-                                roleBadgeStyle = 'bg-purple-950/40 text-purple-400 border-purple-800/40';
-                              } else if (memberRole === 'ESTOQUISTA') {
-                                roleBadgeStyle = 'bg-amber-950/40 text-amber-400 border-amber-800/40';
-                              } else if (memberRole === 'TRAINEE') {
-                                roleBadgeStyle = 'bg-teal-950/40 text-teal-400 border-teal-800/40';
+                    roleBadgeStyle = 'bg-teal-950/40 text-teal-400 border-teal-800/40';
                               }
 
                               const filialObj = filiais.find(f => f.id === member.filial_id);
@@ -12085,11 +12160,11 @@ export default function Dashboard({ session, profileDataProps }) {
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="py-4 text-gray-300 font-mono text-xs">
+                                  <td className="py-4 font-mono text-xs text-gray-400">
                                     {member.email || '-'}
                                   </td>
                                   <td className="py-4">
-                                    {['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO', 'RH', 'GERENTE'].includes(profile?.role) ? (
+                                    {profile?.role !== 'DONO' && ['SUPER_ADMIN', 'ADMIN', 'OWNER', 'RH', 'GERENTE'].includes(profile?.role) ? (
                                       <select
                                         value={memberRole}
                                         onChange={(e) => handleUpdateEmployeeRole(member.id, e.target.value, member.email)}
@@ -12115,7 +12190,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                     )}
                                   </td>
                                   <td className="py-4 text-gray-300 text-xs">
-                                    {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH'].includes(profile?.role) ? (
+                                    {profile?.role !== 'DONO' && ['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'RH'].includes(profile?.role) ? (
                                       <select
                                         value={member.filial_id || ''}
                                         onChange={(e) => handleUpdateEmployeeFilial(member.id, e.target.value, member.email)}
@@ -12140,26 +12215,28 @@ export default function Dashboard({ session, profileDataProps }) {
                                       Ativo
                                     </span>
                                   </td>
-                                  <td className="py-4 text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                      <button
-                                        onClick={() => handleOpenEditColaboradorModal(member)}
-                                        className="p-1.5 border border-[#222222] hover:border-[#6A0DAD]/60 text-gray-400 hover:text-white rounded bg-black transition-colors cursor-pointer"
-                                        title="Editar Informações do Colaborador (E-mail, Telefone, CPF, Senha)"
-                                      >
-                                        <Edit2 size={13} />
-                                      </button>
-                                      {(!isGerenteCreator || ['VENDEDOR', 'ESTOQUISTA'].includes(memberRole)) && member.id !== session?.user?.id && (
+                                  {profile?.role !== 'DONO' && (
+                                    <td className="py-4 text-right">
+                                      <div className="flex items-center justify-end gap-2">
                                         <button
-                                          onClick={() => handleDeleteColaborador(member.id, member.nome, member.email)}
-                                          className="p-1.5 border border-[#222222] hover:border-red-800/60 text-gray-500 hover:text-red-400 rounded bg-black transition-colors"
-                                          title="Excluir Colaborador"
+                                          onClick={() => handleOpenEditColaboradorModal(member)}
+                                          className="p-1.5 border border-[#222222] hover:border-[#6A0DAD]/60 text-gray-400 hover:text-white rounded bg-black transition-colors cursor-pointer"
+                                          title="Editar Informações do Colaborador (E-mail, Telefone, CPF, Senha)"
                                         >
-                                          <Trash2 size={13} />
+                                          <Edit2 size={13} />
                                         </button>
-                                      )}
-                                    </div>
-                                  </td>
+                                        {(!isGerenteCreator || ['VENDEDOR', 'ESTOQUISTA'].includes(memberRole)) && member.id !== session?.user?.id && (
+                                          <button
+                                            onClick={() => handleDeleteColaborador(member.id, member.nome, member.email)}
+                                            className="p-1.5 border border-[#222222] hover:border-red-800/60 text-gray-500 hover:text-red-400 rounded bg-black transition-colors"
+                                            title="Excluir Colaborador"
+                                          >
+                                            <Trash2 size={13} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  )}
                                 </tr>
                               );
                             })}
