@@ -414,7 +414,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [modalComprovante, setModalComprovante] = useState(null);
 
   // Estados para Torre de Controlo
-  const [catalogoTab, setCatalogoTab] = useState('catalogo');
+  const [catalogoTab, setCatalogoTab] = useState(profile?.role === 'DONO' ? 'torre' : 'catalogo');
   const [torreData, setTorreData] = useState([]);
   const [torreFiliais, setTorreFiliais] = useState([]);
   const [torreLoading, setTorreLoading] = useState(false);
@@ -9827,25 +9827,27 @@ export default function Dashboard({ session, profileDataProps }) {
                 {/* AREA CATÁLOGO E TORRE DE CONTROLO (Oculto para GERENTE) */}
                 {profile?.role !== 'GERENTE' && (
                   <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl overflow-hidden">
-                    <div className="flex border-b border-[#222222]">
-                      <button
-                        onClick={() => setCatalogoTab('catalogo')}
-                        className={`flex-1 py-4 text-sm font-bold transition-colors border-r border-[#222222] ${catalogoTab === 'catalogo' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
-                      >
-                        <Database size={16} className="inline mr-2" />
-                        Catálogo Mestre de Produtos
-                      </button>
-                      <button
-                        onClick={() => { setCatalogoTab('torre'); fetchTorreControlo(); }}
-                        className={`flex-1 py-4 text-sm font-bold transition-colors ${catalogoTab === 'torre' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
-                      >
-                        <BarChart3 size={16} className="inline mr-2" />
-                        Torre de Controlo (Visão Global)
-                      </button>
-                    </div>
+                    {profile?.role !== 'DONO' && (
+                      <div className="flex border-b border-[#222222]">
+                        <button
+                          onClick={() => setCatalogoTab('catalogo')}
+                          className={`flex-1 py-4 text-sm font-bold transition-colors border-r border-[#222222] ${catalogoTab === 'catalogo' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
+                        >
+                          <Database size={16} className="inline mr-2" />
+                          Catálogo Mestre de Produtos
+                        </button>
+                        <button
+                          onClick={() => { setCatalogoTab('torre'); fetchTorreControlo(); }}
+                          className={`flex-1 py-4 text-sm font-bold transition-colors ${catalogoTab === 'torre' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
+                        >
+                          <BarChart3 size={16} className="inline mr-2" />
+                          Torre de Controlo (Visão Global)
+                        </button>
+                      </div>
+                    )}
 
                   <div className="p-6">
-                    {catalogoTab === 'catalogo' && (
+                    {(catalogoTab === 'catalogo' && profile?.role !== 'DONO') && (
                       <>
                         <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
                           <Database size={18} className="text-[#6A0DAD]" />
@@ -10084,7 +10086,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               maxLength={8}
                               value={ncmProduto}
                               onChange={(e) => setNcmProduto(e.target.value.replace(/\D/g, ''))}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs font-mono placeholder-gray-600 outline-none transition-all"
+                              className="w-full bg-[#000] border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs font-mono placeholder-gray-600 outline-none transition-all"
                               placeholder="Ex: 85171300"
                             />
                           </div>
@@ -10095,7 +10097,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               maxLength={7}
                               value={cestProduto}
                               onChange={(e) => setCestProduto(e.target.value.replace(/\D/g, ''))}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs font-mono placeholder-gray-600 outline-none transition-all"
+                              className="w-full bg-[#000] border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs font-mono placeholder-gray-600 outline-none transition-all"
                               placeholder="Ex: 2105300"
                             />
                           </div>
@@ -10106,7 +10108,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               maxLength={4}
                               value={cfopProduto}
                               onChange={(e) => setCfopProduto(e.target.value.replace(/\D/g, ''))}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs font-mono placeholder-gray-600 outline-none transition-all"
+                              className="w-full bg-[#000] border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs font-mono placeholder-gray-600 outline-none transition-all"
                               placeholder="Ex: 5405"
                             />
                           </div>
@@ -10117,7 +10119,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           <select
                             value={origemProduto}
                             onChange={(e) => setOrigemProduto(e.target.value)}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs outline-none transition-all"
+                            className="w-full bg-[#000] border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-2.5 py-2 text-xs outline-none transition-all"
                           >
                             <option value="0">0 - Nacional</option>
                             <option value="1">1 - Estrangeira - Importação Direta</option>
@@ -10256,7 +10258,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       </>
                     )}
 
-                    {catalogoTab === 'torre' && (
+                    {(catalogoTab === 'torre' || profile?.role === 'DONO') && (
                       <div className="space-y-4 animate-fadeIn">
                         <div className="flex justify-between items-center mb-2">
                           <h3 className="text-lg font-bold text-white flex items-center gap-2">
