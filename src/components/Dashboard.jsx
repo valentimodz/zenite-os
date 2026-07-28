@@ -4790,30 +4790,37 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setIsSavingAjuste(true);
     try {
-      // 1. Localizar produto na filial
-      let { data: existingProd, error: prodFindErr } = await supabase
+      let targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      if (!targetEmpresaId || targetEmpresaId === 'MASTER' || targetEmpresaId === '00000000-0000-0000-0000-000000000001') {
+        const { data: empList } = await supabase.from('empresas').select('id').limit(1);
+        if (empList && empList.length > 0) {
+          targetEmpresaId = empList[0].id;
+        }
+      }
+
+      // 1. Localizar produto na filial de forma segura (retorna array, pega 1º elemento)
+      const { data: existingProds, error: prodFindErr } = await supabase
         .from('produtos')
         .select('*')
-        .eq('empresa_id', company.id)
+        .eq('empresa_id', targetEmpresaId)
         .eq('filial_id', ajusteFilialId)
-        .eq('nome', ajusteProduto.nome)
-        .maybeSingle();
+        .eq('nome', ajusteProduto.nome);
 
       if (prodFindErr) throw prodFindErr;
 
+      const existingProd = existingProds && existingProds.length > 0 ? existingProds[0] : null;
       let targetProdutoId;
 
       if (ajusteTipo === 'ENTRADA') {
         if (isCelular) {
-          // Verificar se IMEI já existe
-          const { data: existente, error: checkErr } = await supabase
+          // Verificar de forma segura se IMEI já existe
+          const { data: imeisEncontrados, error: checkErr } = await supabase
             .from('imeis')
             .select('imei')
-            .eq('imei', targetImei)
-            .maybeSingle();
+            .eq('imei', targetImei);
 
           if (checkErr) throw checkErr;
-          if (existente) {
+          if (imeisEncontrados && imeisEncontrados.length > 0) {
             alert('Erro: Este IMEI já está registrado no sistema.');
             setIsSavingAjuste(false);
             return;
@@ -4822,10 +4829,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (!existingProd) {
           // Criar novo produto para filial
-          const { data: newProd, error: newProdErr } = await supabase
+          const { data: newProds, error: newProdErr } = await supabase
             .from('produtos')
             .insert({
-              empresa_id: company.id,
+              empresa_id: targetEmpresaId,
               filial_id: ajusteFilialId,
               nome: ajusteProduto.nome,
               tipo: ajusteProduto.tipo,
@@ -4837,11 +4844,13 @@ export default function Dashboard({ session, profileDataProps }) {
               cfop: ajusteProduto.cfop || null,
               origem: ajusteProduto.origem || '0'
             })
-            .select()
-            .single();
+            .select();
 
           if (newProdErr) throw newProdErr;
-          targetProdutoId = newProd.id;
+          if (!newProds || newProds.length === 0) {
+            throw new Error('Não foi possível registrar o produto.');
+          }
+          targetProdutoId = newProds[0].id;
         } else {
           // Incrementar quantidade
           const { error: updateErr } = await supabase
@@ -4858,7 +4867,7 @@ export default function Dashboard({ session, profileDataProps }) {
             .from('imeis')
             .insert({
               produto_id: targetProdutoId,
-              empresa_id: company.id,
+              empresa_id: targetEmpresaId,
               filial_id: ajusteFilialId,
               imei: targetImei,
               status: 'DISPONÍVEL',
@@ -4871,7 +4880,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         // Log da movimentação
         await supabase.from('estoque_movimentacoes').insert({
-          empresa_id: company.id,
+          empresa_id: targetEmpresaId,
           produto_id: targetProdutoId,
           imei: targetImei,
           tipo_movimentacao: 'AJUSTE_MANUAL_ENTRADA',
@@ -4892,22 +4901,22 @@ export default function Dashboard({ session, profileDataProps }) {
         targetProdutoId = existingProd.id;
 
         if (isCelular) {
-          // Localizar o IMEI
-          const { data: imeiRecord, error: imeiRecordErr } = await supabase
+          // Localizar o IMEI de forma segura sem .single() / .maybeSingle()
+          const { data: imeiRecords, error: imeiRecordErr } = await supabase
             .from('imeis')
             .select('*')
             .eq('imei', targetImei)
-            .eq('empresa_id', company.id)
+            .eq('empresa_id', targetEmpresaId)
             .eq('filial_id', ajusteFilialId)
-            .eq('vendido', false)
-            .maybeSingle();
+            .eq('vendido', false);
 
           if (imeiRecordErr) throw imeiRecordErr;
-          if (!imeiRecord) {
+          if (!imeiRecords || imeiRecords.length === 0) {
             alert('Erro: Este IMEI não foi localizado ou não está disponível nesta filial.');
             setIsSavingAjuste(false);
             return;
           }
+          const imeiRecord = imeiRecords[0];
 
           // Marcar vendido = true
           const { error: imeiUpdErr } = await supabase
@@ -4928,7 +4937,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         // Log da movimentação
         await supabase.from('estoque_movimentacoes').insert({
-          empresa_id: company.id,
+          empresa_id: targetEmpresaId,
           produto_id: targetProdutoId,
           imei: targetImei,
           tipo_movimentacao: 'AJUSTE_MANUAL_SAIDA',
