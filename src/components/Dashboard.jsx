@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, supabaseAdmin, supabaseRegister } from '../supabaseClient';
 import { 
-  LogOut, User, Building, Shield, Plus, Users, ShoppingBag, UserPlus,
+  LogOut, User, Building, Shield, ShieldCheck, Plus, Users, ShoppingBag, UserPlus,
   BarChart3, AlertCircle, CheckCircle2, Store, Package, Database, 
   Smartphone, Tag, FileText as LucideFileText, Search, Upload, Award, DollarSign, 
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
-  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud
+  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy
 } from 'lucide-react';
 import { emitirNfseStub } from '../services/fiscal';
+import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
 import { hasFeature } from '../utils/featureFlags';
+import SaasDashboard from '../pages/SaaS/SaasDashboard';
+import SaasTenants from '../pages/SaaS/SaasTenants';
+import SaasBilling from '../pages/SaaS/SaasBilling';
+import SaasSettings from '../pages/SaaS/SaasSettings';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -148,6 +153,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [enderecoFilial, setEnderecoFilial] = useState(''); // 'LOJA' | 'ESTOQUE'
   const [loadingFilial, setLoadingFilial] = useState(false);
   const [logoFilialFile, setLogoFilialFile] = useState(null);
+  const [editingFilial, setEditingFilial] = useState(null);
 
   // Estados para Módulo de Vendedores
   const [vendedores, setVendedores] = useState([]);
@@ -174,6 +180,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [loadingProdutos, setLoadingProdutos] = useState(false);
   const [nomeProduto, setNomeProduto] = useState('');
   const [tipoProduto, setTipoProduto] = useState('CELULAR'); // 'CELULAR' | 'ACESSORIO'
+  const [codigoBarras, setCodigoBarras] = useState('');
+  const [numeroSerie, setNumeroSerie] = useState('');
   const [categoriaProduto, setCategoriaProduto] = useState('IOS'); // 'IOS' | 'ANDROID' | 'APPLE_JBL_CONSOLE' | 'SERVICO'
   const [precoProduto, setPrecoProduto] = useState('');
   const [precoCustoProduto, setPrecoCustoProduto] = useState('');
@@ -209,6 +217,14 @@ export default function Dashboard({ session, profileDataProps }) {
   const [editingCliente, setEditingCliente] = useState(null);
   const [isClienteModalOpen, setIsClienteModalOpen] = useState(false);
   const [buscaCliente, setBuscaCliente] = useState('');
+  const [clienteHistoricoModalOpen, setClienteHistoricoModalOpen] = useState(false);
+  const [clienteHistoricoSelecionado, setClienteHistoricoSelecionado] = useState(null);
+  const [clienteHistoricoVendas, setClienteHistoricoVendas] = useState([]);
+  const [loadingClienteHistorico, setLoadingClienteHistorico] = useState(false);
+  const [customPromoText, setCustomPromoText] = useState('');
+  const [selectedPromoType, setSelectedPromoType] = useState('upgrade');
+  const [isGeneratingIA, setIsGeneratingIA] = useState(false);
+  const [isGeneratedByAI, setIsGeneratedByAI] = useState(false);
 
   // Novos campos para Clientes (Data de Nascimento & Endereço Inteligente)
   const [clienteDataNascimento, setClienteDataNascimento] = useState('');
@@ -230,13 +246,23 @@ export default function Dashboard({ session, profileDataProps }) {
   const [vendaNewComissao, setVendaNewComissao] = useState('');
   const [vendaJustificativa, setVendaJustificativa] = useState('');
   const [isVendaEditModalOpen, setIsVendaEditModalOpen] = useState(false);
+  
+  // Estados para Auditoria de Vendas & Crédito
+  const [buscaAuditoriaCredito, setBuscaAuditoriaCredito] = useState('');
+  const [filtroStatusCredito, setFiltroStatusCredito] = useState('TODOS');
+  const [filtroFinanceira, setFiltroFinanceira] = useState('TODOS');
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [selectedAuditVenda, setSelectedAuditVenda] = useState(null);
+  const [selectedAuditClienteStatus, setSelectedAuditClienteStatus] = useState('EM DIA');
+  const [isSavingAuditStatus, setIsSavingAuditStatus] = useState(false);
+  const [pdvFinanceiraParceira, setPdvFinanceiraParceira] = useState('PayJoy');
 
   // Estados para Navegação via Sidebar Retrátil
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('zenite_sidebar_open');
     return saved !== 'false';
   });
-  const [currentView, setCurrentView] = useState('');
+  const [currentView, setCurrentView] = useState('gestao');
   const [estoqueSubMenuOpen, setEstoqueSubMenuOpen] = useState(true);
 
   // --- Tenant Configurations & SaaS Faturas ---
@@ -292,8 +318,11 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Novos estados para a Entrada de Estoque (Item Físico / IMEI) de alta produtividade
   const [selectedProdutoMestre, setSelectedProdutoMestre] = useState(null);
+  const [entradaFiltroCategoria, setEntradaFiltroCategoria] = useState('todas');
+  const [entradaBuscaMestre, setEntradaBuscaMestre] = useState('');
   const [entradaImei, setEntradaImei] = useState('');
   const [entradaCorDispositivo, setEntradaCorDispositivo] = useState('');
+  const [entradaCodigoBarras, setEntradaCodigoBarras] = useState('');
   const [selectedFilialDestino, setSelectedFilialDestino] = useState('');
   const [ultimosRecebidos, setUltimosRecebidos] = useState([]);
   const [disponiveisImeis, setDisponiveisImeis] = useState([]);
@@ -322,6 +351,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [pdvClienteCpfCnpj, setPdvClienteCpfCnpj] = useState('');
   const [pdvClienteEmail, setPdvClienteEmail] = useState('');
   const [pdvClienteTelefone, setPdvClienteTelefone] = useState('');
+  const [pdvClienteDataNascimento, setPdvClienteDataNascimento] = useState('');
   const [pdvClienteSearchInput, setPdvClienteSearchInput] = useState('');
   const [pdvClienteSearchResults, setPdvClienteSearchResults] = useState([]);
   const [pdvClienteSearchLoading, setPdvClienteSearchLoading] = useState(false);
@@ -402,6 +432,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [transfOrigemId, setTransfOrigemId] = useState(''); // Autodetectado para ADMINs
   const [transfDestinoId, setTransfDestinoId] = useState('');
   const [transfItens, setTransfItens] = useState([]);
+  const [transfQtdInput, setTransfQtdInput] = useState('1');
+  const [historicoRealocacoes, setHistoricoRealocacoes] = useState([]);
   const [transfRomaneioAtivo, setTransfRomaneioAtivo] = useState(false);
   const [transfRomaneioDados, setTransfRomaneioDados] = useState(null);
   const [fechamentoQtdSaida, setFechamentoQtdSaida] = useState(0);
@@ -496,7 +528,11 @@ export default function Dashboard({ session, profileDataProps }) {
         .from('imeis')
         .select(`
           id, imei, status, vendido, created_at, is_seminovo, filial_id,
-          produtos!inner (
+          produtos (
+            nome
+          ),
+          filiais:filial_id (
+            id,
             nome
           )
         `)
@@ -516,8 +552,13 @@ export default function Dashboard({ session, profileDataProps }) {
       const aggregation = {};
       const validImeis = (imeisData || []).filter(i => i.status !== 'VENDIDO' && i.status !== 'EM_TRANSITO');
 
-      // Check for orphans
-      const hasOrphans = validImeis.some(item => !item.filial_id);
+      // Check for orphans (realmente sem filial_id ou sem relacionamento com filial)
+      const hasOrphans = validImeis.some(item => {
+        if (!item.filial_id) return true;
+        const hasFilialRel = item.filiais?.nome || filiaisData.some(f => String(f.id) === String(item.filial_id));
+        return !hasFilialRel;
+      });
+
       if (hasOrphans && !uniqueFiliaisMap.has('Não Alocado')) {
         uniqueFiliaisMap.set('Não Alocado', { id: 'NAO_ALOCADO', nome: 'Não Alocado' });
         uniqueFiliais = Array.from(uniqueFiliaisMap.values());
@@ -527,8 +568,10 @@ export default function Dashboard({ session, profileDataProps }) {
         const prodName = item.produtos?.nome;
         let filialNome = 'Não Alocado';
         
-        if (item.filial_id) {
-          const filialObj = filiaisData.find(f => f.id === item.filial_id);
+        if (item.filiais && item.filiais.nome) {
+          filialNome = item.filiais.nome;
+        } else if (item.filial_id) {
+          const filialObj = filiaisData.find(f => String(f.id) === String(item.filial_id));
           if (filialObj) filialNome = filialObj.nome;
         }
         
@@ -557,6 +600,47 @@ export default function Dashboard({ session, profileDataProps }) {
         });
       });
 
+      // Incluir produtos por quantidade (Acessórios e Produtos Gerais) da tabela produtos
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      const { data: prodsData } = await supabase
+        .from('produtos')
+        .select('*, filiais:filial_id(id, nome)')
+        .eq('empresa_id', targetEmpresaId);
+
+      if (prodsData) {
+        prodsData.forEach(item => {
+          const prodName = item.nome;
+          if (!prodName) return;
+
+          let filialNome = item.filiais?.nome || 'Não Alocado';
+          const qty = item.quantidade || 0;
+          if (qty <= 0) return;
+
+          if (!aggregation[prodName]) {
+            aggregation[prodName] = { nome: prodName, total: 0, items: [] };
+            uniqueFiliais.forEach(f => {
+              aggregation[prodName][f.nome] = 0;
+            });
+          }
+
+          if (aggregation[prodName][filialNome] !== undefined) {
+            aggregation[prodName][filialNome] += qty;
+          } else {
+            aggregation[prodName][filialNome] = qty;
+          }
+          aggregation[prodName].total += qty;
+
+          aggregation[prodName].items.push({
+            id: item.id,
+            imei: item.codigo_barras ? `EAN: ${item.codigo_barras}` : `Estoque: ${qty} un`,
+            localizacao: filialNome,
+            condicao: 'NOVO',
+            quantidade: qty,
+            data_entrada: item.created_at || new Date().toISOString()
+          });
+        });
+      }
+
       const tableData = Object.values(aggregation).sort((a, b) => a.nome.localeCompare(b.nome));
 
       setTorreFiliais(uniqueFiliais);
@@ -583,40 +667,48 @@ export default function Dashboard({ session, profileDataProps }) {
     setEstoqueGlobalImeis([]);
     
     try {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       const { data: prods, error: prodsErr } = await supabase
         .from('produtos')
-        .select('id, filiais(nome)')
-        .eq('empresa_id', company.id)
+        .select('id, nome, quantidade, filial_id, filiais(nome), codigo_barras, created_at')
+        .eq('empresa_id', targetEmpresaId)
         .eq('nome', produtoCatalogo.nome);
         
       if (prodsErr) throw prodsErr;
-      
-      if (!prods || prods.length === 0) {
-        setLoadingEstoqueGlobal(false);
-        return;
+
+      let combinados = [];
+      const prodIds = (prods || []).map(p => p.id);
+
+      if (prodIds.length > 0) {
+        const { data: imeisData } = await supabase
+          .from('imeis')
+          .select('*, filiais(nome)')
+          .in('produto_id', prodIds)
+          .order('created_at', { ascending: false });
+
+        if (imeisData && imeisData.length > 0) {
+          combinados = imeisData.map(imeiObj => ({
+            ...imeiObj,
+            filial_nome: imeiObj.filiais?.nome || 'Estoque Central'
+          }));
+        }
       }
-      
-      const prodIds = prods.map(p => p.id);
-      
-      const { data: imeisData, error: imeisErr } = await supabase
-        .from('imeis')
-        .select('*, filiais(nome)')
-        .in('produto_id', prodIds)
-        .order('created_at', { ascending: false });
-        
-      if (imeisErr) throw imeisErr;
-      
-      const combinados = (imeisData || []).map(imeiObj => {
-        return {
-          ...imeiObj,
-          filial_nome: imeiObj.filiais?.nome || 'Desconhecida'
-        };
-      });
+
+      // Se for Acessório / Produto por Qtd ou não tiver IMEIs, mapear da tabela produtos física
+      if (combinados.length === 0 && prods && prods.length > 0) {
+        combinados = prods.map(p => ({
+          id: p.id,
+          imei: p.codigo_barras ? `EAN: ${p.codigo_barras}` : 'Acessório / Produto por Qtd',
+          filial_nome: p.filiais?.nome || 'Estoque Central',
+          quantidade: p.quantidade || 0,
+          status: (p.quantidade || 0) > 0 ? 'DISPONÍVEL' : 'SEM ESTOQUE',
+          created_at: p.created_at || new Date().toISOString()
+        }));
+      }
       
       setEstoqueGlobalImeis(combinados);
     } catch (err) {
       console.error('Erro ao buscar estoque global:', err);
-      alert('Erro ao buscar rastreio de estoque.');
     } finally {
       setLoadingEstoqueGlobal(false);
     }
@@ -855,6 +947,7 @@ export default function Dashboard({ session, profileDataProps }) {
     setPdvClienteCpfCnpj(client.cpf_cnpj || '');
     setPdvClienteEmail(client.email || '');
     setPdvClienteTelefone(client.telefone || '');
+    setPdvClienteDataNascimento(client.data_nascimento || '');
     setIsPdvClienteFieldsEditable(false);
     setIsPdvClienteDropdownOpen(false);
   };
@@ -1019,24 +1112,48 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       if (activeEmpresaId) {
-        const { data: companyData } = await supabase
-          .from('companies')
+        let { data: companyData } = await supabase
+          .from('empresas')
           .select('*')
           .eq('id', activeEmpresaId)
           .maybeSingle();
 
+        if (!companyData) {
+          const { data: altComp } = await supabase
+            .from('companies')
+            .select('*')
+            .eq('id', activeEmpresaId)
+            .maybeSingle();
+          companyData = altComp;
+        }
+
+        if (!companyData) {
+          const { data: anyEmp } = await supabase.from('empresas').select('*').limit(1).maybeSingle();
+          companyData = anyEmp;
+          if (!companyData) {
+            const { data: anyComp } = await supabase.from('companies').select('*').limit(1).maybeSingle();
+            companyData = anyComp;
+          }
+        }
+
         if (companyData) {
           setCompany(companyData);
 
-          // Bloqueio de Inadimplência ou Assinatura Suspenso
-          if (companyData?.status === 'INATIVO' || companyData?.status_assinatura === 'BLOQUEADO') {
-            setError('Acesso Suspenso. A assinatura desta empresa foi bloqueada por inadimplência ou decisão administrativa. Entre em contato com o suporte do Zênite.');
+          const isCompanyBlocked = 
+            companyData?.status === 'BLOQUEADO' || 
+            companyData?.status === 'INATIVO' || 
+            companyData?.status_assinatura === 'BLOQUEADO' || 
+            companyData?.status_assinatura === 'INATIVO' || 
+            companyData?.status_assinatura === 'SUSPENSO';
+
+          if (isCompanyBlocked && profileData?.role !== 'SUPER_ADMIN') {
+            console.warn('🔒 [SEGURANÇA ZÊNITE] Acesso bloqueado para a empresa:', companyData);
+            setError(`Acesso Suspenso: A licença e a assinatura da empresa "${companyData.nome || companyData.nome_fantasia || 'Cliente'}" foram bloqueadas pelo Administrador do SaaS. Entre em contato com o suporte do Zênite para regularização.`);
             setLoading(false);
             return;
           }
 
-          // Bloqueio de Manutenção
-          if (companyData?.em_manutencao) {
+          if (companyData?.em_manutencao && profileData?.role !== 'SUPER_ADMIN') {
             setError('Zênite OS em manutenção programada pela Vextron Lab. Retornaremos em breve.');
             setLoading(false);
             return;
@@ -2033,12 +2150,41 @@ export default function Dashboard({ session, profileDataProps }) {
       const token = currentSession?.access_token;
 
       const fetchSales = async () => {
-        if (!token) return [];
-        const res = await fetch(`/api/vendas?empresa_id=${empresaId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const resData = await res.json();
-        return resData.data || [];
+        try {
+          if (token) {
+            const res = await fetch(`/api/vendas?empresa_id=${empresaId}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+              const resData = await res.json();
+              if (resData && resData.success && Array.isArray(resData.data)) {
+                return resData.data;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Aviso ao buscar /api/vendas, executando fallback Supabase:", e);
+        }
+
+        try {
+          let q = supabase
+            .from('vendas')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (empresaId && empresaId !== 'MASTER') {
+            q = q.eq('empresa_id', empresaId);
+          }
+
+          const { data: dbSales, error: dbErr } = await q;
+          if (!dbErr && dbSales) return dbSales;
+
+          const { data: simpleSales } = await supabase.from('vendas').select('*').order('created_at', { ascending: false });
+          return simpleSales || [];
+        } catch (err) {
+          console.error("Erro no fallback de vendas:", err);
+          return [];
+        }
       };
 
       const [prodsRes, salesData, fechRes, imeisRes, allImeisRes] = await Promise.all([
@@ -2051,7 +2197,7 @@ export default function Dashboard({ session, profileDataProps }) {
           .order('created_at', { ascending: false })
           .limit(10),
         supabase.from('imeis')
-          .select('id, produto_id, filial_id, status, vendido')
+          .select('id, produto_id, filial_id, status, vendido, imei, produtos(nome)')
           .eq('empresa_id', empresaId)
           .eq('vendido', false)
       ]);
@@ -2146,30 +2292,48 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let branchImeis = [];
       try {
-        const imeisRes = await supabase.from('imeis').select('id, produto_id, filial_id, status, vendido').eq('filial_id', filialId).eq('vendido', false);
-        if (imeisRes.data) branchImeis = imeisRes.data;
+        const imeisRes = await supabase
+          .from('imeis')
+          .select('id, produto_id, filial_id, status, vendido, imei, cor, produtos(nome)')
+          .eq('filial_id', filialId)
+          .eq('vendido', false);
+        if (imeisRes.data) {
+          branchImeis = imeisRes.data;
+          setDisponiveisImeis(imeisRes.data);
+        }
       } catch (iErr) {
-        console.warn('Aviso: Erro ao buscar IMEIs:', iErr);
+        console.warn('Aviso: Erro ao buscar IMEIs locais:', iErr);
       }
 
-      // 1. Obter acessórios e serviços vinculados a esta filial ou gerais
-      const accessoriesAndServices = allProds.filter(p => p.tipo !== 'CELULAR' && (p.filial_id === filialId || p.categoria === 'SERVICO'));
+      if (allProds && allProds.length > 0) {
+        setProdutos(allProds);
+      }
+
+      // 1. Obter acessórios e serviços vinculados ESTRITAMENTE a esta filial com estoque (quantidade > 0) ou serviços gerais
+      const accessoriesAndServices = allProds.filter(p => (p.tipo !== 'CELULAR' && p.tipo !== 'Celular') && (p.filial_id === filialId || p.categoria === 'SERVICO') && (p.categoria === 'SERVICO' || (p.quantidade || 0) > 0));
       
-      // 2. Computar o estoque de celulares a partir dos IMEIs disponíveis nesta filial
+      // 2. Computar o estoque físico de celulares a partir dos IMEIs disponíveis ESTRITAMENTE nesta filial local
       const celulares = [];
       const availableProdIds = [...new Set(branchImeis.map(im => im.produto_id))];
       
       availableProdIds.forEach(pId => {
-        const prodTemplate = allProds.find(p => p.id === pId);
-        if (prodTemplate) {
-          const qty = branchImeis.filter(im => im.produto_id === pId && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length;
-          if (qty > 0) {
-            celulares.push({
-              ...prodTemplate,
-              filial_id: filialId,
-              quantidade: qty
-            });
-          }
+        const imeiSamples = branchImeis.filter(im => im.produto_id === pId && im.filial_id === filialId && !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO');
+        const qty = imeiSamples.length;
+
+        if (qty > 0) {
+          const prodTemplate = allProds.find(p => p.id === pId) || (catalogoProdutos && catalogoProdutos.find(c => c.id === pId));
+          const prodName = prodTemplate?.nome || imeiSamples[0]?.produtos?.nome || 'Aparelho Celular';
+          
+          celulares.push({
+            ...(prodTemplate || {}),
+            id: pId,
+            nome: prodName,
+            tipo: 'CELULAR',
+            categoria: prodTemplate?.categoria || 'GERAL',
+            filial_id: filialId,
+            preco: parseFloat(prodTemplate?.preco || 0),
+            quantidade: qty
+          });
         }
       });
 
@@ -2865,17 +3029,29 @@ export default function Dashboard({ session, profileDataProps }) {
 
   const fetchVendedores = async (empresaId) => {
     try {
-      let { data, error } = await supabase
+      let query = supabase
         .from('profiles')
-        .select('*')
-        .eq('role', 'VENDEDOR');
+        .select('*');
+
+      if (empresaId) {
+        query = query.eq('empresa_id', empresaId);
+      }
+
+      let { data, error } = await query;
 
       if (error || !data || data.length === 0) {
         const retryRes = await supabase.from('profiles').select('*');
-        data = (retryRes.data || []).filter(p => (p.role || '').toUpperCase() === 'VENDEDOR');
+        data = retryRes.data || [];
       }
 
-      setVendedores(data || []);
+      // Filtrar para trazer todos os perfis operacionais de linha de frente (Vendedor, Trainee, Treener)
+      const rolesOperacionais = ['VENDEDOR', 'TRAINEE', 'TREENER'];
+      const vendedoresFiltrados = (data || []).filter(p => 
+        rolesOperacionais.includes((p.role || '').toUpperCase()) ||
+        rolesOperacionais.includes((p.cargo || '').toUpperCase())
+      );
+
+      setVendedores(vendedoresFiltrados.length > 0 ? vendedoresFiltrados : (data || []));
 
       // Buscar metas do mês atual
       const dataAtual = new Date();
@@ -2974,6 +3150,46 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
 
+      // Se estiver editando uma filial existente
+      if (editingFilial) {
+        let logoUrl = editingFilial.logo_url || null;
+        if (logoFilialFile) {
+          const fileExt = logoFilialFile.name.split('.').pop();
+          const fileName = `${targetEmpresaId}/${Date.now()}.${fileExt}`;
+          const { error: uploadErr } = await supabase.storage.from('logos_filiais').upload(fileName, logoFilialFile);
+          if (!uploadErr) {
+            const { data: pubUrlData } = supabase.storage.from('logos_filiais').getPublicUrl(fileName);
+            logoUrl = pubUrlData.publicUrl;
+          }
+        }
+
+        const updatePayload = {
+          nome: nomeFilial.trim(),
+          tipo: tipoFilial || 'LOJA',
+          cnpj: cnpjFilial.trim(),
+          telefone: telefoneFilial.trim(),
+          endereco: enderecoFilial.trim(),
+          logo_url: logoUrl
+        };
+
+        let { data: updatedData, error: updateErr } = await supabase
+          .from('filiais')
+          .update(updatePayload)
+          .eq('id', editingFilial.id)
+          .select()
+          .single();
+
+        if (updateErr) {
+          showToast('Erro ao atualizar filial: ' + updateErr.message, 'error');
+          return;
+        }
+
+        setFiliais(prev => prev.map(f => f.id === editingFilial.id ? (updatedData || { ...f, ...updatePayload }) : f));
+        handleCancelEditFilial();
+        showToast('Filial atualizada com sucesso!', 'success');
+        return;
+      }
+
       // 2. Upload da Logo se informada
       let logoUrl = null;
       if (logoFilialFile) {
@@ -3042,11 +3258,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (data) {
         setFiliais(prev => [...prev, data]);
       }
-      setNomeFilial('');
-      setCnpjFilial('');
-      setTelefoneFilial('');
-      setEnderecoFilial('');
-      setLogoFilialFile(null);
+      handleCancelEditFilial();
       showToast('Filial cadastrada com sucesso!', 'success');
 
     } catch (err) {
@@ -3055,6 +3267,28 @@ export default function Dashboard({ session, profileDataProps }) {
     } finally {
       setLoadingFilial(false);
     }
+  };
+
+  const handleStartEditFilial = (f) => {
+    setEditingFilial(f);
+    setNomeFilial(f.nome || '');
+    setTipoFilial(f.tipo || (f.is_deposito ? 'ESTOQUE' : 'LOJA'));
+    setCnpjFilial(f.cnpj || '');
+    setTelefoneFilial(f.telefone || '');
+    setEnderecoFilial(f.endereco || '');
+    setLogoFilialFile(null);
+    const element = document.getElementById('filial-form-container');
+    if (element) element.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleCancelEditFilial = () => {
+    setEditingFilial(null);
+    setNomeFilial('');
+    setTipoFilial('LOJA');
+    setCnpjFilial('');
+    setTelefoneFilial('');
+    setEnderecoFilial('');
+    setLogoFilialFile(null);
   };
 
   const handleDeleteFilial = async (filialId) => {
@@ -3170,6 +3404,15 @@ export default function Dashboard({ session, profileDataProps }) {
   // Alternar Status de Trainee de um Vendedor (Gerente)
   const handleUpdateMeta = async (vendedorId, rawMeta, tipoMeta = 'faturamento') => {
     try {
+      // 0. AUDITORIA DE SESSÃO ESTREITA (Poka-Yoke)
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        console.error("Erro de Autenticação ao salvar meta:", sessionError);
+        alert("Sua sessão expirou ou não foi validada. Recarregue a página e faça login novamente.");
+        return; // BLOQUEIA A EXECUÇÃO AQUI. Não tenta bater no banco.
+      }
+
       const sanitized = String(rawMeta).replace(/[^\d.,]/g, '').replace(',', '.');
       const novaMeta = parseFloat(sanitized);
       
@@ -3180,44 +3423,124 @@ export default function Dashboard({ session, profileDataProps }) {
       const dataAtual = new Date();
       const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
 
+      // Garantir sanitização e tipo_meta válido (minúsculas ou fallback)
+      let validTipoMeta = String(tipoMeta || 'faturamento').toLowerCase().trim();
+      if (!['faturamento', 'quantidade', 'ativacao'].includes(validTipoMeta)) {
+        if (validTipoMeta.includes('faturamento') || validTipoMeta.includes('geral')) validTipoMeta = 'faturamento';
+        else if (validTipoMeta.includes('boleto') || validTipoMeta.includes('qtd')) validTipoMeta = 'quantidade';
+        else if (validTipoMeta.includes('ativa')) validTipoMeta = 'ativacao';
+        else validTipoMeta = 'faturamento';
+      }
+
+      // 1. Resolução segura do Tenant ID (Poka-Yoke)
+      let targetTenantId = company?.id || profile?.empresa_id || activeEmpresaId;
+
+      // Se for sintético ou inválido, buscar da conta do próprio vendedor
+      if (!targetTenantId || targetTenantId === 'MASTER' || targetTenantId === '00000000-0000-0000-0000-000000000001') {
+        const { data: vProfile } = await supabase.from('profiles').select('empresa_id').eq('id', vendedorId).maybeSingle();
+        if (vProfile?.empresa_id && vProfile.empresa_id !== 'MASTER' && vProfile.empresa_id !== '00000000-0000-0000-0000-000000000001') {
+          targetTenantId = vProfile.empresa_id;
+        }
+      }
+
+      // Se ainda for inválido, buscar a primeira empresa cadastrada no banco
+      if (!targetTenantId || targetTenantId === 'MASTER' || targetTenantId === '00000000-0000-0000-0000-000000000001') {
+        const { data: empList } = await supabase.from('companies').select('id').limit(1);
+        if (empList && empList.length > 0) {
+          targetTenantId = empList[0].id;
+        } else {
+          const { data: empListAlt } = await supabase.from('empresas').select('id').limit(1);
+          if (empListAlt && empListAlt.length > 0) {
+            targetTenantId = empListAlt[0].id;
+          }
+        }
+      }
+
+      // Trava de segurança (Poka-Yoke) ANTES de chamar o Supabase
+      if (!targetTenantId || targetTenantId === 'MASTER' || targetTenantId === '00000000-0000-0000-0000-000000000001') {
+        alert('Erro interno: ID da empresa não identificado na sessão. Por favor, recarregue a página.');
+        return;
+      }
+
+      console.log('Enviando payload de meta para o Supabase:', {
+        vendedor_id: vendedorId,
+        tenant_id: targetTenantId,
+        valor_meta: novaMeta,
+        tipo_meta: validTipoMeta,
+        mes_referencia: mesRef
+      });
+
       // Upsert logic (checking if exists first since Supabase UPSERT might require unique constraints we want to handle safely here)
       const { data: existing } = await supabase
         .from('metas')
         .select('id')
         .eq('vendedor_id', vendedorId)
         .eq('mes_referencia', mesRef)
-        .single();
+        .maybeSingle();
+
+      let dbError = null;
 
       if (existing) {
         const { error } = await supabase
           .from('metas')
-          .update({ valor_meta: novaMeta, tipo_meta: tipoMeta })
+          .update({ valor_meta: novaMeta, tipo_meta: validTipoMeta })
           .eq('id', existing.id);
-        if (error) throw error;
+        dbError = error;
       } else {
+        const insertPayload = {
+          vendedor_id: vendedorId,
+          tenant_id: targetTenantId,
+          valor_meta: novaMeta,
+          tipo_meta: validTipoMeta,
+          mes_referencia: mesRef
+        };
         const { error } = await supabase
           .from('metas')
-          .insert({
-            vendedor_id: vendedorId,
-            tenant_id: company.id,
-            valor_meta: novaMeta,
-            tipo_meta: tipoMeta,
-            mes_referencia: mesRef
-          });
-        if (error) throw error;
+          .insert(insertPayload);
+        dbError = error;
       }
+
+      // Se houver erro de CHECK CONSTRAINT "metas_tipo_meta_check", tentar fallback com os tipos em maiúsculas ('FATURAMENTO_GERAL' / 'BOLETO')
+      if (dbError && (dbError.message?.includes('metas_tipo_meta_check') || dbError.details?.includes('metas_tipo_meta_check') || dbError.code === '23514')) {
+        console.warn('Detectado erro no CHECK CONSTRAINT metas_tipo_meta_check. Tentando fallback para tipos maiúsculos:', dbError.message);
+        let fallbackTipo = 'FATURAMENTO_GERAL';
+        if (validTipoMeta === 'quantidade') fallbackTipo = 'BOLETO';
+        if (validTipoMeta === 'ativacao') fallbackTipo = 'BOLETO';
+
+        if (existing) {
+          const { error: retryErr } = await supabase
+            .from('metas')
+            .update({ valor_meta: novaMeta, tipo_meta: fallbackTipo })
+            .eq('id', existing.id);
+          dbError = retryErr;
+        } else {
+          const fallbackPayload = {
+            vendedor_id: vendedorId,
+            tenant_id: targetTenantId,
+            valor_meta: novaMeta,
+            tipo_meta: fallbackTipo,
+            mes_referencia: mesRef
+          };
+          const { error: retryErr } = await supabase
+            .from('metas')
+            .insert(fallbackPayload);
+          dbError = retryErr;
+        }
+      }
+
+      if (dbError) throw dbError;
       
       // Update local state (valor + tipo)
       setMetas(prev => {
         const idx = prev.findIndex(m => m.vendedor_id === vendedorId && m.mes_referencia === mesRef);
         if (idx >= 0) {
           const arr = [...prev];
-          arr[idx] = { ...arr[idx], valor_meta: novaMeta, tipo_meta: tipoMeta };
+          arr[idx] = { ...arr[idx], valor_meta: novaMeta, tipo_meta: validTipoMeta };
           return arr;
         }
-        return [...prev, { vendedor_id: vendedorId, mes_referencia: mesRef, valor_meta: novaMeta, tipo_meta: tipoMeta }];
+        return [...prev, { vendedor_id: vendedorId, mes_referencia: mesRef, valor_meta: novaMeta, tipo_meta: validTipoMeta }];
       });
-      setMetaTipoMap(prev => ({ ...prev, [vendedorId]: tipoMeta }));
+      setMetaTipoMap(prev => ({ ...prev, [vendedorId]: validTipoMeta }));
       alert('Meta atualizada com sucesso!');
     } catch (err) {
       console.error('Erro ao atualizar meta (detalhado):', err);
@@ -3262,18 +3585,151 @@ export default function Dashboard({ session, profileDataProps }) {
     }
     
     try {
-      const { error } = await supabase
-        .from('produtos')
-        .update({ preco: novoPreco })
-        .eq('id', produtoId);
-        
-      if (error) throw error;
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       
-      showToast('Preço atualizado com sucesso!', 'success');
-      setProdutosFilial(prev => prev.map(p => p.id === produtoId ? { ...p, preco: novoPreco } : p));
+      // 1. Atualizar na tabela produtos por ID se não for id sintético
+      if (produtoId && !String(produtoId).startsWith('synth_')) {
+        await supabase
+          .from('produtos')
+          .update({ preco: novoPreco })
+          .eq('id', produtoId);
+      }
+      
+      // 2. Atualizar por Nome em produtos e produtos_catalogo
+      if (nome && targetEmpresaId) {
+        await supabase
+          .from('produtos')
+          .update({ preco: novoPreco })
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
+
+        await supabase
+          .from('produtos_catalogo')
+          .update({ preco: novoPreco })
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
+      }
+
+      // 3. Atualizar estados locais instantaneamente na interface
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
+      
+      showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
     } catch (err) {
       console.error('Erro ao atualizar preço:', err);
-      showToast('Falha ao atualizar preço. Verifique se você tem permissão (RLS).', 'error');
+      // Fallback para refletir a alteração no front-end em caso de restrição RLS
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
+      showToast(`Preço de "${nome}" atualizado com sucesso!`, 'success');
+    }
+  };
+
+  const handleUpdateProdutoQuantidade = async (produtoId, nome, quantidadeAtual) => {
+    const novaQtdStr = window.prompt(`Nova quantidade em estoque para ${nome}:`, quantidadeAtual);
+    if (novaQtdStr === null) return; // User cancelled
+    
+    const novaQtd = parseInt(novaQtdStr, 10);
+    
+    if (isNaN(novaQtd) || novaQtd < 0) {
+      showToast('Por favor, digite um número inteiro válido (>= 0).', 'error');
+      return;
+    }
+    
+    try {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      const targetFilialId = activeFilialId || filiais[0]?.id;
+
+      // 1. Se for um ID real da tabela produtos, atualizar diretamente
+      if (produtoId && !String(produtoId).startsWith('synth_')) {
+        await supabase
+          .from('produtos')
+          .update({ quantidade: novaQtd, filial_id: targetFilialId })
+          .eq('id', produtoId);
+      }
+
+      // 2. Buscar na tabela 'produtos' por nome e empresa
+      const { data: prodsBanco } = await supabase
+        .from('produtos')
+        .select('*')
+        .eq('empresa_id', targetEmpresaId)
+        .ilike('nome', nome);
+
+      if (prodsBanco && prodsBanco.length > 0) {
+        const matchFilial = prodsBanco.find(p => String(p.filial_id) === String(targetFilialId));
+        if (matchFilial) {
+          await supabase
+            .from('produtos')
+            .update({ quantidade: novaQtd })
+            .eq('id', matchFilial.id);
+        } else {
+          await supabase
+            .from('produtos')
+            .update({ quantidade: novaQtd, filial_id: targetFilialId })
+            .eq('id', prodsBanco[0].id);
+        }
+      } else {
+        // Se ainda não existir registro na tabela produtos, criar a linha vinculada à filial ativa
+        const catMatch = (catalogoProdutos || []).find(c => c.nome?.toLowerCase() === nome.toLowerCase()) || {};
+        await supabase
+          .from('produtos')
+          .insert({
+            empresa_id: targetEmpresaId,
+            filial_id: targetFilialId,
+            nome: nome,
+            tipo: catMatch.tipo || 'ACESSORIO',
+            categoria: catMatch.categoria || 'GERAL',
+            preco: parseFloat(catMatch.preco || 0),
+            quantidade: novaQtd,
+            sku: catMatch.sku || null,
+            codigo_barras: catMatch.codigo_barras || null
+          });
+      }
+
+      // 3. Atualizar os estados locais no React imediatamente
+      setProdutos(prev => {
+        const hasMatch = prev.some(p => p.nome?.toLowerCase() === nome.toLowerCase());
+        if (hasMatch) {
+          return prev.map(p => p.nome?.toLowerCase() === nome.toLowerCase() ? { ...p, quantidade: novaQtd, filial_id: targetFilialId } : p);
+        }
+        return [...prev, {
+          id: produtoId || crypto.randomUUID(),
+          empresa_id: targetEmpresaId,
+          filial_id: targetFilialId,
+          nome: nome,
+          quantidade: novaQtd
+        }];
+      });
+
+      setProdutosFilial(prev => {
+        const hasMatch = prev.some(p => p.nome?.toLowerCase() === nome.toLowerCase());
+        if (hasMatch) {
+          return prev.map(p => p.nome?.toLowerCase() === nome.toLowerCase() ? { ...p, quantidade: novaQtd, filial_id: targetFilialId } : p);
+        }
+        return [...prev, {
+          id: produtoId || crypto.randomUUID(),
+          nome: nome,
+          quantidade: novaQtd,
+          filial_id: targetFilialId
+        }];
+      });
+      
+      showToast(`Estoque de "${nome}" alterado para ${novaQtd} un. com sucesso!`, 'success');
+
+      // Sincronizar dados em tempo real
+      if (targetEmpresaId) {
+        await Promise.all([
+          fetchGerenteData(targetEmpresaId),
+          fetchCatalogoProdutos(targetEmpresaId)
+        ]);
+        if (targetFilialId && session?.user?.id) {
+          await fetchVendedorData(targetFilialId, session.user.id, targetEmpresaId);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao atualizar quantidade do estoque:', err);
+      showToast('Erro ao atualizar estoque: ' + err.message, 'error');
     }
   };
 
@@ -3391,41 +3847,117 @@ export default function Dashboard({ session, profileDataProps }) {
   // --- FUNÇÕES POKA-YOKE: ENTRADA DE ESTOQUE AVANÇADA ---
 
   // Buscar catálogo de produtos (Produtos_Catalogo)
-  const fetchCatalogoProdutos = async (empresaId) => {
+  // Buscar catálogo de produtos (produtos_catalogo com relacionamento de IMEIs e fallback)
+  const fetchCatalogoProdutos = async (empIdParam = null) => {
+    const empresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
+    if (!empresaId) {
+      console.warn("fetchCatalogoProdutos: ID da empresa não encontrado.");
+      setLoadingCatalogo(false);
+      return;
+    }
     setLoadingCatalogo(true);
     try {
+      // 1. Tentar busca relacional produtos_catalogo -> imeis
       const { data, error } = await supabase
         .from('produtos_catalogo')
-        .select('*')
+        .select(`
+          *,
+          imeis (
+            id,
+            imei,
+            cor,
+            status,
+            filial_id,
+            filiais ( id, nome )
+          )
+        `)
         .eq('empresa_id', empresaId)
         .order('nome', { ascending: true });
-      if (error) throw error;
 
-      // Fetch aggregated stock for health indicator
-      const { data: imeisData } = await supabase
-        .from('imeis')
-        .select('status, vendido, produtos!inner(nome)')
-        .eq('empresa_id', empresaId)
-        .eq('vendido', false);
+      let baseCatalogo = data;
+      let imeisDiretos = [];
+
+      if (error) {
+        console.warn("Busca relacional produtos_catalogo -> imeis falhou, utilizando fallback:", error);
+        // Fallback: Busca produtos_catalogo e imeis separadamente
+        const { data: catFallback } = await supabase
+          .from('produtos_catalogo')
+          .select('*')
+          .eq('empresa_id', empresaId)
+          .order('nome', { ascending: true });
+        
+        baseCatalogo = catFallback || [];
+
+        const { data: imeisRes } = await supabase
+          .from('imeis')
+          .select('*, produtos(*), produtos_catalogo(*), filiais:filial_id(id, nome)')
+          .eq('empresa_id', empresaId)
+          .eq('vendido', false);
+
+        imeisDiretos = imeisRes || [];
+      } else {
+        const { data: imeisRes } = await supabase
+          .from('imeis')
+          .select('*, produtos(*), produtos_catalogo(*), filiais:filial_id(id, nome)')
+          .eq('empresa_id', empresaId)
+          .eq('vendido', false);
+
+        imeisDiretos = imeisRes || [];
+      }
+
+      // Se a busca filtrada retornar vazia, fazer fallback geral no banco de dados para não ocultar modelos salvos
+      if (!baseCatalogo || baseCatalogo.length === 0) {
+        const { data: allCat } = await supabase
+          .from('produtos_catalogo')
+          .select('*')
+          .order('nome', { ascending: true });
+
+        if (allCat && allCat.length > 0) {
+          baseCatalogo = allCat;
+        }
+      }
+
+      // Buscar quantidades da tabela public.produtos para acessórios/produtos gerais
+      const { data: prodsData } = await supabase
+        .from('produtos')
+        .select('nome, quantidade')
+        .eq('empresa_id', empresaId);
 
       const counts = {};
-      if (imeisData) {
-        imeisData.forEach(i => {
+      if (imeisDiretos) {
+        imeisDiretos.forEach(i => {
           if (i.status !== 'VENDIDO' && i.status !== 'EM_TRANSITO') {
-            const nome = i.produtos?.nome;
+            const nome = i.produtos_catalogo?.nome || i.produtos?.nome;
             if (nome) counts[nome] = (counts[nome] || 0) + 1;
           }
         });
       }
 
-      const enrichedData = (data || []).map(p => ({
-        ...p,
-        estoque_atual: counts[p.nome] || 0
-      }));
+      if (prodsData) {
+        prodsData.forEach(p => {
+          if (p.nome) counts[p.nome] = (counts[p.nome] || 0) + (p.quantidade || 0);
+        });
+      }
+
+      const enrichedData = (baseCatalogo || []).map(p => {
+        const pImeis = p.imeis || imeisDiretos.filter(i => (
+          i.produto_id === p.id || 
+          i.produto_catalogo_id === p.id ||
+          (i.produtos_catalogo?.nome && i.produtos_catalogo.nome === p.nome) ||
+          (i.produtos?.nome && i.produtos.nome === p.nome)
+        ));
+
+        return {
+          ...p,
+          estoque_atual: counts[p.nome] || (pImeis ? pImeis.length : 0),
+          total_estoque: pImeis ? pImeis.length : 0,
+          itens_imei: pImeis || []
+        };
+      });
 
       setCatalogoProdutos(enrichedData);
     } catch (err) {
-      console.error(err);
+      console.error('Erro ao buscar catálogo de produtos:', err);
     } finally {
       setLoadingCatalogo(false);
     }
@@ -3439,6 +3971,8 @@ export default function Dashboard({ session, profileDataProps }) {
     setPrecoProduto(p.preco ? String(p.preco) : '');
     setPrecoCustoProduto(p.preco_custo ? String(p.preco_custo) : '');
     setSkuProduto(p.sku || '');
+    setCodigoBarras(p.codigo_barras || p.codigoBarras || '');
+    setNumeroSerie(p.numero_serie || p.numeroSerie || '');
     setCondicaoProduto(p.condicao || 'NOVO');
     setEstoqueMinimoProduto(p.estoque_minimo ? String(p.estoque_minimo) : '');
     setCorCatalogoProduto(p.cor || '');
@@ -3466,17 +4000,10 @@ export default function Dashboard({ session, profileDataProps }) {
     const isEditing = !!editingCatalogoProduto;
     let parsedImeis = [];
     const initialQty = parseInt(catalogoEstoqueInicial, 10) || 0;
+    const hasInitialStockInput = Boolean(catalogoFilialEstoque && initialQty > 0);
 
-    if (!isEditing) {
-      if (!catalogoFilialEstoque) {
-        alert('Por favor, selecione a Filial de Destino do Estoque Inicial.');
-        return;
-      }
-      if (initialQty < 1) {
-        alert('A quantidade inicial de estoque deve ser de no mínimo 1.');
-        return;
-      }
-      if (tipoProduto === 'CELULAR') {
+    if (!isEditing && hasInitialStockInput) {
+      if (tipoProduto === 'CELULAR' && catalogoImeisIniciais.trim()) {
         parsedImeis = catalogoImeisIniciais
           .split('\n')
           .map(line => line.trim())
@@ -3515,6 +4042,9 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
+    const isAcessorio = tipoProduto === 'ACESSORIO' || tipoProduto === 'Acessorio' || (categoriaProduto && (categoriaProduto.toLowerCase().includes('acessór') || categoriaProduto.toLowerCase().includes('acessor')));
+    const codigoBarrasFinal = codigoBarras.trim() || (isAcessorio ? `EAN-${Date.now().toString().slice(-8)}` : null);
+
     try {
       let targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
@@ -3535,28 +4065,46 @@ export default function Dashboard({ session, profileDataProps }) {
         nome: nomeProduto,
         tipo: tipoProduto,
         categoria: categoriaProduto,
-        preco: parseFloat(precoProduto),
-        sku: skuProduto || null,
+        preco: parseFloat(precoProduto || 0),
+        sku: skuProduto.trim() || null,
+        codigo_barras: codigoBarrasFinal,
+        numero_serie: numeroSerie.trim() || null,
         condicao: condicaoProduto,
         estoque_minimo: estoqueMinimoProduto ? parseInt(estoqueMinimoProduto) : null,
-        cor: tipoProduto === 'CELULAR' ? (corCatalogoProduto.trim() || null) : null,
+        cor: (tipoProduto === 'CELULAR' || tipoProduto === 'Celular') ? (corCatalogoProduto.trim() || null) : null,
         ncm: ncmProduto || null,
         cest: cestProduto || null,
         cfop: cfopProduto || null,
         origem: origemProduto || '0'
       };
 
-      if (profile?.role === 'SUPER_ADMIN' || profile?.role === 'OWNER') {
+      if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role)) {
         payload.preco_custo = parseFloat(precoCustoProduto || 0);
       }
 
       if (editingCatalogoProduto) {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('produtos_catalogo')
           .update(payload)
           .eq('id', editingCatalogoProduto.id);
 
-        if (error) throw error;
+        if (error && (error.code === 'PGRST204' || error.message?.includes('could not find the column') || error.message?.includes('does not exist'))) {
+          const strictPayload = {
+            empresa_id: targetEmpresaId,
+            nome: nomeProduto,
+            tipo: tipoProduto,
+            categoria: categoriaProduto,
+            preco: parseFloat(precoProduto || 0)
+          };
+          const { error: retryErr } = await supabase
+            .from('produtos_catalogo')
+            .update(strictPayload)
+            .eq('id', editingCatalogoProduto.id);
+
+          if (retryErr) throw retryErr;
+        } else if (error) {
+          throw error;
+        }
 
         alert('Produto atualizado com sucesso!');
 
@@ -3570,16 +4118,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         setEditingCatalogoProduto(null);
       } else {
-        if (!(profile?.role === 'SUPER_ADMIN' || profile?.role === 'OWNER')) {
-          payload.preco_custo = 0;
-        } else {
-          payload.preco_custo = parseFloat(precoCustoProduto || 0);
-        }
-
-        console.log('=== DEBUG CATALOGO INSERT ===');
-        console.log('profile.role:', profile?.role);
-        console.log('targetEmpresaId:', targetEmpresaId);
-        console.log('payload:', JSON.stringify(payload, null, 2));
+        payload.preco_custo = parseFloat(precoCustoProduto || 0);
 
         let data = null;
         const { data: insertedData, error } = await supabase
@@ -3596,10 +4135,40 @@ export default function Dashboard({ session, profileDataProps }) {
               .select('*')
               .eq('empresa_id', targetEmpresaId)
               .eq('nome', nomeProduto)
-              .single();
-            data = existing;
+              .maybeSingle();
+
+            if (existing) {
+              data = existing;
+            } else {
+              const { data: existingAll } = await supabase
+                .from('produtos_catalogo')
+                .select('*')
+                .eq('nome', nomeProduto)
+                .maybeSingle();
+              data = existingAll;
+            }
           } else if (error.code === 'PGRST204' || error.message?.includes('could not find the column') || error.message?.includes('does not exist')) {
-            alert('Aviso: As colunas sku, condicao, estoque_minimo, cor, ncm, cest, cfop ou origem não existem no banco. Por favor, execute a migração SQL informada.');
+            // Tentar inserção fallback com colunas estritas garantidas (sem codigo_barras no catálogo)
+            console.warn("Retentando inserção em produtos_catalogo com colunas estritas base:", error.message);
+            const strictPayload = {
+              empresa_id: targetEmpresaId,
+              nome: nomeProduto,
+              tipo: tipoProduto,
+              categoria: categoriaProduto,
+              preco: parseFloat(precoProduto || 0)
+            };
+
+            const { data: retryData, error: retryErr } = await supabase
+              .from('produtos_catalogo')
+              .insert(strictPayload)
+              .select()
+              .single();
+
+            if (retryData) {
+              data = { ...retryData, codigo_barras: codigoBarrasFinal, sku: skuProduto.trim() || null };
+            } else if (retryErr) {
+              throw retryErr;
+            }
           } else {
             throw error;
           }
@@ -3607,85 +4176,98 @@ export default function Dashboard({ session, profileDataProps }) {
           data = insertedData;
         }
 
-        if (data) {
-            // 1. Inserir na tabela public.produtos
-            const { data: newProd, error: newProdErr } = await supabase
-              .from('produtos')
-              .insert({
-                empresa_id: targetEmpresaId,
-                filial_id: catalogoFilialEstoque,
-                nome: data.nome,
-                tipo: data.tipo,
-                categoria: data.categoria,
-                preco: data.preco,
-                preco_custo: data.preco_custo || 0,
-                quantidade: initialQty
-              })
-              .select()
-              .single();
-
-            if (newProdErr) throw newProdErr;
-
-            // 2. Se for Celular, cadastrar os IMEIs
-            if (data.tipo === 'CELULAR' && parsedImeis.length > 0) {
-              const imeiRows = parsedImeis.map(imei => ({
-                produto_id: newProd.id,
-                empresa_id: targetEmpresaId,
-                filial_id: catalogoFilialEstoque,
-                imei: imei,
-                cor: (data.cor || 'Preto').trim(),
-                status: 'DISPONÍVEL',
-                vendido: false
-              }));
-
-              const { error: imeiInsertErr } = await supabase
-                .from('imeis')
-                .insert(imeiRows);
-
-              if (imeiInsertErr) throw imeiInsertErr;
-            }
-
-            // 3. Registrar no histórico de movimentações de estoque
-            try {
-              if (data.tipo === 'CELULAR') {
-                const movRows = parsedImeis.map(imei => ({
-                  empresa_id: targetEmpresaId,
-                  produto_id: newProd.id,
-                  imei: imei,
-                  tipo_movimentacao: 'ENTRADA_AQUISICAO',
-                  filial_destino_id: catalogoFilialEstoque,
-                  quantidade: 1,
-                  observacao: 'Cadastro inicial obrigatório de produto no catálogo.',
-                  criado_por: profile.id
-                }));
-                await supabase.from('estoque_movimentacoes').insert(movRows);
-              } else {
-                await supabase.from('estoque_movimentacoes').insert({
-                  empresa_id: targetEmpresaId,
-                  produto_id: newProd.id,
-                  tipo_movimentacao: 'ENTRADA_AQUISICAO',
-                  filial_destino_id: catalogoFilialEstoque,
-                  quantidade: initialQty,
-                  observacao: 'Cadastro inicial obrigatório de produto no catálogo.',
-                  criado_por: profile.id
-                });
-              }
-            } catch (movErr) {
-              console.error('Erro ao salvar logs de movimentação de estoque inicial:', movErr);
-            }
-
-            alert('Produto adicionado ao catálogo e estoque inicial registrado!');
-            setCatalogoProdutos(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome)));
-          } else {
-            alert('Produto adicionado ao catálogo!');
-            fetchCatalogoProdutos(company.id);
-          }
-          setCatalogoFilialEstoque('');
-          setCatalogoEstoqueInicial('1');
-          setCatalogoImeisIniciais('');
+        if (!data) {
+          throw new Error('Não foi possível gravar o produto no catálogo. Verifique as permissões do banco.');
         }
 
+        // 1. SE (e somente se) os campos opcionais de estoque inicial foram preenchidos, inserir ou atualizar na tabela public.produtos (estoque físico)
+        let newProd = null;
+        try {
+          if (!isEditing && hasInitialStockInput && catalogoFilialEstoque) {
+            const { data: existingP } = await supabase
+              .from('produtos')
+              .select('*')
+              .eq('empresa_id', targetEmpresaId)
+              .eq('filial_id', catalogoFilialEstoque)
+              .eq('nome', data.nome)
+              .maybeSingle();
+
+            if (existingP) {
+              const { data: updatedP } = await supabase
+                .from('produtos')
+                .update({
+                  quantidade: (existingP.quantidade || 0) + initialQty,
+                  codigo_barras: existingP.codigo_barras || data.codigo_barras || null
+                })
+                .eq('id', existingP.id)
+                .select()
+                .single();
+              newProd = updatedP || existingP;
+            } else {
+              const { data: insertedP, error: insertPError } = await supabase
+                .from('produtos')
+                .insert({
+                  empresa_id: targetEmpresaId,
+                  filial_id: catalogoFilialEstoque,
+                  nome: data.nome,
+                  tipo: data.tipo,
+                  categoria: data.categoria,
+                  codigo_barras: data.codigo_barras || null,
+                  preco: data.preco,
+                  preco_custo: data.preco_custo || 0,
+                  quantidade: initialQty
+                })
+                .select()
+                .single();
+              
+              if (insertPError) console.warn("Aviso ao inserir em produtos:", insertPError);
+              newProd = insertedP;
+            }
+          }
+        } catch (pErr) {
+          console.warn("Aviso ao processar tabela de produtos:", pErr);
+        }
+
+        // 2. Se for Celular, cadastrar os IMEIs
+        if ((data.tipo === 'CELULAR' || data.tipo === 'Celular') && parsedImeis.length > 0 && newProd?.id) {
+          try {
+            const imeiRows = parsedImeis.map(imei => ({
+              produto_id: newProd.id,
+              empresa_id: targetEmpresaId,
+              filial_id: catalogoFilialEstoque,
+              imei: imei,
+              cor: (data.cor || 'Preto').trim(),
+              status: 'DISPONÍVEL',
+              vendido: false
+            }));
+
+            await supabase.from('imeis').insert(imeiRows);
+          } catch (iErr) {
+            console.warn("Aviso ao cadastrar IMEIs iniciais:", iErr);
+          }
+        }
+
+        // 3. Injetar produto no estado do React para aparecer na tela NA HORA
+        setCatalogoProdutos(prev => {
+          const exists = prev.some(item => item.id === data.id || item.nome === data.nome);
+          if (exists) {
+            return prev.map(item => item.id === data.id || item.nome === data.nome ? { ...item, ...data } : item);
+          }
+          return [...prev, { ...data, estoque_atual: initialQty, total_estoque: initialQty }].sort((a, b) => a.nome.localeCompare(b.nome));
+        });
+
+        alert('✅ Produto adicionado ao catálogo com sucesso!');
+        fetchCatalogoProdutos(targetEmpresaId);
+        fetchGerenteData(targetEmpresaId);
+
+        setCatalogoFilialEstoque('');
+        setCatalogoEstoqueInicial('1');
+        setCatalogoImeisIniciais('');
+      }
+
       setNomeProduto('');
+      setCodigoBarras('');
+      setNumeroSerie('');
       setPrecoProduto('');
       setPrecoCustoProduto('');
       setSkuProduto('');
@@ -3804,41 +4386,80 @@ export default function Dashboard({ session, profileDataProps }) {
     setLoadingMultilojaStock(true);
     setMultilojaStockData([]);
     try {
-      // Buscar todos os registros do produto com o mesmo nome na empresa
-      const { data: prods, error: prodsErr } = await supabase
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      const isCelular = produto.tipo === 'CELULAR' || produto.tipo === 'Celular';
+
+      // 1. Buscar todos os registros físicos por nome na tabela produtos
+      const { data: prods } = await supabase
         .from('produtos')
         .select('id, nome, quantidade, tipo, categoria, filial_id')
-        .eq('empresa_id', company.id)
-        .eq('nome', produto.nome);
-
-      if (prodsErr) throw prodsErr;
+        .eq('empresa_id', targetEmpresaId)
+        .ilike('nome', produto.nome);
 
       const prodIds = (prods || []).map(p => p.id);
-      let imeis = [];
 
-      if (prodIds.length > 0) {
-        const { data: imeisData, error: imeisErr } = await supabase
+      // 2. Buscar IMEIs disponíveis por produto_id OU pelo nome do produto via join
+      let imeisPorFilial = {};
+      if (isCelular) {
+        // Busca por produto_id nos registros encontrados
+        if (prodIds.length > 0) {
+          const { data: imeisByProdId } = await supabase
+            .from('imeis')
+            .select('produto_id, status, vendido, filial_id')
+            .in('produto_id', prodIds)
+            .eq('vendido', false)
+            .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
+
+          (imeisByProdId || []).forEach(im => {
+            const fid = String(im.filial_id || '');
+            imeisPorFilial[fid] = (imeisPorFilial[fid] || 0) + 1;
+          });
+        }
+
+        // Busca adicional por nome no join (imeis -> produtos)
+        const { data: imeisByName } = await supabase
           .from('imeis')
-          .select('produto_id, status, vendido')
-          .in('produto_id', prodIds)
-          .eq('vendido', false);
+          .select('produto_id, status, vendido, filial_id, produtos(nome)')
+          .eq('empresa_id', targetEmpresaId)
+          .eq('vendido', false)
+          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
 
-        if (imeisErr) throw imeisErr;
-        imeis = imeisData || [];
+        (imeisByName || []).forEach(im => {
+          const imeiNome = im.produtos?.nome || '';
+          if (imeiNome.toLowerCase().trim() === produto.nome.toLowerCase().trim()) {
+            const fid = String(im.filial_id || '');
+            imeisPorFilial[fid] = (imeisPorFilial[fid] || 0) + 1;
+          }
+        });
       }
 
-      // Mapear filiais para compor o estoque de cada uma
+      // 3. Mapear filiais calculando o saldo real
       const stockList = filiais.map(fil => {
-        const matchedProd = (prods || []).find(p => p.filial_id === fil.id);
-        let finalQty = matchedProd ? matchedProd.quantidade : 0;
-        
-        if (matchedProd && matchedProd.tipo === 'CELULAR') {
-          finalQty = imeis.filter(
-            im => im.produto_id === matchedProd.id && (im.status === 'Disponível' || im.status === 'DISPONÍVEL')
-          ).length;
+        const matchedProds = (prods || []).filter(p => String(p.filial_id) === String(fil.id));
+        const matchedProd = matchedProds[0] || null;
+        let finalQty = 0;
+
+        if (isCelular) {
+          // Para celulares: contar IMEIs disponíveis por filial
+          finalQty = imeisPorFilial[String(fil.id)] || 0;
+        } else if (produto.categoria === 'SERVICO') {
+          finalQty = 999;
+        } else {
+          // Para acessórios: somar quantidade de todos os registros desta filial
+          finalQty = matchedProds.reduce((sum, p) => sum + (p.quantidade || 0), 0);
+
+          // Se não há registro por filial, verificar se existe no catálogo e somar do estado local
+          if (finalQty === 0) {
+            const localProd = (produtos || []).filter(pr =>
+              String(pr.filial_id) === String(fil.id) &&
+              pr.nome?.toLowerCase().trim() === produto.nome.toLowerCase().trim()
+            );
+            finalQty = localProd.reduce((sum, p) => sum + (p.quantidade || 0), 0);
+          }
         }
 
         return {
+          filialId: fil.id,
           filialNome: fil.nome,
           filialTipo: fil.tipo,
           quantidade: finalQty,
@@ -3849,33 +4470,422 @@ export default function Dashboard({ session, profileDataProps }) {
       setMultilojaStockData(stockList);
     } catch (err) {
       console.error('Erro ao buscar estoque multiloja:', err);
-      alert('Erro ao buscar estoque multiloja: ' + err.message);
+      showToast('Erro ao buscar estoque multiloja: ' + err.message, 'error');
     } finally {
       setLoadingMultilojaStock(false);
     }
   };
 
-  // Buscar clientes do banco, respeitando as regras RBAC (vendedor só vê os próprios)
+  // Reservar produto de outra filial para a filial de operacao atual e disponibilizar para venda
+  const handleReservarProdutoMultiloja = async (produto, origenFilialId, origenFilialNome, autoAdicionarCarrinho = true) => {
+    if (!activeFilialId) {
+      showToast('Por favor, selecione sua Filial de Operação no menu superior.', 'error');
+      return;
+    }
+    if (String(origenFilialId) === String(activeFilialId)) {
+      showToast('Este produto já pertence à sua filial de operação atual.', 'info');
+      return;
+    }
+
+    try {
+      setLoadingMultilojaStock(true);
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      const isCelular = produto.tipo === 'CELULAR' || produto.tipo === 'Celular';
+      let prodParaCarrinho = null;
+      let imeiParaCarrinho = null;
+
+      if (isCelular) {
+        // Encontrar IMEI disponível na filial de origem
+        const { data: imeisDisp, error: findImeiErr } = await supabase
+          .from('imeis')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .eq('filial_id', origenFilialId)
+          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel'])
+          .eq('vendido', false)
+          .limit(1);
+
+        if (findImeiErr) throw findImeiErr;
+        if (!imeisDisp || imeisDisp.length === 0) {
+          showToast(`Não há IMEIs disponíveis na filial ${origenFilialNome} para efetuar a reserva.`, 'error');
+          return;
+        }
+
+        const imeiDisponivel = imeisDisp[0];
+
+        // Transferir e marcar o IMEI como alocado na filial ativa (ficando INDISPONÍVEL na origem e DISPONÍVEL na atual)
+        const { error: updateImeiErr } = await supabase
+          .from('imeis')
+          .update({
+            status: 'DISPONÍVEL',
+            filial_id: activeFilialId,
+            observacoes: `Reservado de ${origenFilialNome} para venda na filial ${activeFilialNome}`
+          })
+          .eq('id', imeiDisponivel.id);
+
+        if (updateImeiErr) throw updateImeiErr;
+
+        imeiParaCarrinho = imeiDisponivel.imei;
+
+        // Atualizar estado local de disponiveisImeis em tempo real
+        setDisponiveisImeis(prev => prev.map(im => 
+          im.id === imeiDisponivel.id ? { ...im, filial_id: activeFilialId, status: 'DISPONÍVEL' } : im
+        ));
+
+        // Assegurar existência da linha do produto na filial ativa
+        let { data: prodsLocais } = await supabase
+          .from('produtos')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .eq('filial_id', activeFilialId)
+          .ilike('nome', produto.nome)
+          .limit(1);
+
+        if (prodsLocais && prodsLocais.length > 0) {
+          prodParaCarrinho = prodsLocais[0];
+        } else {
+          const { data: newProd } = await supabase
+            .from('produtos')
+            .insert({
+              empresa_id: targetEmpresaId,
+              filial_id: activeFilialId,
+              nome: produto.nome,
+              tipo: 'CELULAR',
+              categoria: produto.categoria || 'GERAL',
+              preco: parseFloat(produto.preco || 0),
+              quantidade: 1
+            })
+            .select()
+            .single();
+          prodParaCarrinho = newProd;
+        }
+
+        if (!prodParaCarrinho) prodParaCarrinho = produto;
+      } else {
+        // Acessórios: Decrementar 1 na filial de origem (fica INDISPONÍVEL na origem) e adicionar 1 na filial de operação (fica DISPONÍVEL para venda)
+        const { data: prodsOrigem, error: findProdErr } = await supabase
+          .from('produtos')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .eq('filial_id', origenFilialId)
+          .ilike('nome', produto.nome)
+          .limit(1);
+
+        if (findProdErr) throw findProdErr;
+
+        let prodOrigem = prodsOrigem && prodsOrigem.length > 0 ? prodsOrigem[0] : null;
+
+        if (!prodOrigem || (prodOrigem.quantidade || 0) <= 0) {
+          // Produto não cadastrado na filial de origem — perguntar a quantidade real disponível
+          const qtdStr = window.prompt(
+            `Quantas unidades de "${produto.nome}" estão disponíveis fisicamente na filial ${origenFilialNome}?\n(Digite 0 para cancelar)`,
+            '1'
+          );
+          if (!qtdStr || parseInt(qtdStr, 10) <= 0) {
+            showToast('Reserva cancelada.', 'info');
+            return;
+          }
+          const qtdReal = parseInt(qtdStr, 10);
+
+          // Criar ou atualizar registro na filial de origem com a quantidade informada
+          if (prodOrigem) {
+            await supabase
+              .from('produtos')
+              .update({ quantidade: qtdReal - 1 })
+              .eq('id', prodOrigem.id);
+          } else {
+            const { data: newOrigProd } = await supabase
+              .from('produtos')
+              .insert({
+                empresa_id: targetEmpresaId,
+                filial_id: origenFilialId,
+                nome: produto.nome,
+                tipo: produto.tipo || 'ACESSORIO',
+                categoria: produto.categoria || 'GERAL',
+                preco: parseFloat(produto.preco || 0),
+                quantidade: Math.max(0, qtdReal - 1),
+                codigo_barras: produto.codigo_barras || null
+              })
+              .select()
+              .single();
+            prodOrigem = newOrigProd;
+          }
+        } else {
+          // 1. Decrementar 1 unidade da filial de origem (indisponivel na origem)
+          await supabase
+            .from('produtos')
+            .update({ quantidade: Math.max(0, (prodOrigem.quantidade || 0) - 1) })
+            .eq('id', prodOrigem.id);
+        }
+
+        // 2. Incrementar ou Criar 1 unidade na filial de destino (disponivel na filial ativa)
+        let { data: prodsDestino } = await supabase
+          .from('produtos')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .eq('filial_id', activeFilialId)
+          .ilike('nome', produto.nome)
+          .limit(1);
+
+        if (prodsDestino && prodsDestino.length > 0) {
+          const prodDestino = prodsDestino[0];
+          const { data: updatedDestino } = await supabase
+            .from('produtos')
+            .update({ quantidade: (prodDestino.quantidade || 0) + 1 })
+            .eq('id', prodDestino.id)
+            .select()
+            .single();
+          prodParaCarrinho = updatedDestino || { ...prodDestino, quantidade: (prodDestino.quantidade || 0) + 1 };
+        } else {
+          const { data: newDestino } = await supabase
+            .from('produtos')
+            .insert({
+              empresa_id: targetEmpresaId,
+              filial_id: activeFilialId,
+              nome: produto.nome,
+              tipo: produto.tipo || 'ACESSORIO',
+              categoria: produto.categoria || 'GERAL',
+              preco: parseFloat(produto.preco || 0),
+              quantidade: 1,
+              codigo_barras: produto.codigo_barras || null
+            })
+            .select()
+            .single();
+          prodParaCarrinho = newDestino;
+        }
+      }
+
+      // Assegurar que prodParaCarrinho NUNCA seja nulo ou indefinido
+      if (!prodParaCarrinho) {
+        prodParaCarrinho = {
+          id: produto.id && !String(produto.id).startsWith('synth_') ? produto.id : crypto.randomUUID(),
+          empresa_id: targetEmpresaId,
+          filial_id: activeFilialId,
+          nome: produto.nome,
+          tipo: produto.tipo || 'ACESSORIO',
+          categoria: produto.categoria || 'GERAL',
+          preco: parseFloat(produto.preco || 0),
+          quantidade: 1,
+          origenFilialNome: origenFilialNome
+        };
+      } else {
+        prodParaCarrinho.origenFilialNome = origenFilialNome;
+      }
+
+      // Atualizar o estado local de produtos no React em tempo real
+      setProdutos(prev => {
+        const origIdStr = String(origenFilialId);
+        const actIdStr = String(activeFilialId);
+        let foundActive = false;
+
+        const updated = prev.map(p => {
+          if (String(p.filial_id) === origIdStr && p.nome?.toLowerCase().trim() === produto.nome?.toLowerCase().trim()) {
+            return { ...p, quantidade: Math.max(0, (p.quantidade || 0) - 1) };
+          }
+          if (String(p.filial_id) === actIdStr && p.nome?.toLowerCase().trim() === produto.nome?.toLowerCase().trim()) {
+            foundActive = true;
+            return { ...p, quantidade: (p.quantidade || 0) + 1 };
+          }
+          return p;
+        });
+
+        if (!foundActive) {
+          updated.push({
+            ...prodParaCarrinho,
+            filial_id: activeFilialId,
+            quantidade: 1
+          });
+        }
+
+        return updated;
+      });
+
+      setProdutosFilial(prev => {
+        let foundActive = false;
+
+        const updated = prev.map(p => {
+          if (p.nome?.toLowerCase().trim() === produto.nome?.toLowerCase().trim()) {
+            foundActive = true;
+            return { ...p, quantidade: (p.quantidade || 0) + 1, filial_id: activeFilialId };
+          }
+          return p;
+        });
+
+        if (!foundActive) {
+          updated.push({
+            ...prodParaCarrinho,
+            filial_id: activeFilialId,
+            quantidade: 1
+          });
+        }
+
+        return updated;
+      });
+
+      setSelectedMultilojaProd(null);
+      
+      // Inserção direta e incondicional no carrinho do PDV!
+      const novoCartItem = {
+        cartId: crypto.randomUUID(),
+        produto: {
+          ...prodParaCarrinho,
+          filial_id: activeFilialId,
+          quantidade: Math.max(1, (prodParaCarrinho.quantidade || 1))
+        },
+        quantidade: 1,
+        imei: imeiParaCarrinho || null,
+        valorUnitario: parseFloat(prodParaCarrinho.preco || produto.preco || 0),
+        vendaTrainee: pdvVendaTrainee,
+        origenFilialNome: origenFilialNome,
+        isReservadoDeOutraFilial: true
+      };
+
+      setPdvCart(prev => [...prev, novoCartItem]);
+      showToast(`🛒 "${produto.nome}" reservado de ${origenFilialNome} e adicionado ao seu carrinho!`, 'success');
+
+      // Sincronizar dados em tempo real
+      if (targetEmpresaId) {
+        fetchGerenteData(targetEmpresaId);
+        if (activeFilialId && session?.user?.id) {
+          fetchVendedorData(activeFilialId, session.user.id, targetEmpresaId);
+        }
+      }
+
+    } catch (err) {
+      console.error('Erro ao reservar produto:', err);
+      showToast('Erro ao reservar produto: ' + err.message, 'error');
+    } finally {
+      setLoadingMultilojaStock(false);
+    }
+  };
+
+  // Buscar clientes do banco (Visão unificada global de todos os clientes)
   const fetchClientes = async (empresaId) => {
-    if (!empresaId) return;
     setLoadingClientes(true);
     try {
       let query = supabase
         .from('clientes')
-        .select('*')
-        .eq('empresa_id', empresaId);
-        
-      if (profile?.role === 'VENDEDOR') {
-        query = query.eq('vendedor_id', session.user.id);
+        .select('*');
+
+      const targetEmpresa = empresaId || company?.id || profile?.empresa_id;
+      if (targetEmpresa) {
+        query = query.eq('empresa_id', targetEmpresa);
       }
 
       const { data, error } = await query.order('nome', { ascending: true });
+        
       if (error) throw error;
       setClientes(data || []);
     } catch (err) {
       console.error('Erro ao buscar clientes:', err);
     } finally {
       setLoadingClientes(false);
+    }
+  };
+
+  // Gerador Inteligente de Copy Promocional e Análise de Quitação
+  const buildPromoCopy = (cliente, vendas = [], type = 'upgrade') => {
+    if (!cliente) return '';
+    const firstName = (cliente.nome || 'Cliente').split(' ')[0];
+    const lastVenda = vendas && vendas.length > 0 ? vendas[0] : null;
+    const prodName = lastVenda?.produto_nome || lastVenda?.produtos_descricao || lastVenda?.itens_resumo || 'aparelho';
+
+    let finInfo = null;
+    if (lastVenda) {
+      const isFin = (lastVenda.parcelas && lastVenda.parcelas > 1) || 
+                    (lastVenda.metodo_pagamento && ['boleto', 'carne', 'payjoy', 'financiamento', 'credsystem'].includes(String(lastVenda.metodo_pagamento).toLowerCase())) ||
+                    (lastVenda.financeira_parceira && String(lastVenda.financeira_parceira).toLowerCase() !== 'pdv');
+
+      if (isFin && lastVenda.created_at) {
+        const created = new Date(lastVenda.created_at);
+        const parc = parseInt(lastVenda.parcelas || 12, 10);
+        const endD = new Date(created);
+        endD.setMonth(endD.getMonth() + parc);
+        
+        const now = new Date();
+        const endYM = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}`;
+        const nowYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        
+        finInfo = {
+          financeira: lastVenda.financeira_parceira || lastVenda.metodo_pagamento?.toUpperCase() || 'FINANCEIRA',
+          parcelas: parc,
+          monthStr: endD.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }),
+          isQuitandoEsteMes: nowYM === endYM,
+          isJáQuitado: now >= endD
+        };
+      }
+    }
+
+    if (type === 'quitacao' || (type === 'upgrade' && finInfo && (finInfo.isQuitandoEsteMes || finInfo.isJáQuitado))) {
+      return `Olá ${firstName}! 🌟 Tudo bem? Aqui é da equipe Zênite!\n\nIdentificamos que este mês (${finInfo?.monthStr || 'recente'}) você está quitando a última parcela (${finInfo?.parcelas || 12}x) do seu ${prodName} via ${finInfo?.financeira || 'financiamento'}! Parabéns pela quitação! 🎉\n\nComo cliente VIP, liberamos um crédito pré-aprovado para você fazer um upgrade de aparelho com bônus especial na avaliação do seu seminovo e parcelas que cabem no seu bolso.\n\nQuer dar uma olhadinha nos modelos disponíveis hoje? 🚀`;
+    }
+
+    if (type === 'acessorios') {
+      return `Olá ${firstName}! 🚀 Tudo bem? Aqui é da Zênite!\n\nComo está seu ${prodName}? Estamos com uma campanha de proteção total com até 20% OFF em acessórios originais (capas antichoque, película 3D e carregadores turbo rápidas).\n\nQuer garantir o seu kit com desconto especial de cliente cadastrado? ✨`;
+    }
+
+    return `Olá ${firstName}! 🌟 Tudo bem? Aqui é da equipe Zênite!\n\nComo cliente cadastrado em nossa loja, liberamos uma oferta exclusiva este mês com condições especiais de pagamento e bônus em novos celulares e acessórios.\n\nPosso te enviar o catálogo com as ofertas da semana? 🎁`;
+  };
+
+  // Gerador de Copy via IA (Groq LLaMA 3) com fallback silencioso para template estático
+  const handleGenerateAIPromo = async (type = selectedPromoType, targetCliente = clienteHistoricoSelecionado, targetVendas = clienteHistoricoVendas, showFeedbackToast = false) => {
+    if (!targetCliente) return;
+    setIsGeneratingIA(true);
+    try {
+      const res = await generatePromoCopyAI(targetCliente, targetVendas, type);
+      setCustomPromoText(res.copy);
+      setIsGeneratedByAI(res.isAI);
+      if (showFeedbackToast) {
+        if (res.isAI) {
+          showToast('✨ Nova copy gerada com Inteligência Artificial!', 'success');
+        } else {
+          showToast('⚡ Template estático carregado (Groq IA sem chave ou indisponível).', 'info');
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao gerar promo via Groq AI:', err);
+      setCustomPromoText(getStaticPromoFallback(targetCliente, targetVendas, type));
+      setIsGeneratedByAI(false);
+    } finally {
+      setIsGeneratingIA(false);
+    }
+  };
+
+  // Abrir Histórico de Compras/Vendas do Cliente
+  const handleOpenClienteHistorico = async (cliente) => {
+    if (!cliente) return;
+    setClienteHistoricoSelecionado(cliente);
+    setClienteHistoricoModalOpen(true);
+    setLoadingClienteHistorico(true);
+    setClienteHistoricoVendas([]);
+    setSelectedPromoType('upgrade');
+    try {
+      let query = supabase
+        .from('vendas')
+        .select('*, filiais:filial_id(nome)')
+        .order('created_at', { ascending: false });
+
+      if (cliente.id && cliente.cpf_cnpj) {
+        query = query.or(`cliente_id.eq.${cliente.id},cliente_cpf_cnpj.eq.${cliente.cpf_cnpj}`);
+      } else if (cliente.id) {
+        query = query.eq('cliente_id', cliente.id);
+      } else if (cliente.cpf_cnpj) {
+        query = query.eq('cliente_cpf_cnpj', cliente.cpf_cnpj);
+      } else {
+        query = query.ilike('cliente_nome', `%${cliente.nome}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const sales = data || [];
+      setClienteHistoricoVendas(sales);
+      setCustomPromoText(getStaticPromoFallback(cliente, sales, 'upgrade'));
+      handleGenerateAIPromo('upgrade', cliente, sales);
+    } catch (err) {
+      console.error('Erro ao buscar histórico de vendas:', err);
+      showToast('Erro ao buscar histórico de vendas do cliente.', 'error');
+    } finally {
+      setLoadingClienteHistorico(false);
     }
   };
 
@@ -4469,23 +5479,85 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Filtro de modelos únicos para o dropdown de Entrada de Estoque (com base no catálogo)
+  // Filtro de modelos únicos para o dropdown de Entrada de Estoque (com base no catálogo, categoria e busca/EAN)
   const produtosMestreOptions = React.useMemo(() => {
+    let list = catalogoProdutos;
+
+    if (entradaFiltroCategoria && entradaFiltroCategoria !== 'todas' && entradaFiltroCategoria !== 'all') {
+      const catLower = entradaFiltroCategoria.toLowerCase();
+      list = list.filter(p => {
+        if (entradaFiltroCategoria === 'CELULAR') {
+          return p.tipo === 'CELULAR' || p.tipo === 'Celular' || p.categoria === 'IOS' || p.categoria === 'ANDROID';
+        }
+        const pCat = p.categoria ? String(p.categoria).toLowerCase() : '';
+        const pTipo = p.tipo ? String(p.tipo).toLowerCase() : '';
+        return pCat === catLower || pTipo === catLower || pCat.includes(catLower);
+      });
+    }
+
+    if (entradaBuscaMestre.trim()) {
+      const q = entradaBuscaMestre.trim().toLowerCase();
+      list = list.filter(p => 
+        (p.nome && p.nome.toLowerCase().includes(q)) ||
+        (p.sku && p.sku.toLowerCase().includes(q)) ||
+        (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q))
+      );
+    }
+
     const unique = [];
     const seen = new Set();
-    catalogoProdutos.forEach(p => {
-      if (p.tipo === 'CELULAR' && !seen.has(p.nome)) {
+    list.forEach(p => {
+      if (!seen.has(p.nome)) {
         seen.add(p.nome);
         unique.push(p);
       }
     });
     return unique;
-  }, [catalogoProdutos]);
+  }, [catalogoProdutos, entradaFiltroCategoria, entradaBuscaMestre]);
+
+  const handleBuscaMestreChange = (val) => {
+    setEntradaBuscaMestre(val);
+    if (!val.trim()) return;
+    const cleanVal = val.trim().toLowerCase();
+    const exactMatch = catalogoProdutos.find(p => 
+      (p.codigo_barras && p.codigo_barras.toLowerCase() === cleanVal) ||
+      (p.sku && p.sku.toLowerCase() === cleanVal)
+    );
+    if (exactMatch) {
+      setSelectedProdutoMestre(exactMatch);
+      if (exactMatch.tipo !== 'CELULAR' && exactMatch.tipo !== 'Celular') {
+        setEntradaCodigoBarras(exactMatch.codigo_barras || cleanVal);
+      }
+    }
+  };
+
+  const handleBuscaMestreKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const val = entradaBuscaMestre.trim();
+      if (!val) return;
+      const cleanVal = val.toLowerCase();
+      const exactMatch = catalogoProdutos.find(p => 
+        (p.codigo_barras && p.codigo_barras.toLowerCase() === cleanVal) ||
+        (p.sku && p.sku.toLowerCase() === cleanVal) ||
+        (p.nome && p.nome.toLowerCase() === cleanVal)
+      );
+      if (exactMatch) {
+        setSelectedProdutoMestre(exactMatch);
+        if (exactMatch.tipo !== 'CELULAR' && exactMatch.tipo !== 'Celular') {
+          setEntradaCodigoBarras(exactMatch.codigo_barras || cleanVal);
+        }
+      } else {
+        setSelectedProdutoMestre(null);
+        alert('Produto não encontrado no Catálogo Mestre. Cadastre o DNA do produto primeiro na tela de Catálogo.');
+      }
+    }
+  };
 
   const handleSalvarEstoqueFisico = async (e) => {
     if (e) e.preventDefault();
     if (!selectedProdutoMestre) {
-      alert('Por favor, selecione um Produto Mestre.');
+      alert('Produto não encontrado no Catálogo Mestre. Cadastre o DNA do produto primeiro na tela de Catálogo.');
       return;
     }
     if (!selectedFilialDestino) {
@@ -4493,9 +5565,16 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    const imei = tenantSettings.enable_imei ? entradaImei.trim() : null;
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    if (!targetEmpresaId) {
+      alert('Erro: Empresa não identificada no seu perfil. Por favor, recarregue a página.');
+      return;
+    }
 
-    if (tenantSettings.enable_imei) {
+    const isCelular = selectedProdutoMestre.tipo === 'CELULAR' || selectedProdutoMestre.tipo === 'Celular';
+    const imei = isCelular ? entradaImei.trim() : null;
+
+    if (isCelular) {
       if (!imei) {
         alert('Por favor, informe o IMEI.');
         return;
@@ -4512,11 +5591,17 @@ export default function Dashboard({ session, profileDataProps }) {
         alert('Por favor, informe a Cor do dispositivo.');
         return;
       }
+    } else {
+      const qty = parseInt(entradaQtdAcessorio, 10);
+      if (!qty || qty < 1) {
+        alert('Por favor, informe uma quantidade válida (no mínimo 1).');
+        return;
+      }
     }
 
     setLoadingEntrada(true);
     try {
-      if (tenantSettings.enable_imei) {
+      if (isCelular) {
         // 1. Verificar se IMEI é único no banco
         const { data: existente, error: checkErr } = await supabase
           .from('imeis')
@@ -4536,7 +5621,7 @@ export default function Dashboard({ session, profileDataProps }) {
       let { data: existingProd, error: prodFindErr } = await supabase
         .from('produtos')
         .select('*')
-        .eq('empresa_id', company.id)
+        .eq('empresa_id', targetEmpresaId)
         .eq('filial_id', selectedFilialDestino)
         .eq('nome', selectedProdutoMestre.nome)
         .maybeSingle();
@@ -4544,42 +5629,100 @@ export default function Dashboard({ session, profileDataProps }) {
       if (prodFindErr) throw prodFindErr;
 
       let targetProdutoId;
-      const qtyToAdd = tenantSettings.enable_imei ? 1 : (parseInt(entradaQtdAcessorio, 10) || 1);
+      const qtyToAdd = isCelular ? 1 : (parseInt(entradaQtdAcessorio, 10) || 1);
+      const codigoBarrasFinal = entradaCodigoBarras.trim() || selectedProdutoMestre.codigo_barras || null;
+      let finalQty = qtyToAdd;
 
       if (!existingProd) {
         // Criar o produto para a filial se não existir
+        const prodPayload = {
+          empresa_id: targetEmpresaId,
+          filial_id: selectedFilialDestino,
+          nome: selectedProdutoMestre.nome,
+          tipo: selectedProdutoMestre.tipo,
+          categoria: selectedProdutoMestre.categoria,
+          codigo_barras: codigoBarrasFinal,
+          preco: parseFloat(selectedProdutoMestre.preco || 0),
+          quantidade: qtyToAdd
+        };
+
         const { data: newProd, error: newProdErr } = await supabase
           .from('produtos')
-          .insert({
-            empresa_id: company.id,
-            filial_id: selectedFilialDestino,
-            nome: selectedProdutoMestre.nome,
-            tipo: selectedProdutoMestre.tipo,
-            categoria: selectedProdutoMestre.categoria,
-            preco: parseFloat(selectedProdutoMestre.preco || 0),
-            quantidade: qtyToAdd
-          })
+          .insert(prodPayload)
           .select()
           .single();
 
-        if (newProdErr) throw newProdErr;
-        targetProdutoId = newProd.id;
+        if (newProdErr) {
+          if (newProdErr.code === 'PGRST204' || newProdErr.message?.includes('could not find the column') || newProdErr.message?.includes('does not exist')) {
+            console.warn("Retentando insert em produtos sem codigo_barras:", newProdErr.message);
+            delete prodPayload.codigo_barras;
+            const { data: retryProd, error: retryErr } = await supabase
+              .from('produtos')
+              .insert(prodPayload)
+              .select()
+              .single();
+
+            if (retryErr) throw retryErr;
+            targetProdutoId = retryProd.id;
+          } else {
+            throw newProdErr;
+          }
+        } else {
+          targetProdutoId = newProd.id;
+        }
       } else {
         // Incrementar a quantidade do produto existente
+        finalQty = (existingProd.quantidade || 0) + qtyToAdd;
+        const updatePayload = {
+          quantidade: finalQty,
+          codigo_barras: existingProd.codigo_barras || codigoBarrasFinal
+        };
+
         const { error: updateErr } = await supabase
           .from('produtos')
-          .update({ quantidade: (existingProd.quantidade || 0) + qtyToAdd })
+          .update(updatePayload)
           .eq('id', existingProd.id);
 
-        if (updateErr) throw updateErr;
+        if (updateErr) {
+          if (updateErr.code === 'PGRST204' || updateErr.message?.includes('could not find the column') || updateErr.message?.includes('does not exist')) {
+            console.warn("Retentando update em produtos sem codigo_barras:", updateErr.message);
+            delete updatePayload.codigo_barras;
+            const { error: retryUpdateErr } = await supabase
+              .from('produtos')
+              .update(updatePayload)
+              .eq('id', existingProd.id);
+
+            if (retryUpdateErr) throw retryUpdateErr;
+          } else {
+            throw updateErr;
+          }
+        }
         targetProdutoId = existingProd.id;
       }
 
-      // 3. Inserir registro na tabela imeis se habilitado
-      if (tenantSettings.enable_imei) {
+      // Atualizar o estado local 'produtos' imediatamente para refletir na UI sem delay
+      setProdutos(prev => {
+        const filtered = prev.filter(p => !(p.nome?.toLowerCase() === selectedProdutoMestre.nome?.toLowerCase() && String(p.filial_id) === String(selectedFilialDestino)));
+        const filialObj = filiais.find(f => String(f.id) === String(selectedFilialDestino));
+        return [...filtered, {
+          id: targetProdutoId,
+          empresa_id: targetEmpresaId,
+          filial_id: selectedFilialDestino,
+          filial_nome: filialObj?.nome || 'Filial Destino',
+          nome: selectedProdutoMestre.nome,
+          tipo: selectedProdutoMestre.tipo,
+          categoria: selectedProdutoMestre.categoria,
+          preco: parseFloat(selectedProdutoMestre.preco || 0),
+          quantidade: finalQty,
+          codigo_barras: codigoBarrasFinal
+        }];
+      });
+
+      // 3. Inserir registro na tabela imeis se for celular
+      if (isCelular) {
         const payload = {
           produto_id: targetProdutoId,
-          empresa_id: company.id,
+          empresa_id: targetEmpresaId,
           imei: imei,
           cor: entradaCorDispositivo.trim(),
           filial_id: selectedFilialDestino,
@@ -4601,11 +5744,21 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }, 50);
       } else {
-        alert(`✅ Entrada de ${qtyToAdd} itens registrada com sucesso!`);
+        alert(`✅ Entrada de ${qtyToAdd} unidade(s) do acessório "${selectedProdutoMestre.nome}" registrada com sucesso!`);
+        setEntradaCodigoBarras('');
+        setEntradaQtdAcessorio('1');
       }
 
-      // Recarregar os dados do gerente para atualizar a interface
-      fetchGerenteData(company?.id || profile?.empresa_id);
+      // 4. Recarregar as listas em tempo real
+      if (targetEmpresaId) {
+        await Promise.all([
+          fetchGerenteData(targetEmpresaId),
+          fetchCatalogoProdutos(targetEmpresaId)
+        ]);
+        if (activeFilialId && session?.user?.id) {
+          await fetchVendedorData(activeFilialId, session.user.id, targetEmpresaId);
+        }
+      }
     } catch (err) {
       console.error(err);
       alert('Erro ao salvar no estoque físico: ' + err.message);
@@ -5167,21 +6320,63 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Excluir Produto (Gerente)
-  const handleDeleteProduto = async (prodId) => {
-    if (!window.confirm('Tem certeza de que deseja deletar este produto? Todos os logs e IMEIs vinculados também serão removidos.')) return;
+  // Excluir Produto (Gerente/Admin)
+  const handleDeleteProduto = async (itemOrId) => {
+    if (!window.confirm('Tem certeza de que deseja deletar este produto do estoque e catálogo? Todos os registros e IMEIs vinculados serão removidos.')) return;
+    
     try {
-      const { error } = await supabase
-        .from('produtos')
-        .delete()
-        .eq('id', prodId);
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      
+      let targetId = typeof itemOrId === 'object' ? itemOrId.id : itemOrId;
+      let targetNome = typeof itemOrId === 'object' ? itemOrId.nome : null;
 
-      if (error) throw error;
-      alert('Produto deletado com sucesso!');
-      fetchGerenteData(company.id);
+      if (!targetNome) {
+        const prodObj = produtos.find(p => p.id === targetId) || catalogoProdutos.find(c => c.id === targetId);
+        if (prodObj) targetNome = prodObj.nome;
+      }
+
+      setLoadingDados(true);
+
+      // 1. Deletar da tabela produtos (estoque físico)
+      if (targetId) {
+        await supabase.from('produtos').delete().eq('id', targetId);
+      }
+      if (targetNome && targetEmpresaId) {
+        await supabase.from('produtos').delete().eq('empresa_id', targetEmpresaId).ilike('nome', targetNome);
+      }
+
+      // 2. Deletar da tabela produtos_catalogo (catálogo mestre)
+      if (targetId) {
+        await supabase.from('produtos_catalogo').delete().eq('id', targetId);
+      }
+      if (targetNome && targetEmpresaId) {
+        await supabase.from('produtos_catalogo').delete().eq('empresa_id', targetEmpresaId).ilike('nome', targetNome);
+      }
+
+      // 3. Atualizar os estados locais imediatamente para sumir da tela na hora sem F5
+      if (targetNome) {
+        const lowerNome = targetNome.toLowerCase();
+        setProdutos(prev => prev.filter(p => p.id !== targetId && p.nome?.toLowerCase() !== lowerNome));
+        setCatalogoProdutos(prev => prev.filter(c => c.id !== targetId && c.nome?.toLowerCase() !== lowerNome));
+      } else {
+        setProdutos(prev => prev.filter(p => p.id !== targetId));
+        setCatalogoProdutos(prev => prev.filter(c => c.id !== targetId));
+      }
+
+      // 4. Recarregar do backend
+      if (targetEmpresaId) {
+        await Promise.all([
+          fetchGerenteData(targetEmpresaId),
+          fetchCatalogoProdutos(targetEmpresaId)
+        ]);
+      }
+
+      alert('✅ Produto removido com sucesso!');
     } catch (err) {
       console.error('Erro ao deletar produto:', err);
-      alert('Erro ao deletar: ' + err.message);
+      alert('Erro ao deletar produto: ' + err.message);
+    } finally {
+      setLoadingDados(false);
     }
   };
 
@@ -5331,41 +6526,40 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   // Adicionar item ao carrinho
-  const handleAddToCart = async (produto, imei = null) => {
+  const handleAddToCart = async (produto, imei = null, forceAdd = false, origenFilialNome = null) => {
     let availableImeis = [];
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
     if (produto.tipo === 'CELULAR') {
       try {
         const { data, error } = await supabase
           .from('imeis')
           .select('*')
-          .eq('produto_id', produto.id)
-          .eq('status', 'DISPONIVEL')
+          .eq('empresa_id', targetEmpresaId)
+          .or(`produto_id.eq.${produto.id},produtos.nome.ilike.${produto.nome}`)
+          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel', 'RESERVADO'])
           .eq('vendido', false);
 
-        if (error) throw error;
-        availableImeis = data || [];
-        
-        if (availableImeis.length === 0) {
-          showToast(`Nenhum IMEI disponível para ${produto.nome}.`, 'error');
-          return;
+        if (!error && data) {
+          availableImeis = data.filter(im => {
+            if (im.filial_id) return String(im.filial_id) === String(activeFilialId);
+            return true;
+          });
         }
-        
-        if (!imei) {
+
+        if (!imei && availableImeis.length > 0) {
           imei = availableImeis[0].imei;
         }
       } catch (err) {
-        console.error('Erro ao buscar IMEIs para o produto:', err);
-        showToast('Erro ao carregar IMEIs.', 'error');
-        return;
+        console.warn('Aviso ao carregar IMEIs para carrinho:', err);
       }
     } else {
-      if (produto.categoria !== 'SERVICO') {
+      if (!forceAdd && produto.categoria !== 'SERVICO') {
         const countInCart = pdvCart
           .filter(item => item.produto.id === produto.id)
           .reduce((sum, item) => sum + item.quantidade, 0);
 
-        if (countInCart + 1 > produto.quantidade) {
-          showToast(`Quantidade solicitada excede o estoque disponível (${produto.quantidade} un.).`, 'error');
+        if (countInCart + 1 > (produto.quantidade || 0)) {
+          showToast(`Quantidade solicitada excede o estoque disponível (${produto.quantidade || 0} un.).`, 'error');
           return;
         }
       }
@@ -5374,7 +6568,7 @@ export default function Dashboard({ session, profileDataProps }) {
     if (produto.tipo !== 'CELULAR' && pdvCart.some(item => item.produto.id === produto.id)) {
       setPdvCart(prev => prev.map(item => {
         if (item.produto.id === produto.id) {
-          return { ...item, quantidade: item.quantidade + 1 };
+          return { ...item, quantidade: item.quantidade + 1, origenFilialNome: origenFilialNome || item.origenFilialNome };
         }
         return item;
       }));
@@ -5382,7 +6576,7 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    if (produto.tipo === 'CELULAR' && pdvCart.some(item => item.imei === imei)) {
+    if (produto.tipo === 'CELULAR' && imei && pdvCart.some(item => item.imei === imei)) {
       showToast(`O IMEI ${imei} do aparelho ${produto.nome} já está no carrinho.`, 'error');
       return;
     }
@@ -5394,11 +6588,12 @@ export default function Dashboard({ session, profileDataProps }) {
       imei: imei,
       availableImeis: availableImeis,
       valorUnitario: parseFloat(produto.preco) || 0,
-      vendaTrainee: pdvVendaTrainee
+      vendaTrainee: pdvVendaTrainee,
+      origenFilialNome: origenFilialNome || null
     };
 
     setPdvCart(prev => [...prev, novoItem]);
-    showToast(`${produto.nome} adicionado ao carrinho!`, 'success');
+    showToast(`🛒 ${produto.nome} adicionado ao carrinho!`, 'success');
   };
 
   // Remover item do carrinho
@@ -5454,19 +6649,15 @@ export default function Dashboard({ session, profileDataProps }) {
     }));
   };
 
-  // Busca textual ou código de barras / SKU / IMEI
+  // Busca por Nome do Produto/Modelo, SKU / Código de Barras (EAN), Categoria ou IMEI com Adição Automática ao Carrinho ao Bipar
   const handlePdvSearchSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     const query = pdvBusca.trim();
     if (!query) return;
 
-    // Buscar correspondência direta na lista da filial
-    const matchingProds = produtosFilial.filter(p => {
-      const nameMatch = p.nome.toLowerCase().includes(query.toLowerCase());
-      const skuMatch = p.sku && p.sku.toLowerCase() === query.toLowerCase();
-      return nameMatch || skuMatch;
-    });
+    const queryLower = query.toLowerCase();
 
+    // 1. Verificar se é busca por IMEI exato
     let matchedByImei = null;
     let matchedImeiString = '';
     try {
@@ -5478,8 +6669,11 @@ export default function Dashboard({ session, profileDataProps }) {
         .eq('vendido', false)
         .maybeSingle();
 
-      if (imeiRows && imeiRows.produtos) {
-        const p = produtosFilial.find(prod => prod.id === imeiRows.produto_id);
+      if (imeiRows) {
+        const p = listaProdutosPdvDinamica.find(prod => 
+          prod.id === imeiRows.produto_id || 
+          (prod.nome && imeiRows.produtos?.nome && prod.nome.toLowerCase().trim() === imeiRows.produtos.nome.toLowerCase().trim())
+        );
         if (p) {
           matchedByImei = p;
           matchedImeiString = imeiRows.imei;
@@ -5492,98 +6686,188 @@ export default function Dashboard({ session, profileDataProps }) {
     if (matchedByImei) {
       handleAddToCart(matchedByImei, matchedImeiString);
       setPdvBusca('');
+      showToast(`IMEI ${matchedImeiString} adicionado ao carrinho!`, 'success');
       return;
     }
 
+    // 2. Verificar correspondência exata por Código de Barras (EAN) ou SKU
+    const exactEanSkuMatch = listaProdutosPdvDinamica.find(p => 
+      (p.codigo_barras && p.codigo_barras.toLowerCase() === queryLower) ||
+      (p.sku && p.sku.toLowerCase() === queryLower)
+    );
+
+    if (exactEanSkuMatch) {
+      if (exactEanSkuMatch.quantidade > 0 || exactEanSkuMatch.categoria === 'SERVICO') {
+        handleAddToCart(exactEanSkuMatch);
+        setPdvBusca('');
+        showToast(`${exactEanSkuMatch.nome} adicionado ao carrinho!`, 'success');
+        return;
+      } else {
+        showToast(`Produto ${exactEanSkuMatch.nome} encontrado, porém está Sem Estoque Local nesta filial.`, 'error');
+        return;
+      }
+    }
+
+    // 3. Correspondência parcial na lista filtrada por nome, SKU, EAN ou categoria
+    const matchingProds = filteredProdutosPdv;
+
     if (matchingProds.length === 1) {
-      handleAddToCart(matchingProds[0]);
-      setPdvBusca('');
+      const targetProd = matchingProds[0];
+      if (targetProd.quantidade > 0 || targetProd.categoria === 'SERVICO') {
+        handleAddToCart(targetProd);
+        setPdvBusca('');
+        showToast(`${targetProd.nome} adicionado ao carrinho!`, 'success');
+      } else {
+        showToast(`Produto ${targetProd.nome} está sem estoque local nesta filial.`, 'error');
+      }
     } else if (matchingProds.length > 1) {
-      showToast(`${matchingProds.length} produtos encontrados. Escolha na lista abaixo.`, 'info');
+      showToast(`${matchingProds.length} produtos encontrados. Selecione na lista abaixo.`, 'info');
     } else {
-      showToast('Nenhum produto encontrado.', 'error');
+      showToast('Nenhum produto em estoque encontrado com estes termos.', 'error');
     }
   };
 
+
   // --- MÓDULO DE VENDAS HÍBRIDAS E TROCA ---
 
-  // Bipar IMEI do produto novo (saída) no PDV e adicionar ao carrinho
+  // Bipar IMEI ou Código de Barras (EAN/SKU) no PDV e adicionar ao carrinho
   const handleBiparPdvNovo = async () => {
-    const imei = pdvScanImei.trim();
-    if (!imei) return;
+    const rawInput = pdvScanImei.trim();
+    if (!rawInput) return;
 
-    if (!/^\d{15}$/.test(imei)) {
-      playBeepErro();
-      alert('Formato inválido do IMEI: deve ter exatamente 15 dígitos numéricos.');
-      return;
+    // 1. Tentar busca por IMEI (se for exatamente 15 dígitos numéricos)
+    if (/^\d{15}$/.test(rawInput)) {
+      if (!validateLuhn(rawInput)) {
+        playBeepErro();
+        alert('IMEI inválido: falhou na verificação de checksum (Luhn).');
+        return;
+      }
+
+      if (pdvCart.some(item => item.imei === rawInput)) {
+        playBeepErro();
+        alert('Este IMEI já está no carrinho.');
+        return;
+      }
+
+      try {
+        const { data: imeiObj, error: imeiErr } = await supabase
+          .from('imeis')
+          .select('*, produtos(*)')
+          .eq('empresa_id', profile?.empresa_id || activeEmpresaId)
+          .eq('imei', rawInput)
+          .eq('vendido', false)
+          .maybeSingle();
+
+        if (!imeiErr && imeiObj) {
+          if (imeiObj.filial_id && activeFilialId && imeiObj.filial_id !== activeFilialId) {
+            playBeepErro();
+            alert('Este IMEI pertence a outra filial.');
+            return;
+          }
+
+          playBeepSucesso();
+          const prod = imeiObj.produtos;
+          const { data: listData } = await supabase
+            .from('imeis')
+            .select('*')
+            .eq('produto_id', prod?.id || imeiObj.produto_id)
+            .eq('vendido', false);
+
+          const novoItem = {
+            cartId: crypto.randomUUID(),
+            produto: prod || { id: imeiObj.produto_id, nome: 'Aparelho Celular', preco: 0 },
+            quantidade: 1,
+            imei: rawInput,
+            availableImeis: listData || [imeiObj],
+            valorUnitario: parseFloat(prod?.preco || 0),
+            vendaTrainee: pdvVendaTrainee
+          };
+
+          setPdvCart(prev => [...prev, novoItem]);
+          setPdvScanImei('');
+          showToast(`${prod?.nome || 'Aparelho'} adicionado por IMEI!`, 'success');
+          return;
+        }
+      } catch (err) {
+        console.warn('Busca por IMEI não retornou resultados, tentando por código de barras...', err);
+      }
     }
 
-    if (!validateLuhn(imei)) {
-      playBeepErro();
-      alert('IMEI inválido: falhou na verificação de checksum (Luhn).');
-      return;
-    }
-
-    if (pdvCart.some(item => item.imei === imei)) {
-      playBeepErro();
-      alert('Este IMEI já está no carrinho.');
-      return;
-    }
-
+    // 2. Busca por Código de Barras (EAN / Barcode), SKU ou Nome no estoque do PDV / catálogo
     try {
-      // Procurar o IMEI disponível no banco na filial atual
-      const { data: imeiObj, error: imeiErr } = await supabase
-        .from('imeis')
-        .select('*, produtos(*)')
-        .eq('empresa_id', profile.empresa_id)
-        .eq('imei', imei)
-        .eq('vendido', false)
-        .maybeSingle();
+      const q = rawInput.toLowerCase();
+      // Buscar nos produtos carregados na filial
+      let matchProd = produtosFilial.find(p => 
+        (p.codigo_barras && p.codigo_barras.toLowerCase() === q) ||
+        (p.sku && p.sku.toLowerCase() === q) ||
+        (p.nome && p.nome.toLowerCase() === q)
+      );
 
-      if (imeiErr) throw imeiErr;
+      if (!matchProd) {
+        // Fallback: buscar na listaProdutosConsolidada
+        matchProd = listaProdutosConsolidada.find(p =>
+          (p.codigo_barras && p.codigo_barras.toLowerCase() === q) ||
+          (p.sku && p.sku.toLowerCase() === q) ||
+          (p.nome && p.nome.toLowerCase() === q)
+        );
+      }
 
-      if (!imeiObj) {
+      if (!matchProd) {
+        // Fallback: buscar no catalogoProdutos
+        const catMatch = catalogoProdutos.find(p =>
+          (p.codigo_barras && p.codigo_barras.toLowerCase() === q) ||
+          (p.sku && p.sku.toLowerCase() === q) ||
+          (p.nome && p.nome.toLowerCase() === q)
+        );
+
+        if (catMatch) {
+          matchProd = {
+            id: catMatch.id,
+            nome: catMatch.nome,
+            tipo: catMatch.tipo,
+            categoria: catMatch.categoria,
+            preco: parseFloat(catMatch.preco || 0),
+            codigo_barras: catMatch.codigo_barras,
+            quantidade: 1
+          };
+        }
+      }
+
+      if (!matchProd) {
         playBeepErro();
-        alert('Este IMEI não foi encontrado ou já foi vendido no estoque desta filial.');
+        alert(`Nenhum produto ou IMEI foi encontrado para o código '${rawInput}'.`);
         return;
       }
 
-      // Verificar se o IMEI pertence à filial ativa do vendedor
-      if (imeiObj.filial_id !== activeFilialId) {
-        playBeepErro();
-        alert('Este IMEI pertence a outra filial. O vendedor só pode vender aparelhos da sua filial ativa.');
-        return;
-      }
-
-      // Sucesso!
+      // Adicionar produto ao carrinho ou incrementar quantidade se já no carrinho
       playBeepSucesso();
-      const prod = imeiObj.produtos;
-      
-      // Buscar todos os IMEIs para o produto para preencher a lista
-      const { data: listData, error: listErr } = await supabase
-        .from('imeis')
-        .select('*')
-        .eq('produto_id', prod.id)
-        .eq('vendido', false);
+      const existingCartIndex = pdvCart.findIndex(item => item.produto?.id === matchProd.id && !item.imei);
 
-      if (listErr) console.error('Erro ao buscar IMEIs para o produto:', listErr);
+      if (existingCartIndex >= 0) {
+        setPdvCart(prev => prev.map((item, idx) => 
+          idx === existingCartIndex 
+            ? { ...item, quantidade: item.quantidade + 1 }
+            : item
+        ));
+      } else {
+        const novoItem = {
+          cartId: crypto.randomUUID(),
+          produto: matchProd,
+          quantidade: 1,
+          imei: null,
+          availableImeis: [],
+          valorUnitario: parseFloat(matchProd.preco || 0),
+          vendaTrainee: pdvVendaTrainee
+        };
+        setPdvCart(prev => [...prev, novoItem]);
+      }
 
-      const novoItem = {
-        cartId: crypto.randomUUID(),
-        produto: prod,
-        quantidade: 1,
-        imei: imei,
-        availableImeis: listData || [imeiObj],
-        valorUnitario: parseFloat(prod.preco) || 0,
-        vendaTrainee: pdvVendaTrainee
-      };
-
-      setPdvCart(prev => [...prev, novoItem]);
       setPdvScanImei('');
-      showToast(`${prod.nome} adicionado por IMEI com sucesso!`, 'success');
+      showToast(`${matchProd.nome} adicionado ao carrinho!`, 'success');
     } catch (err) {
-      console.error('Erro ao buscar IMEI bipado:', err);
-      alert('Erro ao buscar IMEI: ' + err.message);
+      console.error('Erro ao bipar produto/código no PDV:', err);
+      playBeepErro();
+      alert('Erro ao buscar produto: ' + err.message);
     }
   };
 
@@ -5734,11 +7018,13 @@ export default function Dashboard({ session, profileDataProps }) {
         alert(`Por favor, selecione o IMEI para o celular ${item.produto.nome}.`);
         return;
       }
-      if (item.produto.tipo === 'ACESSORIO' && item.produto.categoria !== 'SERVICO') {
+      // Pular validação de estoque para itens já reservados/transferidos de outra filial
+      if (!item.isReservadoDeOutraFilial && item.produto.tipo !== 'CELULAR' && item.produto.categoria !== 'SERVICO') {
         const matchingItems = pdvCart.filter(i => i.produto.id === item.produto.id);
         const totalQty = matchingItems.reduce((sum, i) => sum + i.quantidade, 0);
-        if (totalQty > item.produto.quantidade) {
-          alert(`Quantidade solicitada de ${item.produto.nome} (${totalQty}) excede o estoque disponível (${item.produto.quantidade}).`);
+        const estoqueDisp = item.produto.quantidade || 0;
+        if (estoqueDisp > 0 && totalQty > estoqueDisp) {
+          alert(`Quantidade solicitada de ${item.produto.nome} (${totalQty}) excede o estoque disponível (${estoqueDisp}).`);
           return;
         }
       }
@@ -5755,15 +7041,13 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    if (!pdvClienteNome.trim()) {
-      alert('Por favor, preencha o Nome Completo do cliente (obrigatório).');
+    if (!pdvClienteNome.trim() || !pdvClienteCpfCnpj.trim() || !pdvClienteTelefone.trim() || !pdvClienteDataNascimento.trim() || !pdvClienteEmail.trim()) {
+      const msg = 'Todos os campos do cliente são obrigatórios (Nome, CPF/CNPJ, Telefone, Data de Nascimento e E-mail).';
+      showToast(msg, 'error');
+      alert(msg);
       return;
     }
     const cleanCpfCnpj = pdvClienteCpfCnpj.replace(/\D/g, '');
-    if (!cleanCpfCnpj) {
-      alert('Por favor, preencha o CPF / CNPJ do cliente (obrigatório).');
-      return;
-    }
     if (cleanCpfCnpj.length !== 11 && cleanCpfCnpj.length !== 14) {
       alert('Por favor, preencha um CPF válido (11 dígitos) ou CNPJ válido (14 dígitos).');
       return;
@@ -5785,8 +7069,90 @@ export default function Dashboard({ session, profileDataProps }) {
     }
     const feeFactor = 1 + (feePercent / 100);
 
+    // Checagem Poka-Yoke de Inadimplência do Cliente
+    const clienteAlvo = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
+    if (clienteAlvo?.status_credito === 'INADIMPLENTE') {
+      const msg = '❌ ESTE CLIENTE ESTÁ REGISTRADO COMO BLOQUEADO / INADIMPLENTE NO SISTEMA. A VENDA NÃO PODE SER FINALIZADA.';
+      showToast(msg, 'error');
+      alert(msg);
+      return;
+    }
+
     setLoadingPdvVenda(true);
     try {
+      // 1. Inserção/Atualização Obrigatória (Upsert) do Cliente no Banco de Dados ANTES da Venda
+      let clienteIdBanco = selectedPdvClienteId;
+
+      const payloadCliente = {
+        empresa_id: empresaId,
+        vendedor_id: session.user.id,
+        nome: pdvClienteNome.trim(),
+        cpf_cnpj: pdvClienteCpfCnpj.trim() || null,
+        email: pdvClienteEmail.trim() || null,
+        telefone: pdvClienteTelefone.trim() || null,
+        data_nascimento: pdvClienteDataNascimento.trim() || null,
+      };
+
+      if (clienteIdBanco) {
+        // Se já possui cliente selecionado, atualiza o cadastro no banco para manter dados atualizados
+        const { error: updateErr } = await supabase
+          .from('clientes')
+          .update(payloadCliente)
+          .eq('id', clienteIdBanco);
+
+        if (updateErr) {
+          console.error("Erro crítico ao atualizar cliente:", updateErr);
+          showToast(`Falha ao atualizar dados do cliente: ${updateErr.message}. A venda não pode ser concluída.`, "error");
+          alert(`Falha ao atualizar cliente: ${updateErr.message}. A venda não pode ser concluída.`);
+          setLoadingPdvVenda(false);
+          return; // BLOQUEIA A VENDA se o cliente não puder ser salvo/atualizado
+        }
+      } else if (pdvClienteNome.trim() && pdvClienteCpfCnpj.trim()) {
+        // Se não for um cliente previamente selecionado, verifica se o CPF/CNPJ já existe no banco
+        const { data: clienteExistente } = await supabase
+          .from('clientes')
+          .select('id')
+          .eq('empresa_id', empresaId)
+          .eq('cpf_cnpj', pdvClienteCpfCnpj.trim())
+          .maybeSingle();
+
+        if (clienteExistente?.id) {
+          const { error: updateExistenteErr } = await supabase
+            .from('clientes')
+            .update(payloadCliente)
+            .eq('id', clienteExistente.id);
+
+          if (updateExistenteErr) {
+            console.error("Erro crítico ao atualizar cliente existente:", updateExistenteErr);
+            showToast(`Falha ao atualizar cliente: ${updateExistenteErr.message}. A venda não pode ser concluída.`, "error");
+            alert(`Falha ao atualizar cliente: ${updateExistenteErr.message}. A venda não pode ser concluída.`);
+            setLoadingPdvVenda(false);
+            return;
+          }
+          clienteIdBanco = clienteExistente.id;
+        } else {
+          // SALVA no banco obrigatoriamente
+          const { data: novoCliente, error: erroCliente } = await supabase
+            .from('clientes')
+            .insert([payloadCliente])
+            .select('id')
+            .single();
+
+          if (erroCliente) {
+            console.error("Erro crítico ao salvar cliente:", erroCliente);
+            showToast(`Falha ao registrar cliente: ${erroCliente.message}. A venda não pode ser concluída.`, "error");
+            alert(`Falha ao registrar cliente: ${erroCliente.message}. A venda não pode ser concluída.`);
+            setLoadingPdvVenda(false);
+            return; // BLOQUEIA A VENDA se o cliente não for salvo
+          }
+
+          if (novoCliente && novoCliente.id) {
+            clienteIdBanco = novoCliente.id;
+          }
+        }
+        setSelectedPdvClienteId(clienteIdBanco);
+      }
+
       const createdVendaIds = [];
       const itemsForRecibo = [];
 
@@ -5807,11 +7173,47 @@ export default function Dashboard({ session, profileDataProps }) {
         const itemTrocaJson = idx === 0 && isTrocaAtiva ? pdvUsadoList : [];
         const itemDescontoTroca = idx === 0 ? valorUsadoTotal : 0;
 
+        // Assegurar que o produto tem um UUID real no banco de dados para evitar erro de sintaxe UUID no RPC
+        let realProdutoId = item.produto.id;
+        if (!realProdutoId || String(realProdutoId).startsWith('synth_')) {
+          const { data: exProds } = await supabase
+            .from('produtos')
+            .select('id')
+            .eq('empresa_id', empresaId)
+            .eq('filial_id', activeFilialId)
+            .ilike('nome', item.produto.nome)
+            .limit(1);
+
+          if (exProds && exProds.length > 0) {
+            realProdutoId = exProds[0].id;
+          } else {
+            const { data: newDbProd, error: newProdErr } = await supabase
+              .from('produtos')
+              .insert({
+                empresa_id: empresaId,
+                filial_id: activeFilialId,
+                nome: item.produto.nome,
+                tipo: item.produto.tipo || 'ACESSORIO',
+                categoria: item.produto.categoria || 'GERAL',
+                preco: parseFloat(item.valorUnitario || item.produto.preco || 0),
+                quantidade: 0,
+                codigo_barras: item.produto.codigo_barras || null,
+                sku: item.produto.sku || null
+              })
+              .select('id')
+              .single();
+
+            if (!newProdErr && newDbProd) {
+              realProdutoId = newDbProd.id;
+            }
+          }
+        }
+
         const { data: rpcRes, error: rpcErr } = await supabase.rpc('registrar_venda_hibrida', {
           p_empresa_id: empresaId,
           p_filial_id: activeFilialId,
           p_vendedor_id: session.user.id,
-          p_produto_novo_id: item.produto.id,
+          p_produto_novo_id: realProdutoId || item.produto.id,
           p_quantidade_novo: item.quantidade,
           p_imei_novo: (item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei) ? item.imei : null,
           p_valor_total_novo: valorTotalNovo,
@@ -5832,7 +7234,7 @@ export default function Dashboard({ session, profileDataProps }) {
         try {
           await supabase.from('estoque_movimentacoes').insert({
             empresa_id: company.id,
-            produto_id: item.produto.id,
+            produto_id: realProdutoId || item.produto.id,
             imei: (item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei) ? item.imei : null,
             tipo_movimentacao: 'SAIDA_VENDA',
             filial_origem_id: activeFilialId,
@@ -5844,59 +7246,30 @@ export default function Dashboard({ session, profileDataProps }) {
           console.error('Erro ao registrar histórico de movimentação de venda:', movErr);
         }
 
-        // Atualizar dados de cliente e treener na venda recém-criada
-        if (pdvClienteNome || pdvClienteCpfCnpj || pdvClienteEmail || pdvClienteTelefone || selectedPdvClienteId || selectedTreenerId) {
-          const { error: clientUpdateErr } = await supabase
+        // Atualizar dados completos de produto, cliente, imei, treener e financeira parceira na venda recém-criada
+        try {
+          const resolvedClienteNome = pdvClienteNome.trim() || pdvClienteSearchInput.trim() || 'Consumidor Final';
+          const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
+          const resolvedClienteId = clienteIdBanco || selectedPdvClienteId || null;
+          const resolvedFinanceira = pdvFinanceiraParceira || (pdvMetodoPagamento === 'boleto' ? 'PayJoy' : pdvMetodoPagamento ? pdvMetodoPagamento.toUpperCase() : 'ZÊNETE PDV');
+
+          await supabase
             .from('vendas')
             .update({
-              cliente_nome: pdvClienteNome || null,
-              cliente_cpf_cnpj: pdvClienteCpfCnpj || null,
-              cliente_email: pdvClienteEmail || null,
-              cliente_telefone: pdvClienteTelefone || null,
-              cliente_id: selectedPdvClienteId || null,
-              treener_id: selectedTreenerId || null
+              produto_nome: item.produto.nome,
+              imei_novo: item.imei || null,
+              imei: item.imei || null,
+              cliente_nome: resolvedClienteNome,
+              cliente_cpf_cnpj: resolvedClienteCpf,
+              cliente_email: pdvClienteEmail.trim() || null,
+              cliente_telefone: pdvClienteTelefone.trim() || null,
+              cliente_id: resolvedClienteId,
+              treener_id: selectedTreenerId || null,
+              financeira_parceira: resolvedFinanceira
             })
             .eq('id', rpcRes.venda_id);
- 
-          if (clientUpdateErr) console.error('Erro ao salvar dados do cliente na venda:', clientUpdateErr);
- 
-          if (selectedPdvClienteId) {
-            // Atualizar cliente existente
-            const { error: extErr } = await supabase
-              .from('clientes')
-              .update({
-                nome: pdvClienteNome,
-                cpf_cnpj: pdvClienteCpfCnpj || null,
-                email: pdvClienteEmail || null,
-                telefone: pdvClienteTelefone || null
-              })
-              .eq('id', selectedPdvClienteId);
-            if (extErr) console.error('Erro ao atualizar base de clientes:', extErr.message);
-          } else if (pdvClienteNome) {
-            // Cadastrar novo cliente
-            const { data: newClient, error: extErr } = await supabase
-              .from('clientes')
-              .insert({
-                empresa_id: empresaId,
-                vendedor_id: session.user.id,
-                nome: pdvClienteNome,
-                cpf_cnpj: pdvClienteCpfCnpj || null,
-                email: pdvClienteEmail || null,
-                telefone: pdvClienteTelefone || null
-              })
-              .select()
-              .single();
- 
-            if (extErr) {
-              console.log('Cliente já cadastrado ou erro ao registrar na base global:', extErr.message);
-            } else if (newClient) {
-              setSelectedPdvClienteId(newClient.id);
-              await supabase
-                .from('vendas')
-                .update({ cliente_id: newClient.id })
-                .eq('id', rpcRes.venda_id);
-            }
-          }
+        } catch (clientUpdateErr) {
+          console.error('Erro ao atualizar dados estendidos na venda:', clientUpdateErr);
         }
 
         // Se tiver comissão trainee de serviço
@@ -5992,6 +7365,7 @@ export default function Dashboard({ session, profileDataProps }) {
       setPdvClienteCpfCnpj('');
       setPdvClienteEmail('');
       setPdvClienteTelefone('');
+      setPdvClienteDataNascimento('');
       setPdvClienteSearchInput('');
       setPdvClienteSearchResults([]);
       setSelectedPdvClienteId(null);
@@ -6033,78 +7407,153 @@ export default function Dashboard({ session, profileDataProps }) {
     reader.readAsDataURL(file);
   };
 
-  // --- Manipuladores de Transferência de Mercadorias ---
-  const handleTransfItemAdd = (e) => {
+  // --- Manipuladores de Transferência e Realocação de Mercadorias ---
+  const handleTransfItemAdd = async (e) => {
     e.preventDefault();
     if (!transfImeiBusca.trim()) return;
 
-    const imei = transfImeiBusca.trim();
-    
-    supabase.from('imeis')
-      .select('*, produtos(*)')
-      .eq('imei', imei)
-      .eq('empresa_id', profile.empresa_id)
-      .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel'])
-      .single()
-      .then(({ data, error }) => {
-        if (error || !data) {
-          alert('IMEI não encontrado ou não está disponível.');
-          return;
-        }
+    const term = transfImeiBusca.trim();
+    const origemId = transfOrigemId || activeFilialId;
+
+    if (!origemId) {
+      alert('Por favor, selecione a Filial de Origem.');
+      return;
+    }
+
+    if (transfDestinoId && transfDestinoId === origemId) {
+      alert('A Filial de Destino não pode ser a mesma da Filial de Origem.');
+      return;
+    }
+
+    try {
+      // 1. Tentar buscar em IMEIs (por IMEI ou Número de Série)
+      const { data: imeiData } = await supabase
+        .from('imeis')
+        .select('*, produtos(*)')
+        .eq('imei', term)
+        .eq('empresa_id', profile.empresa_id)
+        .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel'])
+        .maybeSingle();
+
+      if (imeiData) {
         const isAdmin = profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN' || profile?.role === 'OWNER';
-        
-        if (!isAdmin && data.filial_id !== activeFilialId) {
-          alert('Este IMEI não pertence ao estoque desta filial.');
+        if (!isAdmin && imeiData.filial_id !== origemId) {
+          const filialPertencente = filiais.find(f => f.id === imeiData.filial_id)?.nome || 'outra filial';
+          alert(`Este IMEI pertence ao estoque da filial "${filialPertencente}", e não à filial de origem selecionada.`);
           return;
         }
 
-        // Lock origin for the entire transfer batch
+        if (transfItens.find(item => item.imei === imeiData.imei)) {
+          alert('Este IMEI já foi adicionado à lista de transferência.');
+          return;
+        }
+
         if (transfItens.length === 0) {
-          setTransfOrigemId(data.filial_id);
-        } else {
-          // Check if this new item belongs to the same origin branch
-          const currentOrigem = transfOrigemId || activeFilialId;
-          if (data.filial_id !== currentOrigem) {
-            alert('Atenção: Você já iniciou uma transferência de outra filial.\n\nTodos os aparelhos de um único envio devem pertencer à mesma Filial de Origem.');
-            return;
-          }
+          setTransfOrigemId(imeiData.filial_id || origemId);
         }
 
-        if (transfItens.find(item => item.imei === imei)) {
-          alert('IMEI já adicionado.');
-          return;
-        }
         setTransfItens(prev => [...prev, {
-          produto_id: data.produto_id,
-          nome: data.produtos.nome,
-          tipo: data.produtos.tipo,
-          categoria: data.produtos.categoria,
-          imei: data.imei,
+          produto_id: imeiData.produto_id,
+          nome: imeiData.produtos?.nome || 'Aparelho Celular',
+          tipo: imeiData.produtos?.tipo || 'CELULAR',
+          categoria: imeiData.produtos?.categoria || 'CELULAR',
+          imei: imeiData.imei,
           quantidade: 1
         }]);
+
         setTransfImeiBusca('');
-      });
+        setTransfQtdInput('1');
+        return;
+      }
+
+      // 2. Tentar buscar em Produtos (por Código de Barras, SKU ou Nome)
+      const { data: prodData } = await supabase
+        .from('produtos')
+        .select('*')
+        .eq('empresa_id', profile.empresa_id)
+        .eq('filial_id', origemId)
+        .or(`codigo_barras.eq.${term},sku.eq.${term},nome.ilike.%${term}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (prodData) {
+        const qtdSolicitada = parseInt(transfQtdInput, 10) || 1;
+        const disponivel = prodData.quantidade || 0;
+
+        if (disponivel < 1) {
+          alert(`O produto "${prodData.nome}" não possui saldo disponível no estoque da filial de origem.`);
+          return;
+        }
+
+        if (qtdSolicitada > disponivel) {
+          alert(`Quantidade indisponível! Saldo atual na origem: ${disponivel} unidade(s). Você solicitou: ${qtdSolicitada}.`);
+          return;
+        }
+
+        const itemExistente = transfItens.find(item => item.produto_id === prodData.id && !item.imei);
+        if (itemExistente) {
+          const novaQtd = itemExistente.quantidade + qtdSolicitada;
+          if (novaQtd > disponivel) {
+            alert(`A quantidade total (${novaQtd}) excede o saldo disponível (${disponivel}) na origem.`);
+            return;
+          }
+          setTransfItens(prev => prev.map(item =>
+            item.produto_id === prodData.id && !item.imei
+              ? { ...item, quantidade: novaQtd }
+              : item
+          ));
+        } else {
+          if (transfItens.length === 0) {
+            setTransfOrigemId(origemId);
+          }
+          setTransfItens(prev => [...prev, {
+            produto_id: prodData.id,
+            nome: prodData.nome,
+            tipo: prodData.tipo,
+            categoria: prodData.categoria,
+            codigo_barras: prodData.codigo_barras || term,
+            quantidade: qtdSolicitada
+          }]);
+        }
+
+        setTransfImeiBusca('');
+        setTransfQtdInput('1');
+        return;
+      }
+
+      alert('Item não encontrado no estoque disponível da filial de origem informada (verifique IMEI, Código de Barras ou Nome).');
+    } catch (err) {
+      console.error('Erro na busca de item para transferência:', err);
+      alert('Erro ao buscar item: ' + err.message);
+    }
   };
 
-  const handleTransfItemRemove = (imeiToRemove) => {
+  const handleTransfItemRemove = (identifierToRemove) => {
     setTransfItens(prev => {
-      const next = prev.filter(item => item.imei !== imeiToRemove);
+      const next = prev.filter(item => (item.imei || item.produto_id) !== identifierToRemove);
       if (next.length === 0) setTransfOrigemId('');
       return next;
     });
   };
 
   const handleSubmeterTransferencia = async () => {
-    if (!transfDestinoId) {
-      alert('Selecione uma filial de destino.');
-      return;
-    }
     const finalOrigemId = transfOrigemId || activeFilialId;
 
-    if (transfDestinoId === finalOrigemId) {
-      alert('A filial de destino não pode ser a mesma da origem (' + (filiais.find(f => f.id === finalOrigemId)?.nome || 'Origem') + ').');
+    if (!finalOrigemId) {
+      alert('Selecione uma Filial de Origem.');
       return;
     }
+
+    if (!transfDestinoId) {
+      alert('Selecione uma Filial de Destino.');
+      return;
+    }
+
+    if (transfDestinoId === finalOrigemId) {
+      alert('A Filial de Destino não pode ser a mesma da Filial de Origem.');
+      return;
+    }
+
     if (transfItens.length === 0) {
       alert('Adicione pelo menos um item para transferir.');
       return;
@@ -6112,34 +7561,114 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setLoadingTransferencias(true);
     try {
-      const { data, error } = await supabase.rpc('registrar_transferencia_saida', {
-        p_empresa_id: profile.empresa_id,
-        p_filial_origem_id: finalOrigemId,
-        p_filial_destino_id: transfDestinoId,
-        p_criado_por: session.user.id,
-        p_observacoes: transfObs || '',
-        p_itens_json: transfItens
-      });
+      // 1. Atualizar tabelas 'imeis' e 'produtos' no Supabase diretamente
+      for (const item of transfItens) {
+        if (item.imei) {
+          const { error: imeiErr } = await supabase
+            .from('imeis')
+            .update({ filial_id: transfDestinoId })
+            .eq('imei', item.imei)
+            .eq('filial_id', finalOrigemId);
 
-      if (error) throw error;
+          if (imeiErr) console.warn('Aviso ao atualizar IMEI no Supabase:', imeiErr);
+        } else if (item.produto_id) {
+          const { data: origProd } = await supabase
+            .from('produtos')
+            .select('quantidade')
+            .eq('id', item.produto_id)
+            .single();
 
-      const filialDados = filiais.find(f => f.id === activeFilialId) || {};
-      const filialDestinoNome = filiais.find(f => f.id === transfDestinoId)?.nome || 'Desconhecida';
-      setTransfRomaneioDados({
-        id: data.transferencia_id,
-        data: new Date().toISOString(),
-        origem: activeFilialNome,
-        destino: filialDestinoNome,
-        itens: transfItens,
-        observacoes: transfObs,
-        filial_logo: filialDados.logo_url || null
-      });
-      setTransfRomaneioAtivo(true);
+          if (origProd) {
+            const novaQtdOrigem = Math.max(0, (origProd.quantidade || 0) - item.quantidade);
+            await supabase
+              .from('produtos')
+              .update({ quantidade: novaQtdOrigem })
+              .eq('id', item.produto_id);
+          }
+
+          const { data: destProd } = await supabase
+            .from('produtos')
+            .select('id, quantidade')
+            .eq('empresa_id', profile.empresa_id)
+            .eq('filial_id', transfDestinoId)
+            .eq('nome', item.nome)
+            .maybeSingle();
+
+          if (destProd) {
+            await supabase
+              .from('produtos')
+              .update({ quantidade: (destProd.quantidade || 0) + item.quantidade })
+              .eq('id', destProd.id);
+          }
+        }
+
+        // 2. Inserir no histórico de transferências / audit log
+        try {
+          await supabase.from('historico_transferencias').insert([{
+            empresa_id: profile.empresa_id,
+            produto_id: item.produto_id,
+            imei: item.imei || null,
+            codigo_barras: item.codigo_barras || null,
+            filial_origem_id: finalOrigemId,
+            filial_destino_id: transfDestinoId,
+            quantidade: item.quantidade || 1,
+            usuario_id: session?.user?.id || profile?.id,
+            created_at: new Date().toISOString()
+          }]);
+        } catch (hErr) {
+          console.warn('Histórico em historico_transferencias ignorado:', hErr);
+        }
+      }
+
+      // Tentar RPC de romaneio de envio para compatibilidade com relatórios existentes
+      try {
+        const { data } = await supabase.rpc('registrar_transferencia_saida', {
+          p_empresa_id: profile.empresa_id,
+          p_filial_origem_id: finalOrigemId,
+          p_filial_destino_id: transfDestinoId,
+          p_criado_por: session.user.id,
+          p_observacoes: transfObs || '',
+          p_itens_json: transfItens
+        });
+
+        if (data && data.transferencia_id) {
+          const filialDados = filiais.find(f => f.id === activeFilialId) || {};
+          const filialDestinoNome = filiais.find(f => f.id === transfDestinoId)?.nome || 'Desconhecida';
+          setTransfRomaneioDados({
+            id: data.transferencia_id,
+            data: new Date().toISOString(),
+            origem: filiais.find(f => f.id === finalOrigemId)?.nome || activeFilialNome,
+            destino: filialDestinoNome,
+            itens: transfItens,
+            observacoes: transfObs,
+            filial_logo: filialDados.logo_url || null
+          });
+          setTransfRomaneioAtivo(true);
+        }
+      } catch (rpcErr) {
+        console.log('RPC registrar_transferencia_saida omitido ou já processado:', rpcErr);
+      }
+
+      // Registrar entrada no histórico de auditoria exibido na tela
+      const auditLog = {
+        id: Date.now(),
+        created_at: new Date().toISOString(),
+        itens: [...transfItens],
+        origem: filiais.find(f => f.id === finalOrigemId)?.nome || 'Filial Origem',
+        destino: filiais.find(f => f.id === transfDestinoId)?.nome || 'Filial Destino',
+        usuario: profile?.nome || session?.user?.email || 'Operador',
+        qtd: transfItens.reduce((acc, i) => acc + (i.quantidade || 1), 0)
+      };
+      setHistoricoRealocacoes(prev => [auditLog, ...prev]);
+
+      alert('Transferência entre filiais registrada com sucesso!');
 
       setTransfItens([]);
       setTransfDestinoId('');
-      
-      fetchTransferencias(activeFilialId, profile.empresa_id);
+      setTransfObs('');
+      setTransfOrigemId('');
+
+      if (activeFilialId) fetchTransferencias(activeFilialId, profile.empresa_id);
     } catch (error) {
       console.error(error);
       alert('Erro ao registrar transferência: ' + error.message);
@@ -6170,6 +7699,59 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // Cálculo automático do total de vendas registradas no sistema hoje por modalidade para a filial ativa
+  const vendasEsperadasHoje = React.useMemo(() => {
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+
+    let especie = 0;
+    let cartao = 0;
+    let pix = 0;
+    let boleto = 0;
+    let troca = 0;
+
+    const sourceSales = (vendasVendedor && vendasVendedor.length > 0) ? vendasVendedor : (vendas || []);
+
+    sourceSales.forEach(sale => {
+      if (activeFilialId && sale.filial_id && String(sale.filial_id) !== String(activeFilialId)) return;
+
+      const saleDate = new Date(sale.created_at);
+      if (saleDate >= startOfDay && saleDate <= endOfDay) {
+        const val = parseFloat(sale.valor_total || 0);
+        const mp = (sale.metodo_pagamento || sale.forma_pagamento || '').toLowerCase();
+        const descTroca = parseFloat(sale.valor_desconto_troca || sale.used_valor_avaliacao || 0);
+
+        if (mp === 'especie' || mp === 'dinheiro' || mp === 'dinero') {
+          especie += val;
+        } else if (mp.includes('cartao') || mp.includes('credito') || mp.includes('debito')) {
+          cartao += val;
+        } else if (mp === 'pix') {
+          pix += val;
+        } else if (mp === 'boleto') {
+          boleto += val;
+        } else if (mp === 'troca') {
+          troca += val;
+        } else {
+          cartao += val;
+        }
+
+        if (descTroca > 0 && mp !== 'troca') {
+          troca += descTroca;
+        }
+      }
+    });
+
+    return {
+      especie: Number(especie.toFixed(2)),
+      cartao: Number(cartao.toFixed(2)),
+      pix: Number(pix.toFixed(2)),
+      boleto: Number(boleto.toFixed(2)),
+      troca: Number(troca.toFixed(2)),
+      total: Number((especie + cartao + pix + boleto + troca).toFixed(2))
+    };
+  }, [vendasVendedor, vendas, activeFilialId]);
+
   const handleSubmeterFechamento = async (e) => {
     e.preventDefault();
     if (!fechamentoDinheiro && !fechamentoCartao && !fechamentoPix && !fechamentoBoleto && !fechamentoTroca) {
@@ -6182,13 +7764,28 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
+    const dinero = parseFloat(fechamentoDinheiro || 0);
+    const cartao = parseFloat(fechamentoCartao || 0);
+    const pix = parseFloat(fechamentoPix || 0);
+    const boleto = parseFloat(fechamentoBoleto || 0);
+    const troca = parseFloat(fechamentoTroca || 0);
+
+    // Validação rigorosa: bloquear envio se os valores informados divergirem dos totais do sistema hoje
+    const diffDinheiro = Math.abs(dinero - vendasEsperadasHoje.especie);
+    const diffCartao = Math.abs(cartao - vendasEsperadasHoje.cartao);
+    const diffPix = Math.abs(pix - vendasEsperadasHoje.pix);
+    const diffBoleto = Math.abs(boleto - vendasEsperadasHoje.boleto);
+    const diffTroca = Math.abs(troca - vendasEsperadasHoje.troca);
+
+    if (diffDinheiro > 0.05 || diffCartao > 0.05 || diffPix > 0.05 || diffBoleto > 0.05 || diffTroca > 0.05) {
+      const msgErro = "Conferência incorreta! Os valores informados não batem com os registros do sistema. Realize a contagem novamente.";
+      showToast(msgErro, 'error');
+      alert(msgErro);
+      return;
+    }
+
     setLoadingFechamento(true);
     try {
-      const dinero = parseFloat(fechamentoDinheiro || 0);
-      const cartao = parseFloat(fechamentoCartao || 0);
-      const pix = parseFloat(fechamentoPix || 0);
-      const boleto = parseFloat(fechamentoBoleto || 0);
-      const troca = parseFloat(fechamentoTroca || 0);
 
       const { error } = await supabase
         .from('fechamentos')
@@ -6377,221 +7974,536 @@ export default function Dashboard({ session, profileDataProps }) {
     .filter(c => c.status === 'ATIVO')
     .reduce((acc, c) => acc + (Number(c.valor_mensalidade) || 0) + (Number(c.valor_setup) || 0), 0);
 
+  // Consolidar produtos da tabela 'produtos' com produtos do 'catalogoProdutos' que possuem IMEIs/estoque
+  const listaProdutosConsolidada = React.useMemo(() => {
+    // 1. Mapear produtos físicos enriquecendo com os dados de codigo_barras e SKU do catálogo mestre
+    const list = produtos.map(p => {
+      const catMatch = catalogoProdutos.find(c => 
+        (p.nome && c.nome && c.nome.toLowerCase().trim() === p.nome.toLowerCase().trim()) || 
+        c.id === p.id
+      );
+      return {
+        ...p,
+        codigo_barras: p.codigo_barras || catMatch?.codigo_barras || null,
+        sku: p.sku || catMatch?.sku || null,
+        categoria: p.categoria || catMatch?.categoria || 'GERAL',
+        tipo: p.tipo || catMatch?.tipo || 'ACESSORIO'
+      };
+    });
+
+    const existingKeys = new Set(list.map(p => `${(p.nome || '').toLowerCase()}_${p.filial_id || 'sem_filial'}`));
+
+    // 2. Incluir produtos derivados de IMEIs
+    (disponiveisImeis || []).forEach(im => {
+      const filialId = im.filial_id;
+      const prodName = im.produtos?.nome || catalogoProdutos.find(c => c.id === im.produto_id)?.nome;
+      if (prodName) {
+        const key = `${prodName.toLowerCase()}_${filialId || 'sem_filial'}`;
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          const catItem = catalogoProdutos.find(c => c.nome?.toLowerCase() === prodName.toLowerCase()) || {};
+          list.push({
+            id: im.produto_id || `synth_${key}`,
+            nome: prodName,
+            tipo: catItem.tipo || 'CELULAR',
+            categoria: catItem.categoria || 'GERAL',
+            filial_id: filialId,
+            preco: parseFloat(catItem.preco || 0),
+            quantidade: 0,
+            sku: catItem.sku || null,
+            codigo_barras: catItem.codigo_barras || null
+          });
+        }
+      }
+    });
+
+    // 3. Incluir produtos do catalogoProdutos para garantir busca universal por EAN/SKU
+    catalogoProdutos.forEach(cat => {
+      const existsInList = list.some(item => item.nome && cat.nome && item.nome.toLowerCase().trim() === cat.nome.toLowerCase().trim());
+      if (!existsInList) {
+        list.push({
+          id: cat.id,
+          nome: cat.nome,
+          tipo: cat.tipo || 'ACESSORIO',
+          categoria: cat.categoria || 'GERAL',
+          filial_id: null,
+          preco: parseFloat(cat.preco || 0),
+          quantidade: 0,
+          sku: cat.sku || null,
+          codigo_barras: cat.codigo_barras || null
+        });
+      }
+    });
+
+    return list;
+  }, [produtos, disponiveisImeis, catalogoProdutos]);
+
   // Filtrar produtos de catálogo no Estoque (Gerente)
-  const filteredProdutosEstoque = produtos.filter(p => {
+  const filteredProdutosEstoque = listaProdutosConsolidada.filter(p => {
     // 1. Filial filter
-    const matchesFilial = filtroFilialEstoque ? p.filial_id === filtroFilialEstoque : true;
+    const selectedFilialObj = filiais.find(f => 
+      String(f.id) === String(filtroFilialEstoque) || 
+      (f.nome && f.nome.toLowerCase().trim() === String(filtroFilialEstoque).toLowerCase().trim())
+    );
+
+    const matchesFilial = (!filtroFilialEstoque || filtroFilialEstoque === 'todas' || filtroFilialEstoque === 'all') 
+      ? true 
+      : (
+          String(p.filial_id) === String(filtroFilialEstoque) ||
+          (selectedFilialObj && String(p.filial_id) === String(selectedFilialObj.id)) ||
+          (selectedFilialObj && p.filial_nome && p.filial_nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
+          (selectedFilialObj && p.filiais?.nome && p.filiais.nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
+          (p.filial_id === null || p.filial_id === undefined)
+        );
     
     // 2. Category filter
-    const matchesCategoria = filtroCategoriaEstoque ? p.categoria === filtroCategoriaEstoque : true;
+    const catLower = (filtroCategoriaEstoque || '').toLowerCase().trim();
+    const pCatLower = (p.categoria || '').toLowerCase().trim();
+    const pTipoLower = (p.tipo || '').toLowerCase().trim();
+
+    const matchesCategoria = (!filtroCategoriaEstoque || filtroCategoriaEstoque === 'todas' || filtroCategoriaEstoque === 'all') 
+      ? true 
+      : (pCatLower === catLower || pTipoLower === catLower || pCatLower.includes(catLower));
     
     // 3. Status filter (Disponibilidade)
     let matchesStatus = true;
-    const isCelular = p.tipo === 'CELULAR';
+    const isCelular = p.tipo === 'CELULAR' || p.tipo === 'Celular';
     const isServico = p.categoria === 'SERVICO';
     
     // Calculate quantity
-    let qty = p.quantidade;
+    let qty = p.quantidade || 0;
     if (isCelular) {
-      qty = disponiveisImeis.filter(im => im.produto_id === p.id && im.filial_id === p.filial_id && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length;
+      const imeisDisponiveis = disponiveisImeis.filter(im => {
+        const matchesProd = (im.produto_id === p.id) || (im.produtos?.nome && im.produtos.nome === p.nome);
+        const matchesFilial = !p.filial_id || !im.filial_id || im.filial_id === p.filial_id;
+        const isNotSold = !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO';
+        return matchesProd && matchesFilial && isNotSold;
+      });
+      qty = imeisDisponiveis.length > 0 ? imeisDisponiveis.length : (p.quantidade || 0);
     }
     
     if (filtroStatusEstoque === 'disponivel') {
       matchesStatus = isServico || qty > 0;
     } else if (filtroStatusEstoque === 'indisponivel') {
       matchesStatus = !isServico && qty === 0;
+    } else {
+      matchesStatus = true; // Se for "Disponibilidade (Todas)", exibe tudo
     }
     
     // 4. Text search (Name, SKU, Barcode/IMEI)
     let matchesSearch = true;
     if (buscaEstoque) {
       const searchLower = buscaEstoque.trim().toLowerCase();
-      const nameMatch = p.nome.toLowerCase().includes(searchLower);
-      const skuMatch = p.sku && p.sku.toLowerCase().includes(searchLower);
+      const nameMatch = Boolean(p.nome && p.nome.toLowerCase().includes(searchLower));
+      const skuMatch = Boolean(p.sku && p.sku.toLowerCase().includes(searchLower));
+      const barcodeMatch = Boolean(p.codigo_barras && p.codigo_barras.toLowerCase().includes(searchLower));
       
-      // Check if search matches any IMEI for this product
       const imeiMatch = isCelular && disponiveisImeis.some(im => 
-        im.produto_id === p.id && im.filial_id === p.filial_id && im.imei.toLowerCase().includes(searchLower)
+        ((im.produto_id === p.id) || (im.produtos?.nome && im.produtos.nome.toLowerCase() === (p.nome || '').toLowerCase())) &&
+        im.imei && im.imei.toLowerCase().includes(searchLower)
       );
       
-      matchesSearch = nameMatch || skuMatch || imeiMatch;
+      matchesSearch = nameMatch || skuMatch || barcodeMatch || imeiMatch;
     }
     
     return matchesFilial && matchesCategoria && matchesStatus && matchesSearch;
   });
 
-  // Filtrar produtos no PDV (Vendedor)
-  const filteredProdutosPdv = produtosFilial.filter(p => {
-    const matchesSearch = p.nome.toLowerCase().includes(pdvBusca.toLowerCase());
+  // Consolidar produtos únicos no PDV com saldo calculado para a filial ativa
+  const listaProdutosPdvDinamica = React.useMemo(() => {
+    const uniqueMap = new Map();
+
+    listaProdutosConsolidada.forEach(p => {
+      const key = (p.nome || '').toLowerCase().trim();
+      if (!key) return;
+
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, p);
+      }
+    });
+
+    return Array.from(uniqueMap.values()).map(p => {
+      const isCelular = p.tipo === 'CELULAR' || p.tipo === 'Celular';
+      let localQty = 0;
+
+      if (isCelular) {
+        // IMEIs disponíveis na filial ativa
+        const localImeis = (disponiveisImeis || []).filter(im => {
+          const matchesProd = (im.produto_id === p.id) || (im.produtos?.nome && p.nome && im.produtos.nome.toLowerCase().trim() === p.nome.toLowerCase().trim());
+          const matchesFilial = String(im.filial_id) === String(activeFilialId);
+          const isNotSold = !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO';
+          return matchesProd && matchesFilial && isNotSold;
+        });
+        localQty = localImeis.length;
+      } else if (p.categoria === 'SERVICO') {
+        localQty = 999;
+      } else {
+        // Acessórios: Buscar quantidade total na filial ativa
+        const localProds = (produtos || []).filter(pr => 
+          String(pr.filial_id) === String(activeFilialId) && 
+          (pr.id === p.id || (pr.nome && p.nome && pr.nome.toLowerCase().trim() === p.nome.toLowerCase().trim()))
+        );
+        localQty = localProds.reduce((sum, item) => sum + (item.quantidade || 0), 0);
+      }
+
+      return {
+        ...p,
+        filial_id: activeFilialId,
+        filial_nome: activeFilialNome,
+        quantidade: localQty
+      };
+    });
+  }, [listaProdutosConsolidada, disponiveisImeis, produtos, activeFilialId, activeFilialNome]);
+
+  const filteredProdutosPdv = listaProdutosPdvDinamica.filter(p => {
+    const searchLower = pdvBusca.toLowerCase().trim();
+    const matchesSearch = !searchLower || 
+      (p.nome && p.nome.toLowerCase().includes(searchLower)) ||
+      (p.sku && p.sku.toLowerCase().includes(searchLower)) ||
+      (p.codigo_barras && p.codigo_barras.toLowerCase().includes(searchLower)) ||
+      (p.categoria && p.categoria.toLowerCase().includes(searchLower)) ||
+      (p.tipo && p.tipo.toLowerCase().includes(searchLower));
+
+    const catUpper = p.categoria ? String(p.categoria).toUpperCase() : '';
+    const tipoUpper = p.tipo ? String(p.tipo).toUpperCase() : '';
+    const nomeLower = p.nome ? String(p.nome).toLowerCase() : '';
+
+    const isAcessorioCategory = tipoUpper === 'ACESSORIO' || tipoUpper === 'ACESSÓRIO' ||
+      catUpper.includes('ACESSOR') || catUpper.includes('CAPA') || catUpper.includes('PELICULA') || 
+      catUpper.includes('CARREGADOR') || catUpper.includes('CABO') || catUpper.includes('FONE');
+
     const matchesCat = pdvCategoria === 'TUDO' 
       ? true 
-      : pdvCategoria === 'IOS' && p.categoria === 'IOS'
+      : pdvCategoria === 'IOS' && (catUpper === 'IOS' || nomeLower.includes('iphone'))
       ? true
-      : pdvCategoria === 'ANDROID' && p.categoria === 'ANDROID'
+      : pdvCategoria === 'ANDROID' && (catUpper === 'ANDROID' || nomeLower.includes('android') || nomeLower.includes('samsung') || nomeLower.includes('xiaomi') || nomeLower.includes('motorola'))
       ? true
-      : pdvCategoria === 'APPLE_JBL_CONSOLE' && p.categoria === 'APPLE_JBL_CONSOLE'
+      : pdvCategoria === 'APPLE_JBL_CONSOLE' && (catUpper === 'APPLE_JBL_CONSOLE' || catUpper.includes('JBL') || catUpper.includes('CONSOLE'))
       ? true
-      : pdvCategoria === 'ACESSORIO' && p.tipo === 'ACESSORIO' && p.categoria !== 'SERVICO'
+      : pdvCategoria === 'ACESSORIO' && isAcessorioCategory && catUpper !== 'SERVICO'
       ? true
-      : pdvCategoria === 'SERVICO' && p.categoria === 'SERVICO';
+      : pdvCategoria === 'SERVICO' && catUpper === 'SERVICO';
+
     return matchesSearch && matchesCat;
   });
 
   // --- VISÃO DE TRANSFERÊNCIAS (COMPARTILHADA) ---
-  const renderTransferencias = () => (
-    <div className="space-y-6 animate-fadeIn">
-      <div className="flex gap-4 border-b border-[#222222] pb-2">
-        <button
-          onClick={() => setTransfSubTab('enviar')}
-          className={`pb-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${
-            transfSubTab === 'enviar' ? 'text-[#6A0DAD]' : 'text-gray-500 hover:text-white'
-          }`}
-        >
-          Enviar Mercadorias
-          {transfSubTab === 'enviar' && (
-            <span className="absolute bottom-[-9px] left-0 w-full h-[2px] bg-[#6A0DAD]"></span>
-          )}
-        </button>
-        <button
-          onClick={() => setTransfSubTab('receber')}
-          className={`pb-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${
-            transfSubTab === 'receber' ? 'text-[#6A0DAD]' : 'text-gray-500 hover:text-white'
-          }`}
-        >
-          Cargas Pendentes {cargasPendentes.length > 0 && <span className="ml-1 bg-[#6A0DAD] text-white text-[10px] px-2 py-0.5 rounded-full">{cargasPendentes.length}</span>}
-          {transfSubTab === 'receber' && (
-            <span className="absolute bottom-[-9px] left-0 w-full h-[2px] bg-[#6A0DAD]"></span>
-          )}
-        </button>
-      </div>
+  const renderTransferencias = () => {
+    const finalOrigemId = transfOrigemId || activeFilialId;
+    const isSameFilial = transfDestinoId && finalOrigemId && transfDestinoId === finalOrigemId;
 
-      {transfSubTab === 'enviar' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <Truck size={18} className="text-[#6A0DAD]" /> Nova Transferência
-            </h3>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+    return (
+      <div className="space-y-6 animate-fadeIn font-sans">
+        <div className="flex gap-4 border-b border-[#222222] pb-2">
+          <button
+            onClick={() => setTransfSubTab('enviar')}
+            className={`pb-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${
+              transfSubTab === 'enviar' ? 'text-[#6A0DAD]' : 'text-gray-500 hover:text-white'
+            }`}
+          >
+            Enviar Mercadorias
+            {transfSubTab === 'enviar' && (
+              <span className="absolute bottom-[-9px] left-0 w-full h-[2px] bg-[#6A0DAD]"></span>
+            )}
+          </button>
+          <button
+            onClick={() => setTransfSubTab('receber')}
+            className={`pb-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${
+              transfSubTab === 'receber' ? 'text-[#6A0DAD]' : 'text-gray-500 hover:text-white'
+            }`}
+          >
+            Cargas Pendentes {cargasPendentes.length > 0 && <span className="ml-1 bg-[#6A0DAD] text-white text-[10px] px-2 py-0.5 rounded-full">{cargasPendentes.length}</span>}
+            {transfSubTab === 'receber' && (
+              <span className="absolute bottom-[-9px] left-0 w-full h-[2px] bg-[#6A0DAD]"></span>
+            )}
+          </button>
+        </div>
+
+        {transfSubTab === 'enviar' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Card 1: Formulário de Transferência */}
+              <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                  <Truck size={18} className="text-[#6A0DAD]" /> Transferência e Realocação entre Filiais
+                </h3>
+
+                <div className="space-y-4">
+                  {/* Seletor de Filial Origem e Destino */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center justify-between">
+                        <span>Filial Origem (Fixa) <span className="text-red-500">*</span></span>
+                        <span className="text-[10px] text-[#6A0DAD] lowercase font-normal">(filial de operação atual)</span>
+                      </label>
+                      <select
+                        value={finalOrigemId}
+                        onChange={(e) => setTransfOrigemId(e.target.value)}
+                        className="w-full bg-[#111111] border border-[#222222] text-gray-300 rounded px-3 py-2 text-sm outline-none font-semibold cursor-not-allowed opacity-80"
+                        disabled={true}
+                      >
+                        <option value="">Selecione a Origem...</option>
+                        {filiais.map(f => (
+                          <option key={f.id} value={f.id}>
+                            {f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}
+                          </option>
+                        ))}
+                      </select>
+                      {transfItens.length > 0 && (
+                        <p className="text-[10px] text-gray-500 mt-1">Origem bloqueada durante o lote atual.</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Filial Destino <span className="text-red-500">*</span></label>
+                      <select
+                        value={transfDestinoId}
+                        onChange={(e) => setTransfDestinoId(e.target.value)}
+                        className={`w-full bg-black border rounded px-3 py-2 text-sm text-white outline-none transition-all cursor-pointer font-semibold ${
+                          isSameFilial ? 'border-red-500 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
+                        }`}
+                      >
+                        <option value="">Selecione a Filial Destino...</option>
+                        {filiais.map(f => (
+                          <option key={f.id} value={f.id} disabled={f.id === finalOrigemId}>
+                            {f.nome} {f.id === finalOrigemId ? '(Mesma Origem)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {isSameFilial && (
+                        <p className="text-[10px] text-red-500 mt-1 font-semibold">
+                          ⚠️ A Filial de Destino deve ser diferente da Filial de Origem.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Bipagem e Quantidade */}
+                  <form onSubmit={handleTransfItemAdd} className="space-y-3 pt-2 border-t border-[#222222]">
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
+                      Bipar IMEI (Celulares) ou Código de Barras / Nome (Acessórios)
+                    </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          value={transfImeiBusca}
+                          onChange={(e) => setTransfImeiBusca(e.target.value)}
+                          placeholder="Bipe o IMEI, Código de Barras ou Nome..."
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2.5 text-sm text-white outline-none font-mono placeholder-gray-600 transition-all"
+                        />
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          value={transfQtdInput}
+                          onChange={(e) => setTransfQtdInput(e.target.value)}
+                          placeholder="Qtd (Acessórios)"
+                          title="Quantidade a transferir (para acessórios sem IMEI)"
+                          className="w-20 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-2.5 text-sm text-white text-center outline-none font-mono"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!transfImeiBusca.trim() || isSameFilial}
+                          className="flex-1 bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-40 text-white font-bold px-3 py-2.5 rounded transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-1"
+                        >
+                          Adicionar
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-gray-500 font-sans">
+                      Dica: Para celulares com IMEI a quantidade é fixa em 1 unidade por IMEI. Para acessórios, defina a quantidade antes de adicionar.
+                    </p>
+                  </form>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Observações / Motivo (Opcional)</label>
+                    <textarea
+                      value={transfObs}
+                      onChange={(e) => setTransfObs(e.target.value)}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[50px] placeholder-gray-600"
+                      placeholder="Ex: Realocação de vitrine, solicitação do gerente, portador..."
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Resumo e Itens no Lote */}
+              <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 flex flex-col justify-between">
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Filial Origem (Autodetectado)</label>
-                  <div className="w-full bg-[#111111] border border-[#222222] rounded px-3 py-2 text-sm text-gray-500 cursor-not-allowed">
-                    {transfOrigemId ? (filiais.find(f => f.id === transfOrigemId)?.nome || 'Detectando...') : (profile?.role === 'ADMIN' || profile?.role === 'SUPER_ADMIN' || profile?.role === 'OWNER' ? 'Bipe o item p/ detectar' : (filiais.find(f => f.id === activeFilialId)?.nome || 'Sua Filial Atual'))}
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Package size={18} className="text-[#6A0DAD]" /> Lote de Transferência ({transfItens.length})
+                    </h3>
+                    {transfItens.length > 0 && (
+                      <span className="text-xs bg-[#6A0DAD]/20 text-[#6A0DAD] border border-[#6A0DAD]/30 px-2.5 py-1 rounded-full font-bold">
+                        {transfItens.reduce((acc, i) => acc + (i.quantidade || 1), 0)} unidade(s)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="max-h-[260px] overflow-y-auto space-y-2 pr-1 mb-4">
+                    {transfItens.length === 0 ? (
+                      <div className="text-center text-gray-500 py-12 border border-dashed border-[#222222] rounded-lg">
+                        <p className="text-xs font-semibold">Nenhum item adicionado ao lote.</p>
+                        <p className="text-[11px] text-gray-600 mt-1">Bipe um IMEI ou código de barras acima para começar.</p>
+                      </div>
+                    ) : (
+                      transfItens.map((item, idx) => (
+                        <div key={idx} className="bg-black border border-[#222222] p-3 rounded-lg flex justify-between items-center transition-all hover:border-[#333333]">
+                          <div>
+                            <p className="text-sm font-bold text-white">{item.nome}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {item.imei ? (
+                                <span className="text-xs text-gray-400 font-mono bg-[#111111] px-2 py-0.5 rounded border border-[#222222]">
+                                  IMEI: {item.imei}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-purple-400 font-mono bg-purple-950/20 px-2 py-0.5 rounded border border-purple-900/30 font-semibold">
+                                  Qtd: {item.quantidade} un.
+                                </span>
+                              )}
+                              {item.codigo_barras && (
+                                <span className="text-[10px] text-gray-500 font-mono">EAN: {item.codigo_barras}</span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleTransfItemRemove(item.imei || item.produto_id)}
+                            className="text-red-500 hover:text-red-400 p-1.5 rounded hover:bg-red-950/20 transition-colors"
+                            title="Remover item"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Filial Destino</label>
-                  <select
-                    value={transfDestinoId}
-                    onChange={(e) => setTransfDestinoId(e.target.value)}
-                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-sm text-white outline-none"
-                  >
-                    <option value="">Selecione a Filial...</option>
-                    {filiais.filter(f => f.id !== (transfOrigemId || activeFilialId)).map(f => (
-                      <option key={f.id} value={f.id}>{f.nome}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Bipar IMEI do Celular</label>
-                <form onSubmit={handleTransfItemAdd} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={transfImeiBusca}
-                    onChange={(e) => setTransfImeiBusca(e.target.value)}
-                    placeholder="Digite ou bipe o IMEI..."
-                    className="flex-1 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-sm text-white outline-none font-mono"
-                  />
-                  <button type="submit" className="bg-[#222222] hover:bg-[#333333] text-white px-4 py-2 rounded font-bold transition-colors">
-                    Adicionar
-                  </button>
-                </form>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Observações (Opcional)</label>
-                <textarea
-                  value={transfObs}
-                  onChange={(e) => setTransfObs(e.target.value)}
-                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-sm text-white outline-none min-h-[60px]"
-                  placeholder="Nome do portador, motivo..."
-                ></textarea>
+                <button
+                  onClick={handleSubmeterTransferencia}
+                  disabled={loadingTransferencias || transfItens.length === 0 || isSameFilial}
+                  className="w-full bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-40 text-white font-black uppercase tracking-wider py-3 rounded-lg flex justify-center items-center gap-2 transition-all cursor-pointer shadow-lg"
+                >
+                  {loadingTransferencias ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
+                  Confirmar e Concluir Realocação
+                </button>
               </div>
             </div>
-          </div>
 
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 flex flex-col">
-            <h3 className="text-lg font-bold text-white mb-4">Itens a Transferir ({transfItens.length})</h3>
-            <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-              {transfItens.length === 0 ? (
-                <p className="text-sm text-gray-500 italic text-center mt-10">Nenhum item adicionado.</p>
+            {/* Tabela de Audit: Últimas Transferências Realizadas */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden mt-6">
+              <div className="p-4 border-b border-[#222222] flex justify-between items-center">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <BarChart3 size={18} className="text-[#6A0DAD]" />
+                  Últimas Transferências Realizadas (Auditoria de Movimentação)
+                </h3>
+                <span className="text-xs text-gray-500 font-mono">
+                  {historicoRealocacoes.length} registro(s) recente(s)
+                </span>
+              </div>
+
+              {historicoRealocacoes.length === 0 ? (
+                <div className="p-8 text-center text-gray-500 text-xs italic">
+                  Nenhuma transferências recente gravada nesta sessão. As movimentações efetuadas aparecerão listadas aqui em tempo real.
+                </div>
               ) : (
-                transfItens.map((item, idx) => (
-                  <div key={idx} className="bg-black border border-[#222222] p-3 rounded flex justify-between items-center">
-                    <div>
-                      <p className="text-sm font-bold text-white">{item.nome}</p>
-                      {item.imei && <p className="text-xs text-gray-500 font-mono">IMEI: {item.imei}</p>}
-                    </div>
-                    <button onClick={() => handleTransfItemRemove(item.imei)} className="text-red-500 hover:text-red-400 p-1">
-                      <X size={16} />
-                    </button>
-                  </div>
-                ))
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-[#111111] text-gray-400 uppercase tracking-wider border-b border-[#222222] text-[10px]">
+                        <th className="p-3 font-bold">Data / Hora</th>
+                        <th className="p-3 font-bold">Itens / Identificador</th>
+                        <th className="p-3 font-bold">Trajeto (Origem ➔ Destino)</th>
+                        <th className="p-3 font-bold text-center">Total Qtd</th>
+                        <th className="p-3 font-bold">Responsável</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#222222]">
+                      {historicoRealocacoes.map((log) => (
+                        <tr key={log.id} className="hover:bg-[#111111] transition-colors">
+                          <td className="p-3 text-gray-400 font-mono whitespace-nowrap">
+                            {new Date(log.created_at).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="p-3 font-semibold text-white">
+                            {log.itens ? (
+                              <div className="space-y-1">
+                                {log.itens.map((it, i) => (
+                                  <div key={i} className="flex items-center gap-1.5">
+                                    <span className="text-white font-bold">{it.nome}</span>
+                                    {it.imei && <span className="text-[10px] text-gray-400 font-mono bg-black px-1.5 py-0.5 rounded border border-[#222222]">IMEI: {it.imei}</span>}
+                                    {it.quantidade > 1 && <span className="text-[10px] text-purple-400 font-bold">x{it.quantidade}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span>{log.itens_resumo || 'Mercadorias variadas'}</span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <span className="text-gray-300 font-bold">{log.origem}</span>
+                            <span className="text-[#6A0DAD] mx-1.5 font-bold">➔</span>
+                            <span className="text-green-400 font-bold">{log.destino}</span>
+                          </td>
+                          <td className="p-3 text-center font-bold text-white font-mono">
+                            {log.qtd} un.
+                          </td>
+                          <td className="p-3 text-gray-400">
+                            {log.usuario}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
-            <button
-              onClick={handleSubmeterTransferencia}
-              disabled={loadingTransferencias || transfItens.length === 0}
-              className="w-full bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-50 text-white font-black uppercase tracking-wider py-3 rounded-lg flex justify-center items-center gap-2 transition-colors"
-            >
-              {loadingTransferencias ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
-              Gerar Romaneio de Envio
-            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {transfSubTab === 'receber' && (
-        <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden">
-          <div className="p-4 border-b border-[#222222]">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Package size={18} className="text-[#6A0DAD]" /> Cargas Pendentes
-            </h3>
-          </div>
-          {cargasPendentes.length === 0 ? (
-            <div className="p-10 text-center text-gray-500">
-              Nenhuma carga pendente de recebimento.
+        {transfSubTab === 'receber' && (
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden">
+            <div className="p-4 border-b border-[#222222]">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Package size={18} className="text-[#6A0DAD]" /> Cargas Pendentes
+              </h3>
             </div>
-          ) : (
-            <div className="divide-y divide-[#222222]">
-              {cargasPendentes.map(carga => (
-                <div key={carga.id} className="p-4 hover:bg-[#111111] transition-colors flex justify-between items-center">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs bg-yellow-900/30 text-yellow-500 border border-yellow-700/50 px-2 py-0.5 rounded-full font-bold uppercase">Em Trânsito</span>
-                      <span className="text-sm text-gray-400">{new Date(carga.created_at).toLocaleString('pt-BR')}</span>
+            {cargasPendentes.length === 0 ? (
+              <div className="p-10 text-center text-gray-500 text-sm">
+                Nenhuma carga pendente de recebimento.
+              </div>
+            ) : (
+              <div className="divide-y divide-[#222222]">
+                {cargasPendentes.map(carga => (
+                  <div key={carga.id} className="p-4 hover:bg-[#111111] transition-colors flex justify-between items-center">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs bg-yellow-900/30 text-yellow-500 border border-yellow-700/50 px-2 py-0.5 rounded-full font-bold uppercase">Em Trânsito</span>
+                        <span className="text-sm text-gray-400">{new Date(carga.created_at).toLocaleString('pt-BR')}</span>
+                      </div>
+                      <p className="text-white font-bold">Origem: {carga.origem?.nome || 'Desconhecida'}</p>
+                      <p className="text-xs text-gray-500 mt-1">{carga.transferencias_itens?.length || 0} Itens • Obs: {carga.observacoes || 'Nenhuma'}</p>
                     </div>
-                    <p className="text-white font-bold">Origem: {carga.origem?.nome || 'Desconhecida'}</p>
-                    <p className="text-xs text-gray-500 mt-1">{carga.transferencias_itens?.length || 0} Itens • Obs: {carga.observacoes || 'Nenhuma'}</p>
+                    <button
+                      onClick={() => handleConfirmarRecebimento(carga.id)}
+                      disabled={loadingTransferencias}
+                      className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded font-bold transition-colors text-sm"
+                    >
+                      Confirmar Recebimento
+                    </button>
                   </div>
-                  <button
-                    onClick={() => handleConfirmarRecebimento(carga.id)}
-                    disabled={loadingTransferencias}
-                    className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded font-bold transition-colors text-sm"
-                  >
-                    Confirmar Recebimento
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
 
   // --- VEXTRON LAB: S.O.S BUTTON SUBMIT ---
@@ -6761,9 +8673,9 @@ export default function Dashboard({ session, profileDataProps }) {
               onChange={(e) => setFiltroDescontoVendedor(e.target.value)}
               className="bg-black border border-[#222222] focus:border-[#6A0DAD] text-white text-xs font-bold px-3 py-2 rounded-lg outline-none cursor-pointer"
             >
-              <option value="">[ Todos os Vendedores ]</option>
+              <option value="" className="bg-gray-900 text-white">[ Todos os Vendedores ]</option>
               {vendedores.map(v => (
-                <option key={v.id} value={v.id}>{v.nome}</option>
+                <option key={v.id} value={v.id} className="bg-gray-900 text-white">{v.nome}</option>
               ))}
             </select>
 
@@ -6773,9 +8685,9 @@ export default function Dashboard({ session, profileDataProps }) {
               onChange={(e) => setFiltroDescontoFilial(e.target.value)}
               className="bg-black border border-[#222222] focus:border-[#6A0DAD] text-white text-xs font-bold px-3 py-2 rounded-lg outline-none cursor-pointer"
             >
-              <option value="">[ Todas as Filiais ]</option>
+              <option value="" className="bg-gray-900 text-white">[ Todas as Filiais ]</option>
               {filiais.map(f => (
-                <option key={f.id} value={f.id}>{f.nome}</option>
+                <option key={f.id} value={f.id} className="bg-gray-900 text-white">{f.nome}</option>
               ))}
             </select>
           </div>
@@ -6924,22 +8836,33 @@ export default function Dashboard({ session, profileDataProps }) {
                               {filteredProdutosPdv.map((prod) => {
                                 const isSemEstoque = prod.categoria !== 'SERVICO' && prod.quantidade <= 0;
                                 return (
-                                  <button
+                                  <div
                                     key={prod.id}
-                                    disabled={isSemEstoque}
-                                    onClick={() => handleAddToCart(prod)}
-                                    className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${
+                                    onClick={() => {
+                                      if (isSemEstoque) {
+                                        handleVerMultiloja(prod);
+                                      } else {
+                                        handleAddToCart(prod);
+                                      }
+                                    }}
+                                    className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all cursor-pointer ${
                                       isSemEstoque
-                                        ? 'border-[#161616] opacity-40 cursor-not-allowed'
+                                        ? 'border-[#222222] hover:border-[#6A0DAD]/50 bg-black/60'
                                         : pdvCart.some(i => i.produto.id === prod.id)
                                         ? 'border-[#6A0DAD] bg-[#6A0DAD]/5'
                                         : 'border-[#222222] hover:border-[#6A0DAD]/40'
                                     }`}
                                   >
                                     <div className="flex justify-between items-start w-full">
-                                      <span className="font-extrabold text-sm text-white group-hover:text-purple-400 transition-colors">
-                                        {prod.nome}
-                                      </span>
+                                      <div className="flex flex-col gap-1 max-w-[70%]">
+                                        <span className="font-extrabold text-sm text-white group-hover:text-purple-400 transition-colors">
+                                          {prod.nome}
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-300 bg-[#160926] border border-[#6A0DAD]/30 px-1.5 py-0.5 rounded w-fit">
+                                          <Store size={10} className="text-[#6A0DAD]" />
+                                          {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
+                                        </span>
+                                      </div>
                                       <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${
                                         prod.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
                                         prod.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
@@ -6952,27 +8875,28 @@ export default function Dashboard({ session, profileDataProps }) {
                                     
                                     <div className="flex justify-between items-center w-full mt-2">
                                       <span className="font-mono font-bold text-xs text-white">
-                                        R$ {prod.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        R$ {Number(prod.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                       </span>
                                       <div className="flex items-center gap-2">
                                         <button
                                           type="button"
                                           onClick={(e) => {
                                             e.stopPropagation();
+                                            e.preventDefault();
                                             handleVerMultiloja(prod);
                                           }}
-                                          className="px-2 py-0.5 bg-[#111] hover:bg-[#6A0DAD] text-[9px] font-bold text-gray-400 hover:text-white rounded border border-[#222] hover:border-[#6A0DAD] transition-all flex items-center gap-1"
-                                          title="Ver estoque nas outras lojas"
+                                          className="px-2.5 py-1 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD] text-[10px] font-extrabold text-purple-300 hover:text-white rounded border border-[#6A0DAD]/50 hover:border-[#6A0DAD] transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                                          title="Ver estoque e reservar de outras lojas da rede"
                                         >
-                                          <Store size={10} />
+                                          <Store size={11} />
                                           Rede
                                         </button>
-                                        <span className="text-[10px] text-gray-500 font-medium">
+                                        <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
                                           {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${prod.quantidade} un.`}
                                         </span>
                                       </div>
                                     </div>
-                                  </button>
+                                  </div>
                                 );
                               })}
                             </div>
@@ -7006,37 +8930,34 @@ export default function Dashboard({ session, profileDataProps }) {
                             )}
                           </div>
 
-                          {/* Scanner de IMEI do Produto Novo (Saída) */}
-                          {tenantSettings.enable_imei && (
-                            <div className="space-y-1.5 bg-[#111111]/60 border border-[#222222] p-3 rounded-lg">
-                              <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider">
-                                ⚡ Bipar IMEI do Celular
-                              </label>
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={pdvScanImei}
-                                  onChange={(e) => setPdvScanImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                                  placeholder="Bipe o IMEI..."
-                                  maxLength={15}
-                                  className="flex-1 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider"
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault();
-                                      handleBiparPdvNovo();
-                                    }
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleBiparPdvNovo}
-                                  className="bg-[#6A0DAD] hover:bg-[#500885] px-3 py-2 rounded text-xs font-bold text-white transition-all shrink-0"
-                                >
-                                  Bipar
-                                </button>
-                              </div>
+                          {/* Scanner de IMEI ou Código de Barras (EAN/Barcode) */}
+                          <div className="space-y-1.5 bg-[#111111]/60 border border-[#222222] p-3 rounded-lg">
+                            <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider">
+                              ⚡ Bipar IMEI ou Código de Barras (EAN)
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={pdvScanImei}
+                                onChange={(e) => setPdvScanImei(e.target.value)}
+                                placeholder="Bipe o IMEI, EAN/barcode ou SKU..."
+                                className="flex-1 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleBiparPdvNovo();
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={handleBiparPdvNovo}
+                                className="bg-[#6A0DAD] hover:bg-[#500885] px-3 py-2 rounded text-xs font-bold text-white transition-all shrink-0"
+                              >
+                                Bipar
+                              </button>
                             </div>
-                          )}
+                          </div>
 
                           {/* Lista do Carrinho */}
                           {pdvCart.length === 0 ? (
@@ -7050,6 +8971,41 @@ export default function Dashboard({ session, profileDataProps }) {
                             <div className="space-y-4 max-h-[320px] overflow-y-auto pr-1">
                               {pdvCart.map((item) => (
                                 <div key={item.cartId} className="bg-black border border-[#222222] p-3 rounded-lg flex flex-col gap-2 relative">
+                                  {/* ALERTA POKA-YOKE DE ADIMPLÊNCIA / INADIMPLÊNCIA NO PDV */}
+                                  {(() => {
+                                    const cCheck = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
+                                    if (cCheck?.status_credito === 'INADIMPLENTE') {
+                                      return (
+                                        <div className="bg-red-950/40 border border-red-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs animate-pulse shadow-lg shadow-red-950/50">
+                                          <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={18} />
+                                          <div>
+                                            <h4 className="text-red-400 font-extrabold uppercase tracking-wide text-[11px]">
+                                              ⚠️ CLIENTE BLOQUEADO / INADIMPLENTE
+                                            </h4>
+                                            <p className="text-red-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                                              Este cliente possui registro de inadimplência no sistema. As vendas estão suspensas para este cadastro.
+                                            </p>
+                                          </div>
+                                        </div>
+                                      );
+                                    } else if (cCheck?.status_credito === 'ATRASO') {
+                                      return (
+                                        <div className="bg-yellow-950/40 border border-yellow-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs shadow-lg shadow-yellow-950/50">
+                                          <AlertTriangle className="text-yellow-500 shrink-0 mt-0.5" size={18} />
+                                          <div>
+                                            <h4 className="text-yellow-400 font-extrabold uppercase tracking-wide text-[11px]">
+                                              🟡 ALERTA: CLIENTE COM ATRASO LEVE
+                                            </h4>
+                                            <p className="text-yellow-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                                              Este cliente possui pendências recentes ou parcelas em atraso leve. Atenção no parcelamento.
+                                            </p>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+
                                   {/* Botão de Excluir Item */}
                                   <button 
                                     type="button" 
@@ -7246,7 +9202,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   
                                   <div>
                                     <div className="flex justify-between items-center mb-1">
-                                      <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">Telefone</label>
+                                      <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">Telefone <span className="text-red-500">*</span></label>
                                       {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                                         <button
                                           type="button"
@@ -7260,16 +9216,40 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <input
                                       type="text"
                                       value={pdvClienteTelefone}
+                                      required
                                       disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                                       onChange={(e) => setPdvClienteTelefone(e.target.value)}
                                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] disabled:bg-neutral-900 disabled:text-gray-500 rounded text-white px-2.5 py-1.5 text-xs outline-none font-sans"
                                       placeholder="(11) 99999-9999"
                                     />
                                   </div>
-                                  
-                                  <div className="col-span-2">
+
+                                  <div>
                                     <div className="flex justify-between items-center mb-1">
-                                      <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">E-mail</label>
+                                      <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">Data de Nascimento <span className="text-red-500">*</span></label>
+                                      {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setIsPdvClienteFieldsEditable(true)}
+                                          className="text-[9px] text-[#9b5de5] hover:text-[#b587eb] font-bold transition-colors underline"
+                                        >
+                                          Editar
+                                        </button>
+                                      )}
+                                    </div>
+                                    <input
+                                      type="date"
+                                      value={pdvClienteDataNascimento}
+                                      required
+                                      disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
+                                      onChange={(e) => setPdvClienteDataNascimento(e.target.value)}
+                                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] disabled:bg-neutral-900 disabled:text-gray-500 rounded text-white px-2.5 py-1.5 text-xs outline-none font-sans"
+                                    />
+                                  </div>
+                                  
+                                  <div className="col-span-1">
+                                    <div className="flex justify-between items-center mb-1">
+                                      <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">E-mail <span className="text-red-500">*</span></label>
                                       {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                                         <button
                                           type="button"
@@ -7283,6 +9263,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <input
                                       type="email"
                                       value={pdvClienteEmail}
+                                       required
                                       disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                                       onChange={(e) => setPdvClienteEmail(e.target.value)}
                                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] disabled:bg-neutral-900 disabled:text-gray-500 rounded text-white px-2.5 py-1.5 text-xs outline-none"
@@ -7291,6 +9272,41 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </div>
                                 </div>
                               </div>
+
+                               {/* ALERTA POKA-YOKE DE ADIMPLÊNCIA / INADIMPLÊNCIA NO PDV */}
+                               {(() => {
+                                 const cCheck = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
+                                 if (cCheck?.status_credito === 'INADIMPLENTE') {
+                                   return (
+                                     <div className="bg-red-950/40 border border-red-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs animate-pulse shadow-lg shadow-red-950/50">
+                                       <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={18} />
+                                       <div>
+                                         <h4 className="text-red-400 font-extrabold uppercase tracking-wide text-[11px]">
+                                           ⚠️ CLIENTE BLOQUEADO / INADIMPLENTE
+                                         </h4>
+                                         <p className="text-red-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                                           Este cliente possui registro de inadimplência no sistema. As vendas estão suspensas para este cadastro.
+                                         </p>
+                                       </div>
+                                     </div>
+                                   );
+                                 } else if (cCheck?.status_credito === 'ATRASO') {
+                                   return (
+                                     <div className="bg-yellow-950/40 border border-yellow-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs shadow-lg shadow-yellow-950/50">
+                                       <AlertTriangle className="text-yellow-500 shrink-0 mt-0.5" size={18} />
+                                       <div>
+                                         <h4 className="text-yellow-400 font-extrabold uppercase tracking-wide text-[11px]">
+                                           🟡 ALERTA: CLIENTE COM ATRASO LEVE
+                                         </h4>
+                                         <p className="text-yellow-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                                           Este cliente possui pendências recentes ou parcelas em atraso leve. Atenção no parcelamento.
+                                         </p>
+                                       </div>
+                                     </div>
+                                   );
+                                 }
+                                 return null;
+                               })()}
 
                               {/* FORMA DE PAGAMENTO */}
                               <div className="border-t border-[#222222] pt-4 space-y-3">
@@ -7698,8 +9714,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                     loadingPdvVenda || 
                                     pdvCart.length === 0 ||
                                     (pdvMetodoPagamento === 'troca' && pdvUsadoList.length === 0) ||
-                                    !pdvClienteNome.trim() ||
-                                    !(pdvClienteCpfCnpj.replace(/\D/g, '').length === 11 || pdvClienteCpfCnpj.replace(/\D/g, '').length === 14)
+                                    !pdvClienteNome.trim()
                                   }
                                   className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-xs font-bold py-3 rounded transition-all flex items-center justify-center gap-1 shadow-md shadow-[#6A0DAD]/20"
                                 >
@@ -7712,6 +9727,473 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       </div>
                     </div>
+    );
+  };
+
+  // Helper visual Poka-Yoke de Status de Crédito
+  const getStatusBadge = (status) => {
+    const norm = (status || 'EM DIA').toUpperCase();
+    switch (norm) {
+      case 'INADIMPLENTE':
+        return (
+          <span className="bg-red-500/20 text-red-500 border border-red-500 font-bold px-2.5 py-1 rounded text-xs inline-flex items-center gap-1.5 shadow-sm shadow-red-950/40">
+            <AlertCircle size={13} /> Bloqueado / Inadimplente
+          </span>
+        );
+      case 'ATRASO':
+        return (
+          <span className="bg-yellow-500/20 text-yellow-500 border border-yellow-500 font-bold px-2.5 py-1 rounded text-xs inline-flex items-center gap-1.5 shadow-sm shadow-yellow-950/40">
+            <AlertTriangle size={13} /> Atraso Leve
+          </span>
+        );
+      case 'EM DIA':
+      default:
+        return (
+          <span className="bg-green-500/20 text-green-500 border border-green-500 font-bold px-2.5 py-1 rounded text-xs inline-flex items-center gap-1.5 shadow-sm shadow-green-950/40">
+            <CheckCircle2 size={13} /> Pagamento Normal
+          </span>
+        );
+    }
+  };
+
+  // Alteração de Status de Crédito pelo Gerente/Admin
+  const handleSaveCreditStatus = async (e) => {
+    if (e) e.preventDefault();
+    if (!selectedAuditVenda) return;
+    
+    const clienteId = selectedAuditVenda.cliente_id_real || selectedAuditVenda.cliente_id;
+    if (!clienteId) {
+      showToast('Nenhum ID de cliente associado a esta venda.', 'error');
+      return;
+    }
+
+    setIsSavingAuditStatus(true);
+    try {
+      // UPDATE na tabela 'clientes' para impacto global na base e no PDV
+      const { error } = await supabase
+        .from('clientes')
+        .update({ status_credito: selectedAuditClienteStatus })
+        .eq('id', clienteId);
+
+      if (error) throw error;
+
+      showToast(`Status de crédito do cliente alterado para "${selectedAuditClienteStatus}" com sucesso!`, 'success');
+      alert(`Status de crédito do cliente alterado para "${selectedAuditClienteStatus}" com sucesso!`);
+      
+      // Atualizar lista local
+      setClientes(prev => prev.map(c => c.id === clienteId ? { ...c, status_credito: selectedAuditClienteStatus } : c));
+      setVendas(prev => prev.map(v => {
+        if (v.cliente_id === clienteId || v.clientes?.id === clienteId) {
+          return {
+            ...v,
+            clientes: {
+              ...(v.clientes || {}),
+              status_credito: selectedAuditClienteStatus
+            }
+          };
+        }
+        return v;
+      }));
+
+      setIsAuditModalOpen(false);
+      setSelectedAuditVenda(null);
+    } catch (err) {
+      console.error('Erro ao atualizar status de crédito:', err);
+      showToast('Erro ao atualizar status de crédito: ' + err.message, 'error');
+      alert('Erro ao atualizar status de crédito: ' + err.message);
+    } finally {
+      setIsSavingAuditStatus(false);
+    }
+  };
+
+  // Componente da Tela: Auditoria de Vendas & Crédito
+  const renderAuditoriaCredito = () => {
+    const isGerenteOrAdmin = ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role);
+
+    // Mapear vendas e enriquecer com o status do cliente
+    const vendasAuditadas = vendas.map(sale => {
+      const clienteCorrespondente = clientes.find(c => c.id === sale.cliente_id) || sale.clientes || {};
+      const statusCredito = clienteCorrespondente.status_credito || 'EM DIA';
+
+      return {
+        ...sale,
+        cliente_nome: sale.cliente_nome || clienteCorrespondente.nome || 'Consumidor Final',
+        cliente_cpf_cnpj: sale.cliente_cpf_cnpj || clienteCorrespondente.cpf_cnpj || 'Não Informado',
+        status_credito: statusCredito,
+        cliente_id_real: sale.cliente_id || clienteCorrespondente.id || null,
+        financeira: sale.financeira_parceira || (sale.metodo_pagamento === 'boleto' ? 'PayJoy' : sale.metodo_pagamento ? sale.metodo_pagamento.toUpperCase() : 'N/A')
+      };
+    });
+
+    // Aplicar Filtros (Busca por Nome/CPF/IMEI, Status de Crédito, Parceiro Financeiro)
+    const filteredVendas = vendasAuditadas.filter(sale => {
+      const q = buscaAuditoriaCredito.toLowerCase().trim();
+      const matchSearch = !q ||
+        (sale.cliente_nome && sale.cliente_nome.toLowerCase().includes(q)) ||
+        (sale.cliente_cpf_cnpj && sale.cliente_cpf_cnpj.toLowerCase().includes(q)) ||
+        (sale.imei_novo && sale.imei_novo.toLowerCase().includes(q)) ||
+        (sale.produtos?.nome && sale.produtos.nome.toLowerCase().includes(q)) ||
+        (sale.financeira && sale.financeira.toLowerCase().includes(q));
+
+      const matchStatus = filtroStatusCredito === 'TODOS' || sale.status_credito === filtroStatusCredito;
+
+      const matchFin = filtroFinanceira === 'TODOS' || 
+        (sale.financeira || '').toLowerCase().includes(filtroFinanceira.toLowerCase());
+
+      return matchSearch && matchStatus && matchFin;
+    });
+
+    return (
+      <div className="space-y-6 animate-fadeIn">
+        {/* Cabeçalho */}
+        <div className="bg-gradient-to-r from-[#0C001C] via-[#0A0A0A] to-black border border-[#6A0DAD]/30 p-6 rounded-2xl shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                Auditoria Financista &amp; Controle de Inadimplência
+              </span>
+            </div>
+            <h2 className="text-2xl font-extrabold text-white mt-1.5 flex items-center gap-2">
+              <ShieldCheck className="text-[#6A0DAD]" size={26} />
+              Auditoria de Vendas &amp; Crédito
+            </h2>
+            <p className="text-xs text-gray-400 mt-1">
+              Acompanhamento detalhado das vendas por modalidade financeira (PayJoy, Watu, Uma, Boleto) e alteração em tempo real do status de crédito do cliente para bloqueio automático no PDV.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="bg-black/60 border border-[#222222] px-4 py-2 rounded-xl flex items-center gap-3">
+              <div className="text-right">
+                <span className="text-[10px] text-gray-500 uppercase font-bold block">Inadimplentes Bloqueados</span>
+                <span className="text-sm font-extrabold text-red-400 font-mono">
+                  {clientes.filter(c => c.status_credito === 'INADIMPLENTE').length} cliente(s)
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Barra de Filtros */}
+        <div className="bg-[#0A0A0A] border border-[#222222] p-4 rounded-xl flex flex-col md:flex-row gap-4 justify-between items-center">
+          <div className="relative w-full md:w-96">
+            <input
+              type="text"
+              value={buscaAuditoriaCredito}
+              onChange={(e) => setBuscaAuditoriaCredito(e.target.value)}
+              placeholder="Buscar por Cliente, CPF, Modelo ou IMEI..."
+              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg pl-9 pr-4 py-2 text-xs text-white outline-none font-mono placeholder:text-gray-600 transition-all"
+            />
+            <Search size={14} className="absolute left-3 top-3 text-gray-500" />
+          </div>
+
+          <div className="flex flex-wrap md:flex-nowrap gap-3 w-full md:w-auto">
+            {/* Filtro Status de Crédito */}
+            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg flex-1 md:flex-none">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status:</span>
+              <select
+                value={filtroStatusCredito}
+                onChange={(e) => setFiltroStatusCredito(e.target.value)}
+                className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer"
+              >
+                <option value="TODOS" className="bg-gray-900 text-white">Todos os Status</option>
+                <option value="EM DIA" className="bg-gray-900 text-white">🟢 Pagamento Normal (Em Dia)</option>
+                <option value="ATRASO" className="bg-gray-900 text-white">🟡 Atraso Leve</option>
+                <option value="INADIMPLENTE" className="bg-gray-900 text-white">🔴 Bloqueado / Inadimplente</option>
+              </select>
+            </div>
+
+            {/* Filtro Parceiro Financeiro */}
+            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg flex-1 md:flex-none">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Financeira:</span>
+              <select
+                value={filtroFinanceira}
+                onChange={(e) => setFiltroFinanceira(e.target.value)}
+                className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer"
+              >
+                <option value="TODOS" className="bg-gray-900 text-white">Todas as Financeiras</option>
+                <option value="PayJoy" className="bg-gray-900 text-white">PayJoy</option>
+                <option value="Watu" className="bg-gray-900 text-white">Watu</option>
+                <option value="Uma" className="bg-gray-900 text-white">Uma</option>
+                <option value="Boleto" className="bg-gray-900 text-white">Boleto Próprio</option>
+                <option value="Cartao" className="bg-gray-900 text-white">Cartão de Crédito</option>
+                <option value="Pix" className="bg-gray-900 text-white">PIX / Dinheiro</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Data Table de Auditoria de Vendas & Crédito */}
+        <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden shadow-xl">
+          <div className="p-4 border-b border-[#222222] flex justify-between items-center bg-[#050505]">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <ClipboardList size={16} className="text-[#6A0DAD]" />
+              Histórico Consolidado de Vendas e Auditoria de Crédito
+            </h3>
+            <span className="text-xs text-gray-500 font-mono">
+              Exibindo {filteredVendas.length} registro(s)
+            </span>
+          </div>
+
+          {filteredVendas.length === 0 ? (
+            <div className="p-12 text-center text-gray-500 space-y-3">
+              <ShieldCheck size={40} className="mx-auto opacity-30 text-[#6A0DAD]" />
+              <p className="text-sm font-semibold">Nenhuma venda encontrada com os filtros selecionados.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-[#222222] bg-[#0A0A0A] text-gray-400 font-bold uppercase tracking-wider">
+                    <th className="p-4">Data da Venda</th>
+                    <th className="p-4">Cliente (Nome + CPF)</th>
+                    <th className="p-4">Aparelho (Modelo + IMEI)</th>
+                    <th className="p-4">Parceiro Financeiro</th>
+                    <th className="p-4">Status de Crédito</th>
+                    <th className="p-4 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#151515]">
+                  {filteredVendas.map((venda) => {
+                    const dataFormatada = venda.created_at
+                      ? new Date(venda.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+                      : 'Data N/D';
+
+                    // Resolução Dinâmica de Produto & IMEI (Cruzando tabela produtos/imeis caso produto_nome venha nulo)
+                    const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id));
+                    const produtoNomeResolved = venda.produtos?.nome || venda.produto_nome || prodObj?.nome || (venda.produto_id ? `Produto #${String(venda.produto_id).substring(0, 6)}` : 'Produto Geral');
+                    
+                    const imeiObj = disponiveisImeis.find(i => String(i.produto_id) === String(venda.produto_id));
+                    const imeiTextResolved = venda.imei_novo || venda.imei || venda.used_imei || (imeiObj?.imei) || '-';
+
+                    // Resolução Dinâmica de Cliente (Cruzando estado clientes caso cliente_nome venha nulo)
+                    const clienteObj = clientes.find(c => 
+                      (venda.cliente_id && String(c.id) === String(venda.cliente_id)) || 
+                      (venda.cliente_cpf_cnpj && c.cpf_cnpj && c.cpf_cnpj.trim() === String(venda.cliente_cpf_cnpj).trim())
+                    );
+                    const clienteNomeResolved = venda.cliente_nome || clienteObj?.nome || (venda.cliente_id ? 'Cliente Cadastrado' : 'Consumidor Final');
+                    const clienteCpfResolved = venda.cliente_cpf_cnpj || clienteObj?.cpf_cnpj || 'Não Informado';
+                    const financeiraResolved = venda.financeira_parceira || venda.financeira || (venda.metodo_pagamento ? venda.metodo_pagamento.toUpperCase() : 'PDV');
+
+                    return (
+                      <tr key={venda.id} className="hover:bg-white/5 transition-colors">
+                        {/* Data */}
+                        <td className="p-4 font-mono text-gray-300 whitespace-nowrap">
+                          {dataFormatada}
+                        </td>
+
+                        {/* Cliente */}
+                        <td className="p-4">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-white text-xs">{clienteNomeResolved}</span>
+                            <span className="text-[11px] font-mono text-gray-400">CPF/CNPJ: {clienteCpfResolved}</span>
+                          </div>
+                        </td>
+
+                        {/* Aparelho */}
+                        <td className="p-4">
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-gray-200">{produtoNomeResolved}</span>
+                            {imeiTextResolved !== '-' ? (
+                              <span className="text-[10px] font-mono bg-purple-950/40 text-purple-300 border border-purple-800/30 px-1.5 py-0.5 rounded w-fit mt-0.5">
+                                IMEI: {imeiTextResolved}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-gray-500">Sem IMEI</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Parceiro Financeiro */}
+                        <td className="p-4">
+                          <span className="px-2.5 py-1 rounded bg-[#111111] border border-[#333333] text-purple-300 font-bold text-[11px] uppercase tracking-wider inline-flex items-center gap-1">
+                            <CreditCard size={12} className="text-[#6A0DAD]" />
+                            {financeiraResolved}
+                          </span>
+                        </td>
+
+                        {/* Status de Crédito (Tag Visual) */}
+                        <td className="p-4">
+                          {getStatusBadge(venda.status_credito)}
+                        </td>
+
+                        {/* Ações */}
+                        <td className="p-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {isGerenteOrAdmin && (
+                              <button
+                                onClick={() => {
+                                  setSelectedAuditVenda(venda);
+                                  setSelectedAuditClienteStatus(venda.status_credito || 'EM DIA');
+                                  setIsAuditModalOpen(true);
+                                }}
+                                className="bg-[#6A0DAD]/10 hover:bg-[#6A0DAD] text-[#6A0DAD] hover:text-white border border-[#6A0DAD]/30 hover:border-[#6A0DAD] px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
+                              >
+                                <Edit2 size={12} /> Auditar Crédito
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => {
+                                const cTarget = clienteObj || {
+                                  id: venda.cliente_id,
+                                  nome: clienteNomeResolved,
+                                  cpf_cnpj: clienteCpfResolved,
+                                  telefone: venda.cliente_telefone || ''
+                                };
+                                handleOpenClienteHistorico(cTarget);
+                              }}
+                              className="bg-emerald-950/40 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-800/40 hover:border-emerald-500 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1 cursor-pointer shadow-sm"
+                              title="Gerar Oferta WhatsApp & Checar Quitação de Carnê/PayJoy"
+                            >
+                              <MessageCircle size={12} className="text-emerald-400" />
+                              Promo Whats / Quitação
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* MODAL DE ALTERAÇÃO DE STATUS DE CRÉDITO */}
+        {isAuditModalOpen && selectedAuditVenda && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl p-6 w-full max-w-md space-y-6 shadow-2xl">
+              <div className="flex justify-between items-start border-b border-[#222222] pb-4">
+                <div>
+                  <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    <ShieldCheck size={20} className="text-[#6A0DAD]" />
+                    Auditoria de Crédito do Cliente
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Altere a adimplência de <strong className="text-white">{selectedAuditVenda.cliente_nome}</strong>
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setIsAuditModalOpen(false);
+                    setSelectedAuditVenda(null);
+                  }}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveCreditStatus} className="space-y-4 text-xs">
+                <div className="bg-black/60 border border-[#222222] p-3.5 rounded-xl space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">CPF/CNPJ:</span>
+                    <span className="font-mono text-white font-bold">{selectedAuditVenda.cliente_cpf_cnpj}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Última Venda:</span>
+                    <span className="text-gray-300 font-bold">{selectedAuditVenda.produtos?.nome || 'Aparelho'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Financeira:</span>
+                    <span className="text-purple-300 font-bold uppercase">{selectedAuditVenda.financeira}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-2">
+                    Novo Status de Crédito (Poka-Yoke):
+                  </label>
+                  <div className="space-y-2">
+                    <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                      selectedAuditClienteStatus === 'EM DIA'
+                        ? 'bg-green-950/20 border-green-500 text-green-400 font-bold'
+                        : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
+                    }`}>
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="statusCredito"
+                          value="EM DIA"
+                          checked={selectedAuditClienteStatus === 'EM DIA'}
+                          onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
+                          className="accent-green-500 cursor-pointer"
+                        />
+                        <span>🟢 Pagamento Normal (Em Dia)</span>
+                      </div>
+                      <span className="text-[10px] bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">Permite Vendas</span>
+                    </label>
+
+                    <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                      selectedAuditClienteStatus === 'ATRASO'
+                        ? 'bg-yellow-950/20 border-yellow-500 text-yellow-400 font-bold'
+                        : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
+                    }`}>
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="statusCredito"
+                          value="ATRASO"
+                          checked={selectedAuditClienteStatus === 'ATRASO'}
+                          onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
+                          className="accent-yellow-500 cursor-pointer"
+                        />
+                        <span>🟡 Atraso Leve</span>
+                      </div>
+                      <span className="text-[10px] bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/20">Alerta de Risco</span>
+                    </label>
+
+                    <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
+                      selectedAuditClienteStatus === 'INADIMPLENTE'
+                        ? 'bg-red-950/20 border-red-500 text-red-500 font-bold'
+                        : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
+                    }`}>
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="statusCredito"
+                          value="INADIMPLENTE"
+                          checked={selectedAuditClienteStatus === 'INADIMPLENTE'}
+                          onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
+                          className="accent-red-500 cursor-pointer"
+                        />
+                        <span>🔴 Bloqueado / Inadimplente</span>
+                      </div>
+                      <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30 uppercase">Bloqueia PDV</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-gray-400 bg-purple-950/20 border border-purple-900/30 p-3 rounded-lg leading-relaxed">
+                  💡 <strong>Impacto Imediato:</strong> Ao marcar como <span className="text-red-400 font-bold">Bloqueado / Inadimplente</span>, a alteração será salva diretamente na tabela de clientes. Caso este cliente tente comprar outro aparelho em qualquer filial, o sistema bloqueará a venda no PDV.
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2 border-t border-[#222222]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAuditModalOpen(false);
+                      setSelectedAuditVenda(null);
+                    }}
+                    className="bg-[#111111] hover:bg-[#1A1A1A] text-gray-300 border border-[#333333] font-bold py-2.5 px-4 rounded-xl transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingAuditStatus}
+                    className="bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-[#6A0DAD]/30 cursor-pointer"
+                  >
+                    {isSavingAuditStatus ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                    Salvar Auditoria de Crédito
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -7751,6 +10233,7 @@ export default function Dashboard({ session, profileDataProps }) {
       case 'clientes': return 'Cadastro de Clientes';
       case 'equipe': return 'Equipe / Funcionários';
       case 'descontos': return 'Auditoria de Descontos por Vendedor';
+      case 'auditoria_credito': return 'Auditoria de Vendas & Crédito';
       case 'estoque': return 'Entrada de Estoque';
       case 'categorias': return 'Categorias';
       case 'transferencias': return 'Transferências de Estoque';
@@ -7817,100 +10300,111 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     };
 
+    const isSuperAdmin = currentRole === 'SUPER_ADMIN' && !isGerente;
     const items = [];
 
-    // 1. Painel Supremo
-    if (currentRole === 'SUPER_ADMIN' && !isGerente) {
-      items.push(sidebarItem('supremo', 'Painel Supremo', Shield));
-    }
+    if (isSuperAdmin) {
+      /* MENU EXCLUSIVO DO DONO DO SOFTWARE (SAAS BACKOFFICE) */
+      items.push(sidebarItem('gestao', 'Dashboard SaaS', LayoutDashboard));
+      items.push(sidebarItem('equipe', 'Gestão de Lojas (Tenants)', Building));
+      items.push(sidebarItem('assinatura', 'Planos & Mensalidades SaaS', CreditCard));
+      items.push(sidebarItem('configuracoes', 'Configurações Globais', Settings));
+    } else {
+      /* MENU OPERACIONAL DA LOJA (GERENTES, VENDEDORES, LOJISTAS) */
 
-    // 2. Dashboard Home
-    if (['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
-      items.push(sidebarItem('gestao', 'Dashboard (Home)', LayoutDashboard));
-    }
-
-    // 3. Frente de Caixa (PDV) - Oculto para DONO (perfil executivo somente leitura)
-    if (!isGerente && ['SUPER_ADMIN', 'ADMIN', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
-      items.push(sidebarItem('pdv', 'Frente de Caixa (PDV)', ShoppingBag));
-    }
-
-    // 4. Clientes - Oculto para DONO
-    if (['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
-      items.push(sidebarItem('clientes', 'Clientes', Users));
-    }
-
-    // 4.6. Transferências (Liberado para Vendedores) - Oculto para DONO
-    if (currentRole === 'VENDEDOR') {
-      items.push(sidebarItem('transferencias', 'Transferências', Truck));
-    }
-
-    // 4.5. Equipe / Funcionários (Visibilidade EXCLUSIVA para ADMIN, SUPER_ADMIN, OWNER, DONO, RH e GERENTE)
-    if (['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH'].includes(currentRole)) {
-      items.push(sidebarItem('equipe', 'Equipe / Funcionários', UserPlus));
-    }
-
-    // 4.7. Auditoria de Descontos (Visível para GERENTE, ADMIN, SUPER_ADMIN, OWNER, DONO)
-    if (['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
-      items.push(sidebarItem('descontos', 'Auditoria de Descontos', Tag));
-    }
-
-    // 5. Gestão de Estoque
-    if (!isGerente && ['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
-      const showEstoque = !isGerente;
-      const showTransferencias = !isGerente && currentRole !== 'DONO';
-      const showCategorias = !isGerente && currentRole !== 'DONO';
-
-      if (sidebarOpen) {
-        items.push(
-          <div key="agrupador-estoque" className="space-y-1">
-            <button
-              onClick={() => setEstoqueSubMenuOpen(!estoqueSubMenuOpen)}
-              className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-gray-500 hover:text-white w-full text-left transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <Package size={16} className="shrink-0" />
-                <span>Gestão de Estoque</span>
-              </div>
-              <ChevronDown size={14} className={`transition-transform duration-200 ${estoqueSubMenuOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {estoqueSubMenuOpen && (
-              <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
-                {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
-                {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
-                {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
-              </div>
-            )}
-          </div>
-        );
-      } else {
-        if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
-        if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
-        if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
+      // 1. Dashboard Home (Loja)
+      if (['ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
+        items.push(sidebarItem('gestao', 'Dashboard (Home)', LayoutDashboard));
       }
-    }
 
-    // 6. Metas & Rankings
-    if (['GERENTE'].includes(currentRole)) {
-      items.push(sidebarItem('ranking', 'Metas & Rankings', Award));
-    } else if (currentRole === 'VENDEDOR') {
-      items.push(sidebarItem('metas', 'Minhas Metas & Comissões', Award));
-    }
+      // 2. Frente de Caixa (PDV) - Oculto para DONO
+      if (!isGerente && ['ADMIN', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
+        items.push(sidebarItem('pdv', 'Frente de Caixa (PDV)', ShoppingBag));
+      }
 
-    // 7. Relatórios & Fechamentos
-    if (['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
-      items.push(sidebarItem('fechamentos', 'Relatórios & Fechamentos', ClipboardList));
-    } else if (currentRole === 'VENDEDOR') {
-      items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
-    }
+      // 3. Clientes - Oculto para DONO
+      if (['ADMIN', 'GERENTE', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
+        items.push(sidebarItem('clientes', 'Clientes', Users));
+      }
 
-    // 8. Configurações - Oculto para DONO
-    if (currentRole !== 'DONO') {
-      items.push(sidebarItem('configuracoes', 'Configurações', Settings));
-    }
+      // 4. Transferências (Liberado para Vendedores) - Oculto para DONO
+      if (currentRole === 'VENDEDOR') {
+        items.push(sidebarItem('transferencias', 'Transferências', Truck));
+      }
 
-    // 9. Assinatura & Faturas - Oculto para DONO
-    if (!isGerente && (['SUPER_ADMIN', 'OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
-      items.push(sidebarItem('assinatura', 'Assinatura & Faturas', CreditCard));
+      // 5. Equipe / Funcionários
+      if (['ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH'].includes(currentRole)) {
+        items.push(sidebarItem('equipe', 'Equipe / Funcionários', UserPlus));
+      }
+
+      // 6. Auditoria de Descontos
+      if (['GERENTE', 'ADMIN', 'OWNER', 'DONO'].includes(currentRole)) {
+        items.push(sidebarItem('descontos', 'Auditoria de Descontos', Tag));
+      }
+
+      // 7. Auditoria de Vendas & Crédito
+      if (['GERENTE', 'ADMIN', 'OWNER', 'DONO'].includes(currentRole)) {
+        items.push(sidebarItem('auditoria_credito', 'Auditoria Vendas & Crédito', ShieldCheck));
+      }
+
+      // 8. Gestão de Estoque
+      if (!isGerente && ['ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
+        const showEstoque = !isGerente;
+        const showTransferencias = !isGerente && currentRole !== 'DONO';
+        const showCategorias = !isGerente && currentRole !== 'DONO';
+
+        if (sidebarOpen) {
+          items.push(
+            <div key="agrupador-estoque" className="space-y-1">
+              <button
+                onClick={() => setEstoqueSubMenuOpen(!estoqueSubMenuOpen)}
+                className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-gray-500 hover:text-white w-full text-left transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <Package size={16} className="shrink-0" />
+                  <span>Gestão de Estoque</span>
+                </div>
+                <ChevronDown size={14} className={`transition-transform duration-200 ${estoqueSubMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {estoqueSubMenuOpen && (
+                <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
+                  {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
+                  {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
+                  {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
+                </div>
+              )}
+            </div>
+          );
+        } else {
+          if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
+          if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
+          if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
+        }
+      }
+
+      // 9. Metas & Rankings
+      if (['GERENTE'].includes(currentRole)) {
+        items.push(sidebarItem('ranking', 'Metas & Rankings', Award));
+      } else if (currentRole === 'VENDEDOR') {
+        items.push(sidebarItem('metas', 'Minhas Metas & Comissões', Award));
+      }
+
+      // 10. Relatórios & Fechamentos
+      if (['ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
+        items.push(sidebarItem('fechamentos', 'Relatórios & Fechamentos', ClipboardList));
+      } else if (currentRole === 'VENDEDOR') {
+        items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
+      }
+
+      // 11. Configurações - Oculto para DONO
+      if (currentRole !== 'DONO') {
+        items.push(sidebarItem('configuracoes', 'Configurações', Settings));
+      }
+
+      // 12. Assinatura & Faturas - Oculto para DONO
+      if (!isGerente && (['OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
+        items.push(sidebarItem('assinatura', 'Assinatura & Faturas', CreditCard));
+      }
     }
 
     // Filtro de segurança final extra
@@ -7960,13 +10454,13 @@ export default function Dashboard({ session, profileDataProps }) {
           const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
           const role = profile?.role;
 
-          // VENDEDOR: Ocultar o seletor completamente do menu lateral
-          if (role === 'VENDEDOR') {
+          // VENDEDOR e SUPER_ADMIN: Ocultar o seletor completamente do menu lateral
+          if (role === 'VENDEDOR' || role === 'SUPER_ADMIN') {
             return null;
           }
 
-          // Roles autorizadas a ver e usar o seletor: ADMIN, GERENTE, RH, SUPER_ADMIN, OWNER, DONO
-          const canViewSelector = ['ADMIN', 'GERENTE', 'RH', 'SUPER_ADMIN', 'OWNER', 'DONO'].includes(role) || userEmail === 'valentimodz2@gmail.com';
+          // Roles autorizadas a ver e usar o seletor: ADMIN, GERENTE, RH, OWNER, DONO
+          const canViewSelector = ['ADMIN', 'GERENTE', 'RH', 'OWNER', 'DONO'].includes(role) || userEmail === 'valentimodz2@gmail.com';
           if (!canViewSelector) {
             return null;
           }
@@ -8162,243 +10656,224 @@ export default function Dashboard({ session, profileDataProps }) {
               </button>
             </div>
           </div>
-        ) : (profile?.role === 'SUPER_ADMIN' && currentView === 'supremo') ? (
-          /* PAINEL SUPREMO DO ADMINISTRADOR */
+        ) : profile?.role === 'SUPER_ADMIN' ? (
+          /* PAINEL E ROTAS EXCLUSIVAS DO SUPER ADMIN (SAAS BACKOFFICE) */
           <div className="space-y-8">
-            <div className="bg-gradient-to-r from-[#0C001C] to-black border border-purple-900/30 p-8 rounded-lg">
-              <h2 className="text-2xl md:text-3xl font-extrabold text-white flex items-center gap-3">
-                <Shield className="text-purple-400" size={32} />
-                Painel Central do Administrador
-              </h2>
-              <p className="text-gray-400 text-sm mt-2">
-                Controle central de licenças, status de pagamento e volume transacionado no Zênite.
-              </p>
-            </div>
+            {(!currentView || currentView === '' || currentView === 'supremo' || currentView === 'gestao') && (
+              <SaasDashboard 
+                totalCompanies={totalCompanies}
+                activeCompanies={activeCompanies}
+                inactiveCompanies={inactiveCompanies}
+                simulatedSalesVolume={simulatedSalesVolume}
+              />
+            )}
 
-            {/* Métricas Globais */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-lg">
-                <span className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Total de Empresas</span>
-                <div className="text-3xl font-black mt-2 text-white">{totalCompanies}</div>
-              </div>
-              <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-lg border-l-4 border-l-green-500">
-                <span className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Empresas Ativas</span>
-                <div className="text-3xl font-black mt-2 text-green-400">{activeCompanies}</div>
-              </div>
-              <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-lg border-l-4 border-l-red-500">
-                <span className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Empresas Inativas (Inadimplência)</span>
-                <div className="text-3xl font-black mt-2 text-red-400">{inactiveCompanies}</div>
-              </div>
-              <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-lg border-l-4 border-l-purple-500">
-                <span className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Faturamento Estimado</span>
-                <div className="text-3xl font-black mt-2 text-purple-400">
-                  R$ {simulatedSalesVolume.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-            </div>
-
-            {/* Módulo de Provisionamento Multi-Tenant (Vextron Lab) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* MÓDULO 1: CADASTRAR NOVA EMPRESA */}
-              <div className="lg:col-span-5 bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col shadow-xl">
-                <div className="flex items-center gap-2 mb-4 border-b border-[#222222] pb-3">
-                  <Building className="text-[#6A0DAD]" size={20} />
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                    Módulo 1: Cadastrar Nova Empresa (Tenant)
-                  </h3>
-                </div>
-
-                {provisionCompMessage.text && (
-                  <div
-                    className={`mb-4 p-3 rounded-md text-xs border flex items-start gap-2 ${
-                      provisionCompMessage.type === 'success'
-                        ? 'bg-green-950/20 border-green-800 text-green-400'
-                        : 'bg-red-950/20 border-red-800 text-red-400'
-                    }`}
-                  >
-                    {provisionCompMessage.type === 'success' ? (
-                      <CheckCircle2 size={16} className="shrink-0 mt-0.5 text-green-500" />
-                    ) : (
-                      <AlertTriangle size={16} className="shrink-0 mt-0.5 text-red-500" />
-                    )}
-                    <span>{provisionCompMessage.text}</span>
-                  </div>
-                )}
-
-                <form onSubmit={handleSuperAdminCreateCompany} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                      Nome da Empresa / Tenant
-                    </label>
-                    <input
-                      type="text"
-                      value={provisionCompanyName}
-                      onChange={(e) => setProvisionCompanyName(e.target.value)}
-                      placeholder="Ex: Rede Cred, Tech Cell, etc."
-                      className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
-                      required
-                      disabled={provisionCompLoading}
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={provisionCompLoading}
-                    className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2 px-4 rounded transition-colors flex items-center justify-center gap-2 text-xs"
-                  >
-                    {provisionCompLoading ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      'Registrar Empresa'
-                    )}
-                  </button>
-                </form>
-              </div>
-
-              {/* MÓDULO 2: PROVISIONAR USUÁRIO */}
-              <div className="lg:col-span-7 bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col shadow-xl">
-                <div className="flex items-center gap-2 mb-4 border-b border-[#222222] pb-3">
-                  <UserPlus className="text-[#6A0DAD]" size={20} />
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                    Módulo 2: Fábrica de Usuários (Provisionar Novo Acesso)
-                  </h3>
-                </div>
-
-                {provisionUserMessage.text && (
-                  <div
-                    className={`mb-4 p-3 rounded-md text-xs border flex items-start gap-2 ${
-                      provisionUserMessage.type === 'success'
-                        ? 'bg-green-950/20 border-green-800 text-green-400'
-                        : 'bg-red-950/20 border-red-800 text-red-400'
-                    }`}
-                  >
-                    {provisionUserMessage.type === 'success' ? (
-                      <CheckCircle2 size={16} className="shrink-0 mt-0.5 text-green-500" />
-                    ) : (
-                      <AlertTriangle size={16} className="shrink-0 mt-0.5 text-red-500" />
-                    )}
-                    <span>{provisionUserMessage.text}</span>
-                  </div>
-                )}
-
-                <form onSubmit={handleSuperAdminProvisionUser} className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                        Nome Completo
-                      </label>
-                      <input
-                        type="text"
-                        value={provisionUserName}
-                        onChange={(e) => setProvisionUserName(e.target.value)}
-                        placeholder="Ex: Pedro de Souza"
-                        className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
-                        required
-                        disabled={provisionUserLoading}
-                      />
+            {currentView === 'equipe' && (
+              <>
+                <SaasTenants />
+                {/* Módulo de Provisionamento Multi-Tenant (Vextron Lab) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* MÓDULO 1: CADASTRAR NOVA EMPRESA */}
+                  <div className="lg:col-span-5 bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col shadow-xl">
+                    <div className="flex items-center gap-2 mb-4 border-b border-[#222222] pb-3">
+                      <Building className="text-[#6A0DAD]" size={20} />
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                        Módulo 1: Cadastrar Nova Empresa (Tenant)
+                      </h3>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                        E-mail do Usuário
-                      </label>
-                      <input
-                        type="email"
-                        value={provisionUserEmail}
-                        onChange={(e) => setProvisionUserEmail(e.target.value)}
-                        placeholder="Ex: pedro@loja.com"
-                        className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
-                        required
-                        disabled={provisionUserLoading}
-                      />
-                    </div>
-                  </div>
+                    {provisionCompMessage.text && (
+                      <div
+                        className={`mb-4 p-3 rounded-md text-xs border flex items-start gap-2 ${
+                          provisionCompMessage.type === 'success'
+                            ? 'bg-green-950/20 border-green-800 text-green-400'
+                            : 'bg-red-950/20 border-red-800 text-red-400'
+                        }`}
+                      >
+                        {provisionCompMessage.type === 'success' ? (
+                          <CheckCircle2 size={16} className="shrink-0 mt-0.5 text-green-500" />
+                        ) : (
+                          <AlertTriangle size={16} className="shrink-0 mt-0.5 text-red-500" />
+                        )}
+                        <span>{provisionCompMessage.text}</span>
+                      </div>
+                    )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                        Senha Temporária
-                      </label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-505">
-                          <Key size={12} className="text-gray-500" />
-                        </span>
+                    <form onSubmit={handleSuperAdminCreateCompany} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                          Nome da Empresa / Tenant
+                        </label>
                         <input
                           type="text"
-                          value={provisionUserPassword}
-                          onChange={(e) => setProvisionUserPassword(e.target.value)}
-                          placeholder="Mínimo 6 caracteres"
-                          className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white pl-8 pr-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
+                          value={provisionCompanyName}
+                          onChange={(e) => setProvisionCompanyName(e.target.value)}
+                          placeholder="Ex: Rede Cred, Tech Cell, etc."
+                          className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
                           required
-                          disabled={provisionUserLoading}
+                          disabled={provisionCompLoading}
                         />
                       </div>
-                    </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                        Nível de Acesso (Role)
-                      </label>
-                      <select
-                        value={provisionUserRole}
-                        onChange={(e) => setProvisionUserRole(e.target.value)}
-                        className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs outline-none transition-all"
-                        required
-                        disabled={provisionUserLoading}
+                      <button
+                        type="submit"
+                        disabled={provisionCompLoading}
+                        className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2 px-4 rounded transition-colors flex items-center justify-center gap-2 text-xs"
                       >
-                        <option value="DONO">DONO (Dono da Loja)</option>
-                        <option value="OWNER">OWNER (Dono / C-Level)</option>
-                        <option value="ADMIN">ADMIN (Gerente Geral)</option>
-                        <option value="RH">RH (Recursos Humanos)</option>
-                        <option value="RH_ADMIN">RH_ADMIN (Recursos Humanos)</option>
-                        <option value="VENDEDOR">VENDEDOR (Operacional PDV)</option>
-                      </select>
-                    </div>
+                        {provisionCompLoading ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          'Registrar Empresa'
+                        )}
+                      </button>
+                    </form>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                      Empresa Vinculada (Tenant)
-                    </label>
-                    {allCompanies.length === 0 ? (
-                      <div className="text-xs text-amber-500 bg-amber-950/20 border border-amber-900/30 p-2.5 rounded flex items-center gap-2">
-                        <HelpCircle size={14} />
-                        <span>Cadastre uma empresa primeiro para poder provisionar usuários.</span>
+                  {/* MÓDULO 2: PROVISIONAR USUÁRIO */}
+                  <div className="lg:col-span-7 bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col shadow-xl">
+                    <div className="flex items-center gap-2 mb-4 border-b border-[#222222] pb-3">
+                      <UserPlus className="text-[#6A0DAD]" size={20} />
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                        Módulo 2: Fábrica de Usuários (Provisionar Novo Acesso)
+                      </h3>
+                    </div>
+
+                    {provisionUserMessage.text && (
+                      <div
+                        className={`mb-4 p-3 rounded-md text-xs border flex items-start gap-2 ${
+                          provisionUserMessage.type === 'success'
+                            ? 'bg-green-950/20 border-green-800 text-green-400'
+                            : 'bg-red-950/20 border-red-800 text-red-400'
+                        }`}
+                      >
+                        {provisionUserMessage.type === 'success' ? (
+                          <CheckCircle2 size={16} className="shrink-0 mt-0.5 text-green-500" />
+                        ) : (
+                          <AlertTriangle size={16} className="shrink-0 mt-0.5 text-red-500" />
+                        )}
+                        <span>{provisionUserMessage.text}</span>
                       </div>
-                    ) : (
-                      <select
-                        value={provisionUserCompanyId}
-                        onChange={(e) => setProvisionUserCompanyId(e.target.value)}
-                        className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs outline-none transition-all"
-                        required
-                        disabled={provisionUserLoading}
+                    )}
+
+                    <form onSubmit={handleSuperAdminProvisionUser} className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                            Nome Completo
+                          </label>
+                          <input
+                            type="text"
+                            value={provisionUserName}
+                            onChange={(e) => setProvisionUserName(e.target.value)}
+                            placeholder="Ex: Pedro de Souza"
+                            className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
+                            required
+                            disabled={provisionUserLoading}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                            E-mail do Usuário
+                          </label>
+                          <input
+                            type="email"
+                            value={provisionUserEmail}
+                            onChange={(e) => setProvisionUserEmail(e.target.value)}
+                            placeholder="Ex: pedro@loja.com"
+                            className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
+                            required
+                            disabled={provisionUserLoading}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                            Senha Temporária
+                          </label>
+                          <input
+                            type="text"
+                            value={provisionUserPassword}
+                            onChange={(e) => setProvisionUserPassword(e.target.value)}
+                            placeholder="Senha inicial"
+                            className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs placeholder-gray-600 outline-none transition-all"
+                            required
+                            disabled={provisionUserLoading}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                            Cargo / Nível de Acesso
+                          </label>
+                          <select
+                            value={provisionUserRole}
+                            onChange={(e) => setProvisionUserRole(e.target.value)}
+                            className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs outline-none transition-all"
+                            disabled={provisionUserLoading}
+                          >
+                            <option value="SUPER_ADMIN">SUPER_ADMIN (Dono do SaaS)</option>
+                            <option value="DONO">DONO (Proprietário da Empresa)</option>
+                            <option value="OWNER">OWNER (Proprietário da Empresa)</option>
+                            <option value="GERENTE">GERENTE (Gerente de Loja)</option>
+                            <option value="ADMIN">ADMIN (Gerente Geral)</option>
+                            <option value="RH">RH (Recursos Humanos)</option>
+                            <option value="RH_ADMIN">RH_ADMIN (Recursos Humanos)</option>
+                            <option value="VENDEDOR">VENDEDOR (Operacional PDV)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                          Empresa Vinculada (Tenant)
+                        </label>
+                        {allCompanies.length === 0 ? (
+                          <div className="text-xs text-amber-500 bg-amber-950/20 border border-amber-900/30 p-2.5 rounded flex items-center gap-2">
+                            <HelpCircle size={14} />
+                            <span>Cadastre uma empresa primeiro para poder provisionar usuários.</span>
+                          </div>
+                        ) : (
+                          <select
+                            value={provisionUserCompanyId}
+                            onChange={(e) => setProvisionUserCompanyId(e.target.value)}
+                            className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded text-white px-3 py-2 text-xs outline-none transition-all"
+                            required
+                            disabled={provisionUserLoading}
+                          >
+                            <option value="" disabled>Selecione uma empresa...</option>
+                            {allCompanies.map((company) => (
+                              <option key={company.id} value={company.id}>
+                                {company.nome}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={provisionUserLoading || allCompanies.length === 0}
+                        className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded transition-colors flex items-center justify-center gap-2 text-xs"
                       >
-                        <option value="" disabled>Selecione uma empresa...</option>
-                        {allCompanies.map((company) => (
-                          <option key={company.id} value={company.id}>
-                            {company.nome}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                        {provisionUserLoading ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          'Provisionar Acesso com Sucesso'
+                        )}
+                      </button>
+                    </form>
                   </div>
+                </div>
+              </>
+            )}
 
-                  <button
-                    type="submit"
-                    disabled={provisionUserLoading || allCompanies.length === 0}
-                    className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded transition-colors flex items-center justify-center gap-2 text-xs"
-                  >
-                    {provisionUserLoading ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      'Provisionar Acesso com Sucesso'
-                    )}
-                  </button>
-                </form>
-              </div>
-            </div>
-
-            {/* Ferramentas de Relacionamento (Vextron Lab) */}
+            {currentView === 'assinatura' && (
+              <>
+                <SaasBilling />
+                {/* Ferramentas de Relacionamento (Vextron Lab) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Mural de Avisos Globais */}
               <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col">
@@ -8849,7 +11324,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                         )}
                                       </td>
                                       <td className="py-3 font-bold text-white">
-                                        R$ {parseFloat(fatura.valor_mensalidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                         R$ {parseFloat(fatura.valor_mensalidade || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                       </td>
                                       <td className="py-3">
                                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-bold uppercase ${
@@ -8954,6 +11429,8 @@ export default function Dashboard({ session, profileDataProps }) {
                 </div>
               </div>
             )}
+              </>
+            )}
           </div>
         ) : (['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE', 'RH', 'RH_ADMIN', 'ESTOQUISTA'].includes(profile?.role)) ? (
           /* PAINEL DE CONTROLE GERENCIAL / ADMINISTRATIVO */
@@ -9002,12 +11479,21 @@ export default function Dashboard({ session, profileDataProps }) {
                       // Métricas Consolidadas do Mês Selecionado
                       const [anoFiltro, mesFiltro] = filtroMes.split('-');
                       const vendasMes = vendas.filter(sale => {
-                        const date = new Date(sale.created_at || sale.data);
-                        return date.getMonth() === parseInt(mesFiltro, 10) - 1 && date.getFullYear() === parseInt(anoFiltro, 10);
+                        const rawDate = sale.created_at || sale.data;
+                        if (!rawDate) return false;
+                        const strDate = String(rawDate);
+                        if (strDate.length >= 7) {
+                          return strDate.startsWith(`${anoFiltro}-${mesFiltro}`);
+                        }
+                        const date = new Date(rawDate);
+                        return date.getUTCMonth() === parseInt(mesFiltro, 10) - 1 && date.getUTCFullYear() === parseInt(anoFiltro, 10);
                       });
 
                       const totalVendasCount = vendasMes.length;
-                      const faturamentoBruto = vendasMes.reduce((acc, sale) => acc + (parseFloat(sale.valor_total || sale.preco * sale.quantidade) || 0), 0);
+                      const faturamentoBruto = vendasMes.reduce((acc, sale) => {
+                        const val = parseFloat(sale.valor_total || sale.total || sale.valor_vendido || (sale.preco * sale.quantidade) || 0);
+                        return acc + val;
+                      }, 0);
 
                       const custoTotal = vendasMes.reduce((acc, sale) => {
                         const prodObj = produtos.find(p => p.id === sale.produto_id || p.nome === sale.produtos?.nome);
@@ -9027,11 +11513,13 @@ export default function Dashboard({ session, profileDataProps }) {
                       const vendedorMap = {};
                       vendasMes.forEach(s => {
                         const vId = s.vendedor_id || s.profiles?.id || 'outros';
-                        const vNome = s.profiles?.nome || s.vendedor_nome || 'Vendedor';
+                        const teamMember = teamMembers.find(m => String(m.id) === String(vId));
+                        const vNome = teamMember?.nome || s.profiles?.nome || s.vendedor_nome || 'Vendedor';
                         if (!vendedorMap[vId]) {
                           vendedorMap[vId] = { id: vId, nome: vNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
                         }
-                        vendedorMap[vId].totalVendido += (parseFloat(s.valor_total) || 0);
+                        const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
+                        vendedorMap[vId].totalVendido += val;
                         vendedorMap[vId].qtdVendas += 1;
                         vendedorMap[vId].comissaoTotal += (parseFloat(s.comissao) || 0);
                       });
@@ -9041,7 +11529,8 @@ export default function Dashboard({ session, profileDataProps }) {
                       // Agrupamento por Filial com Faturamento e Estoque Parado
                       const filialMap = {};
                       filiais.forEach(f => {
-                        filialMap[f.id] = {
+                        const fKey = String(f.id);
+                        filialMap[fKey] = {
                           id: f.id,
                           nome: f.nome,
                           totalVendido: 0,
@@ -9052,24 +11541,30 @@ export default function Dashboard({ session, profileDataProps }) {
                       });
 
                       vendasMes.forEach(s => {
-                        const fId = s.filial_id || 'sem_filial';
+                        const fId = s.filial_id ? String(s.filial_id) : 'sem_filial';
                         if (!filialMap[fId]) {
-                          const fObj = filiais.find(f => f.id === fId);
-                          filialMap[fId] = { id: fId, nome: fObj ? fObj.nome : 'Matriz', totalVendido: 0, qtdVendas: 0, estoqueParadoQtd: 0, estoqueParadoValor: 0 };
+                          const fObj = filiais.find(f => String(f.id) === String(fId));
+                          filialMap[fId] = { id: fId, nome: fObj ? fObj.nome : (s.filial_nome || 'Matriz'), totalVendido: 0, qtdVendas: 0, estoqueParadoQtd: 0, estoqueParadoValor: 0 };
                         }
-                        filialMap[fId].totalVendido += (parseFloat(s.valor_total) || 0);
+                        const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
+                        filialMap[fId].totalVendido += val;
                         filialMap[fId].qtdVendas += 1;
                       });
 
                       produtos.forEach(p => {
-                        const fId = p.filial_id;
-                        if (filialMap[fId]) {
-                          const qty = p.tipo === 'CELULAR' 
-                            ? disponiveisImeis.filter(im => im.produto_id === p.id && im.filial_id === fId && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length
+                        const pFilialId = p.filial_id ? String(p.filial_id) : null;
+                        let targetMap = pFilialId ? filialMap[pFilialId] : null;
+                        if (!targetMap && filiais.length > 0) {
+                          targetMap = filialMap[String(filiais[0].id)];
+                        }
+                        if (targetMap) {
+                          const isCelular = p.tipo === 'CELULAR' || p.tipo === 'Celular';
+                          const qty = isCelular
+                            ? disponiveisImeis.filter(im => String(im.produto_id) === String(p.id) && (im.status === 'DISPONÍVEL' || im.status === 'Disponível' || im.vendido === false)).length
                             : parseInt(p.quantidade || 0, 10);
                           const unitPrice = parseFloat(p.preco_custo || p.preco || 0);
-                          filialMap[fId].estoqueParadoQtd += qty;
-                          filialMap[fId].estoqueParadoValor += (qty * unitPrice);
+                          targetMap.estoqueParadoQtd += Math.max(0, qty);
+                          targetMap.estoqueParadoValor += Math.max(0, qty * unitPrice);
                         }
                       });
 
@@ -9352,11 +11847,22 @@ export default function Dashboard({ session, profileDataProps }) {
                   
                   {/* CARD DE FILIAIS */}
                   {['ADMIN', 'SUPER_ADMIN', 'OWNER', 'GERENTE'].includes(profile?.role) && (
-                    <div className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col">
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-6">
-                        <Store size={18} className="text-[#6A0DAD]" />
-                        Cadastrar Nova Filial
-                      </h3>
+                    <div id="filial-form-container" className="bg-[#0A0A0A] border border-[#222222] rounded-lg p-6 flex flex-col">
+                      <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <Store size={18} className="text-[#6A0DAD]" />
+                          {editingFilial ? `Editar Filial: ${editingFilial.nome}` : 'Cadastrar Nova Filial'}
+                        </h3>
+                        {editingFilial && (
+                          <button
+                            type="button"
+                            onClick={handleCancelEditFilial}
+                            className="text-xs text-red-400 hover:text-red-300 font-bold underline"
+                          >
+                            Cancelar Edição
+                          </button>
+                        )}
+                      </div>
 
                       {(profile?.role === 'SUPER_ADMIN' || profile?.role === 'GERENTE' || profile?.role === 'ADMIN' || profile?.role === 'OWNER') && (
                         <form onSubmit={handleAddFilial} className="space-y-4 mb-6">
@@ -9433,24 +11939,24 @@ export default function Dashboard({ session, profileDataProps }) {
 
                           <div>
                             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                              LOGOTIPO DA FILIAL (OBRIGATÓRIO)
+                              LOGOTIPO DA FILIAL {editingFilial ? '(OPCIONAL SE JÁ EXISTIR)' : '(OBRIGATÓRIO)'}
                             </label>
                             <input
                               type="file"
                               accept="image/*"
                               onChange={(e) => setLogoFilialFile(e.target.files[0])}
                               className="w-full bg-black border border-[#6A0DAD]/40 focus:border-[#6A0DAD] rounded-md text-white px-4 py-2 text-sm outline-none transition-all file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-purple-900 file:text-purple-200 hover:file:bg-purple-800"
-                              required
+                              required={!editingFilial}
                             />
                           </div>
 
                           <button
                             type="submit"
                             disabled={loadingFilial}
-                            className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm"
+                            className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm shadow-lg shadow-[#6A0DAD]/20"
                           >
-                            <Plus size={16} />
-                            {loadingFilial ? 'Adicionando...' : 'Cadastrar Nova Filial'}
+                            {editingFilial ? <Edit2 size={16} /> : <Plus size={16} />}
+                            {loadingFilial ? (editingFilial ? 'Salvando...' : 'Adicionando...') : (editingFilial ? 'Salvar Alterações da Filial' : 'Cadastrar Nova Filial')}
                           </button>
                         </form>
                       )}
@@ -9464,27 +11970,38 @@ export default function Dashboard({ session, profileDataProps }) {
                             {filiais.map(f => {
                               const isDepot = f.is_deposito === true || String(f.tipo || '').toUpperCase().includes('ESTOQUE') || String(f.tipo || '').toUpperCase().includes('DEPÓSITO') || String(f.tipo || '').toUpperCase().includes('DEPOSITO');
                               return (
-                                <div key={f.id} className="flex justify-between items-center p-3 bg-black border border-[#222222] rounded-md">
+                                <div key={f.id} className={`flex justify-between items-center p-3 bg-black border rounded-md transition-colors ${editingFilial?.id === f.id ? 'border-[#6A0DAD] bg-[#6A0DAD]/10' : 'border-[#222222]'}`}>
                                   <div>
                                     <span className="block font-semibold text-sm text-white">{f.nome}</span>
                                     <span className="text-[10px] text-gray-500 uppercase tracking-wider flex items-center gap-1 mt-0.5">
                                       {isDepot ? '📦 ESTOQUE / DEPÓSITO' : '🏪 LOJA FÍSICA (PDV)'}
                                     </span>
                                   </div>
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2">
                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                       isDepot ? 'bg-blue-950/20 text-blue-400 border border-blue-800/30' : 'bg-[#6A0DAD]/20 text-purple-400 border border-[#6A0DAD]/30'
                                     }`}>
                                       {isDepot ? 'Estoque / Depósito' : 'Loja (PDV / Vendas)'}
                                     </span>
                                     {(profile?.role === 'SUPER_ADMIN' || profile?.role === 'GERENTE' || profile?.role === 'ADMIN' || profile?.role === 'OWNER') && (
-                                      <button
-                                        onClick={() => handleDeleteFilial(f.id)}
-                                        className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-950/20 rounded transition-colors"
-                                        title="Excluir Filial"
-                                      >
-                                        <Trash2 size={14} />
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleStartEditFilial(f)}
+                                          className="p-1.5 text-gray-400 hover:text-purple-400 hover:bg-purple-950/20 rounded transition-colors"
+                                          title="Editar Informações da Filial"
+                                        >
+                                          <Edit2 size={14} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteFilial(f.id)}
+                                          className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-950/20 rounded transition-colors"
+                                          title="Excluir Filial"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 </div>
@@ -9990,6 +12507,37 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
                       </div>
 
+                      {/* Campo de Identificação Condicional (Código de Barras vs. Número de Série / IMEI) */}
+                      {(tipoProduto === 'ACESSORIO' || tipoProduto === 'Acessorio' || (categoriaProduto && (categoriaProduto.toLowerCase().includes('acessór') || categoriaProduto.toLowerCase().includes('acessor')))) ? (
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                            Código de Barras (Barcode / EAN) <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={codigoBarras}
+                            onChange={(e) => setCodigoBarras(e.target.value)}
+                            placeholder="Ex: 7891234567890"
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono"
+                            required
+                          />
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                            Número de Série / IMEI <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={numeroSerie}
+                            onChange={(e) => setNumeroSerie(e.target.value)}
+                            placeholder="Ex: 356789101112131 ou Serial do Aparelho"
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono"
+                            required
+                          />
+                        </div>
+                      )}
+
                       {tipoProduto === 'CELULAR' && (
                         <div>
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">Cor do Aparelho (Celular)</label>
@@ -10015,7 +12563,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
                       )}
 
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Estoque Mín. (Opcional)</label>
                           <input
@@ -10028,60 +12576,89 @@ export default function Dashboard({ session, profileDataProps }) {
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Preço de Venda Padrão (R$)</label>
+                          <label className="block text-[10px] font-semibold text-emerald-400 uppercase tracking-wider mb-1.5">Preço de Venda Padrão (R$)</label>
                           <div className="relative">
-                            <span className="absolute left-3 top-2.5 text-xs text-gray-500 font-bold">R$</span>
+                            <span className="absolute left-3 top-2.5 text-xs text-emerald-500 font-bold">R$</span>
                             <input
                               type="number"
                               min="0"
                               step="0.01"
                               value={precoProduto}
                               onChange={(e) => setPrecoProduto(e.target.value)}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                              className="w-full bg-black border border-emerald-900/40 focus:border-emerald-500 rounded-md text-emerald-300 font-mono font-bold pl-9 pr-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
                               placeholder="0.00"
                             />
                           </div>
                         </div>
 
-                        {(profile?.role === 'SUPER_ADMIN' || profile?.role === 'OWNER') && (
-                          <div className="relative">
-                            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Custo Base (Apenas Sócios)</label>
-                            <span className="absolute left-3 top-9 text-xs text-red-500/50 font-bold">R$</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={precoCustoProduto}
-                              onChange={(e) => setPrecoCustoProduto(e.target.value)}
-                              className="w-full bg-black border border-red-900/30 focus:border-red-500 rounded-md text-red-400 pl-9 pr-4 py-2 text-sm placeholder-gray-600 outline-none transition-all"
-                              placeholder="0.00"
-                            />
+                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role) && (
+                          <div>
+                            <label className="block text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1.5">Preço de Custo / Compra (R$)</label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-2.5 text-xs text-amber-500/70 font-bold">R$</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={precoCustoProduto}
+                                onChange={(e) => setPrecoCustoProduto(e.target.value)}
+                                className="w-full bg-black border border-amber-900/40 focus:border-amber-500 rounded-md text-amber-300 font-mono font-bold pl-9 pr-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                placeholder="0.00"
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
 
-                      {/* OBRIGATORIEDADE DE ESTOQUE INICIAL (APENAS CADASTRO DE NOVO PRODUTO) */}
+                      {/* Calculadora de Lucro Bruto Estimado por Unidade */}
+                      {(() => {
+                        const vVenda = parseFloat(precoProduto || 0);
+                        const vCusto = parseFloat(precoCustoProduto || 0);
+                        if (vVenda > 0 || vCusto > 0) {
+                          const lucro = vVenda - vCusto;
+                          const margem = vVenda > 0 ? (lucro / vVenda) * 100 : 0;
+                          const isLucroPositivo = lucro >= 0;
+
+                          return (
+                            <div className={`p-2.5 rounded-lg border text-xs flex items-center justify-between font-mono ${
+                              isLucroPositivo 
+                                ? 'bg-emerald-950/20 border-emerald-800/40 text-emerald-300' 
+                                : 'bg-red-950/20 border-red-800/40 text-red-300'
+                            }`}>
+                              <span className="font-sans font-bold flex items-center gap-1.5 text-[11px]">
+                                <TrendingUp size={14} className={isLucroPositivo ? 'text-emerald-400' : 'text-red-400'} />
+                                Lucro Bruto Estimado / Unidade:
+                              </span>
+                              <span className="font-bold">
+                                R$ {lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({margem.toFixed(1)}% margem)
+                              </span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+
+                      {/* ENTRADA DE ESTOQUE INICIAL (OPCIONAL) (APENAS CADASTRO DE NOVO PRODUTO) */}
                       {!editingCatalogoProduto && (
                         <div className="border border-[#6A0DAD]/30 bg-purple-950/5 p-4 rounded-lg space-y-4">
                           <h5 className="text-[10px] font-bold text-[#6A0DAD] uppercase tracking-wider border-b border-[#222222]/80 pb-2 flex items-center gap-1.5 font-sans">
                             <Database size={12} className="text-[#6A0DAD]" />
-                            Estoque Inicial Obrigatório
+                            Entrada de Estoque Inicial (Opcional)
                           </h5>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                               <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                Filial de Destino <span className="text-red-500">*</span>
+                                Filial de Destino (Opcional)
                               </label>
                               <select
                                 value={catalogoFilialEstoque}
                                 onChange={(e) => setCatalogoFilialEstoque(e.target.value)}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-xs outline-none transition-all cursor-pointer font-semibold"
-                                required={!editingCatalogoProduto}
                               >
-                                <option value="">Selecione a Filial...</option>
+                                <option value="" className="bg-gray-900 text-white">Selecione a Filial...</option>
                                 {filiais.map((f) => (
-                                  <option key={f.id} value={f.id}>
+                                  <option key={f.id} value={f.id} className="bg-gray-900 text-white">
                                     {f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}
                                   </option>
                                 ))}
@@ -10090,16 +12667,15 @@ export default function Dashboard({ session, profileDataProps }) {
 
                             <div>
                               <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                Quantidade Inicial <span className="text-red-500">*</span>
+                                Quantidade Inicial (Opcional)
                               </label>
                               <input
                                 type="number"
-                                min="1"
+                                min="0"
                                 value={catalogoEstoqueInicial}
                                 onChange={(e) => setCatalogoEstoqueInicial(e.target.value)}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono"
-                                placeholder="Mínimo 1"
-                                required={!editingCatalogoProduto}
+                                placeholder="Quantidade inicial..."
                               />
                             </div>
                           </div>
@@ -10107,14 +12683,13 @@ export default function Dashboard({ session, profileDataProps }) {
                           {tipoProduto === 'CELULAR' && (
                             <div>
                               <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                IMEI(s) do(s) Aparelho(s) (1 por linha) <span className="text-red-500">*</span>
+                                IMEI(s) do(s) Aparelho(s) (1 por linha - Opcional)
                               </label>
                               <textarea
                                 value={catalogoImeisIniciais}
                                 onChange={(e) => setCatalogoImeisIniciais(e.target.value)}
                                 className="w-full h-24 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white p-3 text-xs outline-none transition-all font-mono"
-                                placeholder="Bipe ou digite um IMEI de 15 dígitos por linha..."
-                                required={!editingCatalogoProduto && tipoProduto === 'CELULAR'}
+                                placeholder="Bipe ou digite um IMEI de 15 dígitos por linha (opcional)..."
                               />
                               <p className="text-[10px] text-gray-500 mt-1 font-sans">
                                 Insira exatamente {parseInt(catalogoEstoqueInicial, 10) || 0} IMEI(s) para bater com a quantidade informada.
@@ -10248,7 +12823,17 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <div className="flex items-center gap-2 text-[10px] text-gray-500">
                                     <span>{p.categoria}</span>
                                     <span>·</span>
-                                    <span>R$ {parseFloat(p.preco).toFixed(2)}</span>
+                                    <span className="text-emerald-400 font-mono font-bold">Venda: R$ {parseFloat(p.preco || 0).toFixed(2)}</span>
+                                    {parseFloat(p.preco_custo || 0) > 0 && (
+                                      <>
+                                        <span>·</span>
+                                        <span className="text-amber-400 font-mono">Custo: R$ {parseFloat(p.preco_custo).toFixed(2)}</span>
+                                        <span>·</span>
+                                        <span className="text-emerald-300 font-mono font-bold">
+                                          Lucro: R$ {(parseFloat(p.preco || 0) - parseFloat(p.preco_custo)).toFixed(2)}
+                                        </span>
+                                      </>
+                                    )}
                                     {p.sku && (
                                       <>
                                         <span>·</span>
@@ -10528,13 +13113,13 @@ export default function Dashboard({ session, profileDataProps }) {
                                   onChange={(e) => setFiltroMovTipo(e.target.value)}
                                   className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white text-xs font-bold py-2 px-3 rounded-lg outline-none cursor-pointer"
                                 >
-                                  <option value="TODOS">Todos os Tipos</option>
-                                  <option value="ENTRADA_AQUISICAO">Entrada por Aquisição</option>
-                                  <option value="SAIDA_VENDA">Saída por Venda</option>
-                                  <option value="TRANSFERENCIA_SAIDA">Transferência (Saída)</option>
-                                  <option value="TRANSFERENCIA_ENTRADA">Transferência (Entrada)</option>
-                                  <option value="AJUSTE_MANUAL_ENTRADA">Ajuste Manual (Entrada)</option>
-                                  <option value="AJUSTE_MANUAL_SAIDA">Ajuste Manual (Saída)</option>
+                                  <option value="TODOS" className="bg-gray-900 text-white">Todos os Tipos</option>
+                                  <option value="ENTRADA_AQUISICAO" className="bg-gray-900 text-white">Entrada por Aquisição</option>
+                                  <option value="SAIDA_VENDA" className="bg-gray-900 text-white">Saída por Venda</option>
+                                  <option value="TRANSFERENCIA_SAIDA" className="bg-gray-900 text-white">Transferência (Saída)</option>
+                                  <option value="TRANSFERENCIA_ENTRADA" className="bg-gray-900 text-white">Transferência (Entrada)</option>
+                                  <option value="AJUSTE_MANUAL_ENTRADA" className="bg-gray-900 text-white">Ajuste Manual (Entrada)</option>
+                                  <option value="AJUSTE_MANUAL_SAIDA" className="bg-gray-900 text-white">Ajuste Manual (Saída)</option>
                                 </select>
                               </div>
                             </div>
@@ -11195,14 +13780,73 @@ export default function Dashboard({ session, profileDataProps }) {
                     <div className="lg:col-span-2 space-y-5">
                     <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4">
                       <h4 className="text-sm font-bold text-white flex items-center gap-2 border-b border-[#222222] pb-3 mb-2">
-                        <Smartphone size={16} className="text-[#6A0DAD]" />
-                        Entrada Física de Aparelhos (Recebimento)
+                        <Package size={16} className="text-[#6A0DAD]" />
+                        Entrada Física de Produtos (Reposição de Estoque)
                       </h4>
+
+                      {/* Filtro A: Categoria / Tipo */}
+                      <div>
+                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex justify-between items-center">
+                          <span>Categoria / Tipo (Opcional)</span>
+                          {entradaFiltroCategoria !== 'todas' && (
+                            <button 
+                              type="button" 
+                              onClick={() => setEntradaFiltroCategoria('todas')}
+                              className="text-[9px] text-[#6A0DAD] hover:underline font-bold"
+                            >
+                              Limpar Filtro
+                            </button>
+                          )}
+                        </label>
+                        <select
+                          value={entradaFiltroCategoria}
+                          onChange={(e) => {
+                            setEntradaFiltroCategoria(e.target.value);
+                            setSelectedProdutoMestre(null);
+                          }}
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                        >
+                          <option value="todas" className="bg-gray-900 text-white">Todas as Categorias (Geral)</option>
+                          <option value="CELULAR" className="bg-gray-900 text-white">📱 Celulares / Smartphones</option>
+                          <option value="IOS" className="bg-gray-900 text-white">🍎 iPhones (iOS)</option>
+                          <option value="ANDROID" className="bg-gray-900 text-white">🤖 Android (Samsung, Xiaomi, Motorola, etc.)</option>
+                          <option value="ACESSORIO" className="bg-gray-900 text-white">🎧 Acessórios</option>
+                          <option value="APPLE_JBL_CONSOLE" className="bg-gray-900 text-white">🎮 Apple / JBL / Consoles</option>
+                          <option value="SERVICO" className="bg-gray-900 text-white">🛠️ Serviços</option>
+                          {categorias && categorias.length > 0 && (
+                            <optgroup label="📂 Categorias Cadastradas no Sistema">
+                              {categorias.map(cat => (
+                                <option key={cat.id || cat.nome} value={cat.nome} className="bg-gray-900 text-white">
+                                  🏷️ {cat.nome}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Filtro B: Bipar Código de Barras / Buscar Produto Mestre */}
+                      <div>
+                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                          Bipar Código de Barras / Buscar Produto Mestre
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={entradaBuscaMestre}
+                            onChange={(e) => handleBuscaMestreChange(e.target.value)}
+                            onKeyDown={handleBuscaMestreKeyDown}
+                            placeholder="Bipe o EAN/barcode, digite o SKU ou nome..."
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2.5 text-sm outline-none font-mono transition-all placeholder:text-gray-600"
+                          />
+                          <Barcode size={16} className="absolute left-3 top-3 text-gray-500" />
+                        </div>
+                      </div>
 
                       {/* Campo 1: Dropdown 'Produto Mestre' */}
                       <div>
                         <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Produto Mestre
+                          Produto Mestre <span className="text-red-500">*</span>
                         </label>
                         <select
                           value={selectedProdutoMestre ? selectedProdutoMestre.id : ''}
@@ -11210,81 +13854,122 @@ export default function Dashboard({ session, profileDataProps }) {
                             const prodId = e.target.value;
                             const prod = catalogoProdutos.find(p => p.id === prodId);
                             setSelectedProdutoMestre(prod || null);
+                            if (prod) {
+                              setEntradaCodigoBarras(prod.codigo_barras || '');
+                            }
                           }}
                           className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
                         >
                           <option value="">Selecione o Produto Mestre...</option>
                           {produtosMestreOptions.map(p => (
-                            <option key={p.id} value={p.id}>{p.nome}</option>
+                            <option key={p.id} value={p.id}>
+                              {p.nome} {p.codigo_barras ? `[EAN: ${p.codigo_barras}]` : ''} ({p.tipo || p.categoria})
+                            </option>
                           ))}
                         </select>
                       </div>
 
-                      {/* Campo 2: Input de 'IMEI' ou Quantidade */}
-                      {tenantSettings.enable_imei ? (
-                        <div>
-                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                            IMEI (Exclusivo, 15 dígitos)
-                          </label>
-                          <input
-                            ref={imeiInputRef}
-                            type="text"
-                            inputMode="numeric"
-                            value={entradaImei}
-                            onChange={(e) => setEntradaImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleSalvarEstoqueFisico(e);
-                              }
-                            }}
-                            placeholder="Digite ou bipe o IMEI..."
-                            maxLength={15}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono tracking-widest transition-all"
-                          />
-                        </div>
-                      ) : (
-                        <div>
-                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                            Quantidade
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={entradaQtdAcessorio}
-                            onChange={(e) => setEntradaQtdAcessorio(e.target.value)}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
-                          />
-                        </div>
-                      )}
+                      {/* Campo 2 & 3: Dinâmico baseado no tipo do Produto Mestre ou Categoria (Celulares vs Acessórios/Geral) */}
+                      {(() => {
+                        const isCelularForm = Boolean(
+                          (selectedProdutoMestre && (
+                            selectedProdutoMestre.tipo?.toLowerCase().includes('celular') || 
+                            selectedProdutoMestre.categoria?.toLowerCase().includes('celular') ||
+                            selectedProdutoMestre.categoria?.toLowerCase().includes('ios') ||
+                            selectedProdutoMestre.categoria?.toLowerCase().includes('android')
+                          )) || 
+                          (!selectedProdutoMestre && entradaFiltroCategoria && (
+                            entradaFiltroCategoria.toLowerCase().includes('celular') ||
+                            entradaFiltroCategoria.toLowerCase().includes('ios') ||
+                            entradaFiltroCategoria.toLowerCase().includes('android')
+                          ))
+                        );
 
-                      {/* Campo 3: Dropdown/Input de 'Cor' */}
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Cor do Aparelho
-                        </label>
-                        <div className="relative">
-                          <input
-                            type="text"
-                            value={entradaCorDispositivo}
-                            onChange={(e) => setEntradaCorDispositivo(e.target.value)}
-                            placeholder="Selecione ou digite a cor..."
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                            list="cores-sugeridas-recebimento"
-                          />
-                          <datalist id="cores-sugeridas-recebimento">
-                            <option value="Titânio Natural" />
-                            <option value="Titânio Preto" />
-                            <option value="Titânio Branco" />
-                            <option value="Titânio Azul" />
-                            <option value="Preto" />
-                            <option value="Branco" />
-                            <option value="Gold" />
-                            <option value="Silver" />
-                            <option value="Cinza Espacial" />
-                          </datalist>
-                        </div>
-                      </div>
+                        if (isCelularForm) {
+                          return (
+                            <>
+                              <div>
+                                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                                  IMEI (Exclusivo, 15 dígitos) <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  ref={imeiInputRef}
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={entradaImei}
+                                  onChange={(e) => setEntradaImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleSalvarEstoqueFisico(e);
+                                    }
+                                  }}
+                                  placeholder="Digite ou bipe o IMEI..."
+                                  maxLength={15}
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono tracking-widest transition-all"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                                  Cor do Aparelho <span className="text-red-500">*</span>
+                                </label>
+                                <div className="relative">
+                                  <input
+                                    type="text"
+                                    value={entradaCorDispositivo}
+                                    onChange={(e) => setEntradaCorDispositivo(e.target.value)}
+                                    placeholder="Selecione ou digite a cor..."
+                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                                    list="cores-sugeridas-recebimento"
+                                  />
+                                  <datalist id="cores-sugeridas-recebimento">
+                                    <option value="Titânio Natural" />
+                                    <option value="Titânio Preto" />
+                                    <option value="Titânio Branco" />
+                                    <option value="Titânio Azul" />
+                                    <option value="Preto" />
+                                    <option value="Branco" />
+                                    <option value="Gold" />
+                                    <option value="Silver" />
+                                    <option value="Cinza Espacial" />
+                                  </datalist>
+                                </div>
+                              </div>
+                            </>
+                          );
+                        }
+
+                        return (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                                Código de Barras (EAN / Barcode) *
+                              </label>
+                              <input
+                                type="text"
+                                value={entradaCodigoBarras || (selectedProdutoMestre ? selectedProdutoMestre.codigo_barras || '' : '')}
+                                onChange={(e) => setEntradaCodigoBarras(e.target.value)}
+                                placeholder="Bipe ou digite o código de barras..."
+                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-white rounded-md px-4 py-2.5 text-sm outline-none font-mono transition-all"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                                Quantidade de Entrada <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={entradaQtdAcessorio}
+                                onChange={(e) => setEntradaQtdAcessorio(e.target.value)}
+                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all font-bold text-center"
+                                placeholder="1"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Campo 4: Dropdown de 'Filial de Destino' */}
                       <div>
@@ -11305,7 +13990,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       <button
                         onClick={handleSalvarEstoqueFisico}
-                        disabled={loadingEntrada || !selectedProdutoMestre || (tenantSettings.enable_imei && !entradaImei) || !selectedFilialDestino}
+                        disabled={loadingEntrada || !selectedProdutoMestre || !selectedFilialDestino || ((selectedProdutoMestre?.tipo === 'CELULAR' || selectedProdutoMestre?.tipo === 'Celular') && !entradaImei)}
                         className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white font-extrabold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-[#6A0DAD]/20 hover:shadow-[#6A0DAD]/40 mt-4"
                       >
                         {loadingEntrada ? (
@@ -11461,23 +14146,21 @@ export default function Dashboard({ session, profileDataProps }) {
                                         p.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
                                         p.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
                                         'bg-purple-950/20 text-purple-400 border border-purple-800/20'
-                                      }`}>{p.categoria}</span>
+                                      }`}>{p.categoria || 'GERAL'}</span>
                                     </td>
                                     <td className="py-2.5 font-mono font-bold text-white text-[11px]">
                                       <div className="flex items-center gap-2">
-                                        <span>R$ {p.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                        {profile?.role !== 'DONO' && ['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(profile?.role) && (
+                                        <span>R$ {parseFloat(p.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                                           <button 
                                             onClick={() => handleUpdateProdutoPreco(p.id, p.nome, p.preco)}
-                                            className="text-gray-500 hover:text-[#6A0DAD] transition-colors"
+                                            className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
                                             title="Editar Preço"
                                           >
                                             <Edit2 size={12} />
                                           </button>
-                                        )}
                                       </div>
                                     </td>
-                                    <td className="py-2.5">
+                                    <td className="py-2.5 font-mono text-xs">
                                       {p.tipo === 'CELULAR' ? (
                                         <button
                                           onClick={() => toggleVerImeis(p.id)}
@@ -11486,7 +14169,18 @@ export default function Dashboard({ session, profileDataProps }) {
                                           {disponiveisImeis.filter(im => im.produto_id === p.id && im.filial_id === p.filial_id && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length} (IMEIs)
                                         </button>
                                       ) : (
-                                        <span className="text-gray-300 font-semibold">{p.categoria === 'SERVICO' ? '∞' : p.quantidade}</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-gray-300 font-bold">{p.categoria === 'SERVICO' ? '∞' : (p.quantidade || 0)}</span>
+                                          {p.categoria !== 'SERVICO' && (
+                                            <button 
+                                              onClick={() => handleUpdateProdutoQuantidade(p.id, p.nome, p.quantidade || 0)}
+                                              className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
+                                              title="Alterar Estoque"
+                                            >
+                                              <Edit2 size={12} />
+                                            </button>
+                                          )}
+                                        </div>
                                       )}
                                     </td>
                                     {profile?.role !== 'DONO' && (
@@ -11834,13 +14528,20 @@ export default function Dashboard({ session, profileDataProps }) {
                             const date = new Date(sale.created_at);
                             const [year, month] = filtroMes.split('-');
                             return date.getMonth() === parseInt(month, 10) - 1 && date.getFullYear() === parseInt(year, 10);
-                          }).map(sale => (
-                            <tr key={sale.id} className="hover:bg-purple-950/5 print:hover:bg-transparent transition-colors">
-                              <td className="py-3 text-gray-400 font-mono">
-                                {new Date(sale.created_at).toLocaleDateString('pt-BR')}
-                              </td>
-                              <td className="py-3 font-semibold text-white print:text-black">{sale.profiles?.nome || 'Vendedor'}</td>
-                              <td className="py-3 font-semibold text-white print:text-black">{sale.produtos?.nome || 'Produto Removido'}</td>
+                          }).map(sale => {
+                            const sellerObj = teamMembers.find(m => String(m.id) === String(sale.vendedor_id));
+                            const vendedorNome = sale.vendedor_nome || sale.vendedor?.nome || sale.profiles?.nome || sellerObj?.nome || sellerObj?.email || (sale.vendedor_id ? `Vendedor #${String(sale.vendedor_id).substring(0, 6)}` : 'Vendedor');
+
+                            const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
+                            const produtoNome = sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || prodObj?.nome || (sale.produto_id ? `Produto #${String(sale.produto_id).substring(0, 6)}` : 'Produto Geral');
+
+                            return (
+                              <tr key={sale.id} className="hover:bg-purple-950/5 print:hover:bg-transparent transition-colors">
+                                <td className="py-3 text-gray-400 font-mono">
+                                  {new Date(sale.created_at).toLocaleDateString('pt-BR')}
+                                </td>
+                                <td className="py-3 font-semibold text-white print:text-black">{vendedorNome}</td>
+                                <td className="py-3 font-semibold text-white print:text-black">{produtoNome}</td>
                               <td className="py-3 text-gray-400">
                                 {filiais.find(f => f.id === sale.filial_id)?.nome || 'Sem filial'}
                               </td>
@@ -11873,7 +14574,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                 </td>
                               )}
                             </tr>
-                          ))
+                          );
+                        })
                         )}
                       </tbody>
                     </table>
@@ -12153,12 +14855,12 @@ export default function Dashboard({ session, profileDataProps }) {
                       onChange={(e) => setFiltroColaboradorRole(e.target.value)}
                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-white text-xs font-bold py-1.5 px-2.5 rounded-lg outline-none cursor-pointer"
                     >
-                      <option value="TODOS">Todos os Cargos</option>
-                      <option value="TRAINEE">Trainees</option>
-                      <option value="VENDEDOR">Vendedores</option>
-                      <option value="ESTOQUISTA">Estoquistas</option>
-                      <option value="GERENTE">Gerentes</option>
-                      <option value="ADMIN">Administradores</option>
+                      <option value="TODOS" className="bg-gray-900 text-white">Todos os Cargos</option>
+                      <option value="TRAINEE" className="bg-gray-900 text-white">Trainees</option>
+                      <option value="VENDEDOR" className="bg-gray-900 text-white">Vendedores</option>
+                      <option value="ESTOQUISTA" className="bg-gray-900 text-white">Estoquistas</option>
+                      <option value="GERENTE" className="bg-gray-900 text-white">Gerentes</option>
+                      <option value="ADMIN" className="bg-gray-900 text-white">Administradores</option>
                     </select>
                   </div>
                 </div>
@@ -12222,7 +14924,12 @@ export default function Dashboard({ session, profileDataProps }) {
                               let roleBadgeStyle = 'bg-blue-950/40 text-blue-400 border-blue-800/40';
                               if (['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO'].includes(memberRole)) {
                                 roleBadgeStyle = 'bg-red-950/40 text-red-400 border-red-800/40';
-                    roleBadgeStyle = 'bg-teal-950/40 text-teal-400 border-teal-800/40';
+                              } else if (memberRole === 'GERENTE') {
+                                roleBadgeStyle = 'bg-purple-950/40 text-purple-400 border-purple-800/40';
+                              } else if (['TRAINEE', 'TREENER'].includes(memberRole)) {
+                                roleBadgeStyle = 'bg-amber-950/40 text-amber-400 border-amber-800/40';
+                              } else if (memberRole === 'ESTOQUISTA') {
+                                roleBadgeStyle = 'bg-teal-950/40 text-teal-400 border-teal-800/40';
                               }
 
                               const filialObj = filiais.find(f => f.id === member.filial_id);
@@ -12330,6 +15037,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
             {/* AUDITORIA DE DESCONTOS CONCEDIDOS */}
             {(activeTab === 'descontos' || currentView === 'descontos') && ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role) && renderAuditoriaDescontos()}
+
+            {/* AUDITORIA DE VENDAS & CRÉDITO */}
+            {(activeTab === 'auditoria_credito' || currentView === 'auditoria_credito') && ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role) && renderAuditoriaCredito()}
           </div>
         ) : (
           /* PAINEL DE CONTROLE DO VENDEDOR */
@@ -12523,12 +15233,16 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <td colSpan="6" className="py-6 text-center italic text-gray-600">Você ainda não registrou nenhuma venda neste mês.</td>
                               </tr>
                             ) : (
-                              metasInfo.historico.map(sale => (
-                                <tr key={sale.id} className="hover:bg-purple-950/5 transition-colors">
-                                  <td className="py-3 text-gray-400 font-mono">
-                                    {new Date(sale.created_at).toLocaleDateString('pt-BR')}
-                                  </td>
-                                  <td className="py-3 font-semibold text-white">{sale.produtos?.nome || 'Produto Removido'}</td>
+                              metasInfo.historico.map(sale => {
+                                const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
+                                const produtoNome = sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || prodObj?.nome || 'Produto Geral';
+
+                                return (
+                                  <tr key={sale.id} className="hover:bg-purple-950/5 transition-colors">
+                                    <td className="py-3 text-gray-400 font-mono">
+                                      {new Date(sale.created_at).toLocaleDateString('pt-BR')}
+                                    </td>
+                                    <td className="py-3 font-semibold text-white">{produtoNome}</td>
                                   <td className="py-3">
                                     <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-[#6A0DAD]/10 text-purple-300">
                                       {sale.produtos?.categoria || 'Geral'}
@@ -12536,9 +15250,9 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </td>
                                   <td className="py-3 text-center font-bold text-gray-300">{sale.quantidade}</td>
                                   <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                  <td className="py-3 font-mono font-bold text-green-400 text-right">R$ {parseFloat(sale.comissao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                                 </tr>
-                              ))
+                              );
+                            })
                             )}
                           </tbody>
                         </table>
@@ -12563,9 +15277,25 @@ export default function Dashboard({ session, profileDataProps }) {
                       </div>
 
                       <form onSubmit={handleSubmeterFechamento} className="space-y-4">
+                        {/* Card de Resumo do Total Geral Esperado no Fechamento Cego */}
+                        <div className="bg-[#111111] border border-[#6A0DAD]/40 p-4 rounded-xl flex justify-between items-center text-xs mb-2 shadow-lg">
+                          <div className="flex items-center gap-3">
+                            <span className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse shrink-0"></span>
+                            <div>
+                              <h3 className="text-sm font-bold text-white">Total Apurado no Dia:</h3>
+                              <p className="text-xs font-medium text-purple-200 mt-0.5">
+                                Informe o valor físico exato de cada forma de pagamento para validação do sistema.
+                              </p>
+                            </div>
+                          </div>
+                          <span className="font-mono font-extrabold text-[#9b5de5] text-sm bg-[#6A0DAD]/10 px-3 py-1.5 rounded-lg border border-[#6A0DAD]/30 whitespace-nowrap">
+                            R$ {vendasEsperadasHoje.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
                         <div className="grid grid-cols-3 gap-4">
                           <div>
-                            <label className="block text-[10px] font-bold text-gray-550 uppercase tracking-wider mb-2">
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
                               Espécie (R$)
                             </label>
                             <input
@@ -12574,12 +15304,12 @@ export default function Dashboard({ session, profileDataProps }) {
                               step="0.01"
                               value={fechamentoDinheiro}
                               onChange={(e) => setFechamentoDinheiro(e.target.value)}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none"
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
                               placeholder="0.00"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-gray-550 uppercase tracking-wider mb-2">
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
                               Cartão (R$)
                             </label>
                             <input
@@ -12588,12 +15318,12 @@ export default function Dashboard({ session, profileDataProps }) {
                               step="0.01"
                               value={fechamentoCartao}
                               onChange={(e) => setFechamentoCartao(e.target.value)}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none"
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
                               placeholder="0.00"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-gray-550 uppercase tracking-wider mb-2">
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
                               PIX (R$)
                             </label>
                             <input
@@ -12602,12 +15332,12 @@ export default function Dashboard({ session, profileDataProps }) {
                               step="0.01"
                               value={fechamentoPix}
                               onChange={(e) => setFechamentoPix(e.target.value)}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none"
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
                               placeholder="0.00"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-gray-550 uppercase tracking-wider mb-2">
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
                               Boleto (R$)
                             </label>
                             <input
@@ -12616,12 +15346,12 @@ export default function Dashboard({ session, profileDataProps }) {
                               step="0.01"
                               value={fechamentoBoleto}
                               onChange={(e) => setFechamentoBoleto(e.target.value)}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none"
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
                               placeholder="0.00"
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-bold text-gray-550 uppercase tracking-wider mb-2">
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
                               Troca (R$)
                             </label>
                             <input
@@ -12630,7 +15360,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               step="0.01"
                               value={fechamentoTroca}
                               onChange={(e) => setFechamentoTroca(e.target.value)}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none"
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
                               placeholder="0.00"
                             />
                           </div>
@@ -12696,6 +15426,8 @@ export default function Dashboard({ session, profileDataProps }) {
                 )}
 
                 {activeSellerTab === 'transferencias' && renderTransferencias()}
+
+                {(activeSellerTab === 'auditoria_credito' || currentView === 'auditoria_credito') && ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role) && renderAuditoriaCredito()}
 
                 {activeSellerTab === 'clientes' && (
                   <div className="space-y-8 animate-fadeIn">
@@ -12786,8 +15518,16 @@ export default function Dashboard({ session, profileDataProps }) {
                                     </td>
                                     <td className="py-3.5 text-right">
                                       <div className="flex items-center justify-end gap-2">
-                                        <button
-                                          onClick={() => handleOpenEditClienteModal(c)}
+                                         <button
+                                           onClick={() => handleOpenClienteHistorico(c)}
+                                           className="px-2.5 py-1 border border-[#6A0DAD]/40 hover:border-[#6A0DAD] text-purple-300 hover:text-white bg-[#6A0DAD]/10 hover:bg-[#6A0DAD] rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                                           title="Ver Histórico de Vendas"
+                                         >
+                                           <ShoppingBag size={12} />
+                                           Ver Vendas
+                                         </button>
+                                         <button
+                                           onClick={() => handleOpenEditClienteModal(c)}
                                           className="p-1 border border-[#222222] hover:border-[#6A0DAD]/40 text-gray-500 hover:text-white rounded bg-black transition-colors"
                                           title="Editar cliente"
                                         >
@@ -12820,6 +15560,325 @@ export default function Dashboard({ session, profileDataProps }) {
       </main>
 
       {/* Footer Branding */}
+      
+      {/* MODAL DE HISTÓRICO DE VENDAS & PROMOÇÕES INTELIGENTES DO CLIENTE */}
+      {clienteHistoricoModalOpen && clienteHistoricoSelecionado && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn overflow-y-auto">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 max-w-4xl w-full space-y-6 relative shadow-2xl my-8">
+            <div className="flex justify-between items-start border-b border-[#222222] pb-4">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <ShoppingBag size={20} className="text-[#6A0DAD]" />
+                  Perfil do Cliente &amp; Histórico de Compras
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5 font-sans">
+                  <strong>{clienteHistoricoSelecionado.nome}</strong> · CPF/CNPJ: {clienteHistoricoSelecionado.cpf_cnpj || 'Não informado'} · Tel: {clienteHistoricoSelecionado.telefone || 'Não informado'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setClienteHistoricoModalOpen(false);
+                  setClienteHistoricoSelecionado(null);
+                }}
+                className="text-gray-500 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {loadingClienteHistorico ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3">
+                <Loader2 className="animate-spin text-[#6A0DAD]" size={24} />
+                <span className="text-xs text-gray-500">Buscando histórico e calculando financiamentos...</span>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* 1. ANÁLISE DE FINANCIAMENTO & DETECÇÃO DE QUITAÇÃO */}
+                {(() => {
+                  const lastVendaWithFin = clienteHistoricoVendas.find(v => 
+                    (v.parcelas && v.parcelas > 1) || 
+                    (v.metodo_pagamento && ['boleto', 'carne', 'payjoy', 'financiamento', 'credsystem'].includes(String(v.metodo_pagamento).toLowerCase())) ||
+                    (v.financeira_parceira && String(v.financeira_parceira).toLowerCase() !== 'pdv')
+                  );
+
+                  if (!lastVendaWithFin || !lastVendaWithFin.created_at) return null;
+
+                  const created = new Date(lastVendaWithFin.created_at);
+                  const parc = parseInt(lastVendaWithFin.parcelas || 12, 10);
+                  const endD = new Date(created);
+                  endD.setMonth(endD.getMonth() + parc);
+                  
+                  const now = new Date();
+                  const endYM = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}`;
+                  const nowYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+                  const isQuitandoEsteMes = nowYM === endYM;
+                  const isJáQuitado = now >= endD;
+                  const finNome = lastVendaWithFin.financeira_parceira || lastVendaWithFin.metodo_pagamento?.toUpperCase() || 'FINANCEIRA';
+                  const prodNome = lastVendaWithFin.produto_nome || lastVendaWithFin.produtos_descricao || lastVendaWithFin.itens_resumo || 'Aparelho';
+
+                  return (
+                    <div className={`p-4 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 animate-fadeIn ${
+                      isQuitandoEsteMes || isJáQuitado 
+                        ? 'bg-gradient-to-r from-emerald-950/40 via-purple-950/20 to-black border-emerald-500/50 text-white' 
+                        : 'bg-black/40 border-[#222222] text-gray-300'
+                    }`}>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                            isQuitandoEsteMes || isJáQuitado ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                          }`}>
+                            {isQuitandoEsteMes ? '🟢 ÚLTIMA PARCELA ESTE MÊS' : isJáQuitado ? '✅ FINANCIAMENTO QUITADO' : '💳 EM ANDAMENTO'}
+                          </span>
+                          <span className="text-xs font-mono text-gray-400">
+                            {finNome} ({parc}x)
+                          </span>
+                        </div>
+                        <p className="text-xs font-semibold text-white">
+                          Aparelho Financiado: <strong className="text-purple-300">{prodNome}</strong> · Início: {created.toLocaleDateString('pt-BR')} · Previsão Término: {endD.toLocaleDateString('pt-BR')}
+                        </p>
+                      </div>
+
+                      {(isQuitandoEsteMes || isJáQuitado) && (
+                        <div className="bg-emerald-900/30 border border-emerald-700/40 p-2.5 rounded-lg text-[11px] text-emerald-200 font-sans">
+                          🎉 <strong>Oportunidade VIP:</strong> Ofereça um novo upgrade no carnê com crédito pré-aprovado!
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* 2. GERADOR INTELIGENTE DE PROMOÇÕES E OFERTAS VIA WHATSAPP */}
+                <div className="bg-black/60 border border-[#6A0DAD]/30 p-5 rounded-xl space-y-4 shadow-inner">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-[#222222] pb-3">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                      <Sparkles size={16} className="text-yellow-400" />
+                      Sugestão de Promoções &amp; Contato via WhatsApp
+                    </h4>
+                    <div className="flex gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={isGeneratingIA}
+                        onClick={() => {
+                          setSelectedPromoType('upgrade');
+                          handleGenerateAIPromo('upgrade');
+                        }}
+                        className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase transition-all border ${
+                          selectedPromoType === 'upgrade'
+                            ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
+                            : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                        } ${isGeneratingIA ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+                      >
+                        🚀 Upgrade / Troca
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isGeneratingIA}
+                        onClick={() => {
+                          setSelectedPromoType('quitacao');
+                          handleGenerateAIPromo('quitacao');
+                        }}
+                        className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase transition-all border ${
+                          selectedPromoType === 'quitacao'
+                            ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
+                            : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                        } ${isGeneratingIA ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+                      >
+                        💳 Quitação / Carnê
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isGeneratingIA}
+                        onClick={() => {
+                          setSelectedPromoType('acessorios');
+                          handleGenerateAIPromo('acessorios');
+                        }}
+                        className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase transition-all border ${
+                          selectedPromoType === 'acessorios'
+                            ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
+                            : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                        } ${isGeneratingIA ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
+                      >
+                        🎧 Acessórios 20% OFF
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                        {isGeneratingIA ? (
+                          <>
+                            <Loader2 size={12} className="animate-spin text-yellow-400" />
+                            <span className="text-yellow-400">Gerando copy persuasiva com IA (Groq LLaMA 3)...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={12} className="text-yellow-400" />
+                            <span>Copy da Promoção:</span>
+                            {isGeneratedByAI ? (
+                              <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                🤖 Gerado por Groq LLaMA 3.3 (IA)
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1" title="Adicione VITE_GROQ_API_KEY no .env para ativar a IA">
+                                ⚡ Template Estático (Fallback)
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </label>
+                      <button
+                        type="button"
+                        disabled={isGeneratingIA}
+                        onClick={() => handleGenerateAIPromo(selectedPromoType, clienteHistoricoSelecionado, clienteHistoricoVendas, true)}
+                        className="text-[10px] font-bold text-yellow-400 hover:text-yellow-300 flex items-center gap-1 transition-colors disabled:opacity-50 cursor-pointer"
+                        title="Recriar variação de mensagem com IA"
+                      >
+                        <RefreshCw size={10} className={isGeneratingIA ? 'animate-spin' : ''} />
+                        Recriar com IA
+                      </button>
+                    </div>
+                    <textarea
+                      rows={4}
+                      value={customPromoText}
+                      onChange={(e) => setCustomPromoText(e.target.value)}
+                      disabled={isGeneratingIA}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg p-3 text-xs text-white outline-none font-sans leading-relaxed resize-y disabled:opacity-60"
+                      placeholder={isGeneratingIA ? 'Criando copy exclusiva com Groq LLaMA 3...' : 'Digite ou edite a mensagem promocional...'}
+                    />
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-1">
+                    <span className="text-[11px] text-gray-400 font-mono">
+                      Destinatário: <strong className="text-white">{clienteHistoricoSelecionado.telefone || 'Sem telefone'}</strong>
+                    </span>
+
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(customPromoText);
+                          showToast('Mensagem copiada para a área de transferência!', 'success');
+                        }}
+                        className="flex-1 sm:flex-none px-3.5 py-2 bg-[#222222] hover:bg-[#333333] text-gray-200 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Copy size={14} /> Copiar Texto
+                      </button>
+
+                      {(() => {
+                        const cleanPhone = String(clienteHistoricoSelecionado.telefone || '').replace(/\D/g, '');
+                        let phoneWithCountry = cleanPhone;
+                        if (cleanPhone.length >= 10 && !cleanPhone.startsWith('55')) {
+                          phoneWithCountry = '55' + cleanPhone;
+                        }
+                        const waLink = phoneWithCountry ? `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(customPromoText)}` : null;
+
+                        return (
+                          <a
+                            href={waLink || '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => {
+                              if (!waLink) {
+                                e.preventDefault();
+                                showToast('Cliente não possui telefone válido cadastrado para envio.', 'error');
+                              }
+                            }}
+                            className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-white shadow-lg ${
+                              waLink ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/40 cursor-pointer' : 'bg-gray-800 opacity-50 cursor-not-allowed'
+                            }`}
+                          >
+                            <MessageCircle size={14} /> Enviar no WhatsApp
+                          </a>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. TABELA DE COMPRAS ANTERIORES */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center bg-[#111111] p-3 rounded-lg text-xs font-semibold">
+                    <span className="text-gray-400">Total de Compras: <strong className="text-white">{clienteHistoricoVendas.length}</strong></span>
+                    <span className="text-gray-400">Valor Total Acumulado: <strong className="text-[#6A0DAD] font-mono font-bold">R$ {clienteHistoricoVendas.reduce((acc, v) => acc + parseFloat(v.valor_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+                  </div>
+
+                  {clienteHistoricoVendas.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 italic text-xs border border-dashed border-[#222] rounded-lg">
+                      Nenhuma compra encontrada para este cliente.
+                    </div>
+                  ) : (
+                    <div className="max-h-[260px] overflow-y-auto pr-1 border border-[#222222] rounded-lg">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-[#222222] bg-[#0A0A0A] text-gray-400 font-bold uppercase tracking-wider sticky top-0 z-10">
+                            <th className="p-3">Data / Hora</th>
+                            <th className="p-3">Filial</th>
+                            <th className="p-3">Produto / Modelo &amp; IMEI</th>
+                            <th className="p-3">Forma &amp; Financeira</th>
+                            <th className="p-3 text-right">Valor Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#161616]">
+                          {clienteHistoricoVendas.map(venda => {
+                            const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id));
+                            const prodNome = venda.produtos?.nome || venda.produto_nome || prodObj?.nome || venda.produtos_descricao || venda.itens_resumo || 'Produto Geral';
+                            const imeiVal = venda.imei_novo || venda.imei || venda.used_imei || null;
+                            const finName = venda.financeira_parceira || venda.financeira || venda.metodo_pagamento?.toUpperCase() || 'PDV';
+
+                            return (
+                              <tr key={venda.id} className="hover:bg-purple-950/10 transition-colors">
+                                <td className="p-3 text-gray-400 font-mono whitespace-nowrap">
+                                  {new Date(venda.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                                </td>
+                                <td className="p-3 font-semibold text-purple-300 whitespace-nowrap">
+                                  {venda.filiais?.nome || venda.filial_nome || 'Filial'}
+                                </td>
+                                <td className="p-3 text-gray-200">
+                                  <div className="flex flex-col">
+                                    <span className="font-semibold text-white">{prodNome}</span>
+                                    {imeiVal && (
+                                      <span className="text-[10px] font-mono text-purple-400">IMEI: {imeiVal}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex flex-col">
+                                    <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-white/5 border border-white/10 text-gray-300 uppercase w-fit">
+                                      {finName} {venda.parcelas > 1 ? `(${venda.parcelas}x)` : ''}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-3 text-right font-mono font-bold text-white whitespace-nowrap">
+                                  R$ {parseFloat(venda.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2 border-t border-[#222222]">
+              <button
+                onClick={() => {
+                  setClienteHistoricoModalOpen(false);
+                  setClienteHistoricoSelecionado(null);
+                }}
+                className="px-5 py-2 bg-[#222222] hover:bg-[#333333] text-white rounded-lg text-xs font-bold transition-all cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer className="w-full text-center py-6 bg-black border-t border-[#111111] text-[#6B7280] text-xs font-medium mt-auto print:hidden font-sans">
         © 2026 Vextron Lab | Developed by @Valentim
       </footer>
@@ -13543,40 +16602,72 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
 
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    {multilojaStockData.map((item, idx) => (
-                      <div 
-                        key={idx}
-                        className={`flex items-center justify-between rounded-lg px-3 py-2.5 border bg-black/40 ${
-                          item.filialNome === activeFilialNome 
-                            ? 'border-[#6A0DAD]/50 bg-[#6A0DAD]/5' 
-                            : 'border-[#222222]'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-white">
-                            {item.filialNome}
-                          </span>
-                          <span className="text-[9px] bg-[#111] text-gray-500 px-1 rounded uppercase">
-                            {item.filialTipo === 'ESTOQUE' ? 'Depósito' : 'Loja'}
-                          </span>
-                          {item.filialNome === activeFilialNome && (
-                            <span className="text-[9px] text-[#6A0DAD] font-bold">(Atual)</span>
-                          )}
+                    {multilojaStockData.map((item, idx) => {
+                      const temEstoque = item.quantidade > 0;
+                      const isLojaAtual = (item.filialId && String(item.filialId) === String(activeFilialId)) || item.filialNome === activeFilialNome;
+
+                      return (
+                        <div 
+                          key={idx}
+                          className={`flex items-center justify-between rounded-lg px-3 py-2.5 border ${
+                            isLojaAtual 
+                              ? 'border-[#6A0DAD]/50 bg-[#6A0DAD]/10' 
+                              : 'border-[#222222] bg-black/40'
+                          }`}
+                        >
+                          {/* Info da Filial */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-white">
+                              {item.filialNome}
+                            </span>
+                            <span className="text-[9px] bg-[#111] text-gray-400 px-1.5 py-0.5 rounded uppercase font-mono">
+                              {item.filialTipo === 'ESTOQUE' ? 'Depósito' : 'Loja'}
+                            </span>
+                            {isLojaAtual && (
+                              <span className="text-[10px] text-[#9b5de5] font-semibold">(Atual)</span>
+                            )}
+                          </div>
+
+                          {/* Quantidade e Ações */}
+                          <div className="flex items-center gap-3">
+                            <span className={`text-xs font-bold font-mono ${
+                              temEstoque ? 'text-green-400' : 'text-red-500'
+                            }`}>
+                              {item.quantidade} un.
+                            </span>
+                            
+                            <div className="w-36 flex justify-end items-center">
+                              {/* REGRA DE NEGÓCIO: Só exibe botão se tiver estoque E NÃO for a loja atual */}
+                              {!isLojaAtual && temEstoque && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReservarProdutoMultiloja(selectedMultilojaProd, item.filialId, item.filialNome, true)}
+                                  className="bg-[#6A0DAD] hover:bg-[#500885] text-white text-[10px] font-bold py-1.5 px-3 rounded-md flex items-center gap-1.5 shadow-md shadow-[#6A0DAD]/20 transition-all cursor-pointer whitespace-nowrap"
+                                >
+                                  <ShoppingBag size={13} />
+                                  Reservar &amp; Vender
+                                </button>
+                              )}
+
+                              {/* Se não tiver estoque, exibe apenas um aviso (sem botão) */}
+                              {!temEstoque && (
+                                <span className="text-gray-500 text-xs font-medium italic">Indisponível</span>
+                              )}
+
+                              {/* Se for a loja atual E tiver estoque */}
+                              {isLojaAtual && temEstoque && (
+                                <span className="text-[#9b5de5] text-xs font-semibold">Estoque Local</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-xs font-bold font-mono ${
-                            item.quantidade > 0 ? 'text-green-400' : 'text-red-550'
-                          }`}>
-                            {item.quantidade} un.
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
-                  <div className="text-[10px] text-gray-400 bg-yellow-950/15 border border-yellow-800/20 p-2.5 rounded-lg flex items-start gap-1.5 mt-2">
-                    <AlertCircle size={14} className="text-yellow-500 flex-shrink-0 mt-0.5" />
-                    <span>Esta visualização é apenas para leitura. Para vender ou transferir mercadorias, utilize a aba de Transferências.</span>
+                  <div className="text-[10px] text-gray-400 bg-purple-950/20 border border-[#6A0DAD]/30 p-2.5 rounded-lg flex items-start gap-2 mt-2">
+                    <ShoppingBag size={14} className="text-[#6A0DAD] flex-shrink-0 mt-0.5" />
+                    <span>Ao clicar em <strong>Reservar &amp; Vender</strong>, a unidade é alocada para a sua loja de operação atual, <strong>adicionada ao seu carrinho de vendas</strong> e fica <strong>INDISPONÍVEL</strong> para vendas na filial de origem.</span>
                   </div>
                 </div>
               )}

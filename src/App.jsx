@@ -106,16 +106,18 @@ const SuperAdminRouteWrapper = ({ session }) => {
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
-    // Rigid security check
+    if (!session || !session.user) {
+      window.location.href = '/';
+      return;
+    }
+
+    // Security check for Super Admin
     if (session.user.email === 'valentimodz@gmail.com') {
       setAuthorized(true);
       setChecking(false);
     } else {
-      // Unauthorized: sign out immediately and redirect to login page
-      alert('Acesso Negado: Área Exclusiva para Super Administrador. Deslogando...');
-      supabase.auth.signOut().then(() => {
-        window.location.href = '/';
-      });
+      // Unauthorized: redirect to homepage without blocking alert
+      window.location.href = '/';
     }
   }, [session]);
 
@@ -129,7 +131,7 @@ const SuperAdminRouteWrapper = ({ session }) => {
   }
 
   if (authorized) {
-    return <Dashboard session={session} profileDataProps={{ role: 'SUPER_ADMIN', email: 'valentimodz@gmail.com', nome: 'Super Admin' }} />;
+    return <Dashboard session={session} profileDataProps={{ role: 'SUPER_ADMIN', email: session.user.email, nome: 'Super Admin' }} />;
   }
 
   return null;
@@ -181,7 +183,6 @@ const RoleProtectedRoute = ({ session, isCeoRoute }) => {
     if (['OWNER', 'DONO', 'SUPER_ADMIN'].includes(profile?.role)) {
       return <CeoDashboard session={session} profile={profile} />;
     } else {
-      alert('Acesso Negado: Área Exclusiva para Sócios');
       window.location.href = '/';
       return null;
     }
