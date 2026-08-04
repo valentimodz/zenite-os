@@ -243,7 +243,12 @@ REGRAS INQUEBRÁVEIS:
               textMessage: { text: replyText }
             }
           } else if (config.provider === 'zapi') {
-            requestUrl = `${config.api_url}/instances/${config.instance_id}/token/${config.api_token}/send-messages`
+            const baseUrl = config.api_url.endsWith('/') ? config.api_url.slice(0, -1) : config.api_url;
+            requestUrl = `${baseUrl}/instances/${config.instance_id}/token/${config.api_token}/send-text`;
+            
+            // Adicionar Client-Token header por padrão se Z-API exigir em instâncias pagas
+            headers["Client-Token"] = config.api_token;
+            
             requestBody = {
               phone: numero_telefone,
               message: replyText
