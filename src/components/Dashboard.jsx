@@ -7239,14 +7239,29 @@ export default function Dashboard({ session, profileDataProps }) {
           setLoadingPdvVenda(false);
           return; // BLOQUEIA A VENDA se o cliente não puder ser salvo/atualizado
         }
-      } else if (pdvClienteNome.trim() && pdvClienteCpfCnpj.trim()) {
-        // Se não for um cliente previamente selecionado, verifica se o CPF/CNPJ já existe no banco
-        const { data: clienteExistente } = await supabase
-          .from('clientes')
-          .select('id')
-          .eq('empresa_id', empresaId)
-          .eq('cpf_cnpj', pdvClienteCpfCnpj.trim())
-          .maybeSingle();
+      } else if (pdvClienteNome.trim()) {
+        // Se não for um cliente previamente selecionado, tenta encontrar pelo CPF (se preenchido) ou pelo Nome exato
+        let clienteExistente = null;
+        
+        if (pdvClienteCpfCnpj.trim()) {
+          const { data: byCpf } = await supabase
+            .from('clientes')
+            .select('id')
+            .eq('empresa_id', empresaId)
+            .eq('cpf_cnpj', pdvClienteCpfCnpj.trim())
+            .maybeSingle();
+          clienteExistente = byCpf;
+        }
+        
+        if (!clienteExistente) {
+          const { data: byNome } = await supabase
+            .from('clientes')
+            .select('id')
+            .eq('empresa_id', empresaId)
+            .eq('nome', pdvClienteNome.trim())
+            .maybeSingle();
+          clienteExistente = byNome;
+        }
 
         if (clienteExistente?.id) {
           const { error: updateExistenteErr } = await supabase
@@ -7263,7 +7278,7 @@ export default function Dashboard({ session, profileDataProps }) {
           }
           clienteIdBanco = clienteExistente.id;
         } else {
-          // SALVA no banco obrigatoriamente
+          // SALVA novo cliente no banco obrigatoriamente
           const { data: novoCliente, error: erroCliente } = await supabase
             .from('clientes')
             .insert([payloadCliente])
