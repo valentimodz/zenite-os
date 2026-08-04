@@ -256,6 +256,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [selectedAuditClienteStatus, setSelectedAuditClienteStatus] = useState('EM DIA');
   const [isSavingAuditStatus, setIsSavingAuditStatus] = useState(false);
   const [pdvFinanceiraParceira, setPdvFinanceiraParceira] = useState('PayJoy');
+  const [pdvFinanceiraCustomInput, setPdvFinanceiraCustomInput] = useState('');
 
   // Estados para Navegação via Sidebar Retrátil
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -408,7 +409,16 @@ export default function Dashboard({ session, profileDataProps }) {
   const [pdvUsadoObs, setPdvUsadoObs] = useState('');
   const [pdvMetodoRestante, setPdvMetodoRestante] = useState('pix'); // 'pix' | 'cartao' | 'dinheiro'
   const [pdvCartaoParcelas, setPdvCartaoParcelas] = useState(1);
-  
+
+  // Estados de Pagamento Parcial / Sinal / Contas a Receber
+  const [pdvStatusPagamento, setPdvStatusPagamento] = useState('PAGO'); // 'PAGO' | 'PARCIAL' | 'PENDENTE'
+  const [pdvDataVencimentoRestante, setPdvDataVencimentoRestante] = useState('');
+  const [pdvValorPagoCustom, setPdvValorPagoCustom] = useState('');
+  const [modalBaixaVenda, setModalBaixaVenda] = useState(null); // Venda selecionada para dar baixa
+  const [baixaValor, setBaixaValor] = useState('');
+  const [baixaMetodo, setBaixaMetodo] = useState('PIX'); // 'PIX' | 'CARTAO' | 'DINHEIRO'
+  const [loadingBaixa, setLoadingBaixa] = useState(false);
+
   // Recibo Modal
   const [pdvReciboAtivo, setPdvReciboAtivo] = useState(false);
   const [pdvReciboDados, setPdvReciboDados] = useState(null);
@@ -2169,7 +2179,31 @@ export default function Dashboard({ session, profileDataProps }) {
         try {
           let q = supabase
             .from('vendas')
-            .select('*')
+            .select(`
+              *,
+              clientes:cliente_id (
+                id,
+                nome,
+                cpf_cnpj,
+                telefone,
+                email,
+                status_credito
+              ),
+              cliente:cliente_id (
+                id,
+                nome,
+                cpf_cnpj,
+                telefone,
+                email,
+                status_credito
+              ),
+              produtos:produto_id (
+                id,
+                nome,
+                tipo,
+                categoria
+              )
+            `)
             .order('created_at', { ascending: false });
 
           if (empresaId && empresaId !== 'MASTER') {
@@ -2177,9 +2211,15 @@ export default function Dashboard({ session, profileDataProps }) {
           }
 
           const { data: dbSales, error: dbErr } = await q;
+          
+          console.log("🔥 [RAW DATA - PRIMEIRA VENDA]:", dbSales && dbSales.length > 0 ? dbSales[0] : "NENHUMA VENDA");
+
           if (!dbErr && dbSales) return dbSales;
 
-          const { data: simpleSales } = await supabase.from('vendas').select('*').order('created_at', { ascending: false });
+          const { data: simpleSales } = await supabase
+            .from('vendas')
+            .select('*, clientes(*)')
+            .order('created_at', { ascending: false });
           return simpleSales || [];
         } catch (err) {
           console.error("Erro no fallback de vendas:", err);
@@ -3312,6 +3352,67 @@ export default function Dashboard({ session, profileDataProps }) {
       alert("Venda estornada com sucesso.");
     } catch (err) {
       alert("Erro ao estornar venda: " + err.message);
+    }
+  };
+
+  const handleConfirmarBaixaPagamento = async (e) => {
+    if (e) e.preventDefault();
+    if (!modalBaixaVenda) return;
+    const valBaixaNum = parseFloat(baixaValor);
+    if (!valBaixaNum || valBaixaNum <= 0) {
+      alert("Por favor, informe um valor de pagamento válido maior que zero.");
+      return;
+    }
+    
+    const valorTotalVenda = parseFloat(modalBaixaVenda.valor_total || 0);
+    const valorJaPago = parseFloat(modalBaixaVenda.valor_pago || 0);
+    const saldoDevedor = Math.max(0, valorTotalVenda - valorJaPago);
+
+    if (valBaixaNum > saldoDevedor + 0.01) {
+      alert(`O valor informado (R$ ${valBaixaNum.toFixed(2)}) é maior que o saldo devedor restante (R$ ${saldoDevedor.toFixed(2)}).`);
+      return;
+    }
+
+    setLoadingBaixa(true);
+    try {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      // 1. Inserir pagamento na tabela vendas_pagamentos
+      const { error: insertErr } = await supabase.from('vendas_pagamentos').insert({
+        venda_id: modalBaixaVenda.id,
+        valor_pago: valBaixaNum,
+        metodo_pagamento: baixaMetodo,
+        tenant_id: targetEmpresaId
+      });
+      if (insertErr) throw insertErr;
+
+      // 2. Calcular novo total pago e novo status
+      const novoValorPagoTotal = valorJaPago + valBaixaNum;
+      const novoStatus = (novoValorPagoTotal >= valorTotalVenda - 0.01) ? 'PAGO' : 'PARCIAL';
+
+      // 3. Atualizar tabela vendas
+      const { error: updateErr } = await supabase.from('vendas').update({
+        valor_pago: novoValorPagoTotal,
+        status_pagamento: novoStatus
+      }).eq('id', modalBaixaVenda.id);
+
+      if (updateErr) throw updateErr;
+
+      // 4. Atualizar estado local de vendas
+      setVendas(prev => prev.map(v => {
+        if (v.id === modalBaixaVenda.id) {
+          return { ...v, valor_pago: novoValorPagoTotal, status_pagamento: novoStatus };
+        }
+        return v;
+      }));
+
+      showToast(`Pagamento de R$ ${valBaixaNum.toFixed(2)} registrado com sucesso!`, 'success');
+      setModalBaixaVenda(null);
+      setBaixaValor('');
+    } catch (err) {
+      console.error("Erro ao registrar baixa de pagamento:", err);
+      alert("Erro ao registrar pagamento: " + (err.message || 'Tente novamente.'));
+    } finally {
+      setLoadingBaixa(false);
     }
   };
 
@@ -4854,36 +4955,59 @@ export default function Dashboard({ session, profileDataProps }) {
   // Abrir Histórico de Compras/Vendas do Cliente
   const handleOpenClienteHistorico = async (cliente) => {
     if (!cliente) return;
+    console.log("🔥 [DEBUG MODAL CLIENTE]: ID recebido ->", cliente?.id, "Cliente completo ->", cliente);
+
     setClienteHistoricoSelecionado(cliente);
     setClienteHistoricoModalOpen(true);
     setLoadingClienteHistorico(true);
     setClienteHistoricoVendas([]);
     setSelectedPromoType('upgrade');
-    try {
-      let query = supabase
-        .from('vendas')
-        .select('*, filiais:filial_id(nome)')
-        .order('created_at', { ascending: false });
 
-      if (cliente.id && cliente.cpf_cnpj) {
-        query = query.or(`cliente_id.eq.${cliente.id},cliente_cpf_cnpj.eq.${cliente.cpf_cnpj}`);
-      } else if (cliente.id) {
-        query = query.eq('cliente_id', cliente.id);
-      } else if (cliente.cpf_cnpj) {
-        query = query.eq('cliente_cpf_cnpj', cliente.cpf_cnpj);
-      } else {
-        query = query.ilike('cliente_nome', `%${cliente.nome}%`);
+    try {
+      const cleanCpf = cliente.cpf_cnpj ? cliente.cpf_cnpj.replace(/\D/g, '') : '';
+      const rawCpf = cliente.cpf_cnpj ? cliente.cpf_cnpj.trim() : '';
+
+      // Construir filtros flexíveis para garantir busca tanto por ID quanto por CPF/CNPJ legados
+      const orConditions = [];
+      if (cliente.id) orConditions.push(`cliente_id.eq.${cliente.id}`);
+      if (cleanCpf) orConditions.push(`cliente_cpf_cnpj.eq.${cleanCpf}`);
+      if (rawCpf && rawCpf !== cleanCpf) orConditions.push(`cliente_cpf_cnpj.eq.${rawCpf}`);
+
+      let data = null;
+      let error = null;
+
+      if (orConditions.length > 0) {
+        const res = await supabase
+          .from('vendas')
+          .select('*, filiais:filial_id(nome)')
+          .or(orConditions.join(','))
+          .order('created_at', { ascending: false });
+        data = res.data;
+        error = res.error;
+      } else if (cliente.nome) {
+        const res = await supabase
+          .from('vendas')
+          .select('*, filiais:filial_id(nome)')
+          .ilike('cliente_nome', `%${cliente.nome.trim()}%`)
+          .order('created_at', { ascending: false });
+        data = res.data;
+        error = res.error;
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
+      if (error) {
+        console.error("🔥 [ERRO AO BUSCAR HISTÓRICO]:", error.message, error);
+        showToast("Falha ao carregar histórico do banco de dados.", "error");
+        return;
+      }
+
+      console.log("🔥 [COMPRAS ENCONTRADAS]:", data);
       const sales = data || [];
       setClienteHistoricoVendas(sales);
       setCustomPromoText(getStaticPromoFallback(cliente, sales, 'upgrade'));
       handleGenerateAIPromo('upgrade', cliente, sales);
     } catch (err) {
-      console.error('Erro ao buscar histórico de vendas:', err);
-      showToast('Erro ao buscar histórico de vendas do cliente.', 'error');
+      console.error("🔥 [ERRO AO BUSCAR HISTÓRICO]:", err);
+      showToast("Falha ao carregar histórico do banco de dados.", "error");
     } finally {
       setLoadingClienteHistorico(false);
     }
@@ -7053,6 +7177,14 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
+    if (pdvStatusPagamento === 'PARCIAL') {
+      const valPagoNum = parseFloat(pdvValorPagoCustom);
+      if (!valPagoNum || valPagoNum <= 0) {
+        alert('Por favor, informe o valor pago na entrada/sinal para a venda com status PARCIAL.');
+        return;
+      }
+    }
+
     // Calcular valores do carrinho
     const subtotalCart = pdvCart.reduce((sum, item) => sum + item.valorUnitario * item.quantidade, 0);
     const valorUsadoTotal = isTrocaAtiva ? pdvUsadoList.reduce((acc, item) => acc + item.valor, 0) : 0;
@@ -7153,6 +7285,39 @@ export default function Dashboard({ session, profileDataProps }) {
         setSelectedPdvClienteId(clienteIdBanco);
       }
 
+      // PASSO 1 & 2: EXTRAÇÃO DE CONTEXTO E GUARD CLAUSES (TRAVAS DE SEGURANÇA)
+      const cliente_id = clienteIdBanco || selectedPdvClienteId || null;
+      const vendedor_id = session?.user?.id || profile?.id || null;
+
+      console.log("🔥 [PRE-SAVE CHECK] Contexto do Checkout:", {
+        selectedPdvClienteId,
+        clienteIdBanco,
+        cliente_id,
+        vendedor_id,
+        pdvClienteNome: pdvClienteNome.trim(),
+        pdvClienteCpfCnpj: pdvClienteCpfCnpj.trim()
+      });
+
+      // GUARD CLAUSE 1: Se o usuário selecionou um cliente na interface, o ID NÃO PODE ser nulo.
+      if (pdvClienteNome.trim() && !cliente_id) {
+        const msgErrCliente = "Erro de Mapeamento: Cliente selecionado, mas o ID está quebrado. Venda abortada.";
+        console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCliente);
+        showToast(msgErrCliente, "error");
+        alert(msgErrCliente);
+        setLoadingPdvVenda(false);
+        return; // Interrompe a função ANTES de bater no banco
+      }
+
+      // GUARD CLAUSE 2: A venda não pode existir sem um vendedor atrelado
+      if (!vendedor_id) {
+        const msgErrVendedor = "Sessão Inválida: Vendedor não identificado. Faça login novamente.";
+        console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrVendedor);
+        showToast(msgErrVendedor, "error");
+        alert(msgErrVendedor);
+        setLoadingPdvVenda(false);
+        return; // Interrompe a função ANTES de bater no banco
+      }
+
       const createdVendaIds = [];
       const itemsForRecibo = [];
 
@@ -7232,6 +7397,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
         // Registrar saída de estoque por venda
         try {
+          const resolvedClienteNome = pdvClienteNome.trim() || pdvClienteSearchInput.trim() || 'Consumidor Final';
+          const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
+          const resolvedClienteId = clienteIdBanco || selectedPdvClienteId || null;
+          const resolvedFinanceira = (pdvMetodoPagamento === 'boleto')
+            ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
+            : (pdvMetodoPagamento ? pdvMetodoPagamento.toUpperCase() : 'ZÊNETE PDV');
+
           await supabase.from('estoque_movimentacoes').insert({
             empresa_id: company.id,
             produto_id: realProdutoId || item.produto.id,
@@ -7246,30 +7418,71 @@ export default function Dashboard({ session, profileDataProps }) {
           console.error('Erro ao registrar histórico de movimentação de venda:', movErr);
         }
 
-        // Atualizar dados completos de produto, cliente, imei, treener e financeira parceira na venda recém-criada
         try {
           const resolvedClienteNome = pdvClienteNome.trim() || pdvClienteSearchInput.trim() || 'Consumidor Final';
           const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
-          const resolvedClienteId = clienteIdBanco || selectedPdvClienteId || null;
-          const resolvedFinanceira = pdvFinanceiraParceira || (pdvMetodoPagamento === 'boleto' ? 'PayJoy' : pdvMetodoPagamento ? pdvMetodoPagamento.toUpperCase() : 'ZÊNETE PDV');
+          const resolvedClienteId = cliente_id || clienteIdBanco || selectedPdvClienteId || null;
+          const resolvedFinanceira = (pdvMetodoPagamento === 'boleto')
+            ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
+            : (pdvMetodoPagamento ? pdvMetodoPagamento.toUpperCase() : 'ZÊNETE PDV');
 
-          await supabase
+          const actualValorPago = pdvStatusPagamento === 'PAGO' 
+            ? valorTotalNovo 
+            : (pdvStatusPagamento === 'PARCIAL' ? (parseFloat(pdvValorPagoCustom) || 0) : 0);
+
+          const payloadVendaUpdate = {
+            produto_nome: item.produto.nome,
+            imei_novo: item.imei || null,
+            imei: item.imei || null,
+            cliente_nome: resolvedClienteNome,
+            cliente_cpf_cnpj: resolvedClienteCpf,
+            cliente_email: pdvClienteEmail.trim() || null,
+            cliente_telefone: pdvClienteTelefone.trim() || null,
+            cliente_id: resolvedClienteId,
+            vendedor_id: vendedor_id,
+            vendedor_nome: profile?.nome || session?.user?.email || null,
+            treener_id: selectedTreenerId || null,
+            financeira_parceira: resolvedFinanceira,
+            valor_pago: actualValorPago,
+            status_pagamento: pdvStatusPagamento
+          };
+
+          console.log("🔥 [DEBUG PAYLOAD EXATO]:", {
+            cliente: resolvedClienteId,
+            vendedor: vendedor_id,
+            venda_id: rpcRes.venda_id,
+            cliente_nome: resolvedClienteNome,
+            cliente_cpf_cnpj: resolvedClienteCpf,
+            status_pagamento: pdvStatusPagamento,
+            valor_pago: actualValorPago,
+            payload: payloadVendaUpdate
+          });
+
+          const { error: updateVendaErr } = await supabase
             .from('vendas')
-            .update({
-              produto_nome: item.produto.nome,
-              imei_novo: item.imei || null,
-              imei: item.imei || null,
-              cliente_nome: resolvedClienteNome,
-              cliente_cpf_cnpj: resolvedClienteCpf,
-              cliente_email: pdvClienteEmail.trim() || null,
-              cliente_telefone: pdvClienteTelefone.trim() || null,
-              cliente_id: resolvedClienteId,
-              treener_id: selectedTreenerId || null,
-              financeira_parceira: resolvedFinanceira
-            })
+            .update(payloadVendaUpdate)
             .eq('id', rpcRes.venda_id);
+
+          if (updateVendaErr) {
+            console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
+          }
+
+          if (actualValorPago > 0) {
+            const mapMetodo = {
+              'pix': 'PIX',
+              'cartao': 'CARTAO',
+              'dinheiro': 'DINHEIRO'
+            };
+            const metodoResolved = mapMetodo[pdvMetodoPagamento?.toLowerCase()] || 'DINHEIRO';
+            await supabase.from('vendas_pagamentos').insert({
+              venda_id: rpcRes.venda_id,
+              valor_pago: actualValorPago,
+              metodo_pagamento: metodoResolved,
+              tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
+            });
+          }
         } catch (clientUpdateErr) {
-          console.error('Erro ao atualizar dados estendidos na venda:', clientUpdateErr);
+          console.error('Erro ao atualizar dados estendidos e pagamentos na venda:', clientUpdateErr);
         }
 
         // Se tiver comissão trainee de serviço
@@ -7374,6 +7587,8 @@ export default function Dashboard({ session, profileDataProps }) {
       setPdvMetodoPagamento('pix');
       setPdvMetodoRestante('pix');
       setPdvCartaoParcelas(1);
+      setPdvDataVencimentoRestante('');
+      setPdvValorPagoCustom('');
       setIsQuickClientFormOpen(true);
 
       // Recarregar dados
@@ -9339,6 +9554,93 @@ export default function Dashboard({ session, profileDataProps }) {
                                     </button>
                                   ))}
                                 </div>
+                              
+                                 {pdvMetodoPagamento === 'boleto' && (
+                                   <div className="bg-[#111111] border border-[#6A0DAD]/40 p-3 rounded-lg space-y-2 mt-2.5 animate-fadeIn">
+                                     <label className="block text-[10px] font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                                       <Building size={12} className="text-[#6A0DAD]" />
+                                       Selecione a Financeira do Boleto <span className="text-red-500">*</span>
+                                     </label>
+                                     <div className="grid grid-cols-4 gap-1.5">
+                                       {['PayJoy', 'Watu', 'Uma', 'Outra'].map((fin) => (
+                                         <button
+                                           key={fin}
+                                           type="button"
+                                           onClick={() => setPdvFinanceiraParceira(fin)}
+                                           className={`py-1.5 px-1 rounded text-[10px] font-bold transition-all border ${
+                                             pdvFinanceiraParceira === fin
+                                               ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-[#6A0DAD]/20'
+                                               : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                                           }`}
+                                         >
+                                           {fin}
+                                         </button>
+                                       ))}
+                                     </div>
+                                     {pdvFinanceiraParceira === 'Outra' && (
+                                       <input
+                                         type="text"
+                                         placeholder="Informe o nome da financeira..."
+                                         value={pdvFinanceiraCustomInput}
+                                         onChange={(e) => setPdvFinanceiraCustomInput(e.target.value)}
+                                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded text-white px-3 py-1.5 text-xs outline-none mt-1 font-semibold"
+                                       />
+                                     )}
+                                   </div>
+                                 )}
+</div>
+
+                              {/* CONDIÇÃO DE PAGAMENTO (QUITADO / PARCIAL - SINAL / PENDENTE) */}
+                              <div className="border-t border-[#222222] pt-4 space-y-3">
+                                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
+                                  Condição Comercial de Pagamento
+                                </label>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {[
+                                    { value: 'PAGO', label: '🟢 Integral' },
+                                    { value: 'PARCIAL', label: '🟡 Sinal / Entrada' },
+                                    { value: 'PENDENTE', label: '🔴 A Receber' }
+                                  ].map((st) => (
+                                    <button
+                                      key={st.value}
+                                      type="button"
+                                      onClick={() => {
+                                        setPdvStatusPagamento(st.value);
+                                        if (st.value === 'PAGO') setPdvValorPagoCustom('');
+                                      }}
+                                      className={`py-2 px-1 rounded text-[10px] font-bold transition-all border ${
+                                        pdvStatusPagamento === st.value
+                                          ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-[#6A0DAD]/20'
+                                          : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                                      }`}
+                                    >
+                                      {st.label}
+                                    </button>
+                                  ))}
+                                </div>
+
+                                {pdvStatusPagamento === 'PARCIAL' && (
+                                  <div className="bg-[#111111] border border-[#6A0DAD]/30 p-3 rounded-lg space-y-2 mt-2">
+                                    <label className="block text-[10px] font-bold text-purple-300 uppercase tracking-wider">
+                                      Valor Pago no Ato (Sinal / Entrada) <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="relative">
+                                      <span className="absolute left-3 top-2 text-xs text-gray-500 font-mono">R$</span>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={pdvValorPagoCustom}
+                                        onChange={(e) => setPdvValorPagoCustom(e.target.value)}
+                                        placeholder="0.00"
+                                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded text-white pl-8 pr-3 py-1.5 text-xs outline-none font-mono font-bold"
+                                      />
+                                    </div>
+                                    <p className="text-[10px] text-gray-400">
+                                      O saldo restante ficará pendente no cadastro do cliente em Contas a Receber.
+                                    </p>
+                                  </div>
+                                )}
                               </div>
 
                               {/* MÓDULO DE TROCA */}
@@ -9949,6 +10251,7 @@ export default function Dashboard({ session, profileDataProps }) {
                     <th className="p-4">Cliente (Nome + CPF)</th>
                     <th className="p-4">Aparelho (Modelo + IMEI)</th>
                     <th className="p-4">Parceiro Financeiro</th>
+                    <th className="p-4">Status Financeiro</th>
                     <th className="p-4">Status de Crédito</th>
                     <th className="p-4 text-right">Ações</th>
                   </tr>
@@ -9966,14 +10269,23 @@ export default function Dashboard({ session, profileDataProps }) {
                     const imeiObj = disponiveisImeis.find(i => String(i.produto_id) === String(venda.produto_id));
                     const imeiTextResolved = venda.imei_novo || venda.imei || venda.used_imei || (imeiObj?.imei) || '-';
 
-                    // Resolução Dinâmica de Cliente (Cruzando estado clientes caso cliente_nome venha nulo)
-                    const clienteObj = clientes.find(c => 
+                    // Resolução Dinâmica de Cliente (Cruzando JOIN do Supabase ou lista de clientes)
+                    const clienteObj = venda.clientes || clientes.find(c => 
                       (venda.cliente_id && String(c.id) === String(venda.cliente_id)) || 
                       (venda.cliente_cpf_cnpj && c.cpf_cnpj && c.cpf_cnpj.trim() === String(venda.cliente_cpf_cnpj).trim())
                     );
-                    const clienteNomeResolved = venda.cliente_nome || clienteObj?.nome || (venda.cliente_id ? 'Cliente Cadastrado' : 'Consumidor Final');
-                    const clienteCpfResolved = venda.cliente_cpf_cnpj || clienteObj?.cpf_cnpj || 'Não Informado';
+                    const clienteNomeResolved = (venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) 
+                      || clienteObj?.nome 
+                      || (venda.cliente_id ? 'Cliente Cadastrado' : 'Consumidor Final');
+                    const clienteCpfResolved = (venda.cliente_cpf_cnpj && venda.cliente_cpf_cnpj !== 'Não Informado' ? venda.cliente_cpf_cnpj : null) 
+                      || clienteObj?.cpf_cnpj 
+                      || 'Não Informado';
                     const financeiraResolved = venda.financeira_parceira || venda.financeira || (venda.metodo_pagamento ? venda.metodo_pagamento.toUpperCase() : 'PDV');
+
+                    const statusPag = venda.status_pagamento || 'PAGO';
+                    const totalVal = parseFloat(venda.valor_total || 0);
+                    const pagoVal = parseFloat(venda.valor_pago || (statusPag === 'PAGO' ? totalVal : 0));
+                    const saldoRestante = Math.max(0, totalVal - pagoVal);
 
                     return (
                       <tr key={venda.id} className="hover:bg-white/5 transition-colors">
@@ -9987,6 +10299,9 @@ export default function Dashboard({ session, profileDataProps }) {
                           <div className="flex flex-col">
                             <span className="font-bold text-white text-xs">{clienteNomeResolved}</span>
                             <span className="text-[11px] font-mono text-gray-400">CPF/CNPJ: {clienteCpfResolved}</span>
+                            <div className="text-[10px] text-purple-400 font-mono mt-0.5 bg-purple-950/30 border border-purple-800/40 px-1.5 py-0.5 rounded w-fit">
+                              ID no Banco: <strong className="text-purple-200">{venda.cliente_id || 'NULL'}</strong>
+                            </div>
                           </div>
                         </td>
 
@@ -10012,6 +10327,39 @@ export default function Dashboard({ session, profileDataProps }) {
                           </span>
                         </td>
 
+                        {/* Status Financeiro & Contas a Receber */}
+                        <td className="p-4 font-mono">
+                          {statusPag === 'PAGO' ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="px-2 py-0.5 rounded bg-green-950/50 text-green-400 border border-green-800/40 text-[10px] font-bold w-fit">
+                                🟢 PAGO
+                              </span>
+                              <span className="text-[10px] text-gray-400">R$ {totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          ) : statusPag === 'PARCIAL' ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="px-2 py-0.5 rounded bg-yellow-950/50 text-yellow-400 border border-yellow-800/40 text-[10px] font-bold w-fit">
+                                🟡 PARCIAL
+                              </span>
+                              <span className="text-[10px] text-gray-300">
+                                Pago: <strong className="text-green-400">R$ {pagoVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                              </span>
+                              <span className="text-[10px] text-red-400 font-bold">
+                                Resta: R$ {saldoRestante.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="px-2 py-0.5 rounded bg-red-950/50 text-red-400 border border-red-800/40 text-[10px] font-bold w-fit">
+                                🔴 PENDENTE
+                              </span>
+                              <span className="text-[10px] text-red-400 font-bold">
+                                Resta: R$ {totalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
                         {/* Status de Crédito (Tag Visual) */}
                         <td className="p-4">
                           {getStatusBadge(venda.status_credito)}
@@ -10020,6 +10368,18 @@ export default function Dashboard({ session, profileDataProps }) {
                         {/* Ações */}
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {(statusPag === 'PARCIAL' || statusPag === 'PENDENTE') && (
+                              <button
+                                onClick={() => {
+                                  setModalBaixaVenda(venda);
+                                  setBaixaValor(saldoRestante > 0 ? saldoRestante.toFixed(2) : '');
+                                  setBaixaMetodo('PIX');
+                                }}
+                                className="bg-emerald-950/40 hover:bg-emerald-700 text-emerald-300 hover:text-white border border-emerald-800/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
+                              >
+                                <DollarSign size={13} /> Baixar Pagamento
+                              </button>
+                            )}
                             {isGerenteOrAdmin && (
                               <button
                                 onClick={() => {
@@ -10187,6 +10547,123 @@ export default function Dashboard({ session, profileDataProps }) {
                   >
                     {isSavingAuditStatus ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                     Salvar Auditoria de Crédito
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE BAIXA DE PAGAMENTO / CONTAS A RECEBER */}
+        {modalBaixaVenda && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+            <div className="bg-[#0A0A0A] border border-emerald-500/40 rounded-2xl p-6 w-full max-w-md space-y-5 shadow-2xl">
+              <div className="flex justify-between items-start border-b border-[#222222] pb-4">
+                <div>
+                  <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    <DollarSign size={20} className="text-emerald-400" />
+                    Registrar Recebimento / Baixa
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Cliente: <strong className="text-white">{modalBaixaVenda.cliente_nome || 'Consumidor Final'}</strong>
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setModalBaixaVenda(null);
+                    setBaixaValor('');
+                  }}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmarBaixaPagamento} className="space-y-4 text-xs">
+                <div className="bg-black/60 border border-[#222222] p-3.5 rounded-xl space-y-2 font-mono">
+                  <div className="flex justify-between text-gray-400">
+                    <span>Valor Total da Venda:</span>
+                    <span className="text-white font-bold">
+                      R$ {parseFloat(modalBaixaVenda.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-gray-400">
+                    <span>Valor Já Pago (Sinais / Entradas):</span>
+                    <span className="text-emerald-400 font-bold">
+                      R$ {parseFloat(modalBaixaVenda.valor_pago || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t border-[#222222] pt-2 text-xs">
+                    <span className="text-red-400 font-bold uppercase">Saldo Devedor Restante:</span>
+                    <span className="text-red-400 font-black text-sm">
+                      R$ {Math.max(0, parseFloat(modalBaixaVenda.valor_total || 0) - parseFloat(modalBaixaVenda.valor_pago || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
+                    Valor do Pagamento Atual <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-xs text-gray-500 font-mono">R$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={baixaValor}
+                      onChange={(e) => setBaixaValor(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-black border border-[#222222] focus:border-emerald-500 rounded-lg text-white pl-8 pr-3 py-2 text-sm outline-none font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
+                    Forma de Pagamento Recebida
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: 'PIX', label: '⚡ PIX' },
+                      { value: 'CARTAO', label: '💳 Cartão' },
+                      { value: 'DINHEIRO', label: '💵 Dinheiro' }
+                    ].map(m => (
+                      <button
+                        key={m.value}
+                        type="button"
+                        onClick={() => setBaixaMetodo(m.value)}
+                        className={`py-2 px-1 rounded-lg text-xs font-bold transition-all border ${
+                          baixaMetodo === m.value
+                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/20'
+                            : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-[#222222]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalBaixaVenda(null);
+                      setBaixaValor('');
+                    }}
+                    className="bg-[#111111] hover:bg-[#1A1A1A] text-gray-300 border border-[#333333] font-bold py-2.5 px-4 rounded-xl transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loadingBaixa}
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer text-xs"
+                  >
+                    {loadingBaixa ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                    Confirmar Recebimento
                   </button>
                 </div>
               </form>
@@ -14182,7 +14659,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                           )}
                                         </div>
                                       )}
-                                    </td>
+                                     </td>
                                     {profile?.role !== 'DONO' && (
                                       <td className="py-2.5 text-right">
                                         {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(profile?.role) && (
@@ -14778,6 +15255,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <td className="py-3.5 text-right">
                                   <div className="flex items-center justify-end gap-2">
                                     <button
+                                       onClick={() => handleOpenClienteHistorico(c)}
+                                       className="px-2.5 py-1 border border-blue-500/40 hover:border-blue-500 text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-600 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                                       title="Ver Histórico de Compras"
+                                     >
+                                       <Eye size={12} />
+                                       Visualizar
+                                     </button>
+                                     <button
                                       onClick={() => handleOpenEditClienteModal(c)}
                                       className="p-1 border border-[#222222] hover:border-[#6A0DAD]/40 text-gray-500 hover:text-white rounded bg-black transition-colors"
                                       title="Editar cliente"
