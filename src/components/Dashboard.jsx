@@ -8256,33 +8256,35 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Consolidar produtos da tabela 'produtos' com produtos do 'catalogoProdutos' que possuem IMEIs/estoque
   const listaProdutosConsolidada = React.useMemo(() => {
-    // 1. Mapear produtos físicos enriquecendo com os dados de codigo_barras, cor e SKU do catálogo mestre
+    // 1. Mapear produtos físicos enriquecendo com os dados de codigo_barras, cor, preco e SKU do catálogo mestre
     const list = produtos.map(p => {
-      const catMatch = catalogoProdutos.find(c => 
+      const catMatch = (catalogoProdutos || []).find(c => 
         (p.nome && c.nome && c.nome.toLowerCase().trim() === p.nome.toLowerCase().trim()) || 
-        c.id === p.id
+        (c.id && p.id && String(c.id) === String(p.id))
       );
       return {
         ...p,
-        cor: p.cor || catMatch?.cor || null,
+        cor: (p.cor && p.cor.trim()) || catMatch?.cor || null,
         codigo_barras: p.codigo_barras || catMatch?.codigo_barras || null,
         sku: p.sku || catMatch?.sku || null,
         categoria: p.categoria || catMatch?.categoria || 'GERAL',
-        tipo: p.tipo || catMatch?.tipo || 'ACESSORIO'
+        tipo: p.tipo || catMatch?.tipo || 'ACESSORIO',
+        preco: parseFloat(p.preco || catMatch?.preco || 0)
       };
     });
 
-    const existingKeys = new Set(list.map(p => `${(p.nome || '').toLowerCase()}_${p.filial_id || 'sem_filial'}`));
+    const existingKeys = new Set(list.map(p => `${(p.nome || '').toLowerCase().trim()}_${(p.cor || '').toLowerCase().trim()}_${p.filial_id || 'sem_filial'}`));
 
     // 2. Incluir produtos derivados de IMEIs
     (disponiveisImeis || []).forEach(im => {
       const filialId = im.filial_id;
-      const prodName = im.produtos?.nome || catalogoProdutos.find(c => c.id === im.produto_id)?.nome;
+      const prodName = im.produtos?.nome || (catalogoProdutos || []).find(c => c.id === im.produto_id)?.nome;
       if (prodName) {
-        const key = `${prodName.toLowerCase()}_${filialId || 'sem_filial'}`;
+        const catItem = (catalogoProdutos || []).find(c => c.nome?.toLowerCase().trim() === prodName.toLowerCase().trim()) || {};
+        const corVal = (im.cor || catItem.cor || '').toLowerCase().trim();
+        const key = `${prodName.toLowerCase().trim()}_${corVal}_${filialId || 'sem_filial'}`;
         if (!existingKeys.has(key)) {
           existingKeys.add(key);
-          const catItem = catalogoProdutos.find(c => c.nome?.toLowerCase() === prodName.toLowerCase()) || {};
           list.push({
             id: im.produto_id || `synth_${key}`,
             nome: prodName,
@@ -8299,9 +8301,20 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     });
 
-    // 3. Incluir produtos do catalogoProdutos para garantir busca universal por EAN/SKU
-    catalogoProdutos.forEach(cat => {
-      const existsInList = list.some(item => item.nome && cat.nome && item.nome.toLowerCase().trim() === cat.nome.toLowerCase().trim());
+    // 3. Incluir produtos do catalogoProdutos apenas se ainda não existirem no estoque físico
+    (catalogoProdutos || []).forEach(cat => {
+      if (!cat.nome) return;
+      const catNameNorm = cat.nome.toLowerCase().trim();
+      const catCorNorm = (cat.cor || '').toLowerCase().trim();
+
+      const existsInList = list.some(item => {
+        const itemNameNorm = (item.nome || '').toLowerCase().trim();
+        const itemCorNorm = (item.cor || '').toLowerCase().trim();
+        if (itemNameNorm !== catNameNorm) return false;
+        // Se a cor do catálogo for informada, verifica se coincide ou se o item já foi mapeado
+        return !catCorNorm || !itemCorNorm || catCorNorm === itemCorNorm;
+      });
+
       if (!existsInList) {
         list.push({
           id: cat.id,
@@ -8335,8 +8348,7 @@ export default function Dashboard({ session, profileDataProps }) {
           String(p.filial_id) === String(filtroFilialEstoque) ||
           (selectedFilialObj && String(p.filial_id) === String(selectedFilialObj.id)) ||
           (selectedFilialObj && p.filial_nome && p.filial_nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
-          (selectedFilialObj && p.filiais?.nome && p.filiais.nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
-          (p.filial_id === null || p.filial_id === undefined)
+          (selectedFilialObj && p.filiais?.nome && p.filiais.nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim())
         );
     
     // 2. Category filter
