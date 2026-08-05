@@ -6055,6 +6055,11 @@ export default function Dashboard({ session, profileDataProps }) {
         .from('estoque_movimentacoes')
         .select(`
           id, imei, tipo_movimentacao, quantidade, observacao, created_at, criado_por,
+          usuario:criado_por (
+            id,
+            nome,
+            role
+          ),
           produtos (
             nome,
             tipo
@@ -7471,7 +7476,7 @@ export default function Dashboard({ session, profileDataProps }) {
             tipo_movimentacao: 'SAIDA_VENDA',
             filial_origem_id: activeFilialId,
             quantidade: item.quantidade,
-            observacao: `Venda realizada no PDV (Venda ID: ${rpcRes.venda_id}).`,
+            observacao: `Venda realizada no PDV por ${profile?.nome || 'Vendedor'} (Venda ID: ${rpcRes.venda_id}).`,
             criado_por: profile.id
           });
         } catch (movErr) {
@@ -13643,7 +13648,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   value={buscaMovimentacao}
                                   onChange={(e) => setBuscaMovimentacao(e.target.value)}
                                   className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] rounded-lg text-white pl-9 pr-4 py-2 text-xs outline-none transition-all"
-                                  placeholder="Buscar por IMEI, Modelo ou Observação..."
+                                  placeholder="Buscar por IMEI, Modelo, Vendedor ou Observação..."
                                 />
                               </div>
 
@@ -13681,13 +13686,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                       <th className="py-2.5 px-4">Origem</th>
                                       <th className="py-2.5 px-4">Destino</th>
                                       <th className="py-2.5 px-4 text-center">Qtd</th>
+                                      <th className="py-2.5 px-4">Vendedor / Responsável</th>
                                       <th className="py-2.5 px-4">Observação</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-[#222222] bg-black">
                                     {estoqueMovimentacoes.length === 0 ? (
                                       <tr>
-                                        <td colSpan={8} className="py-8 text-center text-gray-600 text-sm italic">
+                                        <td colSpan={9} className="py-8 text-center text-gray-600 text-sm italic">
                                           Nenhuma movimentação registrada no sistema.
                                         </td>
                                       </tr>
@@ -13699,7 +13705,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                             const prodNome = mov.produtos?.nome || '';
                                             const imeiVal = mov.imei || '';
                                             const obs = mov.observacao || '';
-                                            if (!prodNome.toLowerCase().includes(term) && !imeiVal.toLowerCase().includes(term) && !obs.toLowerCase().includes(term)) {
+                                            const userName = mov.usuario?.nome || '';
+                                            if (!prodNome.toLowerCase().includes(term) && !imeiVal.toLowerCase().includes(term) && !obs.toLowerCase().includes(term) && !userName.toLowerCase().includes(term)) {
                                               return false;
                                             }
                                           }
@@ -13743,6 +13750,9 @@ export default function Dashboard({ session, profileDataProps }) {
                                               </td>
                                               <td className="py-2.5 px-4 text-center font-bold text-white font-mono">
                                                 {mov.quantidade}
+                                              </td>
+                                              <td className="py-2.5 px-4 font-semibold text-purple-300">
+                                                {mov.usuario?.nome || (mov.criado_por === profile?.id ? profile?.nome : null) || '-'}
                                               </td>
                                               <td className="py-2.5 px-4 text-gray-400 max-w-xs truncate" title={mov.observacao}>
                                                 {mov.observacao || '-'}
