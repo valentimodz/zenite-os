@@ -4216,7 +4216,7 @@ export default function Dashboard({ session, profileDataProps }) {
         numero_serie: numeroSerie.trim() || null,
         condicao: condicaoProduto,
         estoque_minimo: estoqueMinimoProduto ? parseInt(estoqueMinimoProduto) : null,
-        cor: (tipoProduto === 'CELULAR' || tipoProduto === 'Celular') ? (corCatalogoProduto.trim() || null) : null,
+        cor: corCatalogoProduto.trim() || null,
         ncm: ncmProduto || null,
         cest: cestProduto || null,
         cfop: cfopProduto || null,
@@ -5809,6 +5809,7 @@ export default function Dashboard({ session, profileDataProps }) {
           nome: selectedProdutoMestre.nome,
           tipo: selectedProdutoMestre.tipo,
           categoria: selectedProdutoMestre.categoria,
+          cor: selectedProdutoMestre.cor || (entradaCorDispositivo?.trim() || null),
           codigo_barras: codigoBarrasFinal,
           preco: parseFloat(selectedProdutoMestre.preco || 0),
           quantidade: qtyToAdd
@@ -8250,7 +8251,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Consolidar produtos da tabela 'produtos' com produtos do 'catalogoProdutos' que possuem IMEIs/estoque
   const listaProdutosConsolidada = React.useMemo(() => {
-    // 1. Mapear produtos físicos enriquecendo com os dados de codigo_barras e SKU do catálogo mestre
+    // 1. Mapear produtos físicos enriquecendo com os dados de codigo_barras, cor e SKU do catálogo mestre
     const list = produtos.map(p => {
       const catMatch = catalogoProdutos.find(c => 
         (p.nome && c.nome && c.nome.toLowerCase().trim() === p.nome.toLowerCase().trim()) || 
@@ -8258,6 +8259,7 @@ export default function Dashboard({ session, profileDataProps }) {
       );
       return {
         ...p,
+        cor: p.cor || catMatch?.cor || null,
         codigo_barras: p.codigo_barras || catMatch?.codigo_barras || null,
         sku: p.sku || catMatch?.sku || null,
         categoria: p.categoria || catMatch?.categoria || 'GERAL',
@@ -8281,6 +8283,7 @@ export default function Dashboard({ session, profileDataProps }) {
             nome: prodName,
             tipo: catItem.tipo || 'CELULAR',
             categoria: catItem.categoria || 'GERAL',
+            cor: im.cor || catItem.cor || null,
             filial_id: filialId,
             preco: parseFloat(catItem.preco || 0),
             quantidade: 0,
@@ -8300,6 +8303,7 @@ export default function Dashboard({ session, profileDataProps }) {
           nome: cat.nome,
           tipo: cat.tipo || 'ACESSORIO',
           categoria: cat.categoria || 'GERAL',
+          cor: cat.cor || null,
           filial_id: null,
           preco: parseFloat(cat.preco || 0),
           quantidade: 0,
@@ -13074,30 +13078,30 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
                       )}
 
-                      {tipoProduto === 'CELULAR' && (
                         <div>
-                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">Cor do Aparelho (Celular)</label>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">Cor do Produto / Aparelho</label>
                           <input
                             type="text"
                             value={corCatalogoProduto}
                             onChange={(e) => setCorCatalogoProduto(e.target.value)}
-                            placeholder="Ex: Titânio Natural, Preto, Branco"
+                            placeholder="Ex: Preto, Titânio, Azul, Rosa, Transparente"
                             className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
                             list="cores-sugeridas-catalogo"
                           />
                           <datalist id="cores-sugeridas-catalogo">
-                            <option value="Titânio Natural" />
-                            <option value="Titânio Preto" />
-                            <option value="Titânio Branco" />
-                            <option value="Titânio Azul" />
                             <option value="Preto" />
                             <option value="Branco" />
+                            <option value="Azul" />
+                            <option value="Vermelho" />
+                            <option value="Rosa" />
+                            <option value="Titânio Natural" />
+                            <option value="Titânio Preto" />
+                            <option value="Transparente" />
+                            <option value="Cinza Espacial" />
                             <option value="Gold" />
                             <option value="Silver" />
-                            <option value="Cinza Espacial" />
                           </datalist>
                         </div>
-                      )}
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
