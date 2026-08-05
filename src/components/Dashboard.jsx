@@ -8283,28 +8283,94 @@ export default function Dashboard({ session, profileDataProps }) {
     .filter(c => c.status === 'ATIVO')
     .reduce((acc, c) => acc + (Number(c.valor_mensalidade) || 0) + (Number(c.valor_setup) || 0), 0);
 
-  // Consolidar produtos da tabela 'produtos' com produtos do 'catalogoProdutos' que possuem IMEIs/estoque
+  // Consolidar produtos da tabela 'produtos' com produtos do 'catalogoProdutos' garantindo 1 card/linha por item cadastrado
   const listaProdutosConsolidada = React.useMemo(() => {
-    // 1. Mapear produtos físicos enriquecendo com os dados de codigo_barras, cor, preco e SKU do catálogo mestre
-    const list = produtos.map(p => {
-      const catMatch = (catalogoProdutos || []).find(c => 
-        (p.nome && c.nome && c.nome.toLowerCase().trim() === p.nome.toLowerCase().trim()) || 
-        (c.id && p.id && String(c.id) === String(p.id))
-      );
-      return {
-        ...p,
-        cor: (p.cor && p.cor.trim()) || catMatch?.cor || null,
-        codigo_barras: p.codigo_barras || catMatch?.codigo_barras || null,
-        sku: p.sku || catMatch?.sku || null,
-        categoria: p.categoria || catMatch?.categoria || 'GERAL',
-        tipo: p.tipo || catMatch?.tipo || 'ACESSORIO',
-        preco: parseFloat(p.preco || catMatch?.preco || 0)
-      };
+    const list = [];
+
+    // 1. Processar cada produto cadastrado no Catálogo Mestre (catalogoProdutos)
+    (catalogoProdutos || []).forEach(cat => {
+      if (!cat || !cat.nome) return;
+
+      const catNameNorm = (cat.nome || '').toLowerCase().trim();
+      const catCorNorm = (cat.cor || '').toLowerCase().trim();
+      const catEanNorm = (cat.codigo_barras || '').toLowerCase().trim();
+
+      // Encontrar estoque físico correspondente na tabela 'produtos'
+      const physicalMatches = (produtos || []).filter(p => {
+        if (p.id && String(p.id) === String(cat.id)) return true;
+        const pNameNorm = (p.nome || '').toLowerCase().trim();
+        const pCorNorm = (p.cor || '').toLowerCase().trim();
+        const pEanNorm = (p.codigo_barras || '').toLowerCase().trim();
+
+        if (pNameNorm !== catNameNorm) return false;
+        if (catCorNorm || pCorNorm) {
+          if (catCorNorm !== pCorNorm) return false;
+        }
+        if (catEanNorm || pEanNorm) {
+          if (catEanNorm !== pEanNorm) return false;
+        }
+        return true;
+      });
+
+      if (physicalMatches.length > 0) {
+        physicalMatches.forEach(p => {
+          list.push({
+            ...cat,
+            ...p,
+            id: p.id || cat.id,
+            catalogo_id: cat.id,
+            nome: p.nome || cat.nome,
+            cor: (p.cor && p.cor.trim()) || cat.cor || null,
+            codigo_barras: p.codigo_barras || cat.codigo_barras || null,
+            sku: p.sku || cat.sku || null,
+            categoria: p.categoria || cat.categoria || 'GERAL',
+            tipo: p.tipo || cat.tipo || 'ACESSORIO',
+            preco: parseFloat(p.preco || cat.preco || 0),
+            quantidade: p.quantidade || 0
+          });
+        });
+      } else {
+        // Produto do catálogo mestre sem estoque físico cadastrado em nenhuma filial ainda
+        list.push({
+          id: cat.id,
+          catalogo_id: cat.id,
+          nome: cat.nome,
+          tipo: cat.tipo || 'ACESSORIO',
+          categoria: cat.categoria || 'GERAL',
+          cor: cat.cor || null,
+          filial_id: null,
+          preco: parseFloat(cat.preco || 0),
+          quantidade: 0,
+          sku: cat.sku || null,
+          codigo_barras: cat.codigo_barras || null
+        });
+      }
     });
 
-    const existingKeys = new Set(list.map(p => `${(p.nome || '').toLowerCase().trim()}_${(p.cor || '').toLowerCase().trim()}_${p.filial_id || 'sem_filial'}`));
+    // 2. Incluir produtos da tabela 'produtos' que eventualmente não estejam no catálogo mestre
+    (produtos || []).forEach(p => {
+      if (!p || !p.nome) return;
+      const isAlreadyInList = list.some(item => 
+        (item.id && p.id && String(item.id) === String(p.id)) ||
+        (item.catalogo_id && p.id && String(item.catalogo_id) === String(p.id))
+      );
+      if (!isAlreadyInList) {
+        const catMatch = (catalogoProdutos || []).find(c => 
+          (p.nome && c.nome && c.nome.toLowerCase().trim() === p.nome.toLowerCase().trim())
+        );
+        list.push({
+          ...p,
+          cor: (p.cor && p.cor.trim()) || catMatch?.cor || null,
+          codigo_barras: p.codigo_barras || catMatch?.codigo_barras || null,
+          sku: p.sku || catMatch?.sku || null,
+          categoria: p.categoria || catMatch?.categoria || 'GERAL',
+          tipo: p.tipo || catMatch?.tipo || 'ACESSORIO',
+          preco: parseFloat(p.preco || catMatch?.preco || 0)
+        });
+      }
+    });
 
-    // 2. Incluir produtos derivados de IMEIs
+    // 3. Incluir produtos derivados de IMEIs
     (disponiveisImeis || []).forEach(im => {
       const filialId = im.filial_id;
       const prodName = im.produtos?.nome || (catalogoProdutos || []).find(c => c.id === im.produto_id)?.nome;
@@ -8312,8 +8378,11 @@ export default function Dashboard({ session, profileDataProps }) {
         const catItem = (catalogoProdutos || []).find(c => c.nome?.toLowerCase().trim() === prodName.toLowerCase().trim()) || {};
         const corVal = (im.cor || catItem.cor || '').toLowerCase().trim();
         const key = `${prodName.toLowerCase().trim()}_${corVal}_${filialId || 'sem_filial'}`;
-        if (!existingKeys.has(key)) {
-          existingKeys.add(key);
+        const existsInList = list.some(item => 
+          (im.produto_id && item.id && String(item.id) === String(im.produto_id)) ||
+          (item.nome?.toLowerCase().trim() === prodName.toLowerCase().trim() && String(item.filial_id) === String(filialId))
+        );
+        if (!existsInList) {
           list.push({
             id: im.produto_id || `synth_${key}`,
             nome: prodName,
@@ -8330,46 +8399,8 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     });
 
-    // 3. Incluir produtos do catalogoProdutos apenas se ainda não existirem no estoque físico
-    (catalogoProdutos || []).forEach(cat => {
-      if (!cat.nome) return;
-      const catIdStr = cat.id ? String(cat.id) : null;
-      const catNameNorm = cat.nome.toLowerCase().trim();
-      const catCorNorm = (cat.cor || '').toLowerCase().trim();
-      const catEanNorm = (cat.codigo_barras || '').toLowerCase().trim();
-      const catSkuNorm = (cat.sku || '').toLowerCase().trim();
-
-      const existsInList = list.some(item => {
-        if (catIdStr && item.id && String(item.id) === catIdStr) return true;
-        const itemNameNorm = (item.nome || '').toLowerCase().trim();
-        const itemCorNorm = (item.cor || '').toLowerCase().trim();
-        const itemEanNorm = (item.codigo_barras || '').toLowerCase().trim();
-        const itemSkuNorm = (item.sku || '').toLowerCase().trim();
-
-        return itemNameNorm === catNameNorm &&
-               itemCorNorm === catCorNorm &&
-               itemEanNorm === catEanNorm &&
-               itemSkuNorm === catSkuNorm;
-      });
-
-      if (!existsInList) {
-        list.push({
-          id: cat.id,
-          nome: cat.nome,
-          tipo: cat.tipo || 'ACESSORIO',
-          categoria: cat.categoria || 'GERAL',
-          cor: cat.cor || null,
-          filial_id: null,
-          preco: parseFloat(cat.preco || 0),
-          quantidade: 0,
-          sku: cat.sku || null,
-          codigo_barras: cat.codigo_barras || null
-        });
-      }
-    });
-
     return list;
-  }, [produtos, disponiveisImeis, catalogoProdutos]);
+  }, [catalogoProdutos, produtos, disponiveisImeis]);
 
   // Filtrar produtos de catálogo no Estoque (Gerente)
   const filteredProdutosEstoque = listaProdutosConsolidada.filter(p => {
@@ -8460,19 +8491,16 @@ export default function Dashboard({ session, profileDataProps }) {
     return matchesFilial && matchesCategoria && matchesStatus && matchesSearch;
   });
 
-  // Consolidar produtos únicos no PDV com saldo calculado para a filial ativa
+  // Consolidar produtos para o PDV com saldo calculado para a filial ativa
   const listaProdutosPdvDinamica = React.useMemo(() => {
     const uniqueMap = new Map();
 
     listaProdutosConsolidada.forEach(p => {
       const nameNorm = (p.nome || '').toLowerCase().trim();
-      const corNorm = (p.cor || '').toLowerCase().trim();
-      const eanNorm = (p.codigo_barras || '').toLowerCase().trim();
-      const skuNorm = (p.sku || '').toLowerCase().trim();
       if (!nameNorm) return;
 
-      // Chave única para preservar variações por ID, EAN, Cor ou SKU
-      const key = p.id ? String(p.id) : `${nameNorm}_${corNorm}_${eanNorm}_${skuNorm}`;
+      // Preservar a chave por ID / catalogo_id para garantir 1 card individual por produto cadastrado no catálogo mestre
+      const key = String(p.catalogo_id || p.id || `${nameNorm}_${p.cor || ''}_${p.codigo_barras || ''}`);
 
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, p);
@@ -8484,9 +8512,8 @@ export default function Dashboard({ session, profileDataProps }) {
       let localQty = 0;
 
       if (isCelular) {
-        // IMEIs disponíveis na filial ativa
         const localImeis = (disponiveisImeis || []).filter(im => {
-          const matchesProd = (im.produto_id === p.id) || (im.produtos?.nome && p.nome && im.produtos.nome.toLowerCase().trim() === p.nome.toLowerCase().trim());
+          const matchesProd = (im.produto_id === p.id) || (im.produto_id === p.catalogo_id) || (im.produtos?.nome && p.nome && im.produtos.nome.toLowerCase().trim() === p.nome.toLowerCase().trim());
           const matchesFilial = String(im.filial_id) === String(activeFilialId);
           const isNotSold = !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO';
           return matchesProd && matchesFilial && isNotSold;
@@ -8495,22 +8522,27 @@ export default function Dashboard({ session, profileDataProps }) {
       } else if (p.categoria === 'SERVICO') {
         localQty = 999;
       } else {
-        // Acessórios: Buscar quantidade total na filial ativa para este produto específico (mesmo ID ou mesmo EAN/nome/cor)
+        // Acessórios: Buscar a quantidade exata para este produto nesta filial
         const localProds = (produtos || []).filter(pr => {
           const isFilialMatch = String(pr.filial_id) === String(activeFilialId);
           if (!isFilialMatch) return false;
           if (pr.id && p.id && String(pr.id) === String(p.id)) return true;
+          if (pr.id && p.catalogo_id && String(pr.id) === String(p.catalogo_id)) return true;
 
           const prName = (pr.nome || '').toLowerCase().trim();
           const pName = (p.nome || '').toLowerCase().trim();
-          const prEan = (pr.codigo_barras || '').toLowerCase().trim();
-          const pEan = (p.codigo_barras || '').toLowerCase().trim();
           const prCor = (pr.cor || '').toLowerCase().trim();
           const pCor = (p.cor || '').toLowerCase().trim();
+          const prEan = (pr.codigo_barras || '').toLowerCase().trim();
+          const pEan = (p.codigo_barras || '').toLowerCase().trim();
 
           if (prName !== pName) return false;
-          if (pEan && prEan && pEan !== prEan) return false;
-          if (pCor && prCor && pCor !== prCor) return false;
+          if (prCor || pCor) {
+            if (prCor !== pCor) return false;
+          }
+          if (prEan || pEan) {
+            if (prEan !== pEan) return false;
+          }
           return true;
         });
         localQty = localProds.reduce((sum, item) => sum + (item.quantidade || 0), 0);
