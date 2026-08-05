@@ -4339,13 +4339,21 @@ export default function Dashboard({ session, profileDataProps }) {
         let newProd = null;
         try {
           if (!isEditing && hasInitialStockInput && catalogoFilialEstoque) {
-            const { data: existingP } = await supabase
+            let findPQuery = supabase
               .from('produtos')
               .select('*')
               .eq('empresa_id', targetEmpresaId)
               .eq('filial_id', catalogoFilialEstoque)
-              .eq('nome', data.nome)
-              .maybeSingle();
+              .eq('nome', data.nome);
+
+            if (data.cor) {
+              findPQuery = findPQuery.eq('cor', data.cor);
+            }
+            if (data.codigo_barras) {
+              findPQuery = findPQuery.eq('codigo_barras', data.codigo_barras);
+            }
+
+            const { data: existingP } = await findPQuery.maybeSingle();
 
             if (existingP) {
               const { data: updatedP } = await supabase
@@ -4367,6 +4375,7 @@ export default function Dashboard({ session, profileDataProps }) {
                   nome: data.nome,
                   tipo: data.tipo,
                   categoria: data.categoria,
+                  cor: data.cor || null,
                   codigo_barras: data.codigo_barras || null,
                   preco: data.preco,
                   preco_custo: data.preco_custo || 0,
@@ -5795,20 +5804,30 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       }
 
-      // 2. Localizar se o produto já existe na tabela de produtos desta filial
-      let { data: existingProd, error: prodFindErr } = await supabase
+      // 2. Localizar se o produto já existe na tabela de produtos desta filial (com a mesma cor e código de barras)
+      const targetCor = selectedProdutoMestre.cor || (entradaCorDispositivo?.trim() || null);
+      const codigoBarrasFinal = entradaCodigoBarras.trim() || selectedProdutoMestre.codigo_barras || null;
+
+      let findQuery = supabase
         .from('produtos')
         .select('*')
         .eq('empresa_id', targetEmpresaId)
         .eq('filial_id', selectedFilialDestino)
-        .eq('nome', selectedProdutoMestre.nome)
-        .maybeSingle();
+        .eq('nome', selectedProdutoMestre.nome);
+
+      if (targetCor) {
+        findQuery = findQuery.eq('cor', targetCor);
+      }
+      if (codigoBarrasFinal) {
+        findQuery = findQuery.eq('codigo_barras', codigoBarrasFinal);
+      }
+
+      let { data: existingProd, error: prodFindErr } = await findQuery.maybeSingle();
 
       if (prodFindErr) throw prodFindErr;
 
       let targetProdutoId;
       const qtyToAdd = isCelular ? 1 : (parseInt(entradaQtdAcessorio, 10) || 1);
-      const codigoBarrasFinal = entradaCodigoBarras.trim() || selectedProdutoMestre.codigo_barras || null;
       let finalQty = qtyToAdd;
 
       if (!existingProd) {
@@ -5819,7 +5838,7 @@ export default function Dashboard({ session, profileDataProps }) {
           nome: selectedProdutoMestre.nome,
           tipo: selectedProdutoMestre.tipo,
           categoria: selectedProdutoMestre.categoria,
-          cor: selectedProdutoMestre.cor || (entradaCorDispositivo?.trim() || null),
+          cor: targetCor,
           codigo_barras: codigoBarrasFinal,
           preco: parseFloat(selectedProdutoMestre.preco || 0),
           quantidade: qtyToAdd
@@ -5850,7 +5869,7 @@ export default function Dashboard({ session, profileDataProps }) {
           targetProdutoId = newProd.id;
         }
       } else {
-        // Incrementar a quantidade do produto existente
+        // Incrementar a quantidade do produto existente exato
         finalQty = (existingProd.quantidade || 0) + qtyToAdd;
         const updatePayload = {
           quantidade: finalQty,
@@ -5881,7 +5900,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // Atualizar o estado local 'produtos' imediatamente para refletir na UI sem delay
       setProdutos(prev => {
-        const filtered = prev.filter(p => !(p.nome?.toLowerCase() === selectedProdutoMestre.nome?.toLowerCase() && String(p.filial_id) === String(selectedFilialDestino)));
+        const filtered = prev.filter(p => !(p.id === targetProdutoId));
         const filialObj = filiais.find(f => String(f.id) === String(selectedFilialDestino));
         return [...filtered, {
           id: targetProdutoId,
