@@ -8304,26 +8304,23 @@ export default function Dashboard({ session, profileDataProps }) {
     // 3. Incluir produtos do catalogoProdutos apenas se ainda não existirem no estoque físico
     (catalogoProdutos || []).forEach(cat => {
       if (!cat.nome) return;
+      const catIdStr = cat.id ? String(cat.id) : null;
       const catNameNorm = cat.nome.toLowerCase().trim();
       const catCorNorm = (cat.cor || '').toLowerCase().trim();
       const catEanNorm = (cat.codigo_barras || '').toLowerCase().trim();
       const catSkuNorm = (cat.sku || '').toLowerCase().trim();
 
       const existsInList = list.some(item => {
-        if (item.id && cat.id && String(item.id) === String(cat.id)) return true;
+        if (catIdStr && item.id && String(item.id) === catIdStr) return true;
         const itemNameNorm = (item.nome || '').toLowerCase().trim();
         const itemCorNorm = (item.cor || '').toLowerCase().trim();
         const itemEanNorm = (item.codigo_barras || '').toLowerCase().trim();
         const itemSkuNorm = (item.sku || '').toLowerCase().trim();
 
-        if (itemNameNorm !== catNameNorm) return false;
-        // Se ambos possuírem EAN e forem diferentes, trata como produtos distintos
-        if (catEanNorm && itemEanNorm && catEanNorm !== itemEanNorm) return false;
-        // Se ambos possuírem Cor e forem diferentes, trata como produtos distintos
-        if (catCorNorm && itemCorNorm && catCorNorm !== itemCorNorm) return false;
-        // Se ambos possuírem SKU e forem diferentes, trata como produtos distintos
-        if (catSkuNorm && itemSkuNorm && catSkuNorm !== itemSkuNorm) return false;
-        return true;
+        return itemNameNorm === catNameNorm &&
+               itemCorNorm === catCorNorm &&
+               itemEanNorm === catEanNorm &&
+               itemSkuNorm === catSkuNorm;
       });
 
       if (!existsInList) {
