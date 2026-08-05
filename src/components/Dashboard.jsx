@@ -8306,13 +8306,24 @@ export default function Dashboard({ session, profileDataProps }) {
       if (!cat.nome) return;
       const catNameNorm = cat.nome.toLowerCase().trim();
       const catCorNorm = (cat.cor || '').toLowerCase().trim();
+      const catEanNorm = (cat.codigo_barras || '').toLowerCase().trim();
+      const catSkuNorm = (cat.sku || '').toLowerCase().trim();
 
       const existsInList = list.some(item => {
+        if (item.id && cat.id && String(item.id) === String(cat.id)) return true;
         const itemNameNorm = (item.nome || '').toLowerCase().trim();
         const itemCorNorm = (item.cor || '').toLowerCase().trim();
+        const itemEanNorm = (item.codigo_barras || '').toLowerCase().trim();
+        const itemSkuNorm = (item.sku || '').toLowerCase().trim();
+
         if (itemNameNorm !== catNameNorm) return false;
-        // Se a cor do catálogo for informada, verifica se coincide ou se o item já foi mapeado
-        return !catCorNorm || !itemCorNorm || catCorNorm === itemCorNorm;
+        // Se ambos possuírem EAN e forem diferentes, trata como produtos distintos
+        if (catEanNorm && itemEanNorm && catEanNorm !== itemEanNorm) return false;
+        // Se ambos possuírem Cor e forem diferentes, trata como produtos distintos
+        if (catCorNorm && itemCorNorm && catCorNorm !== itemCorNorm) return false;
+        // Se ambos possuírem SKU e forem diferentes, trata como produtos distintos
+        if (catSkuNorm && itemSkuNorm && catSkuNorm !== itemSkuNorm) return false;
+        return true;
       });
 
       if (!existsInList) {
@@ -8425,8 +8436,14 @@ export default function Dashboard({ session, profileDataProps }) {
     const uniqueMap = new Map();
 
     listaProdutosConsolidada.forEach(p => {
-      const key = (p.nome || '').toLowerCase().trim();
-      if (!key) return;
+      const nameNorm = (p.nome || '').toLowerCase().trim();
+      const corNorm = (p.cor || '').toLowerCase().trim();
+      const eanNorm = (p.codigo_barras || '').toLowerCase().trim();
+      const skuNorm = (p.sku || '').toLowerCase().trim();
+      if (!nameNorm) return;
+
+      // Chave única para preservar variações por ID, EAN, Cor ou SKU
+      const key = p.id ? String(p.id) : `${nameNorm}_${corNorm}_${eanNorm}_${skuNorm}`;
 
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, p);
@@ -8449,11 +8466,24 @@ export default function Dashboard({ session, profileDataProps }) {
       } else if (p.categoria === 'SERVICO') {
         localQty = 999;
       } else {
-        // Acessórios: Buscar quantidade total na filial ativa
-        const localProds = (produtos || []).filter(pr => 
-          String(pr.filial_id) === String(activeFilialId) && 
-          (pr.id === p.id || (pr.nome && p.nome && pr.nome.toLowerCase().trim() === p.nome.toLowerCase().trim()))
-        );
+        // Acessórios: Buscar quantidade total na filial ativa para este produto específico (mesmo ID ou mesmo EAN/nome/cor)
+        const localProds = (produtos || []).filter(pr => {
+          const isFilialMatch = String(pr.filial_id) === String(activeFilialId);
+          if (!isFilialMatch) return false;
+          if (pr.id && p.id && String(pr.id) === String(p.id)) return true;
+
+          const prName = (pr.nome || '').toLowerCase().trim();
+          const pName = (p.nome || '').toLowerCase().trim();
+          const prEan = (pr.codigo_barras || '').toLowerCase().trim();
+          const pEan = (p.codigo_barras || '').toLowerCase().trim();
+          const prCor = (pr.cor || '').toLowerCase().trim();
+          const pCor = (p.cor || '').toLowerCase().trim();
+
+          if (prName !== pName) return false;
+          if (pEan && prEan && pEan !== prEan) return false;
+          if (pCor && prCor && pCor !== prCor) return false;
+          return true;
+        });
         localQty = localProds.reduce((sum, item) => sum + (item.quantidade || 0), 0);
       }
 
