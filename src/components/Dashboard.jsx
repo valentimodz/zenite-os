@@ -8373,20 +8373,36 @@ export default function Dashboard({ session, profileDataProps }) {
       matchesStatus = true; // Se for "Disponibilidade (Todas)", exibe tudo
     }
     
-    // 4. Text search (Name, SKU, Barcode/IMEI)
+    // 4. Text search (Name, SKU, Barcode/EAN, IMEI, Color, Category)
     let matchesSearch = true;
     if (buscaEstoque) {
-      const searchLower = buscaEstoque.trim().toLowerCase();
+      const searchRaw = buscaEstoque.trim();
+      const searchLower = searchRaw.toLowerCase();
+      const searchDigits = searchRaw.replace(/\D/g, '');
+
       const nameMatch = Boolean(p.nome && p.nome.toLowerCase().includes(searchLower));
       const skuMatch = Boolean(p.sku && p.sku.toLowerCase().includes(searchLower));
-      const barcodeMatch = Boolean(p.codigo_barras && p.codigo_barras.toLowerCase().includes(searchLower));
+      const corMatch = Boolean(p.cor && p.cor.toLowerCase().includes(searchLower));
+      const catMatchStr = Boolean(p.categoria && p.categoria.toLowerCase().includes(searchLower));
       
-      const imeiMatch = isCelular && disponiveisImeis.some(im => 
-        ((im.produto_id === p.id) || (im.produtos?.nome && im.produtos.nome.toLowerCase() === (p.nome || '').toLowerCase())) &&
-        im.imei && im.imei.toLowerCase().includes(searchLower)
+      const pBarcode = (p.codigo_barras || '').toLowerCase();
+      const pBarcodeDigits = (p.codigo_barras || '').replace(/\D/g, '');
+      const barcodeMatch = Boolean(
+        (pBarcode && pBarcode.includes(searchLower)) ||
+        (searchDigits && searchDigits.length >= 3 && pBarcodeDigits && pBarcodeDigits.includes(searchDigits))
       );
-      
-      matchesSearch = nameMatch || skuMatch || barcodeMatch || imeiMatch;
+
+      const imeiMatch = Boolean(
+        (disponiveisImeis || []).some(im => {
+          const isSameProd = (im.produto_id === p.id) || (im.produtos?.nome && p.nome && im.produtos.nome.toLowerCase().trim() === p.nome.toLowerCase().trim());
+          if (!isSameProd) return false;
+          const imeiStr = (im.imei || '').toLowerCase();
+          const imeiDigits = (im.imei || '').replace(/\D/g, '');
+          return imeiStr.includes(searchLower) || (searchDigits && searchDigits.length >= 3 && imeiDigits && imeiDigits.includes(searchDigits));
+        })
+      );
+
+      matchesSearch = nameMatch || skuMatch || corMatch || catMatchStr || barcodeMatch || imeiMatch;
     }
     
     return matchesFilial && matchesCategoria && matchesStatus && matchesSearch;
@@ -14614,13 +14630,13 @@ export default function Dashboard({ session, profileDataProps }) {
                           Estoque Consolidado
                         </h4>
                         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-wrap">
-                          <div className="relative flex-1 min-w-[150px] sm:w-44">
+                          <div className="relative flex-1 min-w-[180px] sm:w-64">
                             <Search size={13} className="absolute left-3 top-2.5 text-gray-600" />
                             <input
                               type="text"
                               value={buscaEstoque}
                               onChange={(e) => setBuscaEstoque(e.target.value)}
-                              placeholder="Nome, SKU, IMEI..."
+                              placeholder="Nome, SKU, IMEI, EAN, Cor..."
                               className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-8 pr-4 py-2 text-xs outline-none transition-all"
                             />
                           </div>
