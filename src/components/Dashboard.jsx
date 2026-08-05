@@ -4274,26 +4274,36 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (error) {
           if (error.code === '23505' || error.message?.includes('duplicate key')) {
-            // Produto já existe no catálogo, buscar o existente e continuar
-            const { data: existing } = await supabase
-              .from('produtos_catalogo')
-              .select('*')
-              .eq('empresa_id', targetEmpresaId)
-              .eq('nome', nomeProduto)
-              .maybeSingle();
+            // Se o banco contiver a constraint UNIQUE(empresa_id, nome), tentar reinserir diferenciando com o sufixo de cor ou código de barras
+            const corSuffix = corCatalogoProduto.trim() ? ` (${corCatalogoProduto.trim()})` : (codigoBarrasFinal ? ` - ${codigoBarrasFinal}` : ` [${Date.now().toString().slice(-4)}]`);
+            const nomeComVariacao = `${nomeProduto.trim()}${corSuffix}`;
 
-            if (existing) {
-              data = existing;
+            const retryPayload = { ...payload, nome: nomeComVariacao };
+            const { data: retryInsert, error: retryInsertErr } = await supabase
+              .from('produtos_catalogo')
+              .insert(retryPayload)
+              .select()
+              .single();
+
+            if (retryInsert) {
+              data = retryInsert;
             } else {
-              const { data: existingAll } = await supabase
+              // Fallback para buscar o item existente se a reinserção falhar
+              const { data: existing } = await supabase
                 .from('produtos_catalogo')
                 .select('*')
+                .eq('empresa_id', targetEmpresaId)
                 .eq('nome', nomeProduto)
                 .maybeSingle();
-              data = existingAll;
+
+              if (existing) {
+                data = existing;
+              } else {
+                throw error;
+              }
             }
           } else if (error.code === 'PGRST204' || error.message?.includes('could not find the column') || error.message?.includes('does not exist')) {
-            // Tentar inserção fallback com colunas estritas garantidas (sem codigo_barras no catálogo)
+            // Tentar inserção fallback com colunas estritas garantidas
             console.warn("Retentando inserção em produtos_catalogo com colunas estritas base:", error.message);
             const strictPayload = {
               empresa_id: targetEmpresaId,
