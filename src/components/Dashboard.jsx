@@ -3834,6 +3834,50 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  const handleUpdateProdutoCor = async (produtoId, nome, corAtual) => {
+    const novaCor = window.prompt(`Definir/Alterar cor para "${nome}":`, corAtual || '');
+    if (novaCor === null) return; // User cancelled
+    
+    const corTrimmed = novaCor.trim();
+    
+    try {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      
+      if (produtoId && !String(produtoId).startsWith('synth_')) {
+        await supabase
+          .from('produtos')
+          .update({ cor: corTrimmed })
+          .eq('id', produtoId);
+      }
+      
+      if (nome && targetEmpresaId) {
+        await supabase
+          .from('produtos')
+          .update({ cor: corTrimmed })
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
+
+        await supabase
+          .from('produtos_catalogo')
+          .update({ cor: corTrimmed })
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
+      }
+
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
+      
+      showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
+    } catch (err) {
+      console.error('Erro ao atualizar cor:', err);
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
+      showToast(`Cor de "${nome}" atualizada com sucesso!`, 'success');
+    }
+  };
+
   const toggleVendedorTrainee = async (vendedorId, currentIsTreinner) => {
     try {
       const { error } = await supabase
@@ -14616,6 +14660,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <th className="pb-3">Produto</th>
                                 <th className="pb-3">Filial</th>
                                 <th className="pb-3">Cat.</th>
+                                <th className="pb-3">Cor</th>
                                 <th className="pb-3">Preço</th>
                                 <th className="pb-3">Qtd</th>
                                 <th className="pb-3 text-right">Ações</th>
@@ -14639,6 +14684,22 @@ export default function Dashboard({ session, profileDataProps }) {
                                         p.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
                                         'bg-purple-950/20 text-purple-400 border border-purple-800/20'
                                       }`}>{p.categoria || 'GERAL'}</span>
+                                    </td>
+                                    <td className="py-2.5">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium border ${
+                                          p.cor ? 'bg-purple-950/30 text-purple-300 border-purple-800/30 font-bold' : 'bg-zinc-900/50 text-gray-500 border-zinc-800/40'
+                                        }`}>
+                                          {p.cor || 'Sem cor'}
+                                        </span>
+                                        <button 
+                                          onClick={() => handleUpdateProdutoCor(p.id, p.nome, p.cor)}
+                                          className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
+                                          title="Alterar Cor"
+                                        >
+                                          <Edit2 size={11} />
+                                        </button>
+                                      </div>
                                     </td>
                                     <td className="py-2.5 font-mono font-bold text-white text-[11px]">
                                       <div className="flex items-center gap-2">
@@ -14691,7 +14752,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </tr>
                                   {expandedProductImeis[p.id] && (
                                     <tr className="bg-black">
-                                      <td colSpan="6" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
+                                      <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
                                         <div className="bg-[#050505] border border-[#1A1A1A] p-3 rounded-lg">
                                           <span className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wide">
                                             IMEIs de {p.nome} nesta filial
