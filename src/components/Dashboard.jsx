@@ -5804,7 +5804,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       }
 
-      // 2. Localizar se o produto já existe na tabela de produtos desta filial (com a mesma cor e código de barras)
+      // 2. Localizar se o produto já existe na tabela de produtos desta filial (com a mesma cor)
       const targetCor = selectedProdutoMestre.cor || (entradaCorDispositivo?.trim() || null);
       const codigoBarrasFinal = entradaCodigoBarras.trim() || selectedProdutoMestre.codigo_barras || null;
 
@@ -5818,13 +5818,20 @@ export default function Dashboard({ session, profileDataProps }) {
       if (targetCor) {
         findQuery = findQuery.eq('cor', targetCor);
       }
-      if (codigoBarrasFinal) {
-        findQuery = findQuery.eq('codigo_barras', codigoBarrasFinal);
+
+      let existingProd = null;
+      try {
+        const { data: prodsData, error: findErr } = await findQuery;
+        if (!findErr && prodsData && prodsData.length > 0) {
+          if (codigoBarrasFinal) {
+            existingProd = prodsData.find(p => p.codigo_barras === codigoBarrasFinal) || prodsData[0];
+          } else {
+            existingProd = prodsData[0];
+          }
+        }
+      } catch (e) {
+        console.warn("Aviso na busca de produto físico:", e);
       }
-
-      let { data: existingProd, error: prodFindErr } = await findQuery.maybeSingle();
-
-      if (prodFindErr) throw prodFindErr;
 
       let targetProdutoId;
       const qtyToAdd = isCelular ? 1 : (parseInt(entradaQtdAcessorio, 10) || 1);
