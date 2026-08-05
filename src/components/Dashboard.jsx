@@ -8350,13 +8350,16 @@ export default function Dashboard({ session, profileDataProps }) {
       (f.nome && f.nome.toLowerCase().trim() === String(filtroFilialEstoque).toLowerCase().trim())
     );
 
+    const isCatalogMasterItem = p.filial_id === null || p.filial_id === undefined;
+
     const matchesFilial = (!filtroFilialEstoque || filtroFilialEstoque === 'todas' || filtroFilialEstoque === 'all') 
       ? true 
       : (
           String(p.filial_id) === String(filtroFilialEstoque) ||
           (selectedFilialObj && String(p.filial_id) === String(selectedFilialObj.id)) ||
           (selectedFilialObj && p.filial_nome && p.filial_nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
-          (selectedFilialObj && p.filiais?.nome && p.filiais.nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim())
+          (selectedFilialObj && p.filiais?.nome && p.filiais.nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
+          isCatalogMasterItem
         );
     
     // 2. Category filter
