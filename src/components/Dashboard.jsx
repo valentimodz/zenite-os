@@ -4349,42 +4349,72 @@ export default function Dashboard({ session, profileDataProps }) {
             if (data.cor) {
               findPQuery = findPQuery.eq('cor', data.cor);
             }
-            if (data.codigo_barras) {
-              findPQuery = findPQuery.eq('codigo_barras', data.codigo_barras);
+
+            let existingP = null;
+            try {
+              const { data: pList } = await findPQuery;
+              if (pList && pList.length > 0) {
+                if (data.codigo_barras) {
+                  existingP = pList.find(item => item.codigo_barras === data.codigo_barras) || pList[0];
+                } else {
+                  existingP = pList[0];
+                }
+              }
+            } catch (e) {
+              console.warn("Aviso ao buscar estoque em produtos:", e);
             }
 
-            const { data: existingP } = await findPQuery.maybeSingle();
-
             if (existingP) {
-              const { data: updatedP } = await supabase
+              const updateObj = { quantidade: (existingP.quantidade || 0) + initialQty };
+              if (data.codigo_barras) updateObj.codigo_barras = data.codigo_barras;
+
+              let { data: updatedP, error: uErr } = await supabase
                 .from('produtos')
-                .update({
-                  quantidade: (existingP.quantidade || 0) + initialQty,
-                  codigo_barras: existingP.codigo_barras || data.codigo_barras || null
-                })
+                .update(updateObj)
                 .eq('id', existingP.id)
                 .select()
-                .single();
+                .maybeSingle();
+
+              if (uErr && (uErr.code === '42703' || uErr.code === 'PGRST204' || uErr.message?.includes('codigo_barras') || uErr.message?.includes('does not exist'))) {
+                delete updateObj.codigo_barras;
+                const { data: retryUpd } = await supabase
+                  .from('produtos')
+                  .update(updateObj)
+                  .eq('id', existingP.id)
+                  .select()
+                  .maybeSingle();
+                updatedP = retryUpd;
+              }
               newProd = updatedP || existingP;
             } else {
-              const { data: insertedP, error: insertPError } = await supabase
+              const insertObj = {
+                empresa_id: targetEmpresaId,
+                filial_id: catalogoFilialEstoque,
+                nome: data.nome,
+                tipo: data.tipo,
+                categoria: data.categoria,
+                cor: data.cor || null,
+                codigo_barras: data.codigo_barras || null,
+                preco: data.preco,
+                preco_custo: data.preco_custo || 0,
+                quantidade: initialQty
+              };
+
+              let { data: insertedP, error: insertPError } = await supabase
                 .from('produtos')
-                .insert({
-                  empresa_id: targetEmpresaId,
-                  filial_id: catalogoFilialEstoque,
-                  nome: data.nome,
-                  tipo: data.tipo,
-                  categoria: data.categoria,
-                  cor: data.cor || null,
-                  codigo_barras: data.codigo_barras || null,
-                  preco: data.preco,
-                  preco_custo: data.preco_custo || 0,
-                  quantidade: initialQty
-                })
+                .insert(insertObj)
                 .select()
-                .single();
+                .maybeSingle();
               
-              if (insertPError) console.warn("Aviso ao inserir em produtos:", insertPError);
+              if (insertPError && (insertPError.code === '42703' || insertPError.code === 'PGRST204' || insertPError.message?.includes('codigo_barras') || insertPError.message?.includes('does not exist'))) {
+                delete insertObj.codigo_barras;
+                const { data: retryIns } = await supabase
+                  .from('produtos')
+                  .insert(insertObj)
+                  .select()
+                  .maybeSingle();
+                insertedP = retryIns;
+              }
               newProd = insertedP;
             }
           }
@@ -5858,7 +5888,7 @@ export default function Dashboard({ session, profileDataProps }) {
           .single();
 
         if (newProdErr) {
-          if (newProdErr.code === 'PGRST204' || newProdErr.message?.includes('could not find the column') || newProdErr.message?.includes('does not exist')) {
+          if (newProdErr.code === '42703' || newProdErr.code === 'PGRST204' || newProdErr.message?.includes('codigo_barras') || newProdErr.message?.includes('could not find the column') || newProdErr.message?.includes('does not exist')) {
             console.warn("Retentando insert em produtos sem codigo_barras:", newProdErr.message);
             delete prodPayload.codigo_barras;
             const { data: retryProd, error: retryErr } = await supabase
@@ -5889,7 +5919,7 @@ export default function Dashboard({ session, profileDataProps }) {
           .eq('id', existingProd.id);
 
         if (updateErr) {
-          if (updateErr.code === 'PGRST204' || updateErr.message?.includes('could not find the column') || updateErr.message?.includes('does not exist')) {
+          if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.includes('codigo_barras') || updateErr.message?.includes('could not find the column') || updateErr.message?.includes('does not exist')) {
             console.warn("Retentando update em produtos sem codigo_barras:", updateErr.message);
             delete updatePayload.codigo_barras;
             const { error: retryUpdateErr } = await supabase
