@@ -9165,14 +9165,22 @@ export default function Dashboard({ session, profileDataProps }) {
                                     }`}
                                   >
                                     <div className="flex justify-between items-start w-full">
-                                      <div className="flex flex-col gap-1 max-w-[70%]">
+                                      <div className="flex flex-col gap-1.5 max-w-[70%]">
                                         <span className="font-extrabold text-sm text-white group-hover:text-purple-400 transition-colors">
                                           {prod.nome}
                                         </span>
-                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-300 bg-[#160926] border border-[#6A0DAD]/30 px-1.5 py-0.5 rounded w-fit">
-                                          <Store size={10} className="text-[#6A0DAD]" />
-                                          {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
-                                        </span>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-300 bg-[#160926] border border-[#6A0DAD]/30 px-1.5 py-0.5 rounded w-fit">
+                                            <Store size={10} className="text-[#6A0DAD]" />
+                                            {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
+                                          </span>
+                                          {prod.cor && (
+                                            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#e9d5ff] bg-purple-950/60 border border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
+                                              <Tag size={9} className="text-purple-300" />
+                                              {prod.cor}
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
                                       <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${
                                         prod.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
@@ -9229,13 +9237,15 @@ export default function Dashboard({ session, profileDataProps }) {
                           <div className="flex justify-between items-center pb-2 border-b border-[#222222]">
                             <h3 className="text-base font-bold text-white flex items-center gap-2">
                               <ShoppingBag size={18} className="text-[#6A0DAD]" />
-                              Carrinho ({pdvCart.length})
+                              Carrinho de Venda
                             </h3>
                             {pdvCart.length > 0 && (
-                              <button 
-                                onClick={() => setPdvCart([])} 
-                                className="text-[10px] text-red-500 hover:text-red-400 font-bold uppercase transition-colors"
+                              <button
+                                type="button"
+                                onClick={handleClearCart}
+                                className="text-[10px] text-gray-500 hover:text-red-400 transition-colors font-medium flex items-center gap-1 cursor-pointer"
                               >
+                                <Trash2 size={12} />
                                 Limpar
                               </button>
                             )}
@@ -9328,9 +9338,16 @@ export default function Dashboard({ session, profileDataProps }) {
 
                                   <div className="pr-6">
                                     <h4 className="font-extrabold text-xs text-white truncate">{item.produto.nome}</h4>
-                                    <span className="text-[8px] bg-[#1a1a1a] text-purple-400 border border-purple-900/30 px-1.5 py-0.5 rounded font-bold uppercase mt-1 inline-block">
-                                      {item.produto.categoria}
-                                    </span>
+                                    <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                      <span className="text-[8px] bg-[#1a1a1a] text-purple-400 border border-purple-900/30 px-1.5 py-0.5 rounded font-bold uppercase inline-block">
+                                        {item.produto.categoria}
+                                      </span>
+                                      {item.produto.cor && (
+                                        <span className="text-[8px] bg-purple-950/50 text-[#e9d5ff] border border-purple-700/40 px-1.5 py-0.5 rounded font-bold inline-block">
+                                          {item.produto.cor}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
 
                                   {/* Linha de IMEI/Quantidade e Preço */}
