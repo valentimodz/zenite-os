@@ -617,6 +617,20 @@ export default function Dashboard({ session, profileDataProps }) {
         .select('*, filiais:filial_id(id, nome)')
         .eq('empresa_id', targetEmpresaId);
 
+      // Buscar barcodes do catálogo para enriquecer itens sem codigo_barras na tabela produtos
+      const catBarcodeMap = {};
+      try {
+        const { data: catBC } = await supabase
+          .from('produtos_catalogo')
+          .select('nome, codigo_barras, sku')
+          .eq('empresa_id', targetEmpresaId);
+        (catBC || []).forEach(c => {
+          if (c.nome && (c.codigo_barras || c.sku)) {
+            catBarcodeMap[c.nome.toLowerCase().trim()] = c.codigo_barras || c.sku;
+          }
+        });
+      } catch (_) {}
+
       if (prodsData) {
         prodsData.forEach(item => {
           const prodName = item.nome;
@@ -627,7 +641,7 @@ export default function Dashboard({ session, profileDataProps }) {
           if (qty <= 0) return;
 
           if (!aggregation[prodName]) {
-            aggregation[prodName] = { nome: prodName, total: 0, items: [] };
+            aggregation[prodName] = { nome: prodName, total: 0, items: [], catalogo_barras: catBarcodeMap[prodName.toLowerCase().trim()] || null };
             uniqueFiliais.forEach(f => {
               aggregation[prodName][f.nome] = 0;
             });
@@ -640,9 +654,11 @@ export default function Dashboard({ session, profileDataProps }) {
           }
           aggregation[prodName].total += qty;
 
+          // Usar barcode da tabela produtos ou fallback do catálogo
+          const barcode = item.codigo_barras || catBarcodeMap[prodName.toLowerCase().trim()] || null;
           aggregation[prodName].items.push({
             id: item.id,
-            imei: item.codigo_barras ? `EAN: ${item.codigo_barras}` : `Estoque: ${qty} un`,
+            imei: barcode ? `EAN: ${barcode}` : `Estoque: ${qty} un`,
             localizacao: filialNome,
             condicao: 'NOVO',
             quantidade: qty,
@@ -3696,26 +3712,33 @@ export default function Dashboard({ session, profileDataProps }) {
           .eq('id', produtoId);
       }
       
-      // 2. Atualizar na tabela produtos_catalogo por ID
-      if (produtoId && !String(produtoId).startsWith('synth_')) {
+      // 2. Atualizar por Nome em produtos e produtos_catalogo
+      if (nome && targetEmpresaId) {
+        await supabase
+          .from('produtos')
+          .update({ preco: novoPreco })
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
+
         await supabase
           .from('produtos_catalogo')
           .update({ preco: novoPreco })
-          .eq('id', produtoId);
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
       }
 
-      // 3. Atualizar estados locais apenas para o produto selecionado
-      setProdutos(prev => prev.map(p => p.id === produtoId ? { ...p, preco: novoPreco } : p));
-      setProdutosFilial(prev => prev.map(p => p.id === produtoId ? { ...p, preco: novoPreco } : p));
-      setCatalogoProdutos(prev => prev.map(c => c.id === produtoId ? { ...c, preco: novoPreco } : c));
+      // 3. Atualizar estados locais instantaneamente na interface
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
       
       showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
     } catch (err) {
       console.error('Erro ao atualizar preço:', err);
       // Fallback para refletir a alteração no front-end em caso de restrição RLS
-      setProdutos(prev => prev.map(p => p.id === produtoId ? { ...p, preco: novoPreco } : p));
-      setProdutosFilial(prev => prev.map(p => p.id === produtoId ? { ...p, preco: novoPreco } : p));
-      setCatalogoProdutos(prev => prev.map(c => c.id === produtoId ? { ...c, preco: novoPreco } : c));
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
       showToast(`Preço de "${nome}" atualizado com sucesso!`, 'success');
     }
   };
@@ -3735,14 +3758,37 @@ export default function Dashboard({ session, profileDataProps }) {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       const targetFilialId = activeFilialId || filiais[0]?.id;
 
-      // 1. Se for um ID real da tabela produtos ou catalogo, atualizar diretamente
+      // 1. Se for um ID real da tabela produtos, atualizar diretamente
       if (produtoId && !String(produtoId).startsWith('synth_')) {
         await supabase
           .from('produtos')
-          .update({ quantidade: novaQtd })
+          .update({ quantidade: novaQtd, filial_id: targetFilialId })
           .eq('id', produtoId);
-      } else if (nome && targetEmpresaId) {
-        const catMatch = (catalogoProdutos || []).find(c => c.id === produtoId || c.nome?.toLowerCase() === nome.toLowerCase()) || {};
+      }
+
+      // 2. Buscar na tabela 'produtos' por nome e empresa
+      const { data: prodsBanco } = await supabase
+        .from('produtos')
+        .select('*')
+        .eq('empresa_id', targetEmpresaId)
+        .ilike('nome', nome);
+
+      if (prodsBanco && prodsBanco.length > 0) {
+        const matchFilial = prodsBanco.find(p => String(p.filial_id) === String(targetFilialId));
+        if (matchFilial) {
+          await supabase
+            .from('produtos')
+            .update({ quantidade: novaQtd })
+            .eq('id', matchFilial.id);
+        } else {
+          await supabase
+            .from('produtos')
+            .update({ quantidade: novaQtd, filial_id: targetFilialId })
+            .eq('id', prodsBanco[0].id);
+        }
+      } else {
+        // Se ainda não existir registro na tabela produtos, criar a linha vinculada à filial ativa
+        const catMatch = (catalogoProdutos || []).find(c => c.nome?.toLowerCase() === nome.toLowerCase()) || {};
         await supabase
           .from('produtos')
           .insert({
@@ -3753,14 +3799,39 @@ export default function Dashboard({ session, profileDataProps }) {
             categoria: catMatch.categoria || 'GERAL',
             preco: parseFloat(catMatch.preco || 0),
             quantidade: novaQtd,
-            sku: catMatch.sku || null
+            sku: catMatch.sku || null,
+            codigo_barras: catMatch.codigo_barras || null
           });
       }
 
-      // 2. Atualizar os estados locais no React por ID
-      setProdutos(prev => prev.map(p => p.id === produtoId ? { ...p, quantidade: novaQtd } : p));
-      setProdutosFilial(prev => prev.map(p => p.id === produtoId ? { ...p, quantidade: novaQtd } : p));
-      setCatalogoProdutos(prev => prev.map(c => c.id === produtoId ? { ...c, quantidade: novaQtd } : c));
+      // 3. Atualizar os estados locais no React imediatamente
+      setProdutos(prev => {
+        const hasMatch = prev.some(p => p.nome?.toLowerCase() === nome.toLowerCase());
+        if (hasMatch) {
+          return prev.map(p => p.nome?.toLowerCase() === nome.toLowerCase() ? { ...p, quantidade: novaQtd, filial_id: targetFilialId } : p);
+        }
+        return [...prev, {
+          id: produtoId || crypto.randomUUID(),
+          empresa_id: targetEmpresaId,
+          filial_id: targetFilialId,
+          nome: nome,
+          quantidade: novaQtd
+        }];
+      });
+
+      setProdutosFilial(prev => {
+        const hasMatch = prev.some(p => p.nome?.toLowerCase() === nome.toLowerCase());
+        if (hasMatch) {
+          return prev.map(p => p.nome?.toLowerCase() === nome.toLowerCase() ? { ...p, quantidade: novaQtd, filial_id: targetFilialId } : p);
+        }
+        return [...prev, {
+          id: produtoId || crypto.randomUUID(),
+          nome: nome,
+          quantidade: novaQtd,
+          filial_id: targetFilialId
+        }];
+      });
+      
       showToast(`Estoque de "${nome}" alterado para ${novaQtd} un. com sucesso!`, 'success');
 
       // Sincronizar dados em tempo real
@@ -3793,23 +3864,32 @@ export default function Dashboard({ session, profileDataProps }) {
           .from('produtos')
           .update({ cor: corTrimmed })
           .eq('id', produtoId);
+      }
+      
+      if (nome && targetEmpresaId) {
+        await supabase
+          .from('produtos')
+          .update({ cor: corTrimmed })
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
 
         await supabase
           .from('produtos_catalogo')
           .update({ cor: corTrimmed })
-          .eq('id', produtoId);
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
       }
 
-      setProdutos(prev => prev.map(p => p.id === produtoId ? { ...p, cor: corTrimmed } : p));
-      setProdutosFilial(prev => prev.map(p => p.id === produtoId ? { ...p, cor: corTrimmed } : p));
-      setCatalogoProdutos(prev => prev.map(c => c.id === produtoId ? { ...c, cor: corTrimmed } : c));
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
       
       showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
     } catch (err) {
       console.error('Erro ao atualizar cor:', err);
-      setProdutos(prev => prev.map(p => p.id === produtoId ? { ...p, cor: corTrimmed } : p));
-      setProdutosFilial(prev => prev.map(p => p.id === produtoId ? { ...p, cor: corTrimmed } : p));
-      setCatalogoProdutos(prev => prev.map(c => c.id === produtoId ? { ...c, cor: corTrimmed } : c));
+      setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
       showToast(`Cor de "${nome}" atualizada com sucesso!`, 'success');
     }
   };
@@ -6504,23 +6584,40 @@ export default function Dashboard({ session, profileDataProps }) {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       
       let targetId = typeof itemOrId === 'object' ? itemOrId.id : itemOrId;
-      let targetCatalogoId = typeof itemOrId === 'object' ? (itemOrId.catalogo_id || itemOrId.id) : itemOrId;
+      let targetNome = typeof itemOrId === 'object' ? itemOrId.nome : null;
+
+      if (!targetNome) {
+        const prodObj = produtos.find(p => p.id === targetId) || catalogoProdutos.find(c => c.id === targetId);
+        if (prodObj) targetNome = prodObj.nome;
+      }
 
       setLoadingDados(true);
 
-      // 1. Deletar especificamente pelo ID do produto físico
+      // 1. Deletar da tabela produtos (estoque físico)
       if (targetId) {
         await supabase.from('produtos').delete().eq('id', targetId);
       }
-
-      // 2. Deletar especificamente pelo ID no catálogo mestre se for um ID válido
-      if (targetCatalogoId) {
-        await supabase.from('produtos_catalogo').delete().eq('id', targetCatalogoId);
+      if (targetNome && targetEmpresaId) {
+        await supabase.from('produtos').delete().eq('empresa_id', targetEmpresaId).ilike('nome', targetNome);
       }
 
-      // 3. Atualizar os estados locais mantendo todas as outras variações de produtos intactas
-      setProdutos(prev => prev.filter(p => p.id !== targetId && p.id !== targetCatalogoId));
-      setCatalogoProdutos(prev => prev.filter(c => c.id !== targetId && c.id !== targetCatalogoId));
+      // 2. Deletar da tabela produtos_catalogo (catálogo mestre)
+      if (targetId) {
+        await supabase.from('produtos_catalogo').delete().eq('id', targetId);
+      }
+      if (targetNome && targetEmpresaId) {
+        await supabase.from('produtos_catalogo').delete().eq('empresa_id', targetEmpresaId).ilike('nome', targetNome);
+      }
+
+      // 3. Atualizar os estados locais imediatamente para sumir da tela na hora sem F5
+      if (targetNome) {
+        const lowerNome = targetNome.toLowerCase();
+        setProdutos(prev => prev.filter(p => p.id !== targetId && p.nome?.toLowerCase() !== lowerNome));
+        setCatalogoProdutos(prev => prev.filter(c => c.id !== targetId && c.nome?.toLowerCase() !== lowerNome));
+      } else {
+        setProdutos(prev => prev.filter(p => p.id !== targetId));
+        setCatalogoProdutos(prev => prev.filter(c => c.id !== targetId));
+      }
 
       // 4. Recarregar do backend
       if (targetEmpresaId) {
@@ -13624,8 +13721,13 @@ export default function Dashboard({ session, profileDataProps }) {
                                         .filter(row => {
                                           if (!torreSearch) return true;
                                           const s = torreSearch.toLowerCase();
+                                          const sDigits = torreSearch.replace(/\D/g, '');
                                           if (row.nome.toLowerCase().includes(s)) return true;
-                                          return row.items.some(i => i.imei && i.imei.toLowerCase().includes(s));
+                                          // Pesquisar por IMEI ou código de barras (EAN)
+                                          if (row.items.some(i => i.imei && i.imei.toLowerCase().includes(s))) return true;
+                                          // Pesquisar por barcode do catálogo (fallback)
+                                          if (row.catalogo_barras && (row.catalogo_barras.toLowerCase().includes(s) || (sDigits.length >= 3 && row.catalogo_barras.replace(/\D/g, '').includes(sDigits)))) return true;
+                                          return false;
                                         })
                                         .map((row, idx) => {
                                           const isExpanded = !!torreExpandedRows[row.nome];
