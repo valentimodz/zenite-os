@@ -581,6 +581,27 @@ export default function Dashboard({ session, profileDataProps }) {
       let uniqueFiliais = Array.from(uniqueFiliaisMap.values());
 
       const aggregation = {};
+      
+      // Inicializar agregação com todos os produtos do catálogo para permitir busca mesmo com estoque zero
+      (catData || []).forEach(c => {
+        if (!c.nome) return;
+        const prodName = c.nome;
+        const eanVal = (c.codigo_barras && String(c.codigo_barras).trim()) || null;
+        const skuVal = (c.sku && String(c.sku).trim()) || null;
+        if (!aggregation[prodName]) {
+          aggregation[prodName] = {
+            nome: prodName,
+            codigo_barras: eanVal,
+            sku: skuVal,
+            total: 0,
+            items: []
+          };
+          uniqueFiliais.forEach(f => {
+            aggregation[prodName][f.nome] = 0;
+          });
+        }
+      });
+
       const validImeis = (imeisData || []).filter(i => i.status !== 'VENDIDO' && i.status !== 'EM_TRANSITO');
 
       // Check for orphans (realmente sem filial_id ou sem relacionamento com filial)
@@ -8528,7 +8549,9 @@ export default function Dashboard({ session, profileDataProps }) {
       qty = imeisDisponiveis.length > 0 ? imeisDisponiveis.length : (p.quantidade || 0);
     }
     
-    if (filtroStatusEstoque === 'disponivel') {
+    if (buscaEstoque && buscaEstoque.trim().length > 0) {
+      matchesStatus = true;
+    } else if (filtroStatusEstoque === 'disponivel') {
       matchesStatus = isServico || qty > 0;
     } else if (filtroStatusEstoque === 'indisponivel') {
       matchesStatus = !isServico && qty === 0;
