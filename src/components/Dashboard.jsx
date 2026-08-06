@@ -526,10 +526,25 @@ export default function Dashboard({ session, profileDataProps }) {
   const fetchTorreControlo = async () => {
     setTorreLoading(true);
     try {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+
+      // Buscar mapa do catalogo para relacionar código de barras e SKU
+      const { data: catData } = await supabase
+        .from('produtos_catalogo')
+        .select('id, nome, codigo_barras, sku')
+        .eq('empresa_id', targetEmpresaId);
+
+      const catMap = new Map();
+      (catData || []).forEach(c => {
+        if (c.nome) {
+          catMap.set(c.nome.toLowerCase().trim(), c);
+        }
+      });
+
       const { data: filiaisData, error: fErr } = await supabase
         .from('filiais')
         .select('id, nome')
-        .eq('empresa_id', company.id)
+        .eq('empresa_id', targetEmpresaId)
         .order('nome', { ascending: true });
         
       if (fErr) throw fErr;
@@ -587,7 +602,7 @@ export default function Dashboard({ session, profileDataProps }) {
         
         if (!prodName) return;
 
-        const catMatch = (catalogoProdutos || []).find(c => c.nome && c.nome.toLowerCase().trim() === prodName.toLowerCase().trim());
+        const catMatch = catMap.get(prodName.toLowerCase().trim());
         const eanVal = catMatch?.codigo_barras || null;
         const skuVal = catMatch?.sku || null;
 
@@ -619,7 +634,6 @@ export default function Dashboard({ session, profileDataProps }) {
       });
 
       // Incluir produtos por quantidade (Acessórios e Produtos Gerais) da tabela produtos
-      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       const { data: prodsData } = await supabase
         .from('produtos')
         .select('*, filiais:filial_id(id, nome)')
@@ -634,7 +648,7 @@ export default function Dashboard({ session, profileDataProps }) {
           const qty = item.quantidade || 0;
           if (qty <= 0) return;
 
-          const catMatch = (catalogoProdutos || []).find(c => c.nome && c.nome.toLowerCase().trim() === prodName.toLowerCase().trim());
+          const catMatch = catMap.get(prodName.toLowerCase().trim());
           const eanVal = item.codigo_barras || catMatch?.codigo_barras || null;
           const skuVal = item.sku || catMatch?.sku || null;
 
@@ -8521,20 +8535,20 @@ export default function Dashboard({ session, profileDataProps }) {
       const corMatch = Boolean(p.cor && p.cor.toLowerCase().includes(searchLower));
       const catMatchStr = Boolean(p.categoria && p.categoria.toLowerCase().includes(searchLower));
       
-      const pBarcode = (p.codigo_barras || '').toLowerCase();
-      const pBarcodeDigits = (p.codigo_barras || '').replace(/\D/g, '');
+      const pBarcode = String(p.codigo_barras || p.codigoBarras || '').toLowerCase().trim();
+      const pBarcodeDigits = pBarcode.replace(/\D/g, '');
       const barcodeMatch = Boolean(
         (pBarcode && pBarcode.includes(searchLower)) ||
-        (searchDigits && searchDigits.length >= 3 && pBarcodeDigits && pBarcodeDigits.includes(searchDigits))
+        (searchDigits && searchDigits.length >= 2 && pBarcodeDigits && pBarcodeDigits.includes(searchDigits))
       );
 
       const imeiMatch = Boolean(
         (disponiveisImeis || []).some(im => {
           const isSameProd = (im.produto_id === p.id) || (im.produtos?.nome && p.nome && im.produtos.nome.toLowerCase().trim() === p.nome.toLowerCase().trim());
           if (!isSameProd) return false;
-          const imeiStr = (im.imei || '').toLowerCase();
-          const imeiDigits = (im.imei || '').replace(/\D/g, '');
-          return imeiStr.includes(searchLower) || (searchDigits && searchDigits.length >= 3 && imeiDigits && imeiDigits.includes(searchDigits));
+          const imeiStr = String(im.imei || '').toLowerCase().trim();
+          const imeiDigits = imeiStr.replace(/\D/g, '');
+          return imeiStr.includes(searchLower) || (searchDigits && searchDigits.length >= 2 && imeiDigits && imeiDigits.includes(searchDigits));
         })
       );
 
