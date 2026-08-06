@@ -617,20 +617,6 @@ export default function Dashboard({ session, profileDataProps }) {
         .select('*, filiais:filial_id(id, nome)')
         .eq('empresa_id', targetEmpresaId);
 
-      // Buscar barcodes do catálogo para enriquecer itens sem codigo_barras na tabela produtos
-      const catBarcodeMap = {};
-      try {
-        const { data: catBC } = await supabase
-          .from('produtos_catalogo')
-          .select('nome, codigo_barras, sku')
-          .eq('empresa_id', targetEmpresaId);
-        (catBC || []).forEach(c => {
-          if (c.nome && (c.codigo_barras || c.sku)) {
-            catBarcodeMap[c.nome.toLowerCase().trim()] = c.codigo_barras || c.sku;
-          }
-        });
-      } catch (_) {}
-
       if (prodsData) {
         prodsData.forEach(item => {
           const prodName = item.nome;
@@ -641,7 +627,7 @@ export default function Dashboard({ session, profileDataProps }) {
           if (qty <= 0) return;
 
           if (!aggregation[prodName]) {
-            aggregation[prodName] = { nome: prodName, total: 0, items: [], catalogo_barras: catBarcodeMap[prodName.toLowerCase().trim()] || null };
+            aggregation[prodName] = { nome: prodName, total: 0, items: [] };
             uniqueFiliais.forEach(f => {
               aggregation[prodName][f.nome] = 0;
             });
@@ -654,11 +640,9 @@ export default function Dashboard({ session, profileDataProps }) {
           }
           aggregation[prodName].total += qty;
 
-          // Usar barcode da tabela produtos ou fallback do catálogo
-          const barcode = item.codigo_barras || catBarcodeMap[prodName.toLowerCase().trim()] || null;
           aggregation[prodName].items.push({
             id: item.id,
-            imei: barcode ? `EAN: ${barcode}` : `Estoque: ${qty} un`,
+            imei: item.codigo_barras ? `EAN: ${item.codigo_barras}` : `Estoque: ${qty} un`,
             localizacao: filialNome,
             condicao: 'NOVO',
             quantidade: qty,
@@ -4081,7 +4065,7 @@ export default function Dashboard({ session, profileDataProps }) {
       // Buscar quantidades da tabela public.produtos para acessórios/produtos gerais
       const { data: prodsData } = await supabase
         .from('produtos')
-        .select('nome, quantidade')
+        .select('id, nome, quantidade, filial_id, codigo_barras, cor, sku')
         .eq('empresa_id', empresaId);
 
       const counts = {};
@@ -13720,14 +13704,13 @@ export default function Dashboard({ session, profileDataProps }) {
                                       torreData
                                         .filter(row => {
                                           if (!torreSearch) return true;
-                                          const s = torreSearch.toLowerCase();
-                                          const sDigits = torreSearch.replace(/\D/g, '');
+                                          const s = torreSearch.toLowerCase().trim();
                                           if (row.nome.toLowerCase().includes(s)) return true;
-                                          // Pesquisar por IMEI ou código de barras (EAN)
-                                          if (row.items.some(i => i.imei && i.imei.toLowerCase().includes(s))) return true;
-                                          // Pesquisar por barcode do catálogo (fallback)
-                                          if (row.catalogo_barras && (row.catalogo_barras.toLowerCase().includes(s) || (sDigits.length >= 3 && row.catalogo_barras.replace(/\D/g, '').includes(sDigits)))) return true;
-                                          return false;
+                                          return row.items.some(i => {
+                                            if (i.imei && i.imei.toLowerCase().includes(s)) return true;
+                                            if (i.codigo_barras && i.codigo_barras.toLowerCase().includes(s)) return true;
+                                            return false;
+                                          });
                                         })
                                         .map((row, idx) => {
                                           const isExpanded = !!torreExpandedRows[row.nome];
@@ -13783,7 +13766,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                                     <table className="w-full text-xs text-left border border-[#222222] rounded-md overflow-hidden">
                                                       <thead className="bg-[#111111]">
                                                         <tr className="text-gray-400">
-                                                          <th className="py-2 px-3">IMEI</th>
+                                                          <th className="py-2 px-3">IMEI / EAN</th>
                                                           <th className="py-2 px-3">Localização</th>
                                                           <th className="py-2 px-3">Condição</th>
                                                           <th className="py-2 px-3">Data de Entrada</th>
@@ -13791,10 +13774,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                                       </thead>
                                                       <tbody className="divide-y divide-[#222222]">
                                                         {row.items.map(item => {
-                                                          const isHighlighted = torreSearch && item.imei && item.imei.toLowerCase().includes(torreSearch.toLowerCase());
+                                                          const searchStr = torreSearch.toLowerCase().trim();
+                                                          const isHighlighted = searchStr && (
+                                                            (item.imei && item.imei.toLowerCase().includes(searchStr)) ||
+                                                            (item.codigo_barras && item.codigo_barras.toLowerCase().includes(searchStr))
+                                                          );
                                                           return (
                                                           <tr key={item.id} className={isHighlighted ? 'bg-purple-900/20' : 'hover:bg-[#1a1a1a]'}>
-                                                            <td className={`py-2 px-3 font-mono ${isHighlighted ? 'text-purple-400 font-bold' : 'text-gray-300'}`}>{item.imei}</td>
+                                                            <td className={`py-2 px-3 font-mono ${isHighlighted ? 'text-purple-400 font-bold' : 'text-gray-300'}`}>{item.imei || item.codigo_barras || '-'}</td>
                                                             <td className="py-2 px-3 text-gray-400">
                                                               {item.localizacao === 'Não Alocado' ? (
                                                                 <span className="text-red-400 flex items-center gap-1"><AlertTriangle size={10} /> Não Alocado</span>
