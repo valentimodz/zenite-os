@@ -587,11 +587,18 @@ export default function Dashboard({ session, profileDataProps }) {
         
         if (!prodName) return;
 
+        const catMatch = (catalogoProdutos || []).find(c => c.nome && c.nome.toLowerCase().trim() === prodName.toLowerCase().trim());
+        const eanVal = catMatch?.codigo_barras || null;
+        const skuVal = catMatch?.sku || null;
+
         if (!aggregation[prodName]) {
-          aggregation[prodName] = { nome: prodName, total: 0, items: [] };
+          aggregation[prodName] = { nome: prodName, codigo_barras: eanVal, sku: skuVal, total: 0, items: [] };
           uniqueFiliais.forEach(f => {
             aggregation[prodName][f.nome] = 0;
           });
+        } else if (!aggregation[prodName].codigo_barras && eanVal) {
+          aggregation[prodName].codigo_barras = eanVal;
+          aggregation[prodName].sku = skuVal;
         }
 
         if (aggregation[prodName][filialNome] !== undefined) {
@@ -604,6 +611,7 @@ export default function Dashboard({ session, profileDataProps }) {
         aggregation[prodName].items.push({
            id: item.id,
            imei: item.imei,
+           codigo_barras: eanVal,
            localizacao: filialNome,
            condicao: item.is_seminovo ? 'SEMINOVO' : 'NOVO',
            data_entrada: item.created_at
@@ -626,11 +634,18 @@ export default function Dashboard({ session, profileDataProps }) {
           const qty = item.quantidade || 0;
           if (qty <= 0) return;
 
+          const catMatch = (catalogoProdutos || []).find(c => c.nome && c.nome.toLowerCase().trim() === prodName.toLowerCase().trim());
+          const eanVal = item.codigo_barras || catMatch?.codigo_barras || null;
+          const skuVal = item.sku || catMatch?.sku || null;
+
           if (!aggregation[prodName]) {
-            aggregation[prodName] = { nome: prodName, total: 0, items: [] };
+            aggregation[prodName] = { nome: prodName, codigo_barras: eanVal, sku: skuVal, total: 0, items: [] };
             uniqueFiliais.forEach(f => {
               aggregation[prodName][f.nome] = 0;
             });
+          } else if (!aggregation[prodName].codigo_barras && eanVal) {
+            aggregation[prodName].codigo_barras = eanVal;
+            aggregation[prodName].sku = skuVal;
           }
 
           if (aggregation[prodName][filialNome] !== undefined) {
@@ -642,7 +657,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
           aggregation[prodName].items.push({
             id: item.id,
-            imei: item.codigo_barras ? `EAN: ${item.codigo_barras}` : `Estoque: ${qty} un`,
+            imei: eanVal ? `EAN: ${eanVal}` : `Estoque: ${qty} un`,
+            codigo_barras: eanVal,
             localizacao: filialNome,
             condicao: 'NOVO',
             quantidade: qty,
@@ -8343,7 +8359,7 @@ export default function Dashboard({ session, profileDataProps }) {
         if (catCorNorm || pCorNorm) {
           if (catCorNorm !== pCorNorm) return false;
         }
-        if (catEanNorm || pEanNorm) {
+        if (catEanNorm && pEanNorm) {
           if (catEanNorm !== pEanNorm) return false;
         }
         return true;
@@ -13705,12 +13721,32 @@ export default function Dashboard({ session, profileDataProps }) {
                                         .filter(row => {
                                           if (!torreSearch) return true;
                                           const s = torreSearch.toLowerCase().trim();
-                                          if (row.nome.toLowerCase().includes(s)) return true;
-                                          return row.items.some(i => {
-                                            if (i.imei && i.imei.toLowerCase().includes(s)) return true;
-                                            if (i.codigo_barras && i.codigo_barras.toLowerCase().includes(s)) return true;
-                                            return false;
+                                          const sDigits = s.replace(/\D/g, '');
+
+                                          const nameMatch = row.nome && row.nome.toLowerCase().includes(s);
+                                          const rBarcode = (row.codigo_barras || '').toLowerCase();
+                                          const rBarcodeDigits = (row.codigo_barras || '').replace(/\D/g, '');
+                                          const barcodeMatch = Boolean(
+                                            (rBarcode && rBarcode.includes(s)) ||
+                                            (sDigits && sDigits.length >= 3 && rBarcodeDigits && rBarcodeDigits.includes(sDigits))
+                                          );
+
+                                          const rSku = (row.sku || '').toLowerCase();
+                                          const skuMatch = Boolean(rSku && rSku.includes(s));
+
+                                          const itemsMatch = row.items.some(i => {
+                                            const imeiStr = (i.imei || '').toLowerCase();
+                                            const imeiDigits = (i.imei || '').replace(/\D/g, '');
+                                            const iBarcodeStr = (i.codigo_barras || '').toLowerCase();
+                                            const iBarcodeDigits = (i.codigo_barras || '').replace(/\D/g, '');
+
+                                            return imeiStr.includes(s) ||
+                                                   (sDigits && sDigits.length >= 3 && imeiDigits && imeiDigits.includes(sDigits)) ||
+                                                   iBarcodeStr.includes(s) ||
+                                                   (sDigits && sDigits.length >= 3 && iBarcodeDigits && iBarcodeDigits.includes(sDigits));
                                           });
+
+                                          return nameMatch || barcodeMatch || skuMatch || itemsMatch;
                                         })
                                         .map((row, idx) => {
                                           const isExpanded = !!torreExpandedRows[row.nome];
