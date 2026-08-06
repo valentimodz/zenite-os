@@ -529,10 +529,16 @@ export default function Dashboard({ session, profileDataProps }) {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
       // Buscar mapa do catalogo para relacionar código de barras e SKU
-      const { data: catData } = await supabase
+      let { data: catData } = await supabase
         .from('produtos_catalogo')
-        .select('id, nome, codigo_barras, sku')
-        .eq('empresa_id', targetEmpresaId);
+        .select('id, nome, codigo_barras, sku');
+
+      if (!catData || catData.length === 0) {
+        const { data: fallbackCat } = await supabase
+          .from('produtos_catalogo')
+          .select('id, nome, codigo_barras, sku');
+        catData = fallbackCat || [];
+      }
 
       const catMap = new Map();
       (catData || []).forEach(c => {
@@ -634,10 +640,17 @@ export default function Dashboard({ session, profileDataProps }) {
       });
 
       // Incluir produtos por quantidade (Acessórios e Produtos Gerais) da tabela produtos
-      const { data: prodsData } = await supabase
+      let { data: prodsData } = targetEmpresaId ? await supabase
         .from('produtos')
         .select('*, filiais:filial_id(id, nome)')
-        .eq('empresa_id', targetEmpresaId);
+        .eq('empresa_id', targetEmpresaId) : { data: null };
+
+      if (!prodsData || prodsData.length === 0) {
+        const { data: fallbackProds } = await supabase
+          .from('produtos')
+          .select('*, filiais:filial_id(id, nome)');
+        prodsData = fallbackProds || [];
+      }
 
       if (prodsData) {
         prodsData.forEach(item => {
@@ -8388,8 +8401,8 @@ export default function Dashboard({ session, profileDataProps }) {
             catalogo_id: cat.id,
             nome: p.nome || cat.nome,
             cor: (p.cor && p.cor.trim()) || cat.cor || null,
-            codigo_barras: p.codigo_barras || cat.codigo_barras || null,
-            sku: p.sku || cat.sku || null,
+            codigo_barras: (p.codigo_barras && String(p.codigo_barras).trim()) || (cat.codigo_barras && String(cat.codigo_barras).trim()) || null,
+            sku: (p.sku && String(p.sku).trim()) || (cat.sku && String(cat.sku).trim()) || null,
             categoria: p.categoria || cat.categoria || 'GERAL',
             tipo: p.tipo || cat.tipo || 'ACESSORIO',
             preco: parseFloat(p.preco || cat.preco || 0),
