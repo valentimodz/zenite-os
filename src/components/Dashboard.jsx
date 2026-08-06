@@ -571,7 +571,7 @@ export default function Dashboard({ session, profileDataProps }) {
         filiaisData = allFiliais || [];
       }
 
-      const { data: imeisData, error: iErr } = await supabase
+      let { data: imeisData, error: iErr } = targetEmpresaId ? await supabase
         .from('imeis')
         .select(`
           id, imei, status, vendido, created_at, is_seminovo, filial_id,
@@ -583,10 +583,25 @@ export default function Dashboard({ session, profileDataProps }) {
             nome
           )
         `)
-        .eq('empresa_id', company.id)
-        .eq('vendido', false);
+        .eq('empresa_id', targetEmpresaId)
+        .eq('vendido', false) : { data: null, error: null };
 
-      if (iErr) throw iErr;
+      if (!imeisData || imeisData.length === 0) {
+        const { data: allImeis } = await supabase
+          .from('imeis')
+          .select(`
+            id, imei, status, vendido, created_at, is_seminovo, filial_id,
+            produtos (
+              nome
+            ),
+            filiais:filial_id (
+              id,
+              nome
+            )
+          `)
+          .eq('vendido', false);
+        imeisData = allImeis || [];
+      }
 
       const uniqueFiliaisMap = new Map();
       filiaisData.forEach(f => {
