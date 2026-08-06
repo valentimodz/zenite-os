@@ -523,20 +523,33 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [torreSearch, torreData]);
 
-  const fetchTorreControlo = async () => {
+  const fetchTorreControlo = async (empIdParam = null) => {
     setTorreLoading(true);
     try {
-      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      const targetEmpresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
+
+      const extractEan = (obj) => {
+        if (!obj) return null;
+        const val = obj.codigo_barras || obj.codigoBarras || obj.ean || obj.gtin || obj.barcode || obj.codigo_barra || null;
+        return (val && String(val).trim()) || null;
+      };
+
+      const extractSku = (obj) => {
+        if (!obj) return null;
+        const val = obj.sku || obj.sku_produto || obj.cod_sku || null;
+        return (val && String(val).trim()) || null;
+      };
 
       // Buscar mapa do catalogo para relacionar código de barras e SKU
-      let { data: catData } = await supabase
+      let { data: catData } = targetEmpresaId ? await supabase
         .from('produtos_catalogo')
-        .select('id, nome, codigo_barras, sku');
+        .select('*')
+        .eq('empresa_id', targetEmpresaId) : { data: null };
 
       if (!catData || catData.length === 0) {
         const { data: fallbackCat } = await supabase
           .from('produtos_catalogo')
-          .select('id, nome, codigo_barras, sku');
+          .select('*');
         catData = fallbackCat || [];
       }
 
@@ -547,13 +560,16 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       });
 
-      const { data: filiaisData, error: fErr } = await supabase
+      let { data: filiaisData, error: fErr } = targetEmpresaId ? await supabase
         .from('filiais')
         .select('id, nome')
         .eq('empresa_id', targetEmpresaId)
-        .order('nome', { ascending: true });
+        .order('nome', { ascending: true }) : { data: null, error: null };
         
-      if (fErr) throw fErr;
+      if (!filiaisData || filiaisData.length === 0) {
+        const { data: allFiliais } = await supabase.from('filiais').select('id, nome').order('nome', { ascending: true });
+        filiaisData = allFiliais || [];
+      }
 
       const { data: imeisData, error: iErr } = await supabase
         .from('imeis')
@@ -586,8 +602,8 @@ export default function Dashboard({ session, profileDataProps }) {
       (catData || []).forEach(c => {
         if (!c.nome) return;
         const prodName = c.nome;
-        const eanVal = (c.codigo_barras && String(c.codigo_barras).trim()) || null;
-        const skuVal = (c.sku && String(c.sku).trim()) || null;
+        const eanVal = extractEan(c);
+        const skuVal = extractSku(c);
         if (!aggregation[prodName]) {
           aggregation[prodName] = {
             nome: prodName,
@@ -630,8 +646,8 @@ export default function Dashboard({ session, profileDataProps }) {
         if (!prodName) return;
 
         const catMatch = catMap.get(prodName.toLowerCase().trim());
-        const eanVal = catMatch?.codigo_barras || null;
-        const skuVal = catMatch?.sku || null;
+        const eanVal = extractEan(catMatch) || extractEan(item);
+        const skuVal = extractSku(catMatch) || extractSku(item);
 
         if (!aggregation[prodName]) {
           aggregation[prodName] = { nome: prodName, codigo_barras: eanVal, sku: skuVal, total: 0, items: [] };
@@ -683,8 +699,8 @@ export default function Dashboard({ session, profileDataProps }) {
           if (qty <= 0) return;
 
           const catMatch = catMap.get(prodName.toLowerCase().trim());
-          const eanVal = item.codigo_barras || catMatch?.codigo_barras || null;
-          const skuVal = item.sku || catMatch?.sku || null;
+          const eanVal = extractEan(item) || extractEan(catMatch);
+          const skuVal = extractSku(item) || extractSku(catMatch);
 
           if (!aggregation[prodName]) {
             aggregation[prodName] = { nome: prodName, codigo_barras: eanVal, sku: skuVal, total: 0, items: [] };
@@ -821,6 +837,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (profile.role === 'GERENTE' || profile.role === 'ESTOQUISTA') {
         fetchGerenteData(tenantId);
         fetchCatalogoProdutos(tenantId);
+        fetchTorreControlo(tenantId);
         if (profile.role === 'GERENTE') fetchTaxasCartao(tenantId);
         fetchCategorias(tenantId);
         if (activeFilialId) fetchTransferencias(activeFilialId, tenantId);
@@ -831,12 +848,14 @@ export default function Dashboard({ session, profileDataProps }) {
           fetchTransferencias(activeFilialId, tenantId);
         }
         fetchCatalogoProdutos(tenantId);
+        fetchTorreControlo(tenantId);
         fetchTaxasCartao(tenantId);
         fetchCategorias(tenantId);
       } else {
         // Perfis de Gestão (ADMIN, SUPER_ADMIN, OWNER, DONO, RH)
         fetchGerenteData(tenantId);
         fetchCatalogoProdutos(tenantId);
+        fetchTorreControlo(tenantId);
         fetchTaxasCartao(tenantId);
         fetchCategorias(tenantId);
         if (activeFilialId) fetchTransferencias(activeFilialId, tenantId);
