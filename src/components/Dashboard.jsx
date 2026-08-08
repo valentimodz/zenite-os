@@ -987,9 +987,7 @@ export default function Dashboard({ session, profileDataProps }) {
         handleConfirmarVendaCarrinho();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        setPdvCart([]);
-        setPdvBusca('');
-        showToast('Carrinho limpo!', 'info');
+        handleClearCart();
       }
     };
 
@@ -6950,6 +6948,51 @@ export default function Dashboard({ session, profileDataProps }) {
     showToast(`🛒 ${produto.nome} adicionado ao carrinho!`, 'success');
   };
 
+  // Limpar todo o carrinho e resetar o estado do PDV
+  const handleClearCart = (notify = true) => {
+    setPdvCart([]);
+    setPdvBusca('');
+    setPdvScanImei('');
+    setPdvObsGarantia('');
+    setSelectedTreenerId('');
+    setPdvVendaTrainee(false);
+    setPdvClienteNome('');
+    setPdvClienteCpfCnpj('');
+    setPdvClienteEmail('');
+    setPdvClienteTelefone('');
+    setPdvClienteDataNascimento('');
+    setPdvClienteSearchInput('');
+    setPdvClienteSearchResults([]);
+    setSelectedPdvClienteId(null);
+    setIsPdvClienteFieldsEditable(false);
+    setPdvUsadoList([]);
+    setPdvUsadoProdutoSelecionado(null);
+    setPdvUsadoNomeProduto('');
+    setPdvUsadoSugestoes([]);
+    setPdvUsadoImei('');
+    setPdvUsadoCor('');
+    setPdvUsadoBateria('');
+    setPdvUsadoValor('');
+    setPdvUsadoObs('');
+    setPdvMetodoPagamento('pix');
+    setPdvMetodoRestante('pix');
+    setPdvCartaoParcelas(1);
+    setPdvStatusPagamento('PAGO');
+    setPdvDataVencimentoRestante('');
+    setPdvValorPagoCustom('');
+    setIsQuickClientFormOpen(true);
+
+    try {
+      sessionStorage.removeItem('zenite_pdv_draft');
+    } catch (e) {
+      console.error('Erro ao remover rascunho do PDV:', e);
+    }
+
+    if (notify) {
+      showToast('Carrinho e dados do PDV limpos com sucesso!', 'info');
+    }
+  };
+
   // Remover item do carrinho
   const handleRemoveFromCart = (cartId) => {
     setPdvCart(prev => prev.filter(item => item.cartId !== cartId));
@@ -7815,26 +7858,7 @@ export default function Dashboard({ session, profileDataProps }) {
       showToast('Venda registrada com sucesso!', 'success');
 
       // Limpar estados do PDV
-      setPdvCart([]);
-      setPdvObsGarantia('');
-      setSelectedTreenerId('');
-      setPdvVendaTrainee(false);
-      setPdvClienteNome('');
-      setPdvClienteCpfCnpj('');
-      setPdvClienteEmail('');
-      setPdvClienteTelefone('');
-      setPdvClienteDataNascimento('');
-      setPdvClienteSearchInput('');
-      setPdvClienteSearchResults([]);
-      setSelectedPdvClienteId(null);
-      setIsPdvClienteFieldsEditable(false);
-      setPdvUsadoList([]);
-      setPdvMetodoPagamento('pix');
-      setPdvMetodoRestante('pix');
-      setPdvCartaoParcelas(1);
-      setPdvDataVencimentoRestante('');
-      setPdvValorPagoCustom('');
-      setIsQuickClientFormOpen(true);
+      handleClearCart(false);
 
       // Recarregar dados
       fetchVendedorData(activeFilialId, session.user.id);
@@ -10389,24 +10413,7 @@ export default function Dashboard({ session, profileDataProps }) {
                 <div className="flex gap-2 border-t border-[#222222] pt-4">
                   <button
                     type="button"
-                    onClick={() => {
-                      setPdvCart([]);
-                      setPdvObsGarantia('');
-                      setPdvClienteNome('');
-                      setPdvClienteCpfCnpj('');
-                      setPdvClienteEmail('');
-                      setPdvClienteTelefone('');
-                      setPdvClienteSearchInput('');
-                      setPdvClienteSearchResults([]);
-                      setSelectedPdvClienteId(null);
-                      setIsPdvClienteFieldsEditable(false);
-                      setPdvUsadoList([]);
-                      setPdvMetodoPagamento('pix');
-                      setPdvMetodoRestante('pix');
-                      setPdvCartaoParcelas(1);
-                      setIsQuickClientFormOpen(true);
-                      sessionStorage.removeItem('zenite_pdv_draft');
-                    }}
+                    onClick={() => handleClearCart()}
                     className="flex-1 border border-[#222222] hover:border-red-950 hover:text-red-400 bg-black text-xs font-bold py-3 rounded transition-all"
                   >
                     Cancelar
