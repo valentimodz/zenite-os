@@ -6,8 +6,6 @@ export default function PainelVendaRapida({ isOpen, onClose, produtos = [], onAd
   const [categoriaAtiva, setCategoriaAtiva] = useState('TUDO');
   const [lastAddedId, setLastAddedId] = useState(null);
 
-  if (!isOpen) return null;
-
   // Filtrar produtos genéricos e acessórios
   const produtosFiltrados = useMemo(() => {
     return produtos.filter((p) => {
@@ -44,6 +42,8 @@ export default function PainelVendaRapida({ isOpen, onClose, produtos = [], onAd
       return bateBusca && bateCategoria;
     });
   }, [produtos, busca, categoriaAtiva]);
+
+  if (!isOpen) return null;
 
   const handleSelect = (produto) => {
     onAddToCart(produto);
