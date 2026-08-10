@@ -4,6 +4,7 @@ import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
 import CeoDashboard from './components/CeoDashboard';
 import ResetPassword from './components/ResetPassword';
+import GabaritoImpressao from './components/GabaritoImpressao';
 
 function App() {
   if (isMissingCredentials) {
@@ -88,6 +89,11 @@ function App() {
     const isSuperAdminRoute = window.location.pathname === '/super-admin';
     if (isSuperAdminRoute) {
       return <SuperAdminRouteWrapper session={session} />;
+    }
+
+    const isCadernoPdvRoute = window.location.pathname === '/caderno-pdv' || window.location.pathname === '/gabarito-impressao';
+    if (isCadernoPdvRoute) {
+      return <GabaritoImpressao session={session} onBack={() => { window.location.href = '/'; }} />;
     }
 
     const isCeoRoute = window.location.pathname === '/dashboard/ceo';

@@ -13286,11 +13286,21 @@ export default function Dashboard({ session, profileDataProps }) {
                       <div className="p-6">
                         {(catalogoTab === 'catalogo' && profile?.role !== 'DONO') && (
                           <>
-                            <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-                              <Database size={18} className="text-[#6A0DAD]" />
-                              Catálogo Mestre de Produtos
-                              <span className="text-[10px] bg-[#6A0DAD]/15 text-[#6A0DAD] border border-[#6A0DAD]/30 px-2 py-0.5 rounded-full font-semibold ml-1">Fonte do Poka-Yoke</span>
-                            </h3>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <Database size={18} className="text-[#6A0DAD]" />
+                                Catálogo Mestre de Produtos
+                                <span className="text-[10px] bg-[#6A0DAD]/15 text-[#6A0DAD] border border-[#6A0DAD]/30 px-2 py-0.5 rounded-full font-semibold ml-1">Fonte do Poka-Yoke</span>
+                              </h3>
+                              <button
+                                onClick={() => window.open('/caderno-pdv', '_blank')}
+                                className="px-3 py-1.5 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#c084fc] border border-[#6A0DAD]/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                                title="Abrir Caderno de PDV para Impressão de Códigos de Barras"
+                              >
+                                <Barcode size={14} />
+                                <span>Caderno PDV (Barcodes)</span>
+                              </button>
+                            </div>
                             <p className="text-xs text-gray-600 mb-5">Cadastre os modelos de produtos. O módulo de Entrada de Estoque usará este catálogo para evitar erros de digitação.</p>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
