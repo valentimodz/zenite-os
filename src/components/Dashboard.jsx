@@ -4210,6 +4210,31 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  const handleGerarSKU = () => {
+    let prefixo = 'ACC';
+    if (categoriaProduto) {
+      const catUpper = categoriaProduto.toUpperCase().trim();
+      if (catUpper.includes('PELÍCULA') || catUpper.includes('PELICULA')) prefixo = 'PEL';
+      else if (catUpper.includes('CAPA') || catUpper.includes('CASE')) prefixo = 'CAP';
+      else if (catUpper.includes('CABO')) prefixo = 'CAB';
+      else if (catUpper.includes('CARREGADOR')) prefixo = 'CAR';
+      else if (catUpper.includes('FONE') || catUpper.includes('AUDIO')) prefixo = 'AUD';
+      else {
+        const apenasLetras = catUpper.replace(/[^A-Z]/g, '');
+        if (apenasLetras.length >= 3) prefixo = apenasLetras.substring(0, 3);
+      }
+    } else if (tipoProduto) {
+      prefixo = (tipoProduto === 'CELULAR' || tipoProduto === 'Celular') ? 'CEL' : 'ACC';
+    }
+
+    const aleatorio = Math.floor(100000 + Math.random() * 900000);
+    const skuGerado = `${prefixo}-${aleatorio}`;
+    setCodigoBarras(skuGerado);
+    if (!skuProduto) {
+      setSkuProduto(skuGerado);
+    }
+  };
+
   const handleStartEditCatalogo = (p) => {
     setEditingCatalogoProduto(p);
     setNomeProduto(p.nome || '');
@@ -13389,13 +13414,24 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
                                     Código de Barras (Barcode / EAN) {(tipoProduto === 'ACESSORIO' || tipoProduto === 'Acessorio') && <span className="text-red-500">*</span>}
                                   </label>
-                                  <input
-                                    type="text"
-                                    value={codigoBarras}
-                                    onChange={(e) => setCodigoBarras(e.target.value)}
-                                    placeholder="Ex: 7891234567890"
-                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono"
-                                  />
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="text"
+                                      value={codigoBarras}
+                                      onChange={(e) => setCodigoBarras(e.target.value)}
+                                      placeholder="Bipe ou digite o código de barras..."
+                                      className="flex-1 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={handleGerarSKU}
+                                      className="px-3 py-2.5 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#c084fc] border border-[#6A0DAD]/40 hover:border-[#6A0DAD] rounded-md text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap shadow-sm"
+                                      title="Gerar código interno automático (SKU) para produtos genéricos sem código EAN"
+                                    >
+                                      <Sparkles size={14} className="text-[#a855f7]" />
+                                      <span>Gerar Código</span>
+                                    </button>
+                                  </div>
                                 </div>
 
                                 {/* Campo de Número de Série / IMEI para Celulares / Aparelhos */}
