@@ -388,6 +388,13 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isVendaRapidaOpen, setIsVendaRapidaOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Estados para Pagamentos Múltiplos (Split Payment) no PDV
+  const [pdvListaPagamentos, setPdvListaPagamentos] = useState([]);
+  const [pdvNovoMetodo, setPdvNovoMetodo] = useState('pix');
+  const [pdvNovoValor, setPdvNovoValor] = useState('');
+  const [pdvNovoParcelas, setPdvNovoParcelas] = useState(1);
+  const [pdvNovoFinanceira, setPdvNovoFinanceira] = useState('PayJoy');
+
   // Configurações Fiscais
   const [fiscalCnpj, setFiscalCnpj] = useState('');
   const [fiscalInscricaoEstadual, setFiscalInscricaoEstadual] = useState('');
@@ -7788,7 +7795,24 @@ export default function Dashboard({ session, profileDataProps }) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
           }
 
-          if (actualValorPago > 0) {
+          if (pdvListaPagamentos.length > 0) {
+            for (const pag of pdvListaPagamentos) {
+              const mapMetodo = {
+                'pix': 'PIX',
+                'cartao': 'CARTAO',
+                'dinheiro': 'DINHEIRO',
+                'boleto': 'BOLETO'
+              };
+              const metodoResolved = mapMetodo[pag.metodo?.toLowerCase()] || 'DINHEIRO';
+              await supabase.from('vendas_pagamentos').insert({
+                venda_id: rpcRes.venda_id,
+                valor_pago: pag.valor,
+                metodo_pagamento: metodoResolved,
+                parcelas: pag.parcelas || 1,
+                tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
+              });
+            }
+          } else if (actualValorPago > 0) {
             const mapMetodo = {
               'pix': 'PIX',
               'cartao': 'CARTAO',
@@ -10011,484 +10035,321 @@ export default function Dashboard({ session, profileDataProps }) {
                   return null;
                 })()}
 
-                {/* FORMA DE PAGAMENTO */}
-                <div className="border-t border-[#222222] pt-4 space-y-3">
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
-                    Forma de Pagamento
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { value: 'pix', label: 'Pix' },
-                      { value: 'cartao', label: 'Cartão' },
-                      { value: 'dinheiro', label: 'Dinheiro' },
-                      { value: 'boleto', label: 'Boleto' },
-                      ...(tenantSettings.enable_troca ? [{ value: 'troca', label: 'Troca de Celular' }] : [])
-                    ].map((m) => (
-                      <button
-                        key={m.value}
-                        type="button"
-                        onClick={() => {
-                          setPdvMetodoPagamento(m.value);
-                          setPdvCartaoParcelas(1);
-                          setPdvMetodoRestante('pix');
-                        }}
-                        className={`py-2 px-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvMetodoPagamento === m.value
-                          ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
-                          : 'bg-black text-gray-400 border-[#222222] hover:text-white'
-                          }`}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
+                {/* FORMAS DE PAGAMENTO MÚLTIPLOS (SPLIT PAYMENT) */}
+                {(() => {
+                  const subtotalCart = pdvCart.reduce((sum, item) => sum + item.valorUnitario * item.quantidade, 0);
+                  const abatimentoTroca = pdvUsadoList.reduce((acc, item) => acc + item.valor, 0);
+                  const totalCarrinhoLiquido = Math.max(0, subtotalCart - abatimentoTroca);
+                  const totalJaPago = pdvListaPagamentos.reduce((sum, p) => sum + (parseFloat(p.valor) || 0), 0);
+                  const faltaPagar = Math.max(0, totalCarrinhoLiquido - totalJaPago);
 
-                  {pdvMetodoPagamento === 'boleto' && (
-                    <div className="bg-[#111111] border border-[#6A0DAD]/40 p-3 rounded-lg space-y-2 mt-2.5 animate-fadeIn">
-                      <label className="block text-[10px] font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
-                        <Building size={12} className="text-[#6A0DAD]" />
-                        Selecione a Financeira do Boleto <span className="text-red-500">*</span>
-                      </label>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {['PayJoy', 'Watu', 'Uma', 'Outra'].map((fin) => (
-                          <button
-                            key={fin}
-                            type="button"
-                            onClick={() => setPdvFinanceiraParceira(fin)}
-                            className={`py-1.5 px-1 rounded text-[10px] font-bold transition-all border ${pdvFinanceiraParceira === fin
-                              ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-[#6A0DAD]/20'
-                              : 'bg-black text-gray-400 border-[#222222] hover:text-white'
-                              }`}
-                          >
-                            {fin}
-                          </button>
-                        ))}
-                      </div>
-                      {pdvFinanceiraParceira === 'Outra' && (
-                        <input
-                          type="text"
-                          placeholder="Informe o nome da financeira..."
-                          value={pdvFinanceiraCustomInput}
-                          onChange={(e) => setPdvFinanceiraCustomInput(e.target.value)}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded text-white px-3 py-1.5 text-xs outline-none mt-1 font-semibold"
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
+                  const handleAdicionarPagamentoPdv = () => {
+                    const valNum = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
 
-                {/* CONDIÇÃO DE PAGAMENTO (QUITADO / PARCIAL - SINAL / PENDENTE) */}
-                <div className="border-t border-[#222222] pt-4 space-y-3">
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
-                    Condição Comercial de Pagamento
-                  </label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {[
-                      { value: 'PAGO', label: '🟢 Integral' },
-                      { value: 'PARCIAL', label: '🟡 Sinal / Entrada' },
-                      { value: 'PENDENTE', label: '🔴 A Receber' }
-                    ].map((st) => (
-                      <button
-                        key={st.value}
-                        type="button"
-                        onClick={() => {
-                          setPdvStatusPagamento(st.value);
-                          if (st.value === 'PAGO') setPdvValorPagoCustom('');
-                        }}
-                        className={`py-2 px-1 rounded text-[10px] font-bold transition-all border ${pdvStatusPagamento === st.value
-                          ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-[#6A0DAD]/20'
-                          : 'bg-black text-gray-400 border-[#222222] hover:text-white'
-                          }`}
-                      >
-                        {st.label}
-                      </button>
-                    ))}
-                  </div>
+                    if (!valNum || valNum <= 0) {
+                      showToast('Por favor, informe um valor de pagamento válido (maior que R$ 0,00).', 'error');
+                      return;
+                    }
 
-                  {pdvStatusPagamento === 'PARCIAL' && (
-                    <div className="bg-[#111111] border border-[#6A0DAD]/30 p-3 rounded-lg space-y-2 mt-2">
-                      <label className="block text-[10px] font-bold text-purple-300 uppercase tracking-wider">
-                        Valor Pago no Ato (Sinal / Entrada) <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-2 text-xs text-gray-500 font-mono">R$</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={pdvValorPagoCustom}
-                          onChange={(e) => setPdvValorPagoCustom(e.target.value)}
-                          placeholder="0.00"
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded text-white pl-8 pr-3 py-1.5 text-xs outline-none font-mono font-bold"
-                        />
-                      </div>
-                      <p className="text-[10px] text-gray-400">
-                        O saldo restante ficará pendente no cadastro do cliente em Contas a Receber.
-                      </p>
-                    </div>
-                  )}
-                </div>
+                    if (pdvNovoMetodo !== 'dinheiro' && valNum > (faltaPagar + 0.01)) {
+                      showToast(`O valor informado (R$ ${valNum.toFixed(2)}) excede o saldo restante a pagar (R$ ${faltaPagar.toFixed(2)}).`, 'error');
+                      return;
+                    }
 
-                {/* MÓDULO DE TROCA */}
-                {pdvMetodoPagamento === 'troca' && (
-                  <div className="space-y-4 pt-4 border-t border-[#222222]">
-                    {pdvUsadoList.length > 0 && (
-                      <div className="space-y-2">
-                        <span className="block text-[10px] font-black text-purple-400 uppercase tracking-wider">
-                          Aparelhos na Troca ({pdvUsadoList.length})
+                    let labelMetodo = 'Pix';
+                    if (pdvNovoMetodo === 'pix') labelMetodo = '⚡ Pix';
+                    else if (pdvNovoMetodo === 'dinheiro') labelMetodo = '💵 Dinheiro';
+                    else if (pdvNovoMetodo === 'cartao') labelMetodo = `💳 Cartão (${pdvNovoParcelas}x)`;
+                    else if (pdvNovoMetodo === 'boleto') labelMetodo = `📄 Boleto (${pdvNovoFinanceira})`;
+
+                    const novoItem = {
+                      id: Date.now().toString() + Math.random().toString(36).substring(2, 5),
+                      metodo: pdvNovoMetodo,
+                      label: labelMetodo,
+                      valor: valNum,
+                      parcelas: pdvNovoMetodo === 'cartao' ? pdvNovoParcelas : 1,
+                      financeira: pdvNovoMetodo === 'boleto' ? pdvNovoFinanceira : null
+                    };
+
+                    const novaLista = [...pdvListaPagamentos, novoItem];
+                    setPdvListaPagamentos(novaLista);
+
+                    const novoJaPago = novaLista.reduce((sum, p) => sum + p.valor, 0);
+                    const novoFaltaPagar = Math.max(0, totalCarrinhoLiquido - novoJaPago);
+                    setPdvNovoValor(novoFaltaPagar > 0 ? novoFaltaPagar.toFixed(2) : '');
+                    showToast(`Pagamento de R$ ${valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${labelMetodo}) adicionado!`, 'success');
+                  };
+
+                  const handleRemoverPagamentoPdv = (id) => {
+                    const novaLista = pdvListaPagamentos.filter(p => p.id !== id);
+                    setPdvListaPagamentos(novaLista);
+                    const novoJaPago = novaLista.reduce((sum, p) => sum + p.valor, 0);
+                    const novoFaltaPagar = Math.max(0, totalCarrinhoLiquido - novoJaPago);
+                    setPdvNovoValor(novoFaltaPagar > 0 ? novoFaltaPagar.toFixed(2) : '');
+                  };
+
+                  return (
+                    <div className="border-t border-[#222222] pt-4 space-y-4">
+                      {/* COTEJO DO SALDO EM TEMPO REAL */}
+                      <div className="flex items-center justify-between bg-[#111111]/80 border border-[#222222] p-3 rounded-lg">
+                        <div>
+                          <span className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                            Resumo de Pagamento
+                          </span>
+                          <p className="text-xs font-bold text-white mt-0.5">
+                            Total: R$ {totalCarrinhoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Pago: <span className="text-green-400 font-mono font-bold">R$ {totalJaPago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                          </p>
+                        </div>
+                        <span className={`text-xs font-mono font-extrabold px-2.5 py-1 rounded border shadow-sm ${faltaPagar <= 0.01 ? 'bg-green-950/80 text-green-400 border-green-700/60' : 'bg-amber-950/80 text-amber-300 border-amber-700/60'}`}>
+                          {faltaPagar <= 0.01 ? '✓ Quitado' : `Restante: R$ ${faltaPagar.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
                         </span>
-                        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                          {pdvUsadoList.map((u, idx) => (
-                            <div key={idx} className="bg-black border border-[#222222] p-2.5 rounded flex items-center justify-between gap-3 text-xs">
-                              <div className="min-w-0 flex-1">
-                                <p className="font-bold text-white truncate">{u.produto.nome}</p>
-                                <p className="text-[10px] text-gray-500 truncate font-mono">
-                                  IMEI: {u.imei} · Bateria: {u.bateria}% · {u.cor}
-                                </p>
+                      </div>
+
+                      {/* LISTA DOS PAGAMENTOS REGISTRADOS */}
+                      {pdvListaPagamentos.length > 0 && (
+                        <div className="space-y-2 bg-black border border-[#222222] p-3 rounded-lg">
+                          <span className="block text-[10px] font-extrabold text-purple-400 uppercase tracking-wider mb-1">
+                            Pagamentos Adicionados ({pdvListaPagamentos.length}):
+                          </span>
+                          {pdvListaPagamentos.map((pag) => (
+                            <div key={pag.id} className="flex items-center justify-between bg-[#111111] border border-[#222222] px-3 py-2 rounded text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white">{pag.label}</span>
+                                {pag.parcelas > 1 && (
+                                  <span className="text-[9px] text-purple-300 bg-purple-950/50 px-1.5 py-0.5 rounded font-mono border border-purple-800/40">
+                                    {pag.parcelas}x
+                                  </span>
+                                )}
                               </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <span className="font-mono font-bold text-purple-400">
-                                  - R$ {u.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              <div className="flex items-center gap-2.5">
+                                <span className="font-mono font-black text-green-400">
+                                  R$ {pag.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </span>
                                 <button
                                   type="button"
-                                  onClick={() => handleRemoverPdvUsado(u.imei)}
-                                  className="text-gray-500 hover:text-red-450 p-0.5 rounded transition-colors"
+                                  onClick={() => handleRemoverPagamentoPdv(pag.id)}
+                                  className="text-gray-500 hover:text-red-400 p-1 rounded transition-colors"
+                                  title="Remover este pagamento"
                                 >
-                                  <X size={14} />
+                                  <Trash2 size={13} />
                                 </button>
                               </div>
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    <div className="space-y-3 bg-black border border-[#222222] p-4 rounded-lg animate-fadeIn">
-                      <span className="block text-[10px] font-bold text-white uppercase tracking-wider mb-1">
-                        Ficha do Aparelho Usado
-                      </span>
+                      {/* FORMULÁRIO DE ADICIONAR NOVO PAGAMENTO */}
+                      {faltaPagar > 0.01 ? (
+                        <div className="bg-[#111111]/60 border border-[#222222] p-3.5 rounded-lg space-y-3 animate-fadeIn">
+                          <label className="block text-[10px] font-bold text-purple-300 uppercase tracking-wider">
+                            + Adicionar Forma de Pagamento
+                          </label>
 
-                      <div className="relative">
-                        <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                          1. Modelo do Aparelho Usado (Catálogo)
-                        </label>
-                        <input
-                          type="text"
-                          value={pdvUsadoNomeProduto}
-                          onChange={(e) => handlePdvUsadoBusca(e.target.value)}
-                          placeholder="Buscar modelo..."
-                          className={`w-full bg-black border rounded text-xs text-white px-3 py-2 placeholder-gray-600 outline-none transition-all ${pdvUsadoProdutoSelecionado ? 'border-[#6A0DAD]' : 'border-[#222222] focus:border-[#6A0DAD]'
-                            }`}
-                          autoComplete="off"
-                        />
-
-                        {pdvUsadoProdutoSelecionado && (
-                          <div className="mt-1.5 flex items-center justify-between bg-[#6A0DAD]/10 border border-[#6A0DAD]/40 rounded px-2.5 py-1 text-[11px] text-white">
-                            <p className="font-bold truncate">{pdvUsadoProdutoSelecionado.nome}</p>
-                            <button
-                              type="button"
-                              onClick={() => { setPdvUsadoProdutoSelecionado(null); setPdvUsadoNomeProduto(''); }}
-                              className="text-gray-500 hover:text-red-400 shrink-0 ml-2"
-                            >
-                              <X size={12} />
-                            </button>
-                          </div>
-                        )}
-
-                        {pdvUsadoSugestoes.length > 0 && (
-                          <div className="absolute z-35 left-0 right-0 mt-1 bg-[#111] border border-[#333] rounded shadow-2xl max-h-40 overflow-y-auto">
-                            {pdvUsadoSugestoes.map((p) => (
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { value: 'pix', label: '⚡ Pix' },
+                              { value: 'cartao', label: '💳 Cartão' },
+                              { value: 'dinheiro', label: '💵 Dinheiro' },
+                              { value: 'boleto', label: '📄 Boleto' }
+                            ].map((m) => (
                               <button
-                                key={p.id}
+                                key={m.value}
                                 type="button"
-                                onClick={() => handlePdvUsadoSelecionar(p)}
-                                className="w-full text-left px-3 py-2 hover:bg-[#6A0DAD]/15 text-xs text-white border-b border-[#222] last:border-0"
+                                onClick={() => {
+                                  setPdvNovoMetodo(m.value);
+                                  if (m.value !== 'cartao') setPdvNovoParcelas(1);
+                                }}
+                                className={`py-2 px-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
+                                  ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-purple-900/30'
+                                  : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                                  }`}
                               >
-                                {p.nome}
+                                {m.label}
                               </button>
                             ))}
                           </div>
-                        )}
-                      </div>
 
-                      <div>
-                        <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                          2. IMEI do Aparelho Usado (15 dígitos)
-                        </label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={pdvUsadoImei}
-                          onChange={(e) => setPdvUsadoImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                          placeholder="IMEI..."
-                          maxLength={15}
-                          className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded text-xs text-white px-3 py-2 font-mono tracking-wider outline-none"
-                        />
-                      </div>
+                          {/* Se for Cartão de Crédito: Parcelas */}
+                          {pdvNovoMetodo === 'cartao' && (
+                            <div className="space-y-1 animate-fadeIn">
+                              <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                                Número de Parcelas (Cartão)
+                              </label>
+                              <select
+                                value={pdvNovoParcelas}
+                                onChange={(e) => setPdvNovoParcelas(parseInt(e.target.value, 10))}
+                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
+                              >
+                                {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                                  <option key={n} value={n}>
+                                    {n}x no Cartão de Crédito
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
 
-                      <div className="grid grid-cols-2 gap-2">
+                          {/* Se for Boleto: Financeira */}
+                          {pdvNovoMetodo === 'boleto' && (
+                            <div className="space-y-1 animate-fadeIn">
+                              <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                                Financeira do Boleto
+                              </label>
+                              <div className="grid grid-cols-4 gap-1">
+                                {['PayJoy', 'Watu', 'Uma', 'Outra'].map((fin) => (
+                                  <button
+                                    key={fin}
+                                    type="button"
+                                    onClick={() => setPdvNovoFinanceira(fin)}
+                                    className={`py-1.5 text-[9px] font-bold rounded border transition-all ${pdvNovoFinanceira === fin
+                                      ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
+                                      : 'bg-black text-gray-400 border-[#222222]'
+                                      }`}
+                                  >
+                                    {fin}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Campo de Valor e Botão Adicionar */}
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                              Valor a Pagar nesta Forma (R$)
+                            </label>
+                            <div className="flex gap-2">
+                              <div className="relative flex-1">
+                                <span className="absolute left-3 top-2 text-xs text-gray-500 font-mono font-bold">R$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0.01"
+                                  value={pdvNovoValor !== '' ? pdvNovoValor : faltaPagar.toFixed(2)}
+                                  onChange={(e) => setPdvNovoValor(e.target.value)}
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded pl-9 pr-3 py-1.5 text-xs text-white font-mono font-bold outline-none"
+                                  placeholder={faltaPagar.toFixed(2)}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={handleAdicionarPagamentoPdv}
+                                className="bg-[#6A0DAD] hover:bg-[#500885] text-white px-3.5 py-1.5 rounded text-xs font-bold transition-all shrink-0 flex items-center gap-1 shadow-md shadow-[#6A0DAD]/30 cursor-pointer"
+                              >
+                                <Plus size={14} />
+                                <span>Adicionar</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-green-950/30 border border-green-700/40 p-3 rounded-lg text-center text-xs text-green-400 font-bold flex items-center justify-center gap-2">
+                          <Check size={16} />
+                          <span>Valor total do carrinho pago! Pronto para finalizar.</span>
+                        </div>
+                      )}
+
+                      {/* CONDICAO COMERCIAL / OBSERVACOES DE GARANTIA E TREENER */}
+                      <div className="space-y-3 pt-2">
                         <div>
-                          <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Cor</label>
-                          <input
-                            type="text"
-                            value={pdvUsadoCor}
-                            onChange={(e) => setPdvUsadoCor(e.target.value)}
-                            placeholder="Ex: Grafite"
-                            className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded text-xs text-white px-3 py-2 outline-none"
-                          />
+                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">
+                            Observações de Garantia <span className="text-red-500">*</span>
+                          </label>
+                          <textarea
+                            value={pdvObsGarantia}
+                            onChange={(e) => setPdvObsGarantia(e.target.value)}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[50px]"
+                            placeholder="Detalhes sobre a garantia..."
+                            required
+                          ></textarea>
                         </div>
+
                         <div>
-                          <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Saúde Bateria (%)</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="100"
-                            value={pdvUsadoBateria}
-                            onChange={(e) => setPdvUsadoBateria(e.target.value)}
-                            placeholder="Ex: 85"
-                            className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded text-xs text-white px-3 py-2 outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[9px] font-semibold text-purple-400 uppercase tracking-wider mb-1 font-bold">Valor Avaliação (Crédito)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-xs text-gray-500 font-bold">R$</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={pdvUsadoValor}
-                            onChange={(e) => setPdvUsadoValor(e.target.value)}
-                            placeholder="0.00"
-                            className="w-full bg-black border border-[#6A0DAD]/30 focus:border-[#6A0DAD] rounded text-xs text-white pl-9 pr-3 py-2 outline-none font-mono font-bold"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Checklist Visual</label>
-                        <textarea
-                          value={pdvUsadoObs}
-                          onChange={(e) => setPdvUsadoObs(e.target.value)}
-                          placeholder="Riscos, detalhes..."
-                          rows={2}
-                          className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded text-xs text-white px-3 py-2 outline-none resize-none font-sans"
-                        />
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleAdicionarPdvUsado}
-                        className="w-full bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 border border-[#6A0DAD]/40 text-white font-bold py-2 px-4 rounded text-xs transition-all flex items-center justify-center gap-1.5"
-                      >
-                        <Plus size={14} /> Adicionar na Troca
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* PAGAMENTO RESTANTE DA TROCA */}
-                {pdvMetodoPagamento === 'troca' && pdvUsadoList.length > 0 && pdvCart.reduce((sum, item) => sum + item.valorUnitario * item.quantidade, 0) - pdvUsadoList.reduce((acc, item) => acc + item.valor, 0) > 0 && (
-                  <div className="border-t border-[#222222] pt-4 space-y-3 animate-fadeIn">
-                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
-                      Forma de Pagamento do Saldo Restante
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {['pix', 'cartao', 'dinheiro'].map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => setPdvMetodoRestante(m)}
-                          className={`py-2 rounded text-xs font-bold uppercase tracking-wider transition-all border ${pdvMetodoRestante === m
-                            ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
-                            : 'bg-black text-gray-400 border-[#222222] hover:text-white'
-                            }`}
-                        >
-                          {m === 'cartao' ? 'Cartão' : m === 'pix' ? 'Pix' : 'Dinheiro'}
-                        </button>
-                      ))}
-                    </div>
-
-                    {pdvMetodoRestante === 'cartao' && (
-                      <div className="space-y-1.5 animate-fadeIn">
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                          Selecione as Parcelas
-                        </label>
-                        <select
-                          value={pdvCartaoParcelas}
-                          onChange={(e) => setPdvCartaoParcelas(parseInt(e.target.value, 10))}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
-                        >
-                          {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => {
-                            const saldo = Math.max(0, pdvCart.reduce((sum, item) => sum + item.valorUnitario * item.quantidade, 0) - pdvUsadoList.reduce((acc, item) => acc + item.valor, 0));
-
-                            const feeObj = taxasCartao.find(t => t.parcelas === n);
-                            const feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (n - 1));
-                            const adjusted = saldo * (1 + feePercent / 100);
-                            const valorParc = adjusted / n;
-
-                            return (
-                              <option key={n} value={n}>
-                                {n}x de R$ {valorParc.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({feePercent.toFixed(2)}% juros)
+                          <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-gray-400 uppercase tracking-wide flex items-center justify-between mb-1">
+                            <span>Treener Responsável (Participação)</span>
+                            {selectedTreenerId && (
+                              <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-800/40 font-mono">
+                                Selecionado
+                              </span>
+                            )}
+                          </label>
+                          <select
+                            id="pdvTreenerSelect"
+                            value={selectedTreenerId}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSelectedTreenerId(val);
+                              setPdvVendaTrainee(!!val);
+                            }}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none cursor-pointer"
+                          >
+                            <option value="">Sem participação de Treener</option>
+                            {treenersFilial.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.nome} {t.role ? `(${t.role})` : ''}
                               </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* SE FOR PAGAMENTO NORMAL EM CARTÃO */}
-                {pdvMetodoPagamento === 'cartao' && (
-                  <div className="border-t border-[#222222] pt-4 space-y-3 animate-fadeIn">
-                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
-                      Parcelamento (Cartão)
-                    </label>
-                    <select
-                      value={pdvCartaoParcelas}
-                      onChange={(e) => setPdvCartaoParcelas(parseInt(e.target.value, 10))}
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
-                    >
-                      {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => {
-                        const totalOriginal = pdvCart.reduce((sum, item) => sum + item.valorUnitario * item.quantidade, 0);
-                        const feeObj = taxasCartao.find(t => t.parcelas === n);
-                        const feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (n - 1));
-                        const adjustedTotal = totalOriginal * (1 + feePercent / 100);
-                        const valorParc = adjustedTotal / n;
-
-                        return (
-                          <option key={n} value={n}>
-                            {n}x de R$ {valorParc.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({feePercent.toFixed(2)}% juros)
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-                )}
-
-                {/* OBSERVACÕES DE GARANTIA */}
-                <div className="space-y-2 mt-4 border-t border-[#222] pt-4">
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
-                    Observações de Garantia <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={pdvObsGarantia}
-                    onChange={(e) => setPdvObsGarantia(e.target.value)}
-                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[60px]"
-                    placeholder="Detalhes sobre a garantia..."
-                    required
-                  ></textarea>
-                </div>
-
-                {/* PARTICIPAÇÃO TREENER */}
-                <div className="mt-3 space-y-1 border-t border-[#222] pt-3">
-                  <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-gray-400 uppercase tracking-wide flex items-center justify-between">
-                    <span>Treener Responsável (Participação)</span>
-                    {selectedTreenerId && (
-                      <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-800/40 font-mono">
-                        Selecionado
-                      </span>
-                    )}
-                  </label>
-                  <select
-                    id="pdvTreenerSelect"
-                    value={selectedTreenerId}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedTreenerId(val);
-                      setPdvVendaTrainee(!!val);
-                    }}
-                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none cursor-pointer"
-                  >
-                    <option value="">Sem participação de Treener</option>
-                    {treenersFilial.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.nome} {t.role ? `(${t.role})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* RESUMO FINANCEIRO */}
-                {(() => {
-                  const subtotal = pdvCart.reduce((sum, item) => sum + item.valorUnitario * item.quantidade, 0);
-                  const abatimento = pdvMetodoPagamento === 'troca' ? pdvUsadoList.reduce((acc, item) => acc + item.valor, 0) : 0;
-                  const saldoOriginal = Math.max(0, subtotal - abatimento);
-
-                  const isCartao = (pdvMetodoPagamento === 'troca' && pdvUsadoList.length > 0 && saldoOriginal > 0 && pdvMetodoRestante === 'cartao') || pdvMetodoPagamento === 'cartao';
-
-                  let feePercent = 0;
-                  if (isCartao) {
-                    const feeObj = taxasCartao.find(t => t.parcelas === pdvCartaoParcelas);
-                    feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (pdvCartaoParcelas - 1));
-                  }
-
-                  const valorJuros = saldoOriginal * (feePercent / 100);
-                  const totalPagar = saldoOriginal + valorJuros;
-
-                  return (
-                    <div className="border-t border-[#222222] pt-4 space-y-2 bg-[#111111]/40 p-3 rounded-lg border border-[#222222]/85">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="text-gray-400">Subtotal:</span>
-                        <span className="text-white font-mono">
-                          R$ {subtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
+                            ))}
+                          </select>
+                        </div>
                       </div>
 
-                      {abatimento > 0 && (
+                      {/* RESUMO FINANCEIRO FINAL */}
+                      <div className="border-t border-[#222222] pt-4 space-y-2 bg-[#111111]/40 p-3 rounded-lg border border-[#222222]/85">
                         <div className="flex justify-between items-center text-xs">
-                          <span className="text-purple-400">Abatimento por Troca:</span>
-                          <span className="text-purple-400 font-mono font-bold">
-                            - R$ {abatimento.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          <span className="text-gray-400">Subtotal Carrinho:</span>
+                          <span className="text-white font-mono">
+                            R$ {subtotalCart.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </span>
                         </div>
-                      )}
 
-                      {valorJuros > 0 && (
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="text-red-400">Taxa Máquina ({feePercent.toFixed(2)}%):</span>
-                          <span className="text-red-400 font-mono">
-                            + R$ {valorJuros.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {abatimentoTroca > 0 && (
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-purple-400">Abatimento por Troca:</span>
+                            <span className="text-purple-400 font-mono font-bold">
+                              - R$ {abatimentoTroca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex justify-between items-center border-t border-[#222222] pt-2">
+                          <span className="text-xs font-black text-white uppercase tracking-wider">Total da Venda:</span>
+                          <span className="text-lg font-mono font-black text-white">
+                            R$ {totalCarrinhoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </span>
                         </div>
-                      )}
+                      </div>
 
-                      <div className="flex justify-between items-center border-t border-[#222222] pt-2">
-                        <span className="text-xs font-black text-white uppercase tracking-wider">Total a Pagar:</span>
-                        <span className="text-lg font-mono font-black text-white">
-                          R$ {totalPagar.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
+                      {/* AÇÕES DE CHECKOUT COM TRAVA DE SALDO RESTANTE (faltaPagar > 0.01) */}
+                      <div className="flex gap-2 border-t border-[#222222] pt-4">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPdvCart([]);
+                            setPdvListaPagamentos([]);
+                          }}
+                          className="flex-1 border border-[#222222] hover:border-red-950 hover:text-red-400 bg-black text-xs font-bold py-3 rounded transition-all"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleConfirmarVendaCarrinho}
+                          disabled={
+                            loadingPdvVenda ||
+                            pdvCart.length === 0 ||
+                            faltaPagar > 0.01 ||
+                            pdvListaPagamentos.length === 0 ||
+                            !pdvClienteNome.trim()
+                          }
+                          className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-xs font-bold py-3 rounded transition-all flex items-center justify-center gap-1 shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
+                        >
+                          {loadingPdvVenda ? 'Processando...' : (faltaPagar > 0.01 ? `Falta R$ ${faltaPagar.toFixed(2)}` : 'Finalizar Venda [F10]')}
+                        </button>
                       </div>
                     </div>
                   );
                 })()}
-
-                {/* AÇÕES DE CHECKOUT */}
-                <div className="flex gap-2 border-t border-[#222222] pt-4">
-                  <button
-                    type="button"
-                    onClick={() => handleClearCart()}
-                    className="flex-1 border border-[#222222] hover:border-red-950 hover:text-red-400 bg-black text-xs font-bold py-3 rounded transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmarVendaCarrinho}
-                    disabled={
-                      loadingPdvVenda ||
-                      pdvCart.length === 0 ||
-                      (pdvMetodoPagamento === 'troca' && pdvUsadoList.length === 0) ||
-                      !pdvClienteNome.trim()
-                    }
-                    className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-xs font-bold py-3 rounded transition-all flex items-center justify-center gap-1 shadow-md shadow-[#6A0DAD]/20"
-                  >
-                    {loadingPdvVenda ? 'Processando...' : 'Finalizar Venda [F10]'}
-                  </button>
-                </div>
               </div>
             )}
           </div>
