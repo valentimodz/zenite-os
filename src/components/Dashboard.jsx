@@ -6,7 +6,7 @@ import {
   Smartphone, Tag, FileText as LucideFileText, Search, Upload, Award, DollarSign,
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
-  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy
+  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap
 } from 'lucide-react';
 import { emitirNfseStub } from '../services/fiscal';
 import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
@@ -15,6 +15,7 @@ import SaasDashboard from '../pages/SaaS/SaasDashboard';
 import SaasTenants from '../pages/SaaS/SaasTenants';
 import SaasBilling from '../pages/SaaS/SaasBilling';
 import SaasSettings from '../pages/SaaS/SaasSettings';
+import PainelVendaRapida from './PainelVendaRapida';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -384,6 +385,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isSavingTaxas, setIsSavingTaxas] = useState(false);
   const [tempTaxasMap, setTempTaxasMap] = useState({});
   const [isQuickClientFormOpen, setIsQuickClientFormOpen] = useState(true);
+  const [isVendaRapidaOpen, setIsVendaRapidaOpen] = useState(false);
 
   // Configurações Fiscais
   const [fiscalCnpj, setFiscalCnpj] = useState('');
@@ -9620,6 +9622,15 @@ export default function Dashboard({ session, profileDataProps }) {
                 >
                   Bipar
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setIsVendaRapidaOpen(true)}
+                  className="bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 flex items-center gap-1.5 shadow-md shadow-purple-900/30 hover:scale-[1.02] active:scale-[0.98]"
+                  title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
+                >
+                  <Zap size={14} className="text-amber-300 fill-amber-300 animate-pulse" />
+                  <span>⚡ Venda Rápida</span>
+                </button>
               </div>
             </div>
 
@@ -18630,6 +18641,15 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           </div>
         )}
+
+        {/* Modal de Venda Rápida de Acessórios */}
+        <PainelVendaRapida
+          isOpen={isVendaRapidaOpen}
+          onClose={() => setIsVendaRapidaOpen(false)}
+          produtos={catalogoProdutos && catalogoProdutos.length > 0 ? catalogoProdutos : produtos}
+          onAddToCart={(prod) => handleAddToCart(prod)}
+          cartItemCount={pdvCart.length}
+        />
 
         {/* Toast Notification Container */}
         {toast && (
