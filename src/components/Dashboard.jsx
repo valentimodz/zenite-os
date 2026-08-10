@@ -4196,9 +4196,11 @@ export default function Dashboard({ session, profileDataProps }) {
           (i.produtos?.nome && i.produtos.nome === p.nome)
         ));
 
+        const qtdCalculada = counts[p.nome] !== undefined ? counts[p.nome] : (p.quantidade ?? (pImeis ? pImeis.length : 0));
         return {
           ...p,
-          estoque_atual: counts[p.nome] || (pImeis ? pImeis.length : 0),
+          quantidade: qtdCalculada,
+          estoque_atual: qtdCalculada,
           total_estoque: pImeis ? pImeis.length : 0,
           itens_imei: pImeis || []
         };
@@ -6937,8 +6939,10 @@ export default function Dashboard({ session, profileDataProps }) {
           .filter(item => item.produto.id === produto.id)
           .reduce((sum, item) => sum + item.quantidade, 0);
 
-        if (countInCart + 1 > (produto.quantidade || 0)) {
-          showToast(`Quantidade solicitada excede o estoque disponível (${produto.quantidade || 0} un.).`, 'error');
+        const estoqueDisponivel = produto.quantidade ?? produto.estoque_atual ?? produto.total_estoque ?? (produto.tipo === 'ACESSORIO' || produto.tipo === 'Acessório' ? 999 : 0);
+
+        if (countInCart + 1 > estoqueDisponivel) {
+          showToast(`Quantidade solicitada excede o estoque disponível (${estoqueDisponivel} un.).`, 'error');
           return;
         }
       }

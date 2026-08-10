@@ -46,6 +46,7 @@ export default function PainelVendaRapida({ isOpen, onClose, produtos = [], onAd
   if (!isOpen) return null;
 
   const handleSelect = (produto) => {
+    console.log("🔥 [TOUCH PDV - CLIQUE]: O que estou enviando para o carrinho?", produto);
     onAddToCart(produto);
     setLastAddedId(produto.id);
     setTimeout(() => {
@@ -195,7 +196,7 @@ export default function PainelVendaRapida({ isOpen, onClose, produtos = [], onAd
                         R$ {precoFormatado}
                       </span>
                       <span className="text-[10px] text-neutral-500">
-                        Qtd: {prod.quantidade ?? 1}
+                        Qtd: {prod.quantidade ?? prod.estoque_atual ?? 1}
                       </span>
                     </div>
                   </button>
