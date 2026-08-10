@@ -18650,7 +18650,8 @@ export default function Dashboard({ session, profileDataProps }) {
         <PainelVendaRapida
           isOpen={isVendaRapidaOpen}
           onClose={() => setIsVendaRapidaOpen(false)}
-          produtos={catalogoProdutos && catalogoProdutos.length > 0 ? catalogoProdutos : produtos}
+          session={session}
+          produtos={produtosFilial && produtosFilial.length > 0 ? produtosFilial : (produtos && produtos.length > 0 ? produtos : catalogoProdutos)}
           onAddToCart={(prod) => handleAddToCart(prod)}
           cartItemCount={pdvCart.length}
         />

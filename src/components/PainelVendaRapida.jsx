@@ -1,19 +1,82 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { supabase } from '../supabaseClient';
 import { Search, Zap, X, ShoppingBag, Plus, Tag, Check, Sparkles } from 'lucide-react';
 
-export default function PainelVendaRapida({ isOpen, onClose, produtos = [], onAddToCart, cartItemCount = 0 }) {
+export default function PainelVendaRapida({ isOpen, onClose, session, produtos = [], onAddToCart, cartItemCount = 0 }) {
   const [busca, setBusca] = useState('');
   const [categoriaAtiva, setCategoriaAtiva] = useState('TUDO');
   const [lastAddedId, setLastAddedId] = useState(null);
+  const [estoqueFisicoLocal, setEstoqueFisicoLocal] = useState([]);
+
+  // Buscar produtos diretamente da tabela public.produtos para obter o estoque físico real
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const carregarEstoqueFisico = async () => {
+      try {
+        let empresaId = session?.user?.user_metadata?.empresa_id;
+        if (!empresaId && session?.user?.id) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('empresa_id')
+            .eq('id', session.user.id)
+            .single();
+          empresaId = prof?.empresa_id;
+        }
+
+        let query = supabase.from('produtos').select('*');
+        if (empresaId) query = query.eq('empresa_id', empresaId);
+
+        const { data: prodsData, error } = await query;
+        if (!error && prodsData) {
+          setEstoqueFisicoLocal(prodsData);
+        }
+      } catch (err) {
+        console.warn('Aviso ao buscar estoque físico em PainelVendaRapida:', err);
+      }
+    };
+
+    carregarEstoqueFisico();
+  }, [isOpen, session]);
+
+  // Mapa de estoque físico indexado por nome, id e código de barras
+  const mapEstoqueFisico = useMemo(() => {
+    const map = new Map();
+    (estoqueFisicoLocal || []).forEach((item) => {
+      if (item.id) map.set(item.id, item);
+      if (item.nome) map.set(item.nome.toLowerCase().trim(), item);
+      if (item.codigo_barras) map.set(item.codigo_barras.trim(), item);
+      if (item.sku) map.set(item.sku.trim(), item);
+    });
+    return map;
+  }, [estoqueFisicoLocal]);
 
   // Filtrar produtos genéricos e acessórios
   const produtosFiltrados = useMemo(() => {
-    return produtos.filter((p) => {
+    return produtos.map((p) => {
+      // Cruzar dados com o estoque físico local de produtos
+      const itemFisico = mapEstoqueFisico.get(p.id) ||
+                         (p.codigo_barras ? mapEstoqueFisico.get(p.codigo_barras.trim()) : null) ||
+                         (p.nome ? mapEstoqueFisico.get(p.nome.toLowerCase().trim()) : null);
+
+      const qtdFisica = (itemFisico && itemFisico.quantidade !== undefined && itemFisico.quantidade !== null)
+        ? itemFisico.quantidade
+        : (p.quantidade ?? p.estoque_atual ?? 0);
+
+      return {
+        ...p,
+        id: itemFisico?.id || p.id,
+        quantidade: qtdFisica,
+        estoque_atual: qtdFisica,
+        preco: itemFisico?.preco || p.preco,
+        codigo_barras: itemFisico?.codigo_barras || p.codigo_barras || p.sku
+      };
+    }).filter((p) => {
       // Priorizar Acessórios, Películas, Capas, Serviços ou produtos por Quantidade / SKU Interno
       const isAcessorioOuGenerico = 
         p.tipo === 'ACESSORIO' || 
         p.tipo === 'Acessório' || 
-        p.categoria !== 'IOS' && p.categoria !== 'ANDROID' || 
+        (p.categoria !== 'IOS' && p.categoria !== 'ANDROID') || 
         (p.codigo_barras && (p.codigo_barras.includes('-') || p.codigo_barras.startsWith('SKU') || p.codigo_barras.startsWith('PEL') || p.codigo_barras.startsWith('CAP')));
 
       if (!isAcessorioOuGenerico && p.tipo === 'CELULAR') return false;
@@ -41,7 +104,7 @@ export default function PainelVendaRapida({ isOpen, onClose, produtos = [], onAd
 
       return bateBusca && bateCategoria;
     });
-  }, [produtos, busca, categoriaAtiva]);
+  }, [produtos, mapEstoqueFisico, busca, categoriaAtiva]);
 
   if (!isOpen) return null;
 
