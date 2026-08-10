@@ -9446,10 +9446,10 @@ export default function Dashboard({ session, profileDataProps }) {
   const renderPdvContent = () => {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start animate-fadeIn">
+        <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3 lg:gap-8 items-start animate-fadeIn">
 
-          {/* COLUNA ESQUERDA: CATALOGO */}
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 lg:col-span-2 flex flex-col gap-6">
+          {/* COLUNA ESQUERDA: CATALOGO (ORDER 2 NO MOBILE, ORDER 1 NO DESKTOP) */}
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 sm:p-6 lg:col-span-2 flex flex-col gap-4 sm:gap-6 w-full order-2 lg:order-1">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Package size={18} className="text-[#6A0DAD]" />
@@ -9485,7 +9485,22 @@ export default function Dashboard({ session, profileDataProps }) {
               ))}
             </div>
 
-            {/* Grid de Produtos */}
+            {/* Dica para busca mobile quando catálogo oculto */}
+            {!pdvBusca.trim() && pdvCategoria === 'TUDO' && (
+              <div className="lg:hidden text-center py-3.5 px-3 bg-[#111111]/60 border border-[#222222] rounded-lg text-xs text-gray-400 flex items-center justify-center gap-2">
+                <span>💡 Use a busca acima ou clique em</span>
+                <button
+                  type="button"
+                  onClick={() => setIsVendaRapidaOpen(true)}
+                  className="text-purple-300 hover:text-purple-200 font-bold underline flex items-center gap-1"
+                >
+                  <Zap size={12} className="text-amber-300 fill-amber-300" />
+                  ⚡ Venda Rápida
+                </button>
+              </div>
+            )}
+
+            {/* Grid de Produtos (Oculto no mobile quando sem busca ativa para poupar espaço) */}
             {loadingDados ? (
               <div className="flex flex-col items-center justify-center py-20 gap-3">
                 <Loader2 size={24} className="animate-spin text-[#6A0DAD]" />
@@ -9496,7 +9511,7 @@ export default function Dashboard({ session, profileDataProps }) {
                 Nenhum produto em estoque correspondente aos filtros.
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1">
+              <div className={`${!pdvBusca.trim() && pdvCategoria === 'TUDO' ? 'hidden lg:grid' : 'grid'} grid-cols-1 sm:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1`}>
                 {filteredProdutosPdv.map((prod) => {
                   const isSemEstoque = prod.categoria !== 'SERVICO' && prod.quantidade <= 0;
                   return (
@@ -9572,8 +9587,8 @@ export default function Dashboard({ session, profileDataProps }) {
               </div>
             )}
 
-            {/* Dicas de Atalhos */}
-            <div className="bg-[#111111]/45 border border-[#222222] p-4 rounded-lg flex flex-wrap gap-4 text-[10px] text-gray-500 font-medium">
+            {/* Dicas de Atalhos (Visível apenas no Desktop) */}
+            <div className="hidden lg:flex bg-[#111111]/45 border border-[#222222] p-4 rounded-lg flex-wrap gap-4 text-[10px] text-gray-500 font-medium">
               <span className="font-bold text-gray-400 uppercase tracking-wider block w-full mb-1">Teclas de Atalho [PDV]:</span>
               <span><kbd className="bg-black border border-[#333] px-1.5 py-0.5 rounded text-white mr-1.5 font-bold font-mono">F2</kbd> Buscar Produto</span>
               <span><kbd className="bg-black border border-[#333] px-1.5 py-0.5 rounded text-white mr-1.5 font-bold font-mono">F8</kbd> Cadastro de Cliente</span>
@@ -9583,8 +9598,8 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           </div>
 
-          {/* COLUNA DIREITA: CART/CHECKOUT */}
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 flex flex-col gap-6 lg:col-span-1">
+          {/* COLUNA DIREITA: CART/CHECKOUT (ORDER 1 NO MOBILE, ORDER 2 NO DESKTOP) */}
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 sm:p-6 flex flex-col gap-6 lg:col-span-1 w-full order-1 lg:order-2">
             <div className="flex justify-between items-center pb-2 border-b border-[#222222]">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <ShoppingBag size={18} className="text-[#6A0DAD]" />
