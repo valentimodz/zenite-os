@@ -386,6 +386,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [tempTaxasMap, setTempTaxasMap] = useState({});
   const [isQuickClientFormOpen, setIsQuickClientFormOpen] = useState(true);
   const [isVendaRapidaOpen, setIsVendaRapidaOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Configurações Fiscais
   const [fiscalCnpj, setFiscalCnpj] = useState('');
@@ -5568,6 +5569,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     setCurrentView(view);
+    setIsMobileMenuOpen(false);
     const tenantId = profile?.empresa_id;
 
     // Sincronizar com os estados legados de abas para manter retrocompatibilidade
@@ -11168,7 +11170,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  const renderSidebarItems = () => {
+  const renderSidebarItems = (isMobileDrawer = false) => {
     if (!profile) return null;
 
     const currentRole = profile.role;
@@ -11195,7 +11197,7 @@ export default function Dashboard({ session, profileDataProps }) {
     };
 
     const sidebarItem = (view, label, IconComponent) => {
-      if (sidebarOpen) {
+      if (sidebarOpen || isMobileDrawer) {
         return (
           <button
             key={view}
@@ -11273,7 +11275,7 @@ export default function Dashboard({ session, profileDataProps }) {
         const showTransferencias = !isGerente && currentRole !== 'DONO';
         const showCategorias = !isGerente && currentRole !== 'DONO';
 
-        if (sidebarOpen) {
+        if (sidebarOpen || isMobileDrawer) {
           items.push(
             <div key="agrupador-estoque" className="space-y-1">
               <button
@@ -11348,8 +11350,105 @@ export default function Dashboard({ session, profileDataProps }) {
 
   return (
     <div className="min-h-screen bg-black text-white font-sans flex selection:bg-[#6A0DAD] selection:text-white w-full">
-      {/* MENU LATERAL (SIDEBAR) */}
-      <aside className={`bg-[#0A0A0A] border-r border-[#222222] min-h-screen flex flex-col transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} sticky top-0 shrink-0 z-30 print:hidden`}>
+      {/* DRAWER MOBILE SIDEBAR OVERLAY */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden print:hidden animate-fadeIn">
+          {/* Backdrop Escuro com clique para fechar */}
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+
+          {/* Painel Lateral Mobile Drawer */}
+          <aside className="relative w-72 max-w-[85vw] bg-[#0A0A0A] border-r border-[#222222] h-full flex flex-col shadow-2xl z-50 animate-slideRight">
+            {/* HEADER DO DRAWER MOBILE */}
+            <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
+              <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-1.5">
+                Zênite<span className="text-[#6A0DAD]">.</span>
+              </h1>
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                title="Fechar Menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* SELETOR GLOBAL DE FILIAIS (MOBILE DRAWER) */}
+            {(() => {
+              const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
+              const role = profile?.role;
+
+              if (role === 'VENDEDOR' || role === 'SUPER_ADMIN') return null;
+
+              const canViewSelector = ['ADMIN', 'GERENTE', 'RH', 'OWNER', 'DONO'].includes(role) || userEmail === 'valentimodz2@gmail.com';
+              if (!canViewSelector) return null;
+
+              const gerenteFilialNome = activeFilialNome || filiais.find(f => f.id === profile?.filial_id)?.nome || 'Filial Vinculada';
+
+              return (
+                <div className="px-3 py-3 border-b border-[#222222] bg-[#050505]">
+                  <div className="flex items-center justify-between mb-1.5 px-0.5">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                      <Store size={12} className="text-[#6A0DAD]" />
+                      Filial de Operação
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={activeFilialId || ''}
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        const selectedFilial = filiais.find(f => f.id === selectedId);
+                        const selectedNome = selectedFilial ? selectedFilial.nome : 'Todas as Filiais';
+
+                        setActiveFilialId(selectedId);
+                        setActiveFilialNome(selectedNome);
+                        localStorage.setItem('zenite_active_filial_id', selectedId);
+                        localStorage.setItem('zenite_active_filial_nome', selectedNome);
+
+                        const tenantId = profile?.empresa_id;
+                        if (tenantId) {
+                          fetchGerenteData(tenantId);
+                          if (selectedId) {
+                            fetchVendedorData(selectedId, session?.user?.id, tenantId);
+                            fetchTransferencias(selectedId, tenantId);
+                          }
+                        }
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer"
+                    >
+                      <option value="">[ Todas as Filiais ]</option>
+                      {filiais.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.nome} ({f.tipo === 'LOJA' ? 'PDV' : 'Estoque'})
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* NAV ITEMS DO DRAWER MOBILE */}
+            <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1.5 custom-scrollbar">
+              {renderSidebarItems(true)}
+            </div>
+
+            {/* FOOTER DO DRAWER MOBILE */}
+            <div className="p-4 border-t border-[#222222] flex items-center justify-between text-xs text-gray-500 font-mono">
+              <span>Zênite OS Mobile</span>
+              <span className="text-[10px]">v1.2</span>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* MENU LATERAL DESKTOP (SIDEBAR - ESCONDIDO NO MOBILE) */}
+      <aside className={`hidden md:flex bg-[#0A0A0A] border-r border-[#222222] min-h-screen flex-col transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} sticky top-0 shrink-0 z-30 print:hidden`}>
         {/* LOGO */}
         <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
           {sidebarOpen ? (
@@ -11369,7 +11468,7 @@ export default function Dashboard({ session, profileDataProps }) {
           )}
         </div>
 
-        {/* SELETOR GLOBAL DE FILIAIS (SIDEBAR) */}
+        {/* SELETOR GLOBAL DE FILIAIS (SIDEBAR DESKTOP) */}
         {(() => {
           const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
           const role = profile?.role;
@@ -11476,20 +11575,31 @@ export default function Dashboard({ session, profileDataProps }) {
         </div>
       </aside>
 
-      {/* MAIN CONTAINER */}
-      <div className="flex-1 flex flex-col min-h-screen min-w-0">
+      {/* MAIN CONTAINER (100% LARGURA EM MOBILE) */}
+      <div className="flex-1 flex flex-col min-h-screen min-w-0 w-full">
         {/* SLENDER FIXED NAVBAR */}
-        <header className="border-b border-[#222222] bg-[#0A0A0A] py-3 px-6 md:px-12 flex justify-between items-center h-14 sticky top-0 z-20 print:hidden">
+        <header className="border-b border-[#222222] bg-[#0A0A0A] py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 sticky top-0 z-20 print:hidden">
           <div className="flex items-center gap-2">
+            {/* ÍCONE HAMBÚRGUER MOBILE */}
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="p-1.5 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-1 md:hidden"
+              title="Abrir Menu Principal"
+            >
+              <Menu size={18} />
+            </button>
+
+            {/* ÍCONE DE RECOLHER MENU DESKTOP */}
             {!sidebarOpen && (
               <button
                 onClick={() => { setSidebarOpen(true); localStorage.setItem('zenite_sidebar_open', 'true'); }}
-                className="p-1 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-2"
+                className="hidden md:block p-1 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-2"
                 title="Expandir Menu"
               >
                 <Menu size={16} />
               </button>
             )}
+
             <span className="text-xs bg-[#6A0DAD]/10 text-purple-400 border border-[#6A0DAD]/30 px-2.5 py-1 rounded font-bold uppercase tracking-wider">
               {getViewLabel()}
             </span>
