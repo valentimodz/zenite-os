@@ -324,6 +324,13 @@ export default function Dashboard({ session, profileDataProps }) {
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
   const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
   const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
+  // --- Estados do Modal "Distribuir Estoque Matriz" ---
+  const [distribuirModalOpen, setDistribuirModalOpen] = useState(false);
+  const [produtoDistribuir, setProdutoDistribuir] = useState(null);
+  const [distribuirQuantidades, setDistribuirQuantidades] = useState({});
+  const [distribuirEstoqueAtualMap, setDistribuirEstoqueAtualMap] = useState({});
+  const [loadingDistribuir, setLoadingDistribuir] = useState(false);
+  const [distribuirEmpresas, setDistribuirEmpresas] = useState([]);
   const [entradaNomeProduto, setEntradaNomeProduto] = useState(''); // Campo de busca autocomplete
   const [entradaSugestoes, setEntradaSugestoes] = useState([]); // Sugestões filtradas
   const [entradaProdutoSelecionado, setEntradaProdutoSelecionado] = useState(null); // Produto do catálogo selecionado
@@ -4329,6 +4336,156 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     } catch (err) {
       console.error("Erro ao verificar duplicidade de código de barras no catálogo:", err);
+    }
+  };
+
+  // Abertura do Modal de Distribuição de Estoque Múltiplas Filiais
+  const handleAbrirDistribuirEstoque = async (produto) => {
+    setProdutoDistribuir(produto);
+    setDistribuirQuantidades({});
+    setDistribuirEstoqueAtualMap({});
+    setDistribuirModalOpen(true);
+
+    try {
+      // 1. Fetch de todas as empresas/filiais cadastradas na tabela 'empresas'
+      let { data: empData, error: empErr } = await supabase
+        .from('empresas')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (empErr || !empData || empData.length === 0) {
+        // Fallback em filiais se a tabela 'empresas' estiver vazia ou indisponível
+        const { data: filData } = await supabase
+          .from('filiais')
+          .select('*')
+          .order('nome', { ascending: true });
+        empData = filData || [];
+      }
+
+      setDistribuirEmpresas(empData || []);
+
+      // 2. Buscar estoque atual por empresa/filial na tabela local 'produtos'
+      const { data: prodsData } = await supabase
+        .from('produtos')
+        .select('empresa_id, filial_id, quantidade, nome, catalogo_id')
+        .ilike('nome', produto.nome);
+
+      const mapAtual = {};
+      if (prodsData && prodsData.length > 0) {
+        prodsData.forEach(p => {
+          const key = p.empresa_id || p.filial_id;
+          if (key) {
+            mapAtual[key] = (mapAtual[key] || 0) + (p.quantidade || 0);
+          }
+        });
+      }
+      setDistribuirEstoqueAtualMap(mapAtual);
+    } catch (err) {
+      console.error("Erro ao buscar empresas/estoque para distribuição:", err);
+    }
+  };
+
+  // Operação em Lote de Distribuição de Estoque (Bulk Upsert Supabase)
+  const handleSalvarDistribuicaoLote = async () => {
+    if (!produtoDistribuir) return;
+
+    const filiaisParaAtualizar = Object.entries(distribuirQuantidades).filter(
+      ([empresaId, qty]) => parseInt(qty, 10) > 0
+    );
+
+    if (filiaisParaAtualizar.length === 0) {
+      alert("Informe ao menos uma quantidade maior que zero para uma filial.");
+      return;
+    }
+
+    setLoadingDistribuir(true);
+    try {
+      const payloadsToUpsert = [];
+      const movimentacoes = [];
+      let totalAdicionado = 0;
+      let countFiliais = 0;
+
+      for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
+        const qtyToAdd = parseInt(qtyStr, 10);
+        if (qtyToAdd <= 0) continue;
+
+        // Buscar se o produto já existe na filial (tabela 'produtos')
+        const { data: existingPList } = await supabase
+          .from('produtos')
+          .select('*')
+          .or(`empresa_id.eq.${empresaId},filial_id.eq.${empresaId}`)
+          .ilike('nome', produtoDistribuir.nome)
+          .limit(1);
+
+        const existingP = (existingPList && existingPList.length > 0) ? existingPList[0] : null;
+
+        if (existingP) {
+          // Se a loja já tiver o produto, apenas soma a quantidade
+          const newQty = (existingP.quantidade || 0) + qtyToAdd;
+          payloadsToUpsert.push({
+            ...existingP,
+            quantidade: newQty
+          });
+        } else {
+          // Se não tiver, cria o vínculo do zero
+          payloadsToUpsert.push({
+            empresa_id: empresaId,
+            filial_id: empresaId,
+            catalogo_id: produtoDistribuir.id,
+            nome: produtoDistribuir.nome,
+            tipo: produtoDistribuir.tipo || 'ACESSORIO',
+            categoria: produtoDistribuir.categoria || 'Geral',
+            preco: parseFloat(produtoDistribuir.preco || 0),
+            preco_custo: parseFloat(produtoDistribuir.preco_custo || 0),
+            codigo_barras: produtoDistribuir.codigo_barras || null,
+            sku: produtoDistribuir.sku || null,
+            cor: produtoDistribuir.cor || null,
+            quantidade: qtyToAdd
+          });
+        }
+
+        movimentacoes.push({
+          empresa_id: empresaId,
+          tipo_movimentacao: 'ENTRADA_TRANSFERENCIA',
+          quantidade: qtyToAdd,
+          observacao: `Distribuição Matriz em lote para filial (${produtoDistribuir.nome})`,
+          criado_por: profile?.id
+        });
+
+        totalAdicionado += qtyToAdd;
+        countFiliais++;
+      }
+
+      // Executar a função .upsert() do Supabase na tabela de estoque local (produtos)
+      if (payloadsToUpsert.length > 0) {
+        const { error: upsertErr } = await supabase
+          .from('produtos')
+          .upsert(payloadsToUpsert);
+
+        if (upsertErr) throw upsertErr;
+      }
+
+      // Registrar movimentações no histórico
+      for (const mov of movimentacoes) {
+        try {
+          await supabase.from('estoque_movimentacoes').insert(mov);
+        } catch (movErr) {
+          console.warn("Aviso ao registrar movimentação de estoque:", movErr);
+        }
+      }
+
+      showToast(`Estoque de '${produtoDistribuir.nome}' distribuído com sucesso! (+${totalAdicionado} un. em ${countFiliais} loja(s))`, 'success');
+      setDistribuirModalOpen(false);
+      setProdutoDistribuir(null);
+      setDistribuirQuantidades({});
+
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      if (targetEmpresaId) fetchCatalogoProdutos(targetEmpresaId);
+    } catch (err) {
+      console.error("Erro ao salvar distribuição em lote:", err);
+      alert("Falha ao salvar distribuição: " + (err.message || err));
+    } finally {
+      setLoadingDistribuir(false);
     }
   };
 
@@ -18833,6 +18990,125 @@ export default function Dashboard({ session, profileDataProps }) {
             }
           }}
         />
+
+        {/* Modal Distribuir Estoque Matriz para Múltiplas Filiais */}
+        {distribuirModalOpen && produtoDistribuir && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 shadow-2xl space-y-4 font-sans">
+              <div className="flex items-center justify-between border-b border-[#222222] pb-3">
+                <div className="flex items-center gap-2">
+                  <Share2 className="text-[#6A0DAD]" size={20} />
+                  <div>
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Distribuir Estoque Matriz</h3>
+                    <p className="text-xs text-gray-400 font-semibold">{produtoDistribuir.nome} <span className="text-purple-400">({produtoDistribuir.categoria || 'Geral'})</span></p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setDistribuirModalOpen(false);
+                    setProdutoDistribuir(null);
+                  }}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="text-xs text-gray-400 bg-purple-950/20 border border-purple-900/40 p-3 rounded-lg flex items-center justify-between">
+                <div>
+                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Preço de Venda Padrão</span>
+                  <span className="text-emerald-400 font-mono font-bold text-sm">R$ {parseFloat(produtoDistribuir.preco || 0).toFixed(2)}</span>
+                </div>
+                {produtoDistribuir.sku && (
+                  <div className="text-right">
+                    <span className="text-gray-500 block uppercase font-bold text-[9px]">Código SKU</span>
+                    <span className="text-gray-300 font-mono text-xs">{produtoDistribuir.sku}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Alocação de Quantidades por Filial / Empresa</p>
+                {(() => {
+                  const listaEmpresasFiliais = (distribuirEmpresas && distribuirEmpresas.length > 0)
+                    ? distribuirEmpresas
+                    : (filiais && filiais.length > 0 ? filiais : []);
+
+                  if (listaEmpresasFiliais.length === 0) {
+                    return <p className="text-xs text-gray-500 italic py-4 text-center">Nenhuma empresa/filial cadastrada no sistema.</p>;
+                  }
+
+                  return (
+                    <div className="space-y-2">
+                      {listaEmpresasFiliais.map(f => {
+                        const nomeLoja = f.nome || f.nome_fantasia || f.razao_social || 'Filial Sem Nome';
+                        const estAtual = distribuirEstoqueAtualMap[f.id] || 0;
+                        const qtdAdd = parseInt(distribuirQuantidades[f.id], 10) || 0;
+                        const projFinal = estAtual + qtdAdd;
+
+                        return (
+                          <div key={f.id} className="flex items-center justify-between bg-black border border-[#222222] p-3 rounded-lg hover:border-[#333333] transition-all">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{f.tipo === 'ESTOQUE' ? '📦' : '🏪'}</span>
+                              <div>
+                                <p className="text-xs font-bold text-white">{nomeLoja}</p>
+                                <p className="text-[10px] text-gray-500">Estoque Atual: <strong className="text-gray-300 font-mono">{estAtual} un.</strong></p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <div className="flex flex-col items-end">
+                                <label className="text-[9px] font-bold text-purple-400 uppercase tracking-wider">Quantidade a Adicionar</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={distribuirQuantidades[f.id] || ''}
+                                  onChange={(e) => setDistribuirQuantidades(prev => ({ ...prev, [f.id]: e.target.value }))}
+                                  placeholder="0"
+                                  className="w-24 bg-[#111111] border border-[#333333] focus:border-[#6A0DAD] rounded px-2 py-1 text-xs text-white text-right outline-none font-mono font-bold"
+                                />
+                              </div>
+                              <div className="text-right min-w-[60px]">
+                                <span className="text-[9px] font-bold text-gray-500 uppercase block">Projeção</span>
+                                <span className={`text-xs font-mono font-bold ${qtdAdd > 0 ? 'text-green-400' : 'text-gray-400'}`}>{projFinal} un.</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-[#222222]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDistribuirModalOpen(false);
+                    setProdutoDistribuir(null);
+                  }}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-md transition-colors text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSalvarDistribuicaoLote}
+                  disabled={loadingDistribuir}
+                  className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:opacity-50 text-white font-bold py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-xs shadow-md"
+                >
+                  {loadingDistribuir ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <Share2 size={14} />
+                  )}
+                  <span>Salvar Distribuição em Lote</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Toast Notification Container */}
         {toast && (
