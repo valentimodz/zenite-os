@@ -11598,6 +11598,8 @@ export default function Dashboard({ session, profileDataProps }) {
       // 8. Gestão de Estoque
       if (!isGerente && ['ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
         const showEstoque = !isGerente;
+        const isGestaoAdmin = ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN', 'GERENTE', 'ADMINISTRADOR'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
+        const showCatalogoMestre = isGestaoAdmin;
         const showTransferencias = !isGerente && currentRole !== 'DONO';
         const showCategorias = !isGerente && currentRole !== 'DONO';
 
@@ -11617,7 +11619,7 @@ export default function Dashboard({ session, profileDataProps }) {
               {estoqueSubMenuOpen && (
                 <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
                   {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
-                  {showEstoque && sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2)}
+                  {showCatalogoMestre && sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2)}
                   {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
                   {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
                 </div>
@@ -11626,7 +11628,7 @@ export default function Dashboard({ session, profileDataProps }) {
           );
         } else {
           if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
-          if (showEstoque) items.push(sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2));
+          if (showCatalogoMestre) items.push(sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2));
           if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
           if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
         }
@@ -13739,8 +13741,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
 
-                  {/* AREA CATÁLOGO E TORRE DE CONTROLO */}
-                  {profile?.role !== 'RH_ADMIN' && (
+                  {/* AREA CATÁLOGO E TORRE DE CONTROLO (EXCLUSIVO PARA ADMIN E GESTÃO) */}
+                  {['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN', 'GERENTE', 'ADMINISTRADOR'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
                     <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl overflow-hidden">
                       <div className="flex border-b border-[#222222]">
                         <button
@@ -15206,8 +15208,8 @@ export default function Dashboard({ session, profileDataProps }) {
                 </div>
               )}
 
-              {/* ABA CATÁLOGO MESTRE (DISTRIBUIR) */}
-              {activeTab === 'catalogo_mestre' && (
+              {/* ABA CATÁLOGO MESTRE (DISTRIBUIR - RESTRITO PARA ADMIN E GESTÃO) */}
+              {activeTab === 'catalogo_mestre' && ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN', 'GERENTE', 'ADMINISTRADOR'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
                 <div className="space-y-8 animate-fadeIn">
                   <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
