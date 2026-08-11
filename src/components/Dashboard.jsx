@@ -4639,16 +4639,21 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Operação em Lote de Distribuição de Estoque (v2.5.1 - Bulk Upsert no Estoque Local + Movimentações - CacheBust 1635)
+  // Operação em Lote de Distribuição de Estoque (Check -> Update por ID / Insert com .maybeSingle())
   const handleSalvarDistribuicaoLote = async () => {
     if (!produtoDistribuir) return;
+
+    console.log("🔥 [DEBUG DISTRIBUIÇÃO] Lojas na tela (distribuirEmpresas):", distribuirEmpresas);
+    console.log("🔥 [DEBUG DISTRIBUIÇÃO] Dicionário de quantidades (distribuirQuantidades):", distribuirQuantidades);
 
     const filiaisParaAtualizar = Object.entries(distribuirQuantidades).filter(
       ([empresaId, qty]) => parseInt(qty, 10) > 0
     );
 
+    console.log("🔥 [DEBUG DISTRIBUIÇÃO] Lojas prontas para envio (Qtd > 0):", filiaisParaAtualizar);
+
     if (filiaisParaAtualizar.length === 0) {
-      alert("Informe ao menos uma quantidade maior que zero para uma filial.");
+      alert("Nenhuma quantidade válida foi detectada nos inputs (Qtd > 0). Verifique os valores informados.");
       return;
     }
 
@@ -19471,7 +19476,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         const nomeLoja = f.nome || f.nome_fantasia || f.razao_social || 'Filial Sem Nome';
                         const targetKey = f.id || f.empresa_id || f.filial_id;
                         const estAtual = distribuirEstoqueAtualMap[targetKey] ?? distribuirEstoqueAtualMap[String(targetKey)] ?? 0;
-                        const qtdAdd = parseInt(distribuirQuantidades[f.id], 10) || 0;
+                        const qtdAdd = parseInt(distribuirQuantidades[f.id] || distribuirQuantidades[targetKey] || distribuirQuantidades[String(targetKey)], 10) || 0;
                         const projFinal = estAtual + qtdAdd;
 
                         return (
@@ -19490,8 +19495,17 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <input
                                   type="number"
                                   min="0"
-                                  value={distribuirQuantidades[f.id] || ''}
-                                  onChange={(e) => setDistribuirQuantidades(prev => ({ ...prev, [f.id]: e.target.value }))}
+                                  value={distribuirQuantidades[f.id] || distribuirQuantidades[targetKey] || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDistribuirQuantidades(prev => ({
+                                      ...prev,
+                                      [f.id]: val,
+                                      [targetKey]: val,
+                                      [String(targetKey)]: val,
+                                      [String(f.id)]: val
+                                    }));
+                                  }}
                                   placeholder="0"
                                   className="w-24 bg-[#111111] border border-[#333333] focus:border-[#6A0DAD] rounded px-2 py-1 text-xs text-white text-right outline-none font-mono font-bold"
                                 />
