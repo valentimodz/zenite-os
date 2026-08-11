@@ -331,6 +331,11 @@ export default function Dashboard({ session, profileDataProps }) {
   const [distribuirEstoqueAtualMap, setDistribuirEstoqueAtualMap] = useState({});
   const [loadingDistribuir, setLoadingDistribuir] = useState(false);
   const [distribuirEmpresas, setDistribuirEmpresas] = useState([]);
+  // --- Estados do Sistema de "Transferência Pendente" / Aceite do Gerente ---
+  const [transferenciasPendentes, setTransferenciasPendentes] = useState([]);
+  const [transferenciasPendentesLoading, setTransferenciasPendentesLoading] = useState(false);
+  const [conferenciaModalOpen, setConferenciaModalOpen] = useState(false);
+  const [confirmandoTransferenciaId, setConfirmandoTransferenciaId] = useState(null);
   const [entradaNomeProduto, setEntradaNomeProduto] = useState(''); // Campo de busca autocomplete
   const [entradaSugestoes, setEntradaSugestoes] = useState([]); // Sugestões filtradas
   const [entradaProdutoSelecionado, setEntradaProdutoSelecionado] = useState(null); // Produto do catálogo selecionado
@@ -1018,6 +1023,15 @@ export default function Dashboard({ session, profileDataProps }) {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [activeSellerTab, pdvCart, pdvBusca, pdvClienteTelefone, pdvClienteNome, pdvClienteCpfCnpj, pdvClienteEmail, pdvMetodoPagamento, pdvCartaoParcelas, pdvUsadoList, pdvObsGarantia, pdvVendaTrainee, profile, taxasCartao, pdvClienteSearchInput, selectedPdvClienteId, isPdvClienteFieldsEditable]);
+
+  // Polling suave para atualizar remessas de transferência pendentes em tempo real
+  useEffect(() => {
+    fetchTransferenciasPendentes();
+    const interval = setInterval(() => {
+      fetchTransferenciasPendentes();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [activeEmpresaId, profile, company]);
 
   // --- VEXTRON LAB: SRE (Rascunho Automático do PDV) ---
   useEffect(() => {
@@ -4385,7 +4399,165 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Operação em Lote de Distribuição de Estoque (Bulk Upsert Supabase)
+  // --- Sistema de Transferência Pendente & Aceite de Remessa pelo Gerente ---
+  const fetchTransferenciasPendentes = async () => {
+    const targetFilialId = activeEmpresaId || profile?.empresa_id || profile?.filial_id || company?.id;
+    if (!targetFilialId) return;
+
+    setTransferenciasPendentesLoading(true);
+    try {
+      let { data, error } = await supabase
+        .from('movimentacoes_estoque')
+        .select('*')
+        .or(`empresa_id_destino.eq.${targetFilialId},filial_destino_id.eq.${targetFilialId}`)
+        .eq('status', 'pendente')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        const { data: dataAlt, error: errAlt } = await supabase
+          .from('estoque_movimentacoes')
+          .select('*')
+          .or(`empresa_id_destino.eq.${targetFilialId},filial_destino_id.eq.${targetFilialId}`)
+          .eq('status', 'pendente')
+          .order('created_at', { ascending: false });
+
+        if (!errAlt && dataAlt) {
+          data = dataAlt;
+        }
+      }
+
+      let localPending = [];
+      try {
+        const rawLocal = localStorage.getItem(`zenite_pending_transfers_${targetFilialId}`);
+        if (rawLocal) localPending = JSON.parse(rawLocal) || [];
+      } catch (e) {}
+
+      const combined = [...(data || [])];
+      localPending.forEach(lp => {
+        if (!combined.some(c => String(c.id) === String(lp.id))) {
+          combined.push(lp);
+        }
+      });
+
+      setTransferenciasPendentes(combined);
+    } catch (err) {
+      console.error("Erro ao buscar transferências pendentes:", err);
+    } finally {
+      setTransferenciasPendentesLoading(false);
+    }
+  };
+
+  const handleConfirmarEntradaTransferencia = async (item) => {
+    setConfirmandoTransferenciaId(item.id);
+    try {
+      const targetEmpresaId = item.empresa_id_destino || item.filial_destino_id || activeEmpresaId || profile?.empresa_id;
+      const qtyRecebida = parseInt(item.quantidade_enviada || item.quantidade || 0, 10);
+
+      let prodDetails = {};
+      if (item.detalhes) {
+        try {
+          prodDetails = typeof item.detalhes === 'string' ? JSON.parse(item.detalhes) : item.detalhes;
+        } catch (e) {}
+      }
+      if (item.detalhes_obj) {
+        prodDetails = { ...prodDetails, ...item.detalhes_obj };
+      }
+
+      const prodNome = item.produto_nome || prodDetails.nome || item.produtos?.nome || 'Produto Transferido';
+
+      const { data: existingPList } = await supabase
+        .from('produtos')
+        .select('*')
+        .or(`empresa_id.eq.${targetEmpresaId},filial_id.eq.${targetEmpresaId}`)
+        .ilike('nome', prodNome)
+        .limit(1);
+
+      const existingP = (existingPList && existingPList.length > 0) ? existingPList[0] : null;
+
+      let payloadUpsert;
+      if (existingP) {
+        const newQty = (existingP.quantidade || 0) + qtyRecebida;
+        payloadUpsert = {
+          ...existingP,
+          quantidade: newQty
+        };
+      } else {
+        payloadUpsert = {
+          empresa_id: targetEmpresaId,
+          filial_id: targetEmpresaId,
+          catalogo_id: item.catalogo_id || item.produto_id || prodDetails.catalogo_id,
+          nome: prodNome,
+          tipo: prodDetails.tipo || 'ACESSORIO',
+          categoria: prodDetails.categoria || 'Geral',
+          preco: parseFloat(prodDetails.preco || 0),
+          preco_custo: parseFloat(prodDetails.preco_custo || 0),
+          codigo_barras: prodDetails.codigo_barras || null,
+          sku: prodDetails.sku || null,
+          cor: prodDetails.cor || null,
+          quantidade: qtyRecebida
+        };
+      }
+
+      const { error: upsertErr } = await supabase
+        .from('produtos')
+        .upsert([payloadUpsert]);
+
+      if (upsertErr) throw upsertErr;
+
+      const dataRecebimento = new Date().toISOString();
+      const recebidoPorNome = profile?.nome || profile?.email || 'Gerente Filial';
+
+      if (item.id && !String(item.id).startsWith('mov_')) {
+        await supabase
+          .from('movimentacoes_estoque')
+          .update({
+            status: 'concluido',
+            data_recebimento: dataRecebimento,
+            recebido_por: profile?.id
+          })
+          .eq('id', item.id);
+
+        await supabase
+          .from('estoque_movimentacoes')
+          .update({
+            status: 'concluido',
+            data_recebimento: dataRecebimento,
+            recebido_por: profile?.id
+          })
+          .eq('id', item.id);
+      }
+
+      try {
+        const key = `zenite_pending_transfers_${targetEmpresaId}`;
+        const existing = JSON.parse(localStorage.getItem(key) || '[]');
+        const updated = existing.filter(x => String(x.id) !== String(item.id));
+        localStorage.setItem(key, JSON.stringify(updated));
+      } catch (e) {}
+
+      try {
+        await supabase.from('auditoria_descontos').insert({
+          empresa_id: targetEmpresaId,
+          usuario_id: profile?.id,
+          usuario_nome: recebidoPorNome,
+          acao: 'ACEITE_ENTRADA_ESTOQUE',
+          detalhes: `Gerente ${recebidoPorNome} assinou o recebimento de +${qtyRecebida} un. de '${prodNome}'`
+        });
+      } catch (auditErr) {}
+
+      showToast(`✅ Recebimento confirmado! +${qtyRecebida} un. de '${prodNome}' adicionadas ao estoque local.`, 'success');
+
+      setTransferenciasPendentes(prev => prev.filter(x => String(x.id) !== String(item.id)));
+      if (targetEmpresaId) fetchEstoqueProdutos(targetEmpresaId);
+
+    } catch (err) {
+      console.error("Erro ao confirmar entrada de transferência:", err);
+      alert("Falha ao confirmar entrada: " + (err.message || err));
+    } finally {
+      setConfirmandoTransferenciaId(null);
+    }
+  };
+
+  // Operação em Lote de Distribuição de Estoque (Cria Registros de Transferência Pendente)
   const handleSalvarDistribuicaoLote = async () => {
     if (!produtoDistribuir) return;
 
@@ -4400,37 +4572,28 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setLoadingDistribuir(true);
     try {
-      const payloadsToUpsert = [];
-      const movimentacoes = [];
-      let totalAdicionado = 0;
+      let totalEnviado = 0;
       let countFiliais = 0;
+      const dataEnvio = new Date().toISOString();
 
       for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
         const qtyToAdd = parseInt(qtyStr, 10);
         if (qtyToAdd <= 0) continue;
 
-        // Buscar se o produto já existe na filial (tabela 'produtos')
-        const { data: existingPList } = await supabase
-          .from('produtos')
-          .select('*')
-          .or(`empresa_id.eq.${empresaId},filial_id.eq.${empresaId}`)
-          .ilike('nome', produtoDistribuir.nome)
-          .limit(1);
-
-        const existingP = (existingPList && existingPList.length > 0) ? existingPList[0] : null;
-
-        if (existingP) {
-          // Se a loja já tiver o produto, apenas soma a quantidade
-          const newQty = (existingP.quantidade || 0) + qtyToAdd;
-          payloadsToUpsert.push({
-            ...existingP,
-            quantidade: newQty
-          });
-        } else {
-          // Se não tiver, cria o vínculo do zero
-          payloadsToUpsert.push({
-            empresa_id: empresaId,
-            filial_id: empresaId,
+        const recordPayload = {
+          produto_id: produtoDistribuir.id,
+          catalogo_id: produtoDistribuir.id,
+          empresa_id: company?.id || profile?.empresa_id,
+          empresa_id_destino: empresaId,
+          filial_destino_id: empresaId,
+          filial_origem_id: profile?.filial_id || profile?.empresa_id || company?.id,
+          quantidade_enviada: qtyToAdd,
+          quantidade: qtyToAdd,
+          tipo_movimentacao: 'DISTRIBUICAO_MATRIZ',
+          status: 'pendente',
+          data_envio: dataEnvio,
+          criado_por: profile?.id,
+          detalhes: JSON.stringify({
             catalogo_id: produtoDistribuir.id,
             nome: produtoDistribuir.nome,
             tipo: produtoDistribuir.tipo || 'ACESSORIO',
@@ -4439,51 +4602,44 @@ export default function Dashboard({ session, profileDataProps }) {
             preco_custo: parseFloat(produtoDistribuir.preco_custo || 0),
             codigo_barras: produtoDistribuir.codigo_barras || null,
             sku: produtoDistribuir.sku || null,
-            cor: produtoDistribuir.cor || null,
-            quantidade: qtyToAdd
-          });
+            cor: produtoDistribuir.cor || null
+          })
+        };
+
+        let { error: err1 } = await supabase
+          .from('movimentacoes_estoque')
+          .insert([recordPayload]);
+
+        if (err1) {
+          console.warn("Tentando fallback para estoque_movimentacoes:", err1);
+          await supabase.from('estoque_movimentacoes').insert([recordPayload]).catch(() => {});
         }
 
-        movimentacoes.push({
-          empresa_id: empresaId,
-          tipo_movimentacao: 'ENTRADA_TRANSFERENCIA',
-          quantidade: qtyToAdd,
-          observacao: `Distribuição Matriz em lote para filial (${produtoDistribuir.nome})`,
-          criado_por: profile?.id
-        });
+        try {
+          const key = `zenite_pending_transfers_${empresaId}`;
+          const existing = JSON.parse(localStorage.getItem(key) || '[]');
+          existing.push({
+            id: `mov_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            ...recordPayload,
+            produto_nome: produtoDistribuir.nome,
+            detalhes_obj: JSON.parse(recordPayload.detalhes)
+          });
+          localStorage.setItem(key, JSON.stringify(existing));
+        } catch (e) {}
 
-        totalAdicionado += qtyToAdd;
+        totalEnviado += qtyToAdd;
         countFiliais++;
       }
 
-      // Executar a função .upsert() do Supabase na tabela de estoque local (produtos)
-      if (payloadsToUpsert.length > 0) {
-        const { error: upsertErr } = await supabase
-          .from('produtos')
-          .upsert(payloadsToUpsert);
-
-        if (upsertErr) throw upsertErr;
-      }
-
-      // Registrar movimentações no histórico
-      for (const mov of movimentacoes) {
-        try {
-          await supabase.from('estoque_movimentacoes').insert(mov);
-        } catch (movErr) {
-          console.warn("Aviso ao registrar movimentação de estoque:", movErr);
-        }
-      }
-
-      showToast(`Estoque de '${produtoDistribuir.nome}' distribuído com sucesso! (+${totalAdicionado} un. em ${countFiliais} loja(s))`, 'success');
+      showToast(`🚨 Remessa criada! ${totalEnviado} un. de '${produtoDistribuir.nome}' enviadas para ${countFiliais} filial(is). Aguardando conferência física do gerente.`, 'success');
       setDistribuirModalOpen(false);
       setProdutoDistribuir(null);
       setDistribuirQuantidades({});
 
-      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      if (targetEmpresaId) fetchCatalogoProdutos(targetEmpresaId);
+      fetchTransferenciasPendentes();
     } catch (err) {
       console.error("Erro ao salvar distribuição em lote:", err);
-      alert("Falha ao salvar distribuição: " + (err.message || err));
+      alert("Falha ao distribuir estoque: " + (err.message || err));
     } finally {
       setLoadingDistribuir(false);
     }
@@ -19173,6 +19329,121 @@ export default function Dashboard({ session, profileDataProps }) {
                     <Share2 size={14} />
                   )}
                   <span>Salvar Distribuição em Lote</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Conferência Física de Estoque (Aceite de Remessa pelo Gerente) */}
+        {conferenciaModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 print:hidden">
+            <div className="bg-[#0A0A0A] border border-amber-500/50 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-scaleIn flex flex-col max-h-[85vh]">
+              {/* Header do Modal */}
+              <div className="bg-gradient-to-r from-amber-950/90 via-[#0A0A0A] to-black p-5 border-b border-amber-500/30 flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-amber-500/20 rounded-xl border border-amber-500/40">
+                    <Package size={22} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                      Conferência Física de Remessas
+                      <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
+                        {transferenciasPendentes.length} Pendente(s)
+                      </span>
+                    </h3>
+                    <p className="text-xs text-amber-200/70">Confirme o recebimento físico para dar entrada automática no estoque virtual da sua loja.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setConferenciaModalOpen(false)}
+                  className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Corpo com Lista de Remessas */}
+              <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1">
+                {transferenciasPendentes.length === 0 ? (
+                  <div className="py-16 text-center text-gray-500">
+                    <CheckCircle2 size={42} className="mx-auto mb-3 text-emerald-400 opacity-60" />
+                    <p className="text-base font-bold text-gray-300">Tudo em dia!</p>
+                    <p className="text-xs text-gray-500 mt-1">Nenhuma remessa pendente de conferência física no momento.</p>
+                  </div>
+                ) : (
+                  transferenciasPendentes.map((item, idx) => {
+                    let prodDetails = {};
+                    if (item.detalhes) {
+                      try { prodDetails = typeof item.detalhes === 'string' ? JSON.parse(item.detalhes) : item.detalhes; } catch (e) {}
+                    }
+                    if (item.detalhes_obj) prodDetails = { ...prodDetails, ...item.detalhes_obj };
+
+                    const nomeProd = item.produto_nome || prodDetails.nome || item.produtos?.nome || 'Produto Transferido';
+                    const qtyEnviada = item.quantidade_enviada || item.quantidade || 0;
+                    const dataStr = item.data_envio ? new Date(item.data_envio).toLocaleString('pt-BR') : new Date().toLocaleDateString('pt-BR');
+
+                    return (
+                      <div key={item.id || idx} className="bg-black border border-[#222222] hover:border-amber-500/40 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all shadow-md">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold uppercase">
+                              Remessa Pendente
+                            </span>
+                            <span className="text-xs text-gray-400 font-mono">Enviado em: {dataStr}</span>
+                          </div>
+                          <h4 className="text-base font-bold text-white">{nomeProd}</h4>
+                          <div className="flex items-center gap-3 text-xs text-gray-400">
+                            <span>Categoria: <strong className="text-gray-200">{prodDetails.categoria || 'Geral'}</strong></span>
+                            {prodDetails.cor && <span>Cor: <strong className="text-purple-300 font-semibold">{prodDetails.cor}</strong></span>}
+                            {prodDetails.sku && <span>SKU: <strong className="font-mono text-gray-300">{prodDetails.sku}</strong></span>}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-[#222222] pt-3 sm:pt-0 shrink-0">
+                          <div className="text-right">
+                            <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-semibold">Qtd Enviada</span>
+                            <span className="text-xl font-black text-amber-400 font-mono">+{qtyEnviada} un.</span>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={confirmandoTransferenciaId === item.id}
+                            onClick={() => handleConfirmarEntradaTransferencia(item)}
+                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer shrink-0 border border-emerald-500/40"
+                          >
+                            {confirmandoTransferenciaId === item.id ? (
+                              <>
+                                <Loader2 size={14} className="animate-spin" />
+                                <span>Confirmando...</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 size={15} />
+                                <span>Confirmar Entrada</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Rodapé */}
+              <div className="p-4 bg-[#050505] border-t border-[#222222] flex justify-between items-center text-xs text-gray-500 shrink-0">
+                <span className="flex items-center gap-1 text-[11px]">
+                  <ShieldCheck size={14} className="text-amber-400" />
+                  Assinatura e auditoria de entrada vinculadas ao seu usuário.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setConferenciaModalOpen(false)}
+                  className="px-4 py-2 bg-[#111111] hover:bg-[#222222] text-white rounded-lg transition-colors font-bold text-xs cursor-pointer"
+                >
+                  Fechar
                 </button>
               </div>
             </div>
