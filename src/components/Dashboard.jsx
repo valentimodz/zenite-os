@@ -4659,94 +4659,84 @@ export default function Dashboard({ session, profileDataProps }) {
       let totalEnviado = 0;
       let countFiliais = 0;
       const dataEnvio = new Date().toISOString();
-      const payloadUpsertEstoque = [];
-
-      // 1. Construir Array de Upsert para a tabela de estoque local ('produtos')
+      // 1. Iteração explícita Check -> Update/Insert por filial usando for...of (sem upsert)
       for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
         const qtyToAdd = parseInt(qtyStr, 10);
         if (qtyToAdd <= 0) continue;
 
         const estAtual = distribuirEstoqueAtualMap[empresaId] ?? distribuirEstoqueAtualMap[String(empresaId)] ?? 0;
-        const novaQtdTotal = estAtual + qtyToAdd;
+        const novaQuantidade = estAtual + qtyToAdd;
 
-        payloadUpsertEstoque.push({
-          empresa_id: empresaId,
-          filial_id: empresaId,
-          nome: produtoDistribuir.nome,
-          tipo: produtoDistribuir.tipo || 'ACESSORIO',
-          categoria: produtoDistribuir.categoria || 'Geral',
-          preco: parseFloat(produtoDistribuir.preco || 0),
-          preco_custo: parseFloat(produtoDistribuir.preco_custo || 0),
-          codigo_barras: produtoDistribuir.codigo_barras || null,
-          sku: produtoDistribuir.sku || null,
-          cor: produtoDistribuir.cor || null,
-          quantidade: novaQtdTotal
-        });
+        console.log(`🔥 [DISTRIBUIÇÃO MATRIZ] Processando loja ID ${empresaId}: estoque atual = ${estAtual}, adicionando = ${qtyToAdd}, nova quantidade = ${novaQuantidade}`);
 
-        totalEnviado += qtyToAdd;
-        countFiliais++;
-      }
-
-      if (payloadUpsertEstoque.length === 0) {
-        alert("Nenhuma quantidade válida selecionada para salvar.");
-        setLoadingDistribuir(false);
-        return;
-      }
-
-      console.log("🔥 [BULK UPSERT ESTOQUE] Payload final gerado:", payloadUpsertEstoque);
-
-      // 2. Executar gravação e atualização na tabela de estoque local ('produtos')
-      for (const item of payloadUpsertEstoque) {
-        const { data: prodExistente, error: errSearch } = await supabase
+        // 1. Verifica se a filial já possui este produto no estoque local
+        const { data: produtoExistente, error: errCheck } = await supabase
           .from('produtos')
           .select('id, quantidade')
-          .eq('empresa_id', item.empresa_id)
-          .ilike('nome', item.nome)
+          .eq('empresa_id', empresaId)
+          .ilike('nome', produtoDistribuir.nome)
           .maybeSingle();
 
-        if (errSearch) {
-          console.warn("Aviso ao buscar produto existente no estoque local:", errSearch);
+        if (errCheck) {
+          console.warn(`Aviso ao verificar existência do produto na loja ${empresaId}:`, errCheck);
         }
 
-        if (prodExistente?.id) {
-          console.log(`🔥 [BULK UPSERT] Atualizando produto ID ${prodExistente.id} na filial ${item.empresa_id} para quantidade: ${item.quantidade}`);
-          const { error: errUpdate } = await supabase
+        if (produtoExistente?.id) {
+          // 2A. O produto existe: Faça um UPDATE usando o ID único da linha
+          console.log(`🔥 [UPDATE PRODUTO] Atualizando produto ID ${produtoExistente.id} na loja ${empresaId} para ${novaQuantidade} un.`);
+          const { error: erroUpdate } = await supabase
             .from('produtos')
-            .update({ quantidade: item.quantidade })
-            .eq('id', prodExistente.id);
+            .update({ quantidade: novaQuantidade })
+            .eq('id', produtoExistente.id);
 
-          if (errUpdate) {
-            console.error("🚨 [ERRO UPDATE PRODUTO]:", errUpdate);
-            throw new Error(`Falha ao atualizar estoque da filial ${item.empresa_id}: ${errUpdate.message}`);
+          if (erroUpdate) {
+            console.error(`🚨 [ERRO UPDATE] Loja ${empresaId}:`, erroUpdate);
+            throw new Error(`Erro ao atualizar estoque da loja ${empresaId}: ${erroUpdate.message}`);
           }
         } else {
-          console.log(`🔥 [BULK UPSERT] Inserindo novo produto na filial ${item.empresa_id}`);
-          let itemPayload = { ...item };
-          let { error: errInsert } = await supabase
+          // 2B. O produto NÃO existe: Faça um INSERT completo (com sanitização de colunas)
+          console.log(`🔥 [INSERT PRODUTO] Inserindo novo produto na loja ${empresaId}`);
+          let itemPayload = {
+            empresa_id: empresaId,
+            filial_id: empresaId,
+            nome: produtoDistribuir.nome,
+            tipo: produtoDistribuir.tipo || 'ACESSORIO',
+            categoria: produtoDistribuir.categoria || 'Geral',
+            preco: parseFloat(produtoDistribuir.preco || 0),
+            preco_custo: parseFloat(produtoDistribuir.preco_custo || 0),
+            codigo_barras: produtoDistribuir.codigo_barras || null,
+            sku: produtoDistribuir.sku || null,
+            cor: produtoDistribuir.cor || null,
+            quantidade: novaQuantidade
+          };
+
+          let { error: erroInsert } = await supabase
             .from('produtos')
             .insert([itemPayload]);
 
-          if (errInsert && (errInsert.message?.includes('schema cache') || errInsert.message?.includes('could not find') || errInsert.code === 'PGRST204' || errInsert.code === '42703')) {
-            console.warn("Retentando inserção sanitizada na tabela produtos sem colunas opcionais:", errInsert.message);
-            // Payload mínimo garantido pelo schema do produtos
+          if (erroInsert && (erroInsert.message?.includes('schema cache') || erroInsert.message?.includes('could not find') || erroInsert.code === 'PGRST204' || erroInsert.code === '42703')) {
+            console.warn(`Retentando inserção sanitizada na loja ${empresaId} sem colunas opcionais:`, erroInsert.message);
             itemPayload = {
-              empresa_id: item.empresa_id,
-              filial_id: item.filial_id,
-              nome: item.nome,
-              tipo: item.tipo,
-              categoria: item.categoria,
-              preco: item.preco,
-              quantidade: item.quantidade
+              empresa_id: empresaId,
+              filial_id: empresaId,
+              nome: produtoDistribuir.nome,
+              tipo: produtoDistribuir.tipo || 'ACESSORIO',
+              categoria: produtoDistribuir.categoria || 'Geral',
+              preco: parseFloat(produtoDistribuir.preco || 0),
+              quantidade: novaQuantidade
             };
             const { error: retryErr } = await supabase.from('produtos').insert([itemPayload]);
-            errInsert = retryErr;
+            erroInsert = retryErr;
           }
 
-          if (errInsert) {
-            console.error("🚨 [ERRO INSERT PRODUTO]:", errInsert);
-            throw new Error(`Falha ao inserir novo produto na filial ${item.empresa_id}: ${errInsert.message}`);
+          if (erroInsert) {
+            console.error(`🚨 [ERRO INSERT] Loja ${empresaId}:`, erroInsert);
+            throw new Error(`Erro ao inserir produto na loja ${empresaId}: ${erroInsert.message}`);
           }
         }
+
+        totalEnviado += qtyToAdd;
+        countFiliais++;
       }
 
       // 3. Registrar movimentação de auditoria / remessa
