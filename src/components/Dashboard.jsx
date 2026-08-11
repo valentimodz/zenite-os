@@ -497,7 +497,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [modalComprovante, setModalComprovante] = useState(null);
 
   // Estados para Torre de Controlo
-  const [catalogoTab, setCatalogoTab] = useState(profile?.role === 'DONO' ? 'torre' : 'catalogo');
+  const [catalogoTab, setCatalogoTab] = useState('catalogo');
   const [torreData, setTorreData] = useState([]);
   const [torreFiliais, setTorreFiliais] = useState([]);
   const [torreLoading, setTorreLoading] = useState(false);
@@ -1418,10 +1418,10 @@ export default function Dashboard({ session, profileDataProps }) {
       setActiveTab('gestao');
       setCurrentView('gestao');
       showToast('Acesso Negado: Apenas Administradores e Donos da empresa possuem autorização para acessar este módulo.', 'error');
-    } else if ((activeTab === 'estoque' || activeTab === 'transferencias') && isGerente) {
+    } else if (activeTab === 'transferencias' && isGerente) {
       setActiveTab('gestao');
       setCurrentView('gestao');
-      showToast('Acesso Negado: O perfil Gerente não possui permissão para gerenciar a entrada ou transferência de estoque.', 'error');
+      showToast('Acesso Negado: O perfil Gerente não possui permissão para gerenciar a transferência de estoque.', 'error');
     } else if (activeTab === 'ranking' && !isGerente) {
       setActiveTab('gestao');
       setCurrentView('gestao');
@@ -13581,30 +13581,28 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
 
-                  {/* AREA CATÁLOGO E TORRE DE CONTROLO (Oculto para GERENTE e DONO no Dashboard Home) */}
-                  {profile?.role !== 'GERENTE' && profile?.role !== 'DONO' && (
+                  {/* AREA CATÁLOGO E TORRE DE CONTROLO */}
+                  {profile?.role !== 'RH_ADMIN' && (
                     <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl overflow-hidden">
-                      {profile?.role !== 'DONO' && (
-                        <div className="flex border-b border-[#222222]">
-                          <button
-                            onClick={() => setCatalogoTab('catalogo')}
-                            className={`flex-1 py-4 text-sm font-bold transition-colors border-r border-[#222222] ${catalogoTab === 'catalogo' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
-                          >
-                            <Database size={16} className="inline mr-2" />
-                            Catálogo Mestre de Produtos
-                          </button>
-                          <button
-                            onClick={() => { setCatalogoTab('torre'); fetchTorreControlo(); }}
-                            className={`flex-1 py-4 text-sm font-bold transition-colors ${catalogoTab === 'torre' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
-                          >
-                            <BarChart3 size={16} className="inline mr-2" />
-                            Torre de Controlo (Visão Global)
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex border-b border-[#222222]">
+                        <button
+                          onClick={() => setCatalogoTab('catalogo')}
+                          className={`flex-1 py-4 text-sm font-bold transition-colors border-r border-[#222222] ${catalogoTab === 'catalogo' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
+                        >
+                          <Database size={16} className="inline mr-2" />
+                          Catálogo Mestre de Produtos
+                        </button>
+                        <button
+                          onClick={() => { setCatalogoTab('torre'); fetchTorreControlo(); }}
+                          className={`flex-1 py-4 text-sm font-bold transition-colors ${catalogoTab === 'torre' ? 'bg-[#6A0DAD]/10 text-white border-b-2 border-b-[#6A0DAD]' : 'text-gray-500 hover:bg-[#111111]'}`}
+                        >
+                          <BarChart3 size={16} className="inline mr-2" />
+                          Torre de Controlo (Visão Global)
+                        </button>
+                      </div>
 
                       <div className="p-6">
-                        {(catalogoTab === 'catalogo' && profile?.role !== 'DONO') && (
+                        {catalogoTab === 'catalogo' && (
                           <>
                             <div className="flex items-center justify-between gap-2 mb-1">
                               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -14145,7 +14143,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           </>
                         )}
 
-                        {(catalogoTab === 'torre' || profile?.role === 'DONO') && (
+                        {catalogoTab === 'torre' && (
                           <div className="space-y-4 animate-fadeIn">
                             <div className="flex justify-between items-center mb-2">
                               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -15051,7 +15049,7 @@ export default function Dashboard({ session, profileDataProps }) {
               )}
 
               {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE */}
-              {activeTab === 'estoque' && profile?.role !== 'RH_ADMIN' && profile?.role !== 'GERENTE' && (
+              {activeTab === 'estoque' && profile?.role !== 'RH_ADMIN' && (
                 <div className="space-y-8 animate-fadeIn">
 
                   {/* Cabeçalho da Aba */}
@@ -15071,8 +15069,8 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                    {/* FORMULÁRIO DE ENTRADA DE ESTOQUE (Oculto para DONO) */}
-                    {profile?.role !== 'DONO' && (
+                    {/* FORMULÁRIO DE ENTRADA DE ESTOQUE */}
+                    {true && (
                       <div className="lg:col-span-2 space-y-5">
                         <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4">
                           <h4 className="text-sm font-bold text-white flex items-center gap-2 border-b border-[#222222] pb-3 mb-2">
