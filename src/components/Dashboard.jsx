@@ -4634,7 +4634,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Operação em Lote de Distribuição de Estoque (Cria Registros de Transferência Pendente)
+  // Operação em Lote de Distribuição de Estoque (Bulk Upsert no Estoque Local + Movimentações)
   const handleSalvarDistribuicaoLote = async () => {
     if (!produtoDistribuir) return;
 
@@ -4648,11 +4648,87 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     setLoadingDistribuir(true);
+    console.log("🔥 [BULK UPSERT ESTOQUE] Iniciando gravação para", filiaisParaAtualizar.length, "filial(is).");
+
     try {
       let totalEnviado = 0;
       let countFiliais = 0;
       const dataEnvio = new Date().toISOString();
+      const payloadUpsertEstoque = [];
 
+      // 1. Construir Array de Upsert para a tabela de estoque local ('produtos')
+      for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
+        const qtyToAdd = parseInt(qtyStr, 10);
+        if (qtyToAdd <= 0) continue;
+
+        const estAtual = distribuirEstoqueAtualMap[empresaId] ?? distribuirEstoqueAtualMap[String(empresaId)] ?? 0;
+        const novaQtdTotal = estAtual + qtyToAdd;
+
+        payloadUpsertEstoque.push({
+          empresa_id: empresaId,
+          filial_id: empresaId,
+          catalogo_id: produtoDistribuir.id,
+          nome: produtoDistribuir.nome,
+          tipo: produtoDistribuir.tipo || 'ACESSORIO',
+          categoria: produtoDistribuir.categoria || 'Geral',
+          preco: parseFloat(produtoDistribuir.preco || 0),
+          preco_custo: parseFloat(produtoDistribuir.preco_custo || 0),
+          codigo_barras: produtoDistribuir.codigo_barras || null,
+          sku: produtoDistribuir.sku || null,
+          cor: produtoDistribuir.cor || null,
+          quantidade: novaQtdTotal
+        });
+
+        totalEnviado += qtyToAdd;
+        countFiliais++;
+      }
+
+      if (payloadUpsertEstoque.length === 0) {
+        alert("Nenhuma quantidade válida selecionada para salvar.");
+        setLoadingDistribuir(false);
+        return;
+      }
+
+      console.log("🔥 [BULK UPSERT ESTOQUE] Payload final gerado:", payloadUpsertEstoque);
+
+      // 2. Executar gravação e atualização na tabela de estoque local ('produtos')
+      for (const item of payloadUpsertEstoque) {
+        const { data: prodExistente, error: errSearch } = await supabase
+          .from('produtos')
+          .select('id, quantidade')
+          .eq('empresa_id', item.empresa_id)
+          .ilike('nome', item.nome)
+          .maybeSingle();
+
+        if (errSearch) {
+          console.warn("Aviso ao buscar produto existente no estoque local:", errSearch);
+        }
+
+        if (prodExistente?.id) {
+          console.log(`🔥 [BULK UPSERT] Atualizando produto ID ${prodExistente.id} na filial ${item.empresa_id} para quantidade: ${item.quantidade}`);
+          const { error: errUpdate } = await supabase
+            .from('produtos')
+            .update({ quantidade: item.quantidade })
+            .eq('id', prodExistente.id);
+
+          if (errUpdate) {
+            console.error("🚨 [ERRO UPDATE PRODUTO]:", errUpdate);
+            throw new Error(`Falha ao atualizar estoque da filial ${item.empresa_id}: ${errUpdate.message}`);
+          }
+        } else {
+          console.log(`🔥 [BULK UPSERT] Inserindo novo produto na filial ${item.empresa_id}`);
+          const { error: errInsert } = await supabase
+            .from('produtos')
+            .insert([item]);
+
+          if (errInsert) {
+            console.error("🚨 [ERRO INSERT PRODUTO]:", errInsert);
+            throw new Error(`Falha ao inserir novo produto na filial ${item.empresa_id}: ${errInsert.message}`);
+          }
+        }
+      }
+
+      // 3. Registrar movimentação de auditoria / remessa
       for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
         const qtyToAdd = parseInt(qtyStr, 10);
         if (qtyToAdd <= 0) continue;
@@ -4667,7 +4743,7 @@ export default function Dashboard({ session, profileDataProps }) {
           quantidade_enviada: qtyToAdd,
           quantidade: qtyToAdd,
           tipo_movimentacao: 'DISTRIBUICAO_MATRIZ',
-          status: 'pendente',
+          status: 'concluido',
           data_envio: dataEnvio,
           criado_por: profile?.id,
           detalhes: JSON.stringify({
@@ -4683,44 +4759,43 @@ export default function Dashboard({ session, profileDataProps }) {
           })
         };
 
-        let { error: err1 } = await supabase
-          .from('movimentacoes_estoque')
-          .insert([recordPayload]);
-
-        if (err1) {
-          console.warn("Tentando fallback para estoque_movimentacoes:", err1);
-          try {
-            await supabase.from('estoque_movimentacoes').insert([recordPayload]);
-          } catch (fbErr) {
-            console.warn("Fallback estoque_movimentacoes ignorado:", fbErr);
-          }
-        }
-
         try {
-          const key = `zenite_pending_transfers_${empresaId}`;
-          const existing = JSON.parse(localStorage.getItem(key) || '[]');
-          existing.push({
-            id: `mov_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-            ...recordPayload,
-            produto_nome: produtoDistribuir.nome,
-            detalhes_obj: JSON.parse(recordPayload.detalhes)
-          });
-          localStorage.setItem(key, JSON.stringify(existing));
-        } catch (e) {}
+          let { error: err1 } = await supabase
+            .from('movimentacoes_estoque')
+            .insert([recordPayload]);
 
-        totalEnviado += qtyToAdd;
-        countFiliais++;
+          if (err1) {
+            await supabase.from('estoque_movimentacoes').insert([recordPayload]);
+          }
+        } catch (eMov) {
+          console.warn("Aviso ao salvar registro de movimentação:", eMov);
+        }
       }
 
-      showToast(`🚨 Remessa criada! ${totalEnviado} un. de '${produtoDistribuir.nome}' enviadas para ${countFiliais} filial(is). Aguardando conferência física do gerente.`, 'success');
+      // 4. Feedback visual evidente + Forçar Recarregamento Imediato dos Dados
+      const msgSucesso = `✅ Sucesso! ${totalEnviado} un. de '${produtoDistribuir.nome}' distribuídas em lote para ${countFiliais} filial(is).`;
+      console.log("🔥 [BULK UPSERT ESTOQUE]", msgSucesso);
+      showToast(msgSucesso, 'success');
+      alert(msgSucesso);
+
+      // Limpar formulário do modal
       setDistribuirModalOpen(false);
       setProdutoDistribuir(null);
       setDistribuirQuantidades({});
 
+      // Recarregar dados das visões locais e globais
+      const activeTenantId = company?.id || profile?.empresa_id || activeEmpresaId;
+      if (activeTenantId) {
+        fetchCatalogoProdutos(activeTenantId);
+      }
+      fetchTorreControlo();
       fetchTransferenciasPendentes();
+
     } catch (err) {
-      console.error("Erro ao salvar distribuição em lote:", err);
-      alert("Falha ao distribuir estoque: " + (err.message || err));
+      console.error("🚨 [ERRO DISTRIBUIÇÃO EM LOTE]:", err);
+      const msgErro = "Falha ao distribuir estoque: " + (err.message || err);
+      showToast("🚨 Erro na Distribuição: " + (err.message || err), 'error');
+      alert(msgErro);
     } finally {
       setLoadingDistribuir(false);
     }
