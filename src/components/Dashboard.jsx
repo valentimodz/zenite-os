@@ -5487,23 +5487,48 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar clientes do banco (Visão unificada global de todos os clientes)
+  // Buscar clientes do banco (Com JOIN relacional na filial/empresa de origem)
   const fetchClientes = async (empresaId) => {
     setLoadingClientes(true);
     try {
-      let query = supabase
-        .from('clientes')
-        .select('*');
-
       const targetEmpresa = empresaId || company?.id || profile?.empresa_id;
-      if (targetEmpresa) {
-        query = query.eq('empresa_id', targetEmpresa);
+
+      // Executar query com JOIN relacional conforme especificação Supabase
+      let { data, error } = await supabase
+        .from('clientes')
+        .select(`
+          *,
+          empresa:empresa_id (id, nome),
+          filiais:filial_id (id, nome)
+        `)
+        .order('nome', { ascending: true });
+
+      // Fallback gracioso caso a FK relacional direta gere warning no PostgREST
+      if (error) {
+        console.warn("JOIN em clientes falhou, executando fallback sem JOIN:", error);
+        const { data: fallbackData, error: fbErr } = await supabase
+          .from('clientes')
+          .select('*')
+          .order('nome', { ascending: true });
+
+        if (fbErr) throw fbErr;
+        data = fallbackData;
       }
 
-      const { data, error } = await query.order('nome', { ascending: true });
+      // Mapeamento auxiliar de nomes de filiais/empresas para garantir 100% de preenchimento do badge
+      const filiaisMap = new Map();
+      (filiais || []).forEach(f => filiaisMap.set(String(f.id), f.nome));
+      (empresas || []).forEach(e => filiaisMap.set(String(e.id), e.nome));
 
-      if (error) throw error;
-      setClientes(data || []);
+      const enrichedData = (data || []).map(c => {
+        const filialNome = c.empresa?.nome || c.filiais?.nome || filiaisMap.get(String(c.filial_id)) || filiaisMap.get(String(c.empresa_id)) || 'Matriz / Loja Principal';
+        return {
+          ...c,
+          filial_nome: filialNome
+        };
+      });
+
+      setClientes(enrichedData);
     } catch (err) {
       console.error('Erro ao buscar clientes:', err);
     } finally {
@@ -16282,6 +16307,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           <thead>
                             <tr className="border-b border-[#222222] text-gray-600 font-bold uppercase tracking-wider">
                               <th className="pb-3">Nome</th>
+                              <th className="pb-3">Loja / Filial Origem</th>
                               <th className="pb-3">CPF / CNPJ</th>
                               <th className="pb-3">E-mail</th>
                               <th className="pb-3">Telefone</th>
@@ -16296,6 +16322,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 if (!q) return true;
                                 return (
                                   c.nome.toLowerCase().includes(q) ||
+                                  (c.filial_nome && c.filial_nome.toLowerCase().includes(q)) ||
                                   (c.cpf_cnpj && c.cpf_cnpj.includes(q)) ||
                                   (c.email && c.email.toLowerCase().includes(q)) ||
                                   (c.telefone && c.telefone.includes(q))
@@ -16305,6 +16332,12 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <tr key={c.id} className="hover:bg-[#6A0DAD]/5 transition-colors">
                                   <td className="py-3.5 font-semibold text-white">
                                     {c.nome}
+                                  </td>
+                                  <td className="py-3.5">
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#6A0DAD]/15 text-purple-300 border border-[#6A0DAD]/30 font-sans shadow-sm">
+                                      <Building size={12} className="text-[#6A0DAD]" />
+                                      {c.filial_nome || c.empresa?.nome || c.filiais?.nome || 'Matriz / Loja Principal'}
+                                    </span>
                                   </td>
                                   <td className="py-3.5 text-gray-300 font-mono">
                                     {c.cpf_cnpj || '-'}
