@@ -16,6 +16,7 @@ import SaasTenants from '../pages/SaaS/SaasTenants';
 import SaasBilling from '../pages/SaaS/SaasBilling';
 import SaasSettings from '../pages/SaaS/SaasSettings';
 import PainelVendaRapida from './PainelVendaRapida';
+import { calcularDescontoMaximo } from '../utils/descontoEngine';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -7060,8 +7061,39 @@ export default function Dashboard({ session, profileDataProps }) {
     const item = pdvCart.find(i => i.cartId === cartId);
     if (!item) return;
 
+    const precoOriginal = Number(item.produto.preco) || 0;
+    const precoNovo = parseFloat(newPrice);
+
+    if (isNaN(precoNovo) || precoNovo < 0) return;
+
+    const descontoProposto = Math.max(0, precoOriginal - precoNovo);
+    const descontoMaximoPermitido = calcularDescontoMaximo(item.produto);
+
+    // Validação matemática rígida do teto de desconto por categoria/marca
+    if (descontoProposto > (descontoMaximoPermitido + 0.001)) {
+      const precoMinimoPermitido = Math.max(0, precoOriginal - descontoMaximoPermitido);
+      const nomeLower = (item.produto.nome || '').toLowerCase();
+      const isApple = nomeLower.includes('iphone') || nomeLower.includes('apple') || (item.produto.categoria || '').toLowerCase().includes('ios') || (item.produto.marca || '').toLowerCase().includes('apple');
+
+      if (isApple) {
+        showToast('Desconto Bloqueado: iPhones e produtos Apple possuem 0% de desconto permitido.', 'error');
+      } else {
+        const percMax = Math.round((descontoMaximoPermitido / (precoOriginal || 1)) * 100);
+        showToast(`Desconto Bloqueado: O desconto máximo permitido para este item é ${percMax}% (Preço mínimo: R$ ${precoMinimoPermitido.toFixed(2)}).`, 'error');
+      }
+
+      // Trava matematicamente o preço no valor mínimo permitido
+      setPdvCart(prev => prev.map(i => {
+        if (i.cartId === cartId) {
+          return { ...i, valorUnitario: precoMinimoPermitido };
+        }
+        return i;
+      }));
+      return;
+    }
+
     const custo = item.produto.preco_custo || 0;
-    if (newPrice < custo) {
+    if (precoNovo < custo) {
       if (!['GERENTE', 'ADMIN', 'SUPER_ADMIN'].includes(profile?.role)) {
         showToast('Desconto bloqueado: Somente administradores ou gerentes podem conceder descontos abaixo do preço de custo.', 'error');
         return;
@@ -7070,7 +7102,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setPdvCart(prev => prev.map(i => {
       if (i.cartId === cartId) {
-        return { ...i, valorUnitario: parseFloat(newPrice) || 0 };
+        return { ...i, valorUnitario: precoNovo };
       }
       return i;
     }));
@@ -7758,6 +7790,11 @@ export default function Dashboard({ session, profileDataProps }) {
             ? valorTotalNovo
             : (pdvStatusPagamento === 'PARCIAL' ? (parseFloat(pdvValorPagoCustom) || 0) : 0);
 
+          const itemPrecoTabela = Number(item.produto.preco) || 0;
+          const itemValorVendido = Number(item.valorUnitario) || itemPrecoTabela;
+          const itemDescontoUnitario = Math.max(0, itemPrecoTabela - itemValorVendido);
+          const itemDescontoTotal = itemDescontoUnitario * Number(item.quantidade);
+
           const payloadVendaUpdate = {
             produto_nome: item.produto.nome,
             imei_novo: item.imei || null,
@@ -7772,7 +7809,11 @@ export default function Dashboard({ session, profileDataProps }) {
             treener_id: selectedTreenerId || null,
             financeira_parceira: resolvedFinanceira,
             valor_pago: actualValorPago,
-            status_pagamento: pdvStatusPagamento
+            status_pagamento: pdvStatusPagamento,
+            valor_tabela: itemPrecoTabela * Number(item.quantidade),
+            valor_desconto: itemDescontoTotal,
+            desconto: itemDescontoTotal,
+            percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0
           };
 
           console.log("🔥 [DEBUG PAYLOAD EXATO]:", {
