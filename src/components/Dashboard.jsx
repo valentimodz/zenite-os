@@ -322,6 +322,8 @@ export default function Dashboard({ session, profileDataProps }) {
   // --- Poka-Yoke: Módulo de Entrada de Estoque Avançado ---
   const [catalogoProdutos, setCatalogoProdutos] = useState([]); // Produtos_Catalogo
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
+  const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
+  const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
   const [entradaNomeProduto, setEntradaNomeProduto] = useState(''); // Campo de busca autocomplete
   const [entradaSugestoes, setEntradaSugestoes] = useState([]); // Sugestões filtradas
   const [entradaProdutoSelecionado, setEntradaProdutoSelecionado] = useState(null); // Produto do catálogo selecionado
@@ -4272,6 +4274,64 @@ export default function Dashboard({ session, profileDataProps }) {
     }, 50);
   };
 
+  // Validação em Tempo Real de Duplicidade por Código de Barras / SKU no Catálogo Mestre
+  const verificarDuplicidadeBarcode = async (codigoInput) => {
+    const codigo = (codigoInput !== undefined ? codigoInput : codigoBarras || '').trim();
+    if (!codigo || codigo.length < 3) {
+      setIsProdutoExistenteCatalogo(false);
+      setProdutoExistenteMaster(null);
+      return;
+    }
+
+    try {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      
+      const { data: catData, error } = await supabase
+        .from('produtos_catalogo')
+        .select('*')
+        .eq('empresa_id', targetEmpresaId)
+        .eq('codigo_barras', codigo)
+        .maybeSingle();
+
+      let matchedProd = catData;
+
+      if (!matchedProd && !error) {
+        const { data: bySku } = await supabase
+          .from('produtos_catalogo')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .eq('sku', codigo)
+          .maybeSingle();
+        matchedProd = bySku;
+      }
+
+      if (matchedProd) {
+        setIsProdutoExistenteCatalogo(true);
+        setProdutoExistenteMaster(matchedProd);
+
+        // Mutação / Preenchimento Automático dos Dados do Catálogo Mestre
+        if (matchedProd.nome) setNomeProduto(matchedProd.nome);
+        if (matchedProd.tipo) setTipoProduto(matchedProd.tipo);
+        if (matchedProd.categoria) setCategoriaProduto(matchedProd.categoria);
+        if (matchedProd.preco !== undefined && matchedProd.preco !== null) setPrecoProduto(String(matchedProd.preco));
+        if (matchedProd.preco_custo !== undefined && matchedProd.preco_custo !== null) setPrecoCustoProduto(String(matchedProd.preco_custo));
+        if (matchedProd.sku) setSkuProduto(matchedProd.sku);
+        if (matchedProd.ncm) setNcmProduto(matchedProd.ncm || '');
+        if (matchedProd.cest) setCestProduto(matchedProd.cest || '');
+        if (matchedProd.cfop) setCfopProduto(matchedProd.cfop || '5102');
+        if (matchedProd.origem) setOrigemProduto(matchedProd.origem || '0');
+        if (matchedProd.cor) setCorCatalogoProduto(matchedProd.cor || '');
+
+        showToast(`Produto já catalogado na categoria: ${matchedProd.categoria || 'Geral'}! Carregando dados...`, 'info');
+      } else {
+        setIsProdutoExistenteCatalogo(false);
+        setProdutoExistenteMaster(null);
+      }
+    } catch (err) {
+      console.error("Erro ao verificar duplicidade de código de barras no catálogo:", err);
+    }
+  };
+
   const handleSaveCatalogoProduto = async (e) => {
     e.preventDefault();
     if (!nomeProduto || !precoProduto) {
@@ -4371,7 +4431,22 @@ export default function Dashboard({ session, profileDataProps }) {
 
       console.log("🔥 [AUDITORIA PAYLOAD PRODUTO] Enviando ao Supabase:", payload);
 
-      if (editingCatalogoProduto) {
+      if (isProdutoExistenteCatalogo && produtoExistenteMaster) {
+        // Se o produto já existia no catálogo mestre, reaproveitamos o registro e apenas atualizamos o preço/custo se alterado
+        let { error: updateExistingErr } = await supabase
+          .from('produtos_catalogo')
+          .update({
+            preco: parseFloat(precoProduto || produtoExistenteMaster.preco || 0),
+            preco_custo: parseFloat(precoCustoProduto || produtoExistenteMaster.preco_custo || 0)
+          })
+          .eq('id', produtoExistenteMaster.id);
+
+        if (updateExistingErr) {
+          console.warn("Aviso ao atualizar preço do produto existente no catálogo:", updateExistingErr);
+        }
+        var data = { ...produtoExistenteMaster, preco: parseFloat(precoProduto || produtoExistenteMaster.preco || 0) };
+        showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
+      } else if (editingCatalogoProduto) {
         let { error } = await supabase
           .from('produtos_catalogo')
           .update(payload)
@@ -13395,6 +13470,27 @@ export default function Dashboard({ session, profileDataProps }) {
 
                               {/* Formulário de cadastro de catálogo */}
                               <div className="space-y-3">
+                                {isProdutoExistenteCatalogo && produtoExistenteMaster && (
+                                  <div className="bg-amber-950/40 border border-amber-500/50 p-3 rounded-lg flex items-center justify-between gap-3 text-amber-300 text-xs mb-3 animate-fadeIn">
+                                    <div className="flex items-center gap-2">
+                                      <Database size={16} className="text-amber-400 shrink-0" />
+                                      <span>
+                                        <strong>Produto Encontrado no Catálogo!</strong> Já catalogado na categoria <strong className="text-white">{produtoExistenteMaster.categoria || 'Geral'}</strong>. Dados carregados para <strong>Entrada de Estoque</strong>.
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsProdutoExistenteCatalogo(false);
+                                        setProdutoExistenteMaster(null);
+                                      }}
+                                      className="text-[10px] bg-amber-900/60 hover:bg-amber-800 text-white px-2.5 py-1 rounded transition-colors whitespace-nowrap font-bold"
+                                    >
+                                      Desbloquear / Novo
+                                    </button>
+                                  </div>
+                                )}
+
                                 <div>
                                   <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Nome do Produto / Modelo</label>
                                   <input
@@ -13402,7 +13498,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                     type="text"
                                     value={nomeProduto}
                                     onChange={(e) => setNomeProduto(e.target.value)}
-                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                    readOnly={isProdutoExistenteCatalogo}
+                                    className={`w-full bg-black border ${isProdutoExistenteCatalogo ? 'border-amber-500/40 text-amber-200 cursor-not-allowed' : 'border-[#222222] focus:border-[#6A0DAD] text-white'} rounded-md px-4 py-2.5 text-sm placeholder-gray-600 outline-none transition-all`}
                                     placeholder="Ex: iPhone 15 Pro Max 256GB"
                                   />
                                 </div>
@@ -13413,7 +13510,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <select
                                       value={tipoProduto}
                                       onChange={(e) => setTipoProduto(e.target.value)}
-                                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none transition-all"
+                                      disabled={isProdutoExistenteCatalogo}
+                                      className={`w-full bg-black border ${isProdutoExistenteCatalogo ? 'border-amber-500/40 text-amber-200 cursor-not-allowed' : 'border-[#222222] focus:border-[#6A0DAD] text-white'} rounded-md px-3 py-2.5 text-sm outline-none transition-all`}
                                     >
                                       <option value="CELULAR">Celular</option>
                                       <option value="ACESSORIO">Acessório</option>
@@ -13423,6 +13521,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Categoria</label>
                                     <select
                                       value={categoriaProduto}
+                                      disabled={isProdutoExistenteCatalogo}
                                       onChange={(e) => {
                                         const newCat = e.target.value;
                                         setCategoriaProduto(newCat);
@@ -13434,7 +13533,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                           setOrigemProduto(mapped.origem || '0');
                                         }
                                       }}
-                                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none transition-all"
+                                      className={`w-full bg-black border ${isProdutoExistenteCatalogo ? 'border-amber-500/40 text-amber-200 cursor-not-allowed' : 'border-[#222222] focus:border-[#6A0DAD] text-white'} rounded-md px-3 py-2.5 text-sm outline-none transition-all`}
                                     >
                                       <option value="">Selecione a Categoria...</option>
                                       {categorias.map(cat => (
@@ -13451,7 +13550,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                       type="text"
                                       value={skuProduto}
                                       onChange={(e) => setSkuProduto(e.target.value)}
-                                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                      onBlur={(e) => {
+                                        if (e.target.value) verificarDuplicidadeBarcode(e.target.value);
+                                      }}
+                                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono"
                                       placeholder="Ex: IPH-17PM-256"
                                     />
                                   </div>
@@ -13481,9 +13583,23 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <input
                                       type="text"
                                       value={codigoBarras}
-                                      onChange={(e) => setCodigoBarras(e.target.value)}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setCodigoBarras(val);
+                                        if (isProdutoExistenteCatalogo) {
+                                          setIsProdutoExistenteCatalogo(false);
+                                          setProdutoExistenteMaster(null);
+                                        }
+                                      }}
+                                      onBlur={(e) => verificarDuplicidadeBarcode(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          verificarDuplicidadeBarcode(codigoBarras);
+                                        }
+                                      }}
                                       placeholder="Bipe ou digite o código de barras..."
-                                      className="flex-1 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono"
+                                      className={`flex-1 bg-black border ${isProdutoExistenteCatalogo ? 'border-amber-500 text-amber-200 font-bold' : 'border-[#222222] focus:border-[#6A0DAD] text-white'} rounded-md px-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all font-mono`}
                                     />
                                     <button
                                       type="button"
@@ -13761,10 +13877,12 @@ export default function Dashboard({ session, profileDataProps }) {
                                   )}
                                   <button
                                     onClick={handleSaveCatalogoProduto}
-                                    className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm"
+                                    className={`flex-1 ${isProdutoExistenteCatalogo ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-950/40' : 'bg-[#6A0DAD] hover:bg-[#500885]'} text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm shadow-md`}
                                   >
-                                    {editingCatalogoProduto ? <Save size={15} /> : <Plus size={15} />}
-                                    {editingCatalogoProduto ? 'Salvar Alterações' : 'Adicionar ao Catálogo'}
+                                    {editingCatalogoProduto ? <Save size={15} /> : (isProdutoExistenteCatalogo ? <Database size={15} /> : <Plus size={15} />)}
+                                    {editingCatalogoProduto
+                                      ? 'Salvar Alterações'
+                                      : (isProdutoExistenteCatalogo ? 'Vincular Estoque à Loja Atual' : 'Adicionar ao Catálogo')}
                                   </button>
                                 </div>
                               </div>
