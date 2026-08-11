@@ -4398,14 +4398,19 @@ export default function Dashboard({ session, profileDataProps }) {
       setDistribuirEmpresas(empData || []);
 
       // 2. Query na tabela 'produtos' (Estoque Físico) com logs obrigatórios
-      let queryEstoque = supabase.from('produtos').select('id, empresa_id, filial_id, quantidade, nome, catalogo_id, tipo');
-      if (idDoProdutoSelecionado) {
-        queryEstoque = queryEstoque.or(`catalogo_id.eq.${idDoProdutoSelecionado},id.eq.${idDoProdutoSelecionado},nome.ilike.%${produto.nome || ''}%`);
-      } else if (produto.nome) {
-        queryEstoque = queryEstoque.ilike('nome', produto.nome);
-      }
+      let { data: estoqueFiliais, error: erroEstoque } = await supabase
+        .from('produtos')
+        .select('id, empresa_id, filial_id, quantidade, nome, tipo')
+        .ilike('nome', produto.nome || '');
 
-      const { data: estoqueFiliais, error: erroEstoque } = await queryEstoque;
+      if (erroEstoque) {
+        console.warn("Aviso ao buscar estoque por nome, buscando fallback:", erroEstoque);
+        const { data: estFallback } = await supabase
+          .from('produtos')
+          .select('id, empresa_id, filial_id, quantidade, nome, tipo')
+          .eq('id', idDoProdutoSelecionado);
+        estoqueFiliais = estFallback || [];
+      }
 
       console.log("🔥 [DEBUG ESTOQUE] Dados retornados do banco (produtos):", estoqueFiliais);
       if (erroEstoque) console.error("🚨 [ERRO SUPABASE] Falha ao buscar estoque:", erroEstoque);
@@ -4667,7 +4672,6 @@ export default function Dashboard({ session, profileDataProps }) {
         payloadUpsertEstoque.push({
           empresa_id: empresaId,
           filial_id: empresaId,
-          catalogo_id: produtoDistribuir.id,
           nome: produtoDistribuir.nome,
           tipo: produtoDistribuir.tipo || 'ACESSORIO',
           categoria: produtoDistribuir.categoria || 'Geral',
@@ -4717,9 +4721,26 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         } else {
           console.log(`🔥 [BULK UPSERT] Inserindo novo produto na filial ${item.empresa_id}`);
-          const { error: errInsert } = await supabase
+          let itemPayload = { ...item };
+          let { error: errInsert } = await supabase
             .from('produtos')
-            .insert([item]);
+            .insert([itemPayload]);
+
+          if (errInsert && (errInsert.message?.includes('schema cache') || errInsert.message?.includes('could not find') || errInsert.code === 'PGRST204' || errInsert.code === '42703')) {
+            console.warn("Retentando inserção sanitizada na tabela produtos sem colunas opcionais:", errInsert.message);
+            // Payload mínimo garantido pelo schema do produtos
+            itemPayload = {
+              empresa_id: item.empresa_id,
+              filial_id: item.filial_id,
+              nome: item.nome,
+              tipo: item.tipo,
+              categoria: item.categoria,
+              preco: item.preco,
+              quantidade: item.quantidade
+            };
+            const { error: retryErr } = await supabase.from('produtos').insert([itemPayload]);
+            errInsert = retryErr;
+          }
 
           if (errInsert) {
             console.error("🚨 [ERRO INSERT PRODUTO]:", errInsert);
