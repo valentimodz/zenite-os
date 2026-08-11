@@ -941,6 +941,21 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [profile]);
 
+  // Trava de Segurança Estrita: Se um usuário não-admin (ex: GERENTE ou VENDEDOR) tentar acessar a aba catalogo_mestre, redireciona para a visão autorizada
+  useEffect(() => {
+    const roleUpper = (profile?.role || profileDataProps?.role || '').toUpperCase();
+    const isStrictAdmin = ['ADMIN', 'MASTER', 'OWNER', 'DONO', 'SUPER_ADMIN'].includes(roleUpper);
+    if (!isStrictAdmin && activeTab === 'catalogo_mestre') {
+      if (roleUpper === 'VENDEDOR') {
+        setCurrentView('pdv');
+        setActiveSellerTab('pdv');
+      } else {
+        setCurrentView('gestao');
+        setActiveTab('gestao');
+      }
+    }
+  }, [profile, activeTab]);
+
   useEffect(() => {
     if (categorias.length > 0 && (!categoriaProduto || categoriaProduto === 'IOS')) {
       const hasIos = categorias.some(c => c.nome === 'IOS');
@@ -11623,8 +11638,8 @@ export default function Dashboard({ session, profileDataProps }) {
       // 8. Gestão de Estoque
       if (!isGerente && ['ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
         const showEstoque = !isGerente;
-        const isGestaoAdmin = ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN', 'GERENTE', 'ADMINISTRADOR'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
-        const showCatalogoMestre = isGestaoAdmin;
+        const isStrictAdmin = ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
+        const showCatalogoMestre = isStrictAdmin;
         const showTransferencias = !isGerente && currentRole !== 'DONO';
         const showCategorias = !isGerente && currentRole !== 'DONO';
 
@@ -13766,8 +13781,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
 
-                  {/* AREA CATÁLOGO E TORRE DE CONTROLO (EXCLUSIVO PARA ADMIN E GESTÃO) */}
-                  {['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN', 'GERENTE', 'ADMINISTRADOR'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
+                  {/* AREA CATÁLOGO E TORRE DE CONTROLO (EXCLUSIVO ESTRITAMENTE PARA ADMIN E MASTER) */}
+                  {['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
                     <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl overflow-hidden">
                       <div className="flex border-b border-[#222222]">
                         <button
@@ -15233,8 +15248,8 @@ export default function Dashboard({ session, profileDataProps }) {
                 </div>
               )}
 
-              {/* ABA CATÁLOGO MESTRE (DISTRIBUIR - RESTRITO PARA ADMIN E GESTÃO) */}
-              {activeTab === 'catalogo_mestre' && ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN', 'GERENTE', 'ADMINISTRADOR'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
+              {/* ABA CATÁLOGO MESTRE (DISTRIBUIR - RESTRITO ESTRITAMENTE PARA ADMIN E MASTER) */}
+              {activeTab === 'catalogo_mestre' && ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
                 <div className="space-y-8 animate-fadeIn">
                   <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div>
@@ -15299,7 +15314,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       <p className="text-xs text-gray-500 mt-1">Selecione um modelo do catálogo e bipe os IMEIs. Validação automática em tempo real.</p>
                     </div>
                     <div className="flex items-center gap-3 flex-wrap">
-                      {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE', 'ADMINISTRADOR', 'MASTER', 'ESTOQUISTA'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
+                      {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'MASTER'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
                         <button
                           type="button"
                           onClick={() => {
