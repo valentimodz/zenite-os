@@ -11461,6 +11461,7 @@ export default function Dashboard({ session, profileDataProps }) {
               {estoqueSubMenuOpen && (
                 <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
                   {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
+                  {showEstoque && sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2)}
                   {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
                   {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
                 </div>
@@ -11469,6 +11470,7 @@ export default function Dashboard({ session, profileDataProps }) {
           );
         } else {
           if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
+          if (showEstoque) items.push(sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2));
           if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
           if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
         }
@@ -15048,6 +15050,57 @@ export default function Dashboard({ session, profileDataProps }) {
                 </div>
               )}
 
+              {/* ABA CATÁLOGO MESTRE (DISTRIBUIR) */}
+              {activeTab === 'catalogo_mestre' && (
+                <div className="space-y-8 animate-fadeIn">
+                  <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                      <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
+                        <Share2 size={22} className="text-[#6A0DAD]" />
+                        Catálogo Mestre & Distribuição em Lote
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">Gerencie os modelos mestre e distribua estoque diretamente para todas as filiais e lojas da rede.</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6">
+                    <div className="flex items-center justify-between gap-2 mb-4">
+                      <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                        <Database size={16} className="text-[#6A0DAD]" />
+                        Modelos de Produtos no Catálogo Mestre ({catalogoProdutos?.length || 0})
+                      </h4>
+                    </div>
+
+                    {catalogoProdutos.length === 0 ? (
+                      <p className="text-xs text-gray-500 italic py-8 text-center">Nenhum produto cadastrado no catálogo mestre ainda.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {catalogoProdutos.map(p => (
+                          <div key={p.id} className="bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-4 rounded-xl flex flex-col justify-between gap-3 transition-all">
+                            <div>
+                              <span className="text-[9px] bg-purple-950/30 text-purple-400 border border-purple-800/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                {p.categoria || 'Geral'}
+                              </span>
+                              <h5 className="text-sm font-bold text-white mt-1.5">{p.nome}</h5>
+                              <p className="text-xs font-mono font-bold text-emerald-400 mt-1">R$ {parseFloat(p.preco || 0).toFixed(2)}</p>
+                              {p.sku && <p className="text-[10px] text-gray-500 font-mono mt-0.5">SKU: {p.sku}</p>}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAbrirDistribuirEstoque(p)}
+                              className="w-full bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
+                            >
+                              <Share2 size={13} />
+                              <span>Distribuir para Filiais</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE */}
               {activeTab === 'estoque' && profile?.role !== 'RH_ADMIN' && (
                 <div className="space-y-8 animate-fadeIn">
@@ -15062,9 +15115,27 @@ export default function Dashboard({ session, profileDataProps }) {
                       </h3>
                       <p className="text-xs text-gray-500 mt-1">Selecione um modelo do catálogo e bipe os IMEIs. Validação automática em tempo real.</p>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-600 border border-[#222222] px-4 py-2 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-[#6A0DAD] animate-pulse"></span>
-                      Scanner Mode Ativo
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE', 'ADMINISTRADOR', 'MASTER', 'ESTOQUISTA'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (catalogoProdutos && catalogoProdutos.length > 0) {
+                              handleAbrirDistribuirEstoque(catalogoProdutos[0]);
+                            } else {
+                              showToast("Nenhum produto cadastrado no catálogo mestre ainda.", "info");
+                            }
+                          }}
+                          className="px-3.5 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md shrink-0 cursor-pointer"
+                        >
+                          <Share2 size={14} />
+                          <span>Distribuir Estoque Matriz</span>
+                        </button>
+                      )}
+                      <div className="flex items-center gap-2 text-xs text-gray-600 border border-[#222222] px-4 py-2 rounded-lg">
+                        <span className="w-2 h-2 rounded-full bg-[#6A0DAD] animate-pulse"></span>
+                        Scanner Mode Ativo
+                      </div>
                     </div>
                   </div>
 
