@@ -6,7 +6,7 @@ import {
   Smartphone, Tag, FileText as LucideFileText, Search, Upload, Award, DollarSign,
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
-  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap
+  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera
 } from 'lucide-react';
 import { emitirNfseStub } from '../services/fiscal';
 import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
@@ -16,6 +16,7 @@ import SaasTenants from '../pages/SaaS/SaasTenants';
 import SaasBilling from '../pages/SaaS/SaasBilling';
 import SaasSettings from '../pages/SaaS/SaasSettings';
 import PainelVendaRapida from './PainelVendaRapida';
+import CameraScanner from './CameraScanner';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -387,6 +388,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [tempTaxasMap, setTempTaxasMap] = useState({});
   const [isQuickClientFormOpen, setIsQuickClientFormOpen] = useState(true);
   const [isVendaRapidaOpen, setIsVendaRapidaOpen] = useState(false);
+  const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Estados para Pagamentos Múltiplos (Split Payment) no PDV
@@ -7200,8 +7202,9 @@ export default function Dashboard({ session, profileDataProps }) {
   // --- MÓDULO DE VENDAS HÍBRIDAS E TROCA ---
 
   // Bipar IMEI ou Código de Barras (EAN/SKU) no PDV e adicionar ao carrinho
-  const handleBiparPdvNovo = async () => {
-    const rawInput = pdvScanImei.replace(/[\r\n]/g, '').trim();
+  const handleBiparPdvNovo = async (inputOverride) => {
+    const stringToScan = typeof inputOverride === 'string' ? inputOverride : pdvScanImei;
+    const rawInput = stringToScan.replace(/[\r\n]/g, '').trim();
     if (!rawInput) return;
 
     // 1. Tentar busca por IMEI (se for exatamente 15 dígitos numéricos)
@@ -9695,7 +9698,7 @@ export default function Dashboard({ session, profileDataProps }) {
                     value={pdvScanImei}
                     onChange={(e) => setPdvScanImei(e.target.value)}
                     placeholder="Bipe o IMEI, EAN/barcode ou SKU..."
-                    className="flex-1 min-w-[200px] bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider"
+                    className="flex-1 min-w-[180px] bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -9703,9 +9706,20 @@ export default function Dashboard({ session, profileDataProps }) {
                       }
                     }}
                   />
+
+                  {/* Botão de Câmera Mobile (Visível apenas em mobile/telas pequenas) */}
                   <button
                     type="button"
-                    onClick={handleBiparPdvNovo}
+                    onClick={() => setIsCameraScannerOpen(true)}
+                    className="lg:hidden bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 border border-[#6A0DAD]/50 text-purple-300 p-2 rounded transition-all shrink-0 flex items-center justify-center cursor-pointer"
+                    title="Usar Câmera do Celular para Leitura"
+                  >
+                    <Camera size={16} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleBiparPdvNovo()}
                     className="bg-[#6A0DAD] hover:bg-[#500885] px-3.5 py-2 rounded text-xs font-bold text-white transition-all shrink-0 whitespace-nowrap"
                   >
                     Bipar
@@ -18686,6 +18700,18 @@ export default function Dashboard({ session, profileDataProps }) {
           produtos={produtosFilial && produtosFilial.length > 0 ? produtosFilial : (produtos && produtos.length > 0 ? produtos : catalogoProdutos)}
           onAddToCart={(prod) => handleAddToCart(prod)}
           cartItemCount={pdvCart.length}
+        />
+
+        {/* Leitor por Câmera Mobile */}
+        <CameraScanner
+          isOpen={isCameraScannerOpen}
+          onClose={() => setIsCameraScannerOpen(false)}
+          onScan={(scannedText) => {
+            if (scannedText) {
+              setPdvScanImei(scannedText);
+              handleBiparPdvNovo(scannedText);
+            }
+          }}
         />
 
         {/* Toast Notification Container */}
