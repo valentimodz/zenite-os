@@ -4689,7 +4689,11 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (err1) {
           console.warn("Tentando fallback para estoque_movimentacoes:", err1);
-          await supabase.from('estoque_movimentacoes').insert([recordPayload]).catch(() => {});
+          try {
+            await supabase.from('estoque_movimentacoes').insert([recordPayload]);
+          } catch (fbErr) {
+            console.warn("Fallback estoque_movimentacoes ignorado:", fbErr);
+          }
         }
 
         try {
