@@ -4368,50 +4368,112 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // Função auditada para buscar estoque por filial no Modal de Distribuição com Logs Pesados
+  const fetchEstoqueModalDistribuir = async (produto) => {
+    if (!produto) return;
+    const idDoProdutoSelecionado = produto.id || produto.catalogo_id;
+    console.log("🔥 [DEBUG ESTOQUE] Iniciando busca para produto:", produto, "ID Selecionado:", idDoProdutoSelecionado);
+
+    try {
+      // 1. Fetch de todas as empresas/filiais cadastradas
+      let { data: empData, error: empErr } = await supabase
+        .from('empresas')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (empErr) {
+        console.error("🚨 [ERRO SUPABASE] Falha ao buscar empresas:", empErr);
+      }
+
+      if (!empData || empData.length === 0) {
+        const { data: filData, error: filErr } = await supabase
+          .from('filiais')
+          .select('*')
+          .order('nome', { ascending: true });
+        if (filErr) console.error("🚨 [ERRO SUPABASE] Falha ao buscar filiais:", filErr);
+        empData = filData || [];
+      }
+
+      console.log("🔥 [DEBUG ESTOQUE] Filiais/Empresas encontradas:", empData);
+      setDistribuirEmpresas(empData || []);
+
+      // 2. Query na tabela 'produtos' (Estoque Físico) com logs obrigatórios
+      let queryEstoque = supabase.from('produtos').select('id, empresa_id, filial_id, quantidade, nome, catalogo_id, tipo');
+      if (idDoProdutoSelecionado) {
+        queryEstoque = queryEstoque.or(`catalogo_id.eq.${idDoProdutoSelecionado},id.eq.${idDoProdutoSelecionado},nome.ilike.%${produto.nome || ''}%`);
+      } else if (produto.nome) {
+        queryEstoque = queryEstoque.ilike('nome', produto.nome);
+      }
+
+      const { data: estoqueFiliais, error: erroEstoque } = await queryEstoque;
+
+      console.log("🔥 [DEBUG ESTOQUE] Dados retornados do banco (produtos):", estoqueFiliais);
+      if (erroEstoque) console.error("🚨 [ERRO SUPABASE] Falha ao buscar estoque:", erroEstoque);
+
+      // 3. Query na tabela 'imeis' para aparelhos celulares
+      let imeisPorEmpresa = {};
+      try {
+        const { data: imeisFiliais, error: erroImeis } = await supabase
+          .from('imeis')
+          .select('empresa_id, filial_id, produto_id, status, vendido')
+          .or(`status.eq.DISPONÍVEL,status.eq.Disponível,vendido.eq.false`);
+
+        console.log("🔥 [DEBUG ESTOQUE] IMEIs disponíveis retornados do banco:", imeisFiliais);
+        if (erroImeis) console.error("🚨 [ERRO SUPABASE] Falha ao buscar imeis:", erroImeis);
+
+        if (imeisFiliais && imeisFiliais.length > 0) {
+          imeisFiliais.forEach(im => {
+            if (im.produto_id === idDoProdutoSelecionado || im.produto_id === produto.id) {
+              const kEmp = im.empresa_id || im.filial_id;
+              if (kEmp) {
+                imeisPorEmpresa[String(kEmp)] = (imeisPorEmpresa[String(kEmp)] || 0) + 1;
+              }
+            }
+          });
+        }
+      } catch (eImei) {
+        console.warn("Aviso ao buscar IMEIs para modal de distribuição:", eImei);
+      }
+
+      // 4. Mapeamento de Estado Unificado
+      const mapAtual = {};
+      if (estoqueFiliais && estoqueFiliais.length > 0) {
+        estoqueFiliais.forEach(p => {
+          const keyEmp = p.empresa_id || p.filial_id;
+          if (keyEmp) {
+            const strKey = String(keyEmp);
+            const qtdProduto = parseInt(p.quantidade, 10) || 0;
+            const qtdImei = imeisPorEmpresa[strKey] || 0;
+            const totalFinalQtd = Math.max(qtdProduto, qtdImei);
+
+            mapAtual[keyEmp] = (mapAtual[keyEmp] || 0) + totalFinalQtd;
+            mapAtual[strKey] = (mapAtual[strKey] || 0) + totalFinalQtd;
+          }
+        });
+      }
+
+      // Preencher empresas que possuem contagem de IMEIs caso a tabela produtos esteja nula
+      Object.keys(imeisPorEmpresa).forEach(k => {
+        if (!mapAtual[k]) {
+          mapAtual[k] = imeisPorEmpresa[k];
+        }
+      });
+
+      console.log("🔥 [DEBUG ESTOQUE] Mapa final de estoque compilado:", mapAtual);
+      setDistribuirEstoqueAtualMap(mapAtual);
+
+    } catch (err) {
+      console.error("🚨 [ERRO GERAL] Exceção ao buscar estoque para distribuição:", err);
+    }
+  };
+
   // Abertura do Modal de Distribuição de Estoque Múltiplas Filiais
   const handleAbrirDistribuirEstoque = async (produto) => {
     setProdutoDistribuir(produto);
     setDistribuirQuantidades({});
     setDistribuirEstoqueAtualMap({});
     setDistribuirModalOpen(true);
-
-    try {
-      // 1. Fetch de todas as empresas/filiais cadastradas na tabela 'empresas'
-      let { data: empData, error: empErr } = await supabase
-        .from('empresas')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (empErr || !empData || empData.length === 0) {
-        // Fallback em filiais se a tabela 'empresas' estiver vazia ou indisponível
-        const { data: filData } = await supabase
-          .from('filiais')
-          .select('*')
-          .order('nome', { ascending: true });
-        empData = filData || [];
-      }
-
-      setDistribuirEmpresas(empData || []);
-
-      // 2. Buscar estoque atual por empresa/filial na tabela local 'produtos'
-      const { data: prodsData } = await supabase
-        .from('produtos')
-        .select('empresa_id, filial_id, quantidade, nome, catalogo_id')
-        .ilike('nome', produto.nome);
-
-      const mapAtual = {};
-      if (prodsData && prodsData.length > 0) {
-        prodsData.forEach(p => {
-          const key = p.empresa_id || p.filial_id;
-          if (key) {
-            mapAtual[key] = (mapAtual[key] || 0) + (p.quantidade || 0);
-          }
-        });
-      }
-      setDistribuirEstoqueAtualMap(mapAtual);
-    } catch (err) {
-      console.error("Erro ao buscar empresas/estoque para distribuição:", err);
-    }
+    await fetchEstoqueModalDistribuir(produto);
   };
 
   // --- Sistema de Transferência Pendente & Aceite de Remessa pelo Gerente ---
@@ -19317,7 +19379,8 @@ export default function Dashboard({ session, profileDataProps }) {
                     <div className="space-y-2">
                       {listaEmpresasFiliais.map(f => {
                         const nomeLoja = f.nome || f.nome_fantasia || f.razao_social || 'Filial Sem Nome';
-                        const estAtual = distribuirEstoqueAtualMap[f.id] || 0;
+                        const targetKey = f.id || f.empresa_id || f.filial_id;
+                        const estAtual = distribuirEstoqueAtualMap[targetKey] ?? distribuirEstoqueAtualMap[String(targetKey)] ?? 0;
                         const qtdAdd = parseInt(distribuirQuantidades[f.id], 10) || 0;
                         const projFinal = estAtual + qtdAdd;
 
