@@ -4634,7 +4634,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Operação em Lote de Distribuição de Estoque (Bulk Upsert no Estoque Local + Movimentações)
+  // Operação em Lote de Distribuição de Estoque (v2.5.1 - Bulk Upsert no Estoque Local + Movimentações - CacheBust 1635)
   const handleSalvarDistribuicaoLote = async () => {
     if (!produtoDistribuir) return;
 
