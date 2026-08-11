@@ -7562,11 +7562,12 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       // 1. Inserção/Atualização Obrigatória (Upsert) do Cliente no Banco de Dados ANTES da Venda
       let clienteIdBanco = selectedPdvClienteId;
+      const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
 
       const payloadCliente = {
         empresa_id: empresaId,
         vendedor_id: session.user.id,
-        nome: pdvClienteNome.trim(),
+        nome: nomeClienteFinal || 'Consumidor Final',
         cpf_cnpj: pdvClienteCpfCnpj.trim() || null,
         email: pdvClienteEmail.trim() || null,
         telefone: pdvClienteTelefone.trim() || null,
@@ -7574,7 +7575,7 @@ export default function Dashboard({ session, profileDataProps }) {
       };
 
       if (clienteIdBanco) {
-        // Se já possui cliente selecionado, atualiza o cadastro no banco para manter dados atualizados
+        // Se já possui cliente selecionado por ID, atualiza o cadastro no banco para manter dados síncronos
         const { error: updateErr } = await supabase
           .from('clientes')
           .update(payloadCliente)
@@ -7587,7 +7588,7 @@ export default function Dashboard({ session, profileDataProps }) {
           setLoadingPdvVenda(false);
           return; // BLOQUEIA A VENDA se o cliente não puder ser salvo/atualizado
         }
-      } else if (pdvClienteNome.trim()) {
+      } else if (nomeClienteFinal && nomeClienteFinal !== 'Consumidor Final') {
         // Se não for um cliente previamente selecionado, tenta encontrar pelo CPF (se preenchido) ou pelo Nome exato
         let clienteExistente = null;
 
@@ -7606,7 +7607,7 @@ export default function Dashboard({ session, profileDataProps }) {
             .from('clientes')
             .select('id')
             .eq('empresa_id', empresaId)
-            .eq('nome', pdvClienteNome.trim())
+            .ilike('nome', nomeClienteFinal)
             .maybeSingle();
           clienteExistente = byNome;
         }
@@ -7646,6 +7647,7 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }
         setSelectedPdvClienteId(clienteIdBanco);
+        setPdvClienteNome(nomeClienteFinal);
       }
 
       // PASSO 1 & 2: EXTRAÇÃO DE CONTEXTO E GUARD CLAUSES (TRAVAS DE SEGURANÇA)
@@ -7657,13 +7659,13 @@ export default function Dashboard({ session, profileDataProps }) {
         clienteIdBanco,
         cliente_id,
         vendedor_id,
-        pdvClienteNome: pdvClienteNome.trim(),
+        nomeClienteFinal,
         pdvClienteCpfCnpj: pdvClienteCpfCnpj.trim()
       });
 
-      // GUARD CLAUSE 1: Se o usuário selecionou um cliente na interface, o ID NÃO PODE ser nulo.
-      if (pdvClienteNome.trim() && !cliente_id) {
-        const msgErrCliente = "Erro de Mapeamento: Cliente selecionado, mas o ID está quebrado. Venda abortada.";
+      // GUARD CLAUSE 1: Se o usuário selecionou/informou um cliente, o ID NÃO PODE ser nulo.
+      if (nomeClienteFinal && nomeClienteFinal !== 'Consumidor Final' && !cliente_id) {
+        const msgErrCliente = "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo. Venda abortada.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCliente);
         showToast(msgErrCliente, "error");
         alert(msgErrCliente);
@@ -7760,9 +7762,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
         // Registrar saída de estoque por venda
         try {
-          const resolvedClienteNome = pdvClienteNome.trim() || pdvClienteSearchInput.trim() || 'Consumidor Final';
+          const resolvedClienteNome = nomeClienteFinal || 'Consumidor Final';
           const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
-          const resolvedClienteId = clienteIdBanco || selectedPdvClienteId || null;
+          const resolvedClienteId = cliente_id || clienteIdBanco || selectedPdvClienteId || null;
           const resolvedFinanceira = (pdvMetodoPagamento === 'boleto')
             ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
             : (pdvMetodoPagamento ? pdvMetodoPagamento.toUpperCase() : 'ZÊNETE PDV');
@@ -7782,7 +7784,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         try {
-          const resolvedClienteNome = pdvClienteNome.trim() || pdvClienteSearchInput.trim() || 'Consumidor Final';
+          const resolvedClienteNome = nomeClienteFinal || 'Consumidor Final';
           const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
           const resolvedClienteId = cliente_id || clienteIdBanco || selectedPdvClienteId || null;
           const resolvedFinanceira = (pdvMetodoPagamento === 'boleto')
@@ -7907,7 +7909,7 @@ export default function Dashboard({ session, profileDataProps }) {
         filial_endereco: filialDados.endereco || 'Endereço não cadastrado',
         filial_cnpj: filialDados.cnpj || 'CNPJ não cadastrado',
         filial_telefone: filialDados.telefone || 'Telefone não cadastrado',
-        cliente_nome: pdvClienteNome || 'Consumidor Final',
+        cliente_nome: nomeClienteFinal || 'Consumidor Final',
         cliente_cpf_cnpj: pdvClienteCpfCnpj || '',
         cliente_email: pdvClienteEmail || '',
         cliente_telefone: pdvClienteTelefone || '',
@@ -9894,11 +9896,11 @@ export default function Dashboard({ session, profileDataProps }) {
                         id="pdv-cliente-busca-input"
                         value={pdvClienteSearchInput}
                         onChange={(e) => {
-                          setPdvClienteSearchInput(e.target.value);
+                          const val = e.target.value;
+                          setPdvClienteSearchInput(val);
+                          setPdvClienteNome(val);
                           setIsPdvClienteDropdownOpen(true);
-                          // Limpa a seleção caso o usuário digite algo diferente do nome já selecionado
-                          if (pdvClienteNome && e.target.value !== pdvClienteNome) {
-                            setPdvClienteNome('');
+                          if (pdvClienteNome && val !== pdvClienteNome) {
                             setSelectedPdvClienteId(null);
                           }
                         }}
