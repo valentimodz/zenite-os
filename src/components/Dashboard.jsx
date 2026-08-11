@@ -9642,38 +9642,43 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
 
             {/* Scanner de IMEI ou Código de Barras (EAN/Barcode) */}
-            <div className="space-y-1.5 bg-[#111111]/60 border border-[#222222] p-3 rounded-lg">
+            <div className="space-y-2 bg-[#111111]/60 border border-[#222222] p-3 rounded-lg">
               <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider">
                 ⚡ Bipar IMEI ou Código de Barras (EAN)
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={pdvScanImei}
-                  onChange={(e) => setPdvScanImei(e.target.value)}
-                  placeholder="Bipe o IMEI, EAN/barcode ou SKU..."
-                  className="flex-1 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleBiparPdvNovo();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={handleBiparPdvNovo}
-                  className="bg-[#6A0DAD] hover:bg-[#500885] px-3 py-2 rounded text-xs font-bold text-white transition-all shrink-0"
-                >
-                  Bipar
-                </button>
+              <div className="flex flex-col gap-2.5 w-full">
+                {/* Linha 1: Foco na bipagem */}
+                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full">
+                  <input
+                    type="text"
+                    value={pdvScanImei}
+                    onChange={(e) => setPdvScanImei(e.target.value)}
+                    placeholder="Bipe o IMEI, EAN/barcode ou SKU..."
+                    className="flex-1 min-w-[200px] bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleBiparPdvNovo();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleBiparPdvNovo}
+                    className="bg-[#6A0DAD] hover:bg-[#500885] px-3.5 py-2 rounded text-xs font-bold text-white transition-all shrink-0 whitespace-nowrap"
+                  >
+                    Bipar
+                  </button>
+                </div>
+
+                {/* Linha 2: Ação de atalho expandida */}
                 <button
                   type="button"
                   onClick={() => setIsVendaRapidaOpen(true)}
-                  className="bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 flex items-center gap-1.5 shadow-md shadow-purple-900/30 hover:scale-[1.02] active:scale-[0.98]"
+                  className="w-full bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 shadow-md shadow-purple-900/30 hover:scale-[1.01] active:scale-[0.99]"
                   title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
                 >
-                  <Zap size={14} className="text-amber-300 fill-amber-300 animate-pulse" />
+                  <Zap size={14} className="text-amber-300 fill-amber-300 animate-pulse shrink-0" />
                   <span>⚡ Venda Rápida</span>
                 </button>
               </div>
