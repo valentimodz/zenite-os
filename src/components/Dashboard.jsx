@@ -484,6 +484,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Estados do PDV (Vendedor)
   const [produtosFilial, setProdutosFilial] = useState([]);
+  const [produtosDisponiveisPDV, setProdutosDisponiveisPDV] = useState([]);
   const [vendasVendedor, setVendasVendedor] = useState([]);
   const [pdvCategoria, setPdvCategoria] = useState('TUDO');
   const [pdvBusca, setPdvBusca] = useState('');
@@ -1541,6 +1542,14 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [profile?.empresa_id, company?.id, activeTab]);
 
+  // Atualizar produtos do PDV sempre que a filial ativa for alternada
+  useEffect(() => {
+    const targetFilialId = activeFilialId || profile?.filial_id || profile?.empresa_id || company?.id;
+    if (targetFilialId) {
+      fetchProdutosPDV(targetFilialId);
+    }
+  }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id]);
+
   const fetchTenantSettings = async () => {
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -2521,6 +2530,38 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // Buscar produtos disponíveis para venda no PDV filtrando pela filial ativa de forma tolerante
+  const fetchProdutosPDV = async (filialIdAtiva) => {
+    const targetFilialId = filialIdAtiva || activeFilialId || profile?.filial_id || profile?.empresa_id || company?.id;
+    if (!targetFilialId) return;
+
+    try {
+      // Query tolerante: busca onde a filial é empresa_id OU filial_id
+      let { data: produtosLoja, error } = await supabase
+        .from('produtos')
+        .select('*')
+        .or(`empresa_id.eq.${targetFilialId},filial_id.eq.${targetFilialId}`);
+
+      if (error || !produtosLoja || produtosLoja.length === 0) {
+        // Fallback por empresa_id estrito
+        const { data: fallbackLoja, error: fallbackErr } = await supabase
+          .from('produtos')
+          .select('*')
+          .eq('empresa_id', targetFilialId);
+
+        if (fallbackErr) {
+          console.error("Erro ao carregar produtos no PDV:", fallbackErr);
+          return;
+        }
+        produtosLoja = fallbackLoja;
+      }
+
+      setProdutosDisponiveisPDV(produtosLoja || []);
+    } catch (err) {
+      console.error("Erro ao executar fetchProdutosPDV:", err);
+    }
+  };
+
   // Buscar dados específicos do Vendedor (Estoque na Filial e Vendas próprias)
   const fetchVendedorData = async (filialId, sellerId, forceEmpresaId = null) => {
     if (!filialId || !sellerId) {
@@ -2537,6 +2578,9 @@ export default function Dashboard({ session, profileDataProps }) {
         setLoadingDados(false);
         return;
       }
+
+      // Buscar produtos do PDV para a filial específica
+      fetchProdutosPDV(filialId || empId);
 
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const token = currentSession?.access_token;
@@ -2598,7 +2642,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // 1. Obter acessórios e serviços vinculados ESTRITAMENTE a esta filial com estoque (quantidade > 0) ou serviços gerais
-      const accessoriesAndServices = allProds.filter(p => (p.tipo !== 'CELULAR' && p.tipo !== 'Celular') && (p.filial_id === filialId || p.categoria === 'SERVICO') && (p.categoria === 'SERVICO' || (p.quantidade || 0) > 0));
+      const accessoriesAndServices = allProds.filter(p => (p.tipo !== 'CELULAR' && p.tipo !== 'Celular') && (p.filial_id === filialId || p.empresa_id === filialId || p.categoria === 'SERVICO') && (p.categoria === 'SERVICO' || (p.quantidade || 0) > 0));
 
       // 2. Computar o estoque físico de celulares a partir dos IMEIs disponíveis ESTRITAMENTE nesta filial local
       const celulares = [];
@@ -9522,6 +9566,10 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     });
 
+    const fonteBaseProds = (produtosDisponiveisPDV && produtosDisponiveisPDV.length > 0)
+      ? produtosDisponiveisPDV
+      : (produtos && produtos.length > 0 ? produtos : produtosFilial);
+
     return Array.from(uniqueMap.values()).map(p => {
       const isCelular = p.tipo === 'CELULAR' || p.tipo === 'Celular';
       let localQty = 0;
@@ -9529,7 +9577,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (isCelular) {
         const localImeis = (disponiveisImeis || []).filter(im => {
           const matchesProd = (im.produto_id === p.id) || (im.produto_id === p.catalogo_id) || (im.produtos?.nome && p.nome && im.produtos.nome.toLowerCase().trim() === p.nome.toLowerCase().trim());
-          const matchesFilial = String(im.filial_id) === String(activeFilialId);
+          const matchesFilial = !activeFilialId || String(im.filial_id) === String(activeFilialId) || String(im.empresa_id) === String(activeFilialId);
           const isNotSold = !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO';
           return matchesProd && matchesFilial && isNotSold;
         });
@@ -9537,9 +9585,9 @@ export default function Dashboard({ session, profileDataProps }) {
       } else if (p.categoria === 'SERVICO') {
         localQty = 999;
       } else {
-        // Acessórios: Buscar a quantidade exata para este produto nesta filial
-        const localProds = (produtos || []).filter(pr => {
-          const isFilialMatch = String(pr.filial_id) === String(activeFilialId);
+        // Acessórios e Geral: Buscar a quantidade exata para este produto nesta filial de forma tolerante
+        const localProds = (fonteBaseProds || []).filter(pr => {
+          const isFilialMatch = !activeFilialId || String(pr.filial_id) === String(activeFilialId) || String(pr.empresa_id) === String(activeFilialId);
           if (!isFilialMatch) return false;
           if (pr.id && p.id && String(pr.id) === String(p.id)) return true;
           if (pr.id && p.catalogo_id && String(pr.id) === String(p.catalogo_id)) return true;
@@ -9552,12 +9600,8 @@ export default function Dashboard({ session, profileDataProps }) {
           const pEan = (p.codigo_barras || '').toLowerCase().trim();
 
           if (prName !== pName) return false;
-          if (prCor || pCor) {
-            if (prCor !== pCor) return false;
-          }
-          if (prEan || pEan) {
-            if (prEan !== pEan) return false;
-          }
+          if (prCor && pCor && prCor !== pCor) return false;
+          if (prEan && pEan && prEan !== pEan) return false;
           return true;
         });
         localQty = localProds.reduce((sum, item) => sum + (item.quantidade || 0), 0);
@@ -9570,7 +9614,7 @@ export default function Dashboard({ session, profileDataProps }) {
         quantidade: localQty
       };
     });
-  }, [listaProdutosConsolidada, disponiveisImeis, produtos, activeFilialId, activeFilialNome]);
+  }, [listaProdutosConsolidada, disponiveisImeis, produtos, produtosFilial, produtosDisponiveisPDV, activeFilialId, activeFilialNome]);
 
   const filteredProdutosPdv = listaProdutosPdvDinamica.filter(p => {
     const searchLower = pdvBusca.toLowerCase().trim();
@@ -19524,7 +19568,7 @@ export default function Dashboard({ session, profileDataProps }) {
           isOpen={isVendaRapidaOpen}
           onClose={() => setIsVendaRapidaOpen(false)}
           session={session}
-          produtos={produtosFilial && produtosFilial.length > 0 ? produtosFilial : (produtos && produtos.length > 0 ? produtos : catalogoProdutos)}
+          produtos={listaProdutosPdvDinamica && listaProdutosPdvDinamica.length > 0 ? listaProdutosPdvDinamica : (produtosFilial && produtosFilial.length > 0 ? produtosFilial : produtos)}
           onAddToCart={(prod) => handleAddToCart(prod)}
           cartItemCount={pdvCart.length}
         />
