@@ -5659,29 +5659,40 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar clientes do banco (Com JOIN relacional na filial/empresa de origem)
-  const fetchClientes = async (empresaId) => {
+  // Buscar clientes do banco (Com JOIN relacional e filtro abrangente por empresa_id/vendedor_id)
+  const fetchClientes = async (empIdParam = null) => {
     setLoadingClientes(true);
     try {
-      const targetEmpresa = empresaId || company?.id || profile?.empresa_id;
+      const targetEmpresa = empIdParam || activeEmpresaId || company?.id || profile?.empresa_id;
+      const currentUserId = profile?.id || session?.user?.id;
 
-      // Executar query com JOIN relacional conforme especificação Supabase
-      let { data, error } = await supabase
+      let query = supabase
         .from('clientes')
         .select(`
           *,
           empresa:empresa_id (id, nome),
           filiais:filial_id (id, nome)
         `)
-        .order('nome', { ascending: true });
+        .order('created_at', { ascending: false });
+
+      if (targetEmpresa && currentUserId) {
+        query = query.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa},vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
+      } else if (targetEmpresa) {
+        query = query.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa}`);
+      }
+
+      let { data, error } = await query;
 
       // Fallback gracioso caso a FK relacional direta gere warning no PostgREST
       if (error) {
         console.warn("JOIN em clientes falhou, executando fallback sem JOIN:", error);
-        const { data: fallbackData, error: fbErr } = await supabase
-          .from('clientes')
-          .select('*')
-          .order('nome', { ascending: true });
+        let fbQuery = supabase.from('clientes').select('*').order('created_at', { ascending: false });
+        if (targetEmpresa && currentUserId) {
+          fbQuery = fbQuery.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa},vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
+        } else if (targetEmpresa) {
+          fbQuery = fbQuery.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa}`);
+        }
+        const { data: fallbackData, error: fbErr } = await fbQuery;
 
         if (fbErr) throw fbErr;
         data = fallbackData;
@@ -5700,6 +5711,7 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       });
 
+      console.log("🔥 [FETCH CLIENTES] Clientes carregados com sucesso:", enrichedData?.length || 0);
       setClientes(enrichedData);
     } catch (err) {
       console.error('Erro ao buscar clientes:', err);
@@ -5867,9 +5879,16 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     try {
+      const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
+      const currentEmpresaId = activeEmpresaId || company?.id || profile?.empresa_id;
+      const currentFilialId = profile?.filial_id || currentEmpresaId;
+
       const payload = {
-        empresa_id: company?.id || profile?.empresa_id,
-        vendedor_id: profile?.role === 'VENDEDOR' ? session.user.id : (editingCliente ? editingCliente.vendedor_id : session.user.id),
+        empresa_id: currentEmpresaId,
+        filial_id: currentFilialId,
+        vendedor_id: currentUserId,
+        usuario_id: currentUserId,
+        criado_por: currentUserId,
         nome: nome,
         cpf_cnpj: clienteCpfCnpj.trim() || null,
         email: clienteEmail.trim() || null,
@@ -5883,6 +5902,8 @@ export default function Dashboard({ session, profileDataProps }) {
         uf: clienteUf.trim() || null,
         complemento: clienteComplemento.trim() || null
       };
+
+      console.log("🔥 [CLIENTE FORM PAYLOAD] Inserindo/Atualizando cliente com autoria:", payload);
 
       if (editingCliente) {
         const { error } = await supabase
@@ -8149,15 +8170,24 @@ export default function Dashboard({ session, profileDataProps }) {
       let clienteIdBanco = selectedPdvClienteId;
       const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
 
+      const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
+      const currentEmpresaId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
+      const currentFilialId = profile?.filial_id || currentEmpresaId;
+
       const payloadCliente = {
-        empresa_id: empresaId,
-        vendedor_id: session.user.id,
+        empresa_id: currentEmpresaId,
+        filial_id: currentFilialId,
+        vendedor_id: currentUserId,
+        usuario_id: currentUserId,
+        criado_por: currentUserId,
         nome: nomeClienteFinal || 'Consumidor Final',
         cpf_cnpj: pdvClienteCpfCnpj.trim() || null,
         email: pdvClienteEmail.trim() || null,
         telefone: pdvClienteTelefone.trim() || null,
         data_nascimento: pdvClienteDataNascimento.trim() || null,
       };
+
+      console.log("🔥 [PDV CLIENTE PAYLOAD] Salvar/Atualizar cliente PDV com autoria:", payloadCliente);
 
       if (clienteIdBanco) {
         // Se já possui cliente selecionado por ID, atualiza o cadastro no banco para manter dados síncronos
@@ -8550,6 +8580,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // Recarregar dados
       fetchVendedorData(activeFilialId, session.user.id);
+      fetchClientes(company?.id || profile?.empresa_id);
     } catch (err) {
       console.error('Erro ao registrar venda:', err);
       alert('Falha ao concluir venda: ' + (err.message || JSON.stringify(err)));
