@@ -4737,15 +4737,19 @@ export default function Dashboard({ session, profileDataProps }) {
           produtoIdFinal = novoProd?.id;
         }
 
-        // 2. Grava o histórico contábil paralelamente (com tratativa de erro para não travar a UI)
-        await supabase.from('movimentacoes_estoque').insert([{
-          empresa_id: empresaId,
-          filial_id: empresaId,
-          produto_id: produtoIdFinal,
-          quantidade: qtyToAdd,
-          tipo: 'ENTRADA_DISTRIBUICAO',
-          usuario_id: usuarioId
-        }]).catch(e => console.log("Log contábil ignorado:", e.message));
+        // 2. Grava o histórico contábil de forma segura sem encadeamentos inválidos
+        try {
+          await supabase.from('movimentacoes_estoque').insert([{
+            empresa_id: empresaId,
+            filial_id: empresaId,
+            produto_id: produtoIdFinal,
+            quantidade: qtyToAdd,
+            tipo: 'ENTRADA_DISTRIBUICAO',
+            usuario_id: usuarioId
+          }]);
+        } catch (logErr) {
+          console.log("Aviso de log contábil ignorado:", logErr.message);
+        }
 
         totalEnviado += qtyToAdd;
       }
