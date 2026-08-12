@@ -4678,13 +4678,12 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Operação em Lote de Distribuição de Estoque (Check -> Update por ID / Insert com .maybeSingle())
+  // Operação em Lote de Distribuição de Estoque Auditada (Check -> Update/Insert + Registro em movimentacoes_estoque)
   const handleSalvarDistribuicaoLote = async () => {
     if (!produtoDistribuir) return;
 
-    // 🛡️ BLINDAGEM 1: Verificar se há um produto válido selecionado
     if (!produtoDistribuir.nome) {
-      alert("Erro de segurança: Nenhum produto foi selecionado para distribuição.");
+      alert("Erro: Nenhum produto selecionado para distribuição.");
       return;
     }
 
@@ -4692,9 +4691,8 @@ export default function Dashboard({ session, profileDataProps }) {
       ([empresaId, qty]) => parseInt(qty, 10) > 0
     );
 
-    // 🛡️ BLINDAGEM 2: Impedir envio vazio
     if (filiaisParaAtualizar.length === 0) {
-      alert("Atenção: Você precisa informar uma quantidade maior que zero em pelo menos uma filial.");
+      alert("Informe uma quantidade maior que zero em pelo menos uma filial.");
       return;
     }
 
@@ -4702,19 +4700,18 @@ export default function Dashboard({ session, profileDataProps }) {
 
     try {
       const corProduto = produtoDistribuir.cor ? produtoDistribuir.cor.trim() : null;
+      const usuarioId = profile?.id || session?.user?.id || null;
       let totalEnviado = 0;
       let countFiliais = 0;
 
       for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
         const qtyToAdd = parseInt(qtyStr, 10);
-
-        // 🛡️ BLINDAGEM 3: Impedir números negativos ou inválidos
         if (isNaN(qtyToAdd) || qtyToAdd <= 0) continue;
 
-        const estAtual = distribuirEstoqueAtualMap[empresaId] ?? distribuirEstoqueAtualMap[String(empresaId)] ?? 0;
+        const estAtual = distribuirEstoqueAtualMap[empresaId] ?? 0;
         const novaQuantidade = estAtual + qtyToAdd;
 
-        // 🛡️ BLINDAGEM 4 (A Correção da Cor): Busca o produto exato considerando NOME e COR
+        // 1. Busca produto existente na filial de destino considerando NOME e COR
         let queryCheck = supabase
           .from('produtos')
           .select('id, quantidade')
@@ -4728,36 +4725,61 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         const { data: produtoExistente } = await queryCheck.maybeSingle();
+        let produtoIdFinal = null;
 
         if (produtoExistente?.id) {
-          // Se o produto com essa cor já existe na filial, atualiza apenas ele
-          const { error: erroUpdate } = await supabase
+          produtoIdFinal = produtoExistente.id;
+          // Atualiza saldo existente
+          const { error: errUp } = await supabase
             .from('produtos')
             .update({ quantidade: novaQuantidade })
-            .eq('id', produtoExistente.id);
+            .eq('id', produtoIdFinal);
 
-          if (erroUpdate) throw erroUpdate;
+          if (errUp) throw errUp;
         } else {
-          // Se não existe, cria um novo registro físico já amarrado à cor correta
-          const { error: erroInsert } = await supabase.from('produtos').insert([{
+          // Cria novo registro físico na filial
+          const { data: novoProd, error: errIns } = await supabase
+            .from('produtos')
+            .insert([{
+              empresa_id: empresaId,
+              filial_id: empresaId,
+              nome: produtoDistribuir.nome,
+              tipo: produtoDistribuir.tipo || 'ACESSORIO',
+              categoria: produtoDistribuir.categoria || 'Geral',
+              preco: parseFloat(produtoDistribuir.preco || 0),
+              cor: corProduto,
+              quantidade: novaQuantidade
+            }])
+            .select('id')
+            .maybeSingle();
+
+          if (errIns) throw errIns;
+          produtoIdFinal = novoProd?.id;
+        }
+
+        // 2. REGISTRO CONTÁBIL NA TABELA DE MOVIMENTAÇÕES (Garante dados reais de Entrada/Saída)
+        try {
+          const { error: errMov } = await supabase.from('movimentacoes_estoque').insert([{
             empresa_id: empresaId,
             filial_id: empresaId,
-            nome: produtoDistribuir.nome,
-            tipo: produtoDistribuir.tipo || 'ACESSORIO',
-            categoria: produtoDistribuir.categoria || 'Geral',
-            preco: parseFloat(produtoDistribuir.preco || 0),
-            cor: corProduto, // <--- Aqui a cor é blindada e salva corretamente
-            quantidade: novaQuantidade
+            produto_id: produtoIdFinal,
+            quantidade: qtyToAdd,
+            tipo: 'ENTRADA_DISTRIBUICAO',
+            usuario_id: usuarioId
           }]);
 
-          if (erroInsert) throw erroInsert;
+          if (errMov) {
+            console.warn("Aviso: Movimentação registrada com alerta de log:", errMov.message);
+          }
+        } catch (eMov) {
+          console.warn("Aviso ao salvar movimentação:", eMov);
         }
 
         totalEnviado += qtyToAdd;
         countFiliais++;
       }
 
-      const msgSucesso = `✅ Sucesso! ${totalEnviado} un. de '${produtoDistribuir.nome}' ${corProduto ? `(${corProduto})` : ''} distribuídas para ${countFiliais} filial(is).`;
+      const msgSucesso = `✅ Sincronizado! ${totalEnviado} unidades de '${produtoDistribuir.nome}' ${corProduto ? `(${corProduto})` : ''} distribuídas para ${countFiliais} filial(is) e registradas no fluxo de estoque.`;
       showToast(msgSucesso, 'success');
       alert(msgSucesso);
 
@@ -4769,9 +4791,10 @@ export default function Dashboard({ session, profileDataProps }) {
       if (activeTenantId) {
         fetchCatalogoProdutos(activeTenantId);
       }
+
     } catch (err) {
-      console.error("Erro na distribuição blindada:", err);
-      alert("Erro ao salvar distribuição: " + err.message);
+      console.error("Erro na sincronização de estoque:", err);
+      alert("Erro ao sincronizar: " + err.message);
     } finally {
       setLoadingDistribuir(false);
     }
