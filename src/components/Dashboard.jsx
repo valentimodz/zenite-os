@@ -5754,6 +5754,25 @@ export default function Dashboard({ session, profileDataProps }) {
       const targetEmpresa = empIdParam || activeEmpresaId || company?.id || profile?.empresa_id;
       const currentUserId = profile?.id || session?.user?.id;
 
+      console.log("🕵️‍♂️ [AUDITORIA] ID do Vendedor Logado (Filtro):", currentUserId);
+      console.log("🕵️‍♂️ [AUDITORIA] Tipo do ID:", typeof currentUserId);
+      console.log("🕵️‍♂️ [AUDITORIA] Profile ID:", profile?.id, "Session User ID:", session?.user?.id);
+      console.log("🕵️‍♂️ [AUDITORIA] Target Empresa ID:", targetEmpresa);
+
+      // BUSCA PARALELA DE AUDITORIA SEM FILTROS (Verificar acesso total da tabela e RLS)
+      try {
+        const { data: rawAll, error: rawErr } = await supabase
+          .from('clientes')
+          .select('id, nome, empresa_id, filial_id, vendedor_id, usuario_id, criado_por');
+
+        console.log("🕵️‍♂️ [AUDITORIA PARALELA] Leitura total da tabela clientes (Sem Filtro):", rawAll ? rawAll.length : "ERRO OU BLOQUEIO RLS", rawErr || "Sem Erro");
+        if (rawAll && rawAll.length > 0) {
+          console.log("🕵️‍♂️ [AUDITORIA PARALELA] Amostra dos 3 primeiros clientes no banco:", rawAll.slice(0, 3));
+        }
+      } catch (diagErr) {
+        console.error("🕵️‍♂️ [AUDITORIA PARALELA] Exceção ao testar leitura da tabela clientes:", diagErr);
+      }
+
       let query = supabase
         .from('clientes')
         .select(`
@@ -5765,6 +5784,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (targetEmpresa && currentUserId) {
         query = query.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa},vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
+      } else if (currentUserId) {
+        query = query.or(`vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
       } else if (targetEmpresa) {
         query = query.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa}`);
       }
@@ -5777,6 +5798,8 @@ export default function Dashboard({ session, profileDataProps }) {
         let fbQuery = supabase.from('clientes').select('*').order('created_at', { ascending: false });
         if (targetEmpresa && currentUserId) {
           fbQuery = fbQuery.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa},vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
+        } else if (currentUserId) {
+          fbQuery = fbQuery.or(`vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
         } else if (targetEmpresa) {
           fbQuery = fbQuery.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa}`);
         }
@@ -5784,6 +5807,21 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (fbErr) throw fbErr;
         data = fallbackData;
+      }
+
+      // Fallback secundário se nada retornou mas o vendedor possui clientes vinculados
+      if ((!data || data.length === 0) && currentUserId) {
+        console.log("🕵️‍♂️ [AUDITORIA] 0 clientes retornados com os filtros atuais. Executando fallback incondicional pelo vendedor...");
+        const { data: userClients } = await supabase
+          .from('clientes')
+          .select('*')
+          .or(`vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`)
+          .order('created_at', { ascending: false });
+
+        if (userClients && userClients.length > 0) {
+          console.log("🕵️‍♂️ [AUDITORIA] Fallback encontrou clientes do vendedor:", userClients.length);
+          data = userClients;
+        }
       }
 
       // Mapeamento auxiliar de nomes de filiais/empresas para garantir 100% de preenchimento do badge
@@ -5799,7 +5837,7 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       });
 
-      console.log("🔥 [FETCH CLIENTES] Clientes carregados com sucesso:", enrichedData?.length || 0);
+      console.log("🔥 [FETCH CLIENTES] Clientes finais carregados:", enrichedData?.length || 0);
       setClientes(enrichedData);
     } catch (err) {
       console.error('Erro ao buscar clientes:', err);
