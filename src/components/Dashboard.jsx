@@ -8552,6 +8552,10 @@ export default function Dashboard({ session, profileDataProps }) {
           const itemDescontoUnitario = Math.max(0, itemPrecoTabela - itemValorVendido);
           const itemDescontoTotal = itemDescontoUnitario * Number(item.quantidade);
 
+          if (!vendedor_id) {
+            throw new Error("Tentativa de venda sem vendedor logado.");
+          }
+
           const payloadVendaUpdate = {
             produto_nome: item.produto.nome,
             imei_novo: item.imei || null,
@@ -8562,6 +8566,8 @@ export default function Dashboard({ session, profileDataProps }) {
             cliente_telefone: pdvClienteTelefone.trim() || null,
             cliente_id: resolvedClienteId,
             vendedor_id: vendedor_id,
+            usuario_id: vendedor_id,
+            criado_por: vendedor_id,
             vendedor_nome: profile?.nome || session?.user?.email || null,
             treener_id: selectedTreenerId || null,
             financeira_parceira: resolvedFinanceira,
@@ -8573,16 +8579,7 @@ export default function Dashboard({ session, profileDataProps }) {
             percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0
           };
 
-          console.log("🔥 [DEBUG PAYLOAD EXATO]:", {
-            cliente: resolvedClienteId,
-            vendedor: vendedor_id,
-            venda_id: rpcRes.venda_id,
-            cliente_nome: resolvedClienteNome,
-            cliente_cpf_cnpj: resolvedClienteCpf,
-            status_pagamento: pdvStatusPagamento,
-            valor_pago: actualValorPago,
-            payload: payloadVendaUpdate
-          });
+          console.log("📦 Payload da Venda enviado ao banco:", payloadVendaUpdate);
 
           const { error: updateVendaErr } = await supabase
             .from('vendas')
@@ -9269,13 +9266,29 @@ export default function Dashboard({ session, profileDataProps }) {
     const tipoMeta = m?.tipo_meta || 'faturamento';
     const normType = getNormalizedMetaTipo(tipoMeta);
 
-    // Todas as vendas do mês corrente deste vendedor (independente de método ou categoria)
+    console.log("🕵️‍♂️ [METAS AUDIT] ID Vendedor Logado:", currentUserId);
+    console.log("🕵️‍♂️ [METAS AUDIT] Total Vendas do Vendedor no Estado (vendasVendedor):", (vendasVendedor || []).length);
+    console.log("🕵️‍♂️ [METAS AUDIT] Mês de Referência:", mesRef);
+
+    // Todas as vendas do mês corrente deste vendedor (resiliente a fuso horário e nulos)
     const currentMonthSales = (vendasVendedor || []).filter(sale => {
       const saleUserId = sale.vendedor_id || sale.usuario_id || sale.criado_por;
       if (saleUserId && currentUserId && String(saleUserId) !== String(currentUserId)) return false;
-      const saleDate = new Date(sale.created_at || sale.data);
-      return saleDate.getMonth() === today.getMonth() && saleDate.getFullYear() === today.getFullYear();
+
+      const rawDateStr = sale.created_at || sale.data;
+      if (!rawDateStr) return true; // Se não houver data, mantém na exibição por segurança
+
+      const saleDate = new Date(rawDateStr);
+      if (isNaN(saleDate.getTime())) return true;
+
+      // Comparação tolerante considerando tanto fuso UTC quanto fuso local
+      const isUtcCurrentMonth = saleDate.getUTCFullYear() === today.getFullYear() && saleDate.getUTCMonth() === today.getMonth();
+      const isLocalCurrentMonth = saleDate.getFullYear() === today.getFullYear() && saleDate.getMonth() === today.getMonth();
+
+      return isUtcCurrentMonth || isLocalCurrentMonth;
     });
+
+    console.log("🕵️‍♂️ [METAS AUDIT] Vendas Filtradas para o Mês Atual:", currentMonthSales.length);
 
     // MOTOR DE PROGRESSO CONDICIONAL: filtragem por tipo_meta
     let vendasParaMeta = currentMonthSales;
