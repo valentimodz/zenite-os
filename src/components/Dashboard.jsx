@@ -5824,10 +5824,12 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       }
 
-      // Mapeamento auxiliar de nomes de filiais/empresas para garantir 100% de preenchimento do badge
+      // Mapeamento auxiliar corrigido de nomes de filiais/empresas (Sem ReferenceError)
       const filiaisMap = new Map();
       (filiais || []).forEach(f => filiaisMap.set(String(f.id), f.nome));
-      (empresas || []).forEach(e => filiaisMap.set(String(e.id), e.nome));
+      if (company && company.id) {
+        filiaisMap.set(String(company.id), company.nome || company.nome_fantasia || 'Matriz / Loja Principal');
+      }
 
       const enrichedData = (data || []).map(c => {
         const filialNome = c.empresa?.nome || c.filiais?.nome || filiaisMap.get(String(c.filial_id)) || filiaisMap.get(String(c.empresa_id)) || 'Matriz / Loja Principal';
