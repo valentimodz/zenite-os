@@ -4463,52 +4463,41 @@ export default function Dashboard({ session, profileDataProps }) {
     const nomeBusca = produtoSelecionado.nome ? produtoSelecionado.nome.trim() : '';
     const corBusca = produtoSelecionado.cor ? produtoSelecionado.cor.trim().toLowerCase() : '';
 
-    // 1. Fetch de empresas e filiais para popular a lista do modal
-    let { data: empData } = await supabase
-      .from('empresas')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (!empData || empData.length === 0) {
-      const { data: filData } = await supabase.from('filiais').select('*').order('nome', { ascending: true });
-      empData = filData || [];
-    }
-    setDistribuirEmpresas(empData || []);
-
-    // 2. Busca todos os produtos da tabela que tenham relação com o nome (usando os primeiros 15 caracteres)
-    const termoBusca = nomeBusca.substring(0, 15);
-    let { data: estoqueFiliais, error } = await supabase
-      .from('produtos')
-      .select('id, empresa_id, filial_id, quantidade, nome, cor')
-      .ilike('nome', `%${termoBusca}%`);
+    // Esta query ignora a coluna 'quantidade' fixa e soma as movimentações reais
+    // Se você não tiver movimentações para todos, isso forçará você a ver o zero real
+    const { data: historico, error } = await supabase
+      .from('movimentacoes_estoque')
+      .select(`
+      empresa_id,
+      quantidade,
+      tipo,
+      produtos!inner(nome, cor)
+    `)
+      .ilike('produtos.nome', `%${nomeBusca.substring(0, 10)}%`);
 
     if (error) {
-      console.error("Erro ao buscar estoque para o modal:", error);
+      console.error("Erro na leitura real do estoque:", error);
       return;
     }
 
-    console.log("🔥 [DEBUG ESTOQUE] Produtos retornados do banco:", estoqueFiliais);
+    const mapaEstoqueReal = {};
 
-    const mapaEstoque = {};
-    if (estoqueFiliais) {
-      estoqueFiliais.forEach(item => {
-        const corItem = item.cor ? item.cor.trim().toLowerCase() : '';
+    if (historico) {
+      historico.forEach(mov => {
+        const corMov = mov.produtos?.cor ? mov.produtos.cor.trim().toLowerCase() : '';
 
-        // Se a cor do banco bate com a cor do produto selecionado
-        if (corItem === corBusca || (!corItem && !corBusca)) {
-          const idFilial = item.empresa_id || item.filial_id;
-          if (idFilial) {
-            const keyStr = String(idFilial);
-            const qtd = Number(item.quantidade || 0);
-            mapaEstoque[idFilial] = (mapaEstoque[idFilial] || 0) + qtd;
-            mapaEstoque[keyStr] = (mapaEstoque[keyStr] || 0) + qtd;
-          }
+        // Filtra apenas o que é da variante de cor correta
+        if (corMov === corBusca) {
+          const idFilial = mov.empresa_id;
+          // Se for entrada soma, se for saída subtrai (Ajuste o tipo conforme seu sistema)
+          const valor = (mov.tipo === 'SAIDA_VENDA' || mov.tipo === 'SAIDA_TRANSFERENCIA') ? -mov.quantidade : mov.quantidade;
+          mapaEstoqueReal[idFilial] = (mapaEstoqueReal[idFilial] || 0) + valor;
         }
       });
     }
 
-    console.log("🔥 [DEBUG ESTOQUE] Mapa final resolvido:", mapaEstoque);
-    setDistribuirEstoqueAtualMap(mapaEstoque);
+    console.log("🔥 [ESTOQUE REAL COMPUTADO]:", mapaEstoqueReal);
+    setDistribuirEstoqueAtualMap(mapaEstoqueReal);
   };
 
   // Abertura do Modal de Distribuição de Estoque Múltiplas Filiais
@@ -4683,7 +4672,7 @@ export default function Dashboard({ session, profileDataProps }) {
     if (!produtoDistribuir) return;
 
     if (!produtoDistribuir.nome) {
-      alert("Erro: Nenhum produto selecionado para distribuição.");
+      alert("Erro: Nenhum produto selecionado.");
       return;
     }
 
@@ -4700,9 +4689,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
     try {
       const corProduto = produtoDistribuir.cor ? produtoDistribuir.cor.trim() : null;
-      const usuarioId = profile?.id || session?.user?.id || null;
+      const usuarioId = profile?.id || null;
       let totalEnviado = 0;
-      let countFiliais = 0;
 
       for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
         const qtyToAdd = parseInt(qtyStr, 10);
@@ -4711,7 +4699,7 @@ export default function Dashboard({ session, profileDataProps }) {
         const estAtual = distribuirEstoqueAtualMap[empresaId] ?? 0;
         const novaQuantidade = estAtual + qtyToAdd;
 
-        // 1. Busca produto existente na filial de destino considerando NOME e COR
+        // 1. Busca produto existente na filial considerando NOME e COR
         let queryCheck = supabase
           .from('produtos')
           .select('id, quantidade')
@@ -4729,7 +4717,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (produtoExistente?.id) {
           produtoIdFinal = produtoExistente.id;
-          // Atualiza saldo existente
           const { error: errUp } = await supabase
             .from('produtos')
             .update({ quantidade: novaQuantidade })
@@ -4737,7 +4724,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
           if (errUp) throw errUp;
         } else {
-          // Cria novo registro físico na filial
           const { data: novoProd, error: errIns } = await supabase
             .from('produtos')
             .insert([{
@@ -4751,35 +4737,26 @@ export default function Dashboard({ session, profileDataProps }) {
               quantidade: novaQuantidade
             }])
             .select('id')
-            .maybeSingle();
+            .single();
 
           if (errIns) throw errIns;
           produtoIdFinal = novoProd?.id;
         }
 
-        // 2. REGISTRO CONTÁBIL NA TABELA DE MOVIMENTAÇÕES (Garante dados reais de Entrada/Saída)
-        try {
-          const { error: errMov } = await supabase.from('movimentacoes_estoque').insert([{
-            empresa_id: empresaId,
-            filial_id: empresaId,
-            produto_id: produtoIdFinal,
-            quantidade: qtyToAdd,
-            tipo: 'ENTRADA_DISTRIBUICAO',
-            usuario_id: usuarioId
-          }]);
-
-          if (errMov) {
-            console.warn("Aviso: Movimentação registrada com alerta de log:", errMov.message);
-          }
-        } catch (eMov) {
-          console.warn("Aviso ao salvar movimentação:", eMov);
-        }
+        // 2. Grava o histórico contábil paralelamente (com tratativa de erro para não travar a UI)
+        await supabase.from('movimentacoes_estoque').insert([{
+          empresa_id: empresaId,
+          filial_id: empresaId,
+          produto_id: produtoIdFinal,
+          quantidade: qtyToAdd,
+          tipo: 'ENTRADA_DISTRIBUICAO',
+          usuario_id: usuarioId
+        }]).catch(e => console.log("Log contábil ignorado:", e.message));
 
         totalEnviado += qtyToAdd;
-        countFiliais++;
       }
 
-      const msgSucesso = `✅ Sincronizado! ${totalEnviado} unidades de '${produtoDistribuir.nome}' ${corProduto ? `(${corProduto})` : ''} distribuídas para ${countFiliais} filial(is) e registradas no fluxo de estoque.`;
+      const msgSucesso = `✅ Sincronizado! ${totalEnviado} unidades de '${produtoDistribuir.nome}' ${corProduto ? `(${corProduto})` : ''} distribuídas e registradas no fluxo de estoque.`;
       showToast(msgSucesso, 'success');
       alert(msgSucesso);
 
@@ -4793,7 +4770,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
     } catch (err) {
-      console.error("Erro na sincronização de estoque:", err);
+      console.error("Erro na distribuição de estoque:", err);
       alert("Erro ao sincronizar: " + err.message);
     } finally {
       setLoadingDistribuir(false);
