@@ -4409,7 +4409,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      
+
       const { data: catData, error } = await supabase
         .from('produtos_catalogo')
         .select('*')
@@ -4456,11 +4456,14 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Função auditada para buscar estoque por filial no Modal de Distribuição com Logs Pesados
+  // Função auditada para buscar estoque por filial no Modal de Distribuição com Normalização de Cor
   const fetchEstoqueModalDistribuir = async (produto) => {
     if (!produto) return;
     const idDoProdutoSelecionado = produto.id || produto.catalogo_id;
-    console.log("🔥 [DEBUG ESTOQUE] Iniciando busca para produto:", produto, "ID Selecionado:", idDoProdutoSelecionado);
+    const nomeBusca = produto.nome ? produto.nome.trim() : '';
+    const corBusca = produto.cor ? produto.cor.trim() : '';
+
+    console.log("🔥 [DEBUG ESTOQUE] Iniciando busca para produto:", produto, "Nome:", nomeBusca, "Cor:", corBusca);
 
     try {
       // 1. Fetch de todas as empresas/filiais cadastradas
@@ -4485,21 +4488,14 @@ export default function Dashboard({ session, profileDataProps }) {
       console.log("🔥 [DEBUG ESTOQUE] Filiais/Empresas encontradas:", empData);
       setDistribuirEmpresas(empData || []);
 
-      // 2. Query na tabela 'produtos' (Estoque Físico) filtrando por nome e cor
-      let queryEstoque = supabase
+      // 2. Busca todos os registros do produto na tabela pelo nome
+      let { data: estoqueFiliais, error: erroEstoque } = await supabase
         .from('produtos')
         .select('id, empresa_id, filial_id, quantidade, nome, tipo, cor')
-        .ilike('nome', produto.nome || '');
-
-      // Se o produto mestre tem cor definida, filtre estritamente por ela
-      if (produto.cor) {
-        queryEstoque = queryEstoque.ilike('cor', produto.cor);
-      }
-
-      let { data: estoqueFiliais, error: erroEstoque } = await queryEstoque;
+        .ilike('nome', nomeBusca);
 
       if (erroEstoque) {
-        console.warn("Aviso ao buscar estoque por nome e cor, buscando fallback:", erroEstoque);
+        console.warn("Aviso ao buscar estoque para o modal, tentando fallback por ID:", erroEstoque);
         const { data: estFallback } = await supabase
           .from('produtos')
           .select('id, empresa_id, filial_id, quantidade, nome, tipo, cor')
@@ -4508,18 +4504,14 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       console.log("🔥 [DEBUG ESTOQUE] Dados retornados do banco (produtos):", estoqueFiliais);
-      if (erroEstoque) console.error("🚨 [ERRO SUPABASE] Falha ao buscar estoque:", erroEstoque);
 
       // 3. Query na tabela 'imeis' para aparelhos celulares
       let imeisPorEmpresa = {};
       try {
-        const { data: imeisFiliais, error: erroImeis } = await supabase
+        const { data: imeisFiliais } = await supabase
           .from('imeis')
           .select('empresa_id, filial_id, produto_id, status, vendido')
           .or(`status.eq.DISPONÍVEL,status.eq.Disponível,vendido.eq.false`);
-
-        console.log("🔥 [DEBUG ESTOQUE] IMEIs disponíveis retornados do banco:", imeisFiliais);
-        if (erroImeis) console.error("🚨 [ERRO SUPABASE] Falha ao buscar imeis:", erroImeis);
 
         if (imeisFiliais && imeisFiliais.length > 0) {
           imeisFiliais.forEach(im => {
@@ -4535,32 +4527,38 @@ export default function Dashboard({ session, profileDataProps }) {
         console.warn("Aviso ao buscar IMEIs para modal de distribuição:", eImei);
       }
 
-      // 4. Mapeamento de Estado Unificado
-      const mapAtual = {};
+      // 4. Mapeia o estoque considerando estritamente a cor correspondente (ignorando maiúsculas/minúsculas e espaços)
+      const mapaEstoque = {};
       if (estoqueFiliais && estoqueFiliais.length > 0) {
-        estoqueFiliais.forEach(p => {
-          const keyEmp = p.empresa_id || p.filial_id;
-          if (keyEmp) {
-            const strKey = String(keyEmp);
-            const qtdProduto = parseInt(p.quantidade, 10) || 0;
-            const qtdImei = imeisPorEmpresa[strKey] || 0;
-            const totalFinalQtd = Math.max(qtdProduto, qtdImei);
+        estoqueFiliais.forEach(item => {
+          const corItem = item.cor ? item.cor.trim().toLowerCase() : '';
+          const corAlvo = corBusca.toLowerCase();
 
-            mapAtual[keyEmp] = (mapAtual[keyEmp] || 0) + totalFinalQtd;
-            mapAtual[strKey] = (mapAtual[strKey] || 0) + totalFinalQtd;
+          // Dupla checagem: se corAlvo for informada, filtra pela cor exata normalizada
+          if (!corAlvo || corItem === corAlvo) {
+            const keyEmp = item.empresa_id || item.filial_id;
+            if (keyEmp) {
+              const strKey = String(keyEmp);
+              const qtdProduto = parseInt(item.quantidade, 10) || 0;
+              const qtdImei = imeisPorEmpresa[strKey] || 0;
+              const totalFinalQtd = Math.max(qtdProduto, qtdImei);
+
+              mapaEstoque[keyEmp] = (mapaEstoque[keyEmp] || 0) + totalFinalQtd;
+              mapaEstoque[strKey] = (mapaEstoque[strKey] || 0) + totalFinalQtd;
+            }
           }
         });
       }
 
-      // Preencher empresas que possuem contagem de IMEIs caso a tabela produtos esteja nula
+      // Preencher empresas que possuem contagem de IMEIs caso a tabela produtos esteja zerada
       Object.keys(imeisPorEmpresa).forEach(k => {
-        if (!mapAtual[k]) {
-          mapAtual[k] = imeisPorEmpresa[k];
+        if (!mapaEstoque[k]) {
+          mapaEstoque[k] = imeisPorEmpresa[k];
         }
       });
 
-      console.log("🔥 [DEBUG ESTOQUE] Mapa final de estoque compilado:", mapAtual);
-      setDistribuirEstoqueAtualMap(mapAtual);
+      console.log("🔥 [DEBUG ESTOQUE] Mapa final de estoque compilado por cor:", mapaEstoque);
+      setDistribuirEstoqueAtualMap(mapaEstoque);
 
     } catch (err) {
       console.error("🚨 [ERRO GERAL] Exceção ao buscar estoque para distribuição:", err);
@@ -4607,7 +4605,7 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const rawLocal = localStorage.getItem(`zenite_pending_transfers_${targetFilialId}`);
         if (rawLocal) localPending = JSON.parse(rawLocal) || [];
-      } catch (e) {}
+      } catch (e) { }
 
       const combined = [...(data || [])];
       localPending.forEach(lp => {
@@ -4634,7 +4632,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (item.detalhes) {
         try {
           prodDetails = typeof item.detalhes === 'string' ? JSON.parse(item.detalhes) : item.detalhes;
-        } catch (e) {}
+        } catch (e) { }
       }
       if (item.detalhes_obj) {
         prodDetails = { ...prodDetails, ...item.detalhes_obj };
@@ -4709,7 +4707,7 @@ export default function Dashboard({ session, profileDataProps }) {
         const existing = JSON.parse(localStorage.getItem(key) || '[]');
         const updated = existing.filter(x => String(x.id) !== String(item.id));
         localStorage.setItem(key, JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
 
       try {
         await supabase.from('auditoria_descontos').insert({
@@ -4719,7 +4717,7 @@ export default function Dashboard({ session, profileDataProps }) {
           acao: 'ACEITE_ENTRADA_ESTOQUE',
           detalhes: `Gerente ${recebidoPorNome} assinou o recebimento de +${qtyRecebida} un. de '${prodNome}'`
         });
-      } catch (auditErr) {}
+      } catch (auditErr) { }
 
       showToast(`✅ Recebimento confirmado! +${qtyRecebida} un. de '${prodNome}' adicionadas ao estoque local.`, 'success');
 
@@ -4738,180 +4736,96 @@ export default function Dashboard({ session, profileDataProps }) {
   const handleSalvarDistribuicaoLote = async () => {
     if (!produtoDistribuir) return;
 
-    console.log("🔥 [DEBUG DISTRIBUIÇÃO] Lojas na tela (distribuirEmpresas):", distribuirEmpresas);
-    console.log("🔥 [DEBUG DISTRIBUIÇÃO] Dicionário de quantidades (distribuirQuantidades):", distribuirQuantidades);
+    // 🛡️ BLINDAGEM 1: Verificar se há um produto válido selecionado
+    if (!produtoDistribuir.nome) {
+      alert("Erro de segurança: Nenhum produto foi selecionado para distribuição.");
+      return;
+    }
 
     const filiaisParaAtualizar = Object.entries(distribuirQuantidades).filter(
       ([empresaId, qty]) => parseInt(qty, 10) > 0
     );
 
-    console.log("🔥 [DEBUG DISTRIBUIÇÃO] Lojas prontas para envio (Qtd > 0):", filiaisParaAtualizar);
-
+    // 🛡️ BLINDAGEM 2: Impedir envio vazio
     if (filiaisParaAtualizar.length === 0) {
-      alert("Nenhuma quantidade válida foi detectada nos inputs (Qtd > 0). Verifique os valores informados.");
+      alert("Atenção: Você precisa informar uma quantidade maior que zero em pelo menos uma filial.");
       return;
     }
 
     setLoadingDistribuir(true);
-    console.log("🔥 [BULK UPSERT ESTOQUE] Iniciando gravação para", filiaisParaAtualizar.length, "filial(is).");
 
     try {
+      const corProduto = produtoDistribuir.cor ? produtoDistribuir.cor.trim() : null;
       let totalEnviado = 0;
       let countFiliais = 0;
-      const dataEnvio = new Date().toISOString();
-      // 1. Iteração explícita Check -> Update/Insert por filial usando for...of (sem upsert)
+
       for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
         const qtyToAdd = parseInt(qtyStr, 10);
-        if (qtyToAdd <= 0) continue;
+
+        // 🛡️ BLINDAGEM 3: Impedir números negativos ou inválidos
+        if (isNaN(qtyToAdd) || qtyToAdd <= 0) continue;
 
         const estAtual = distribuirEstoqueAtualMap[empresaId] ?? distribuirEstoqueAtualMap[String(empresaId)] ?? 0;
         const novaQuantidade = estAtual + qtyToAdd;
 
-        console.log(`🔥 [DISTRIBUIÇÃO MATRIZ] Processando loja ID ${empresaId}: estoque atual = ${estAtual}, adicionando = ${qtyToAdd}, nova quantidade = ${novaQuantidade}`);
-
-        // 1. Verifica se a filial já possui este produto (mesmo nome e mesma cor) no estoque local
-        let checkQuery = supabase
+        // 🛡️ BLINDAGEM 4 (A Correção da Cor): Busca o produto exato considerando NOME e COR
+        let queryCheck = supabase
           .from('produtos')
           .select('id, quantidade')
           .eq('empresa_id', empresaId)
           .ilike('nome', produtoDistribuir.nome);
 
-        if (produtoDistribuir.cor) {
-          checkQuery = checkQuery.ilike('cor', produtoDistribuir.cor);
+        if (corProduto) {
+          queryCheck = queryCheck.ilike('cor', corProduto);
+        } else {
+          queryCheck = queryCheck.is('cor', null);
         }
 
-        const { data: produtoExistente, error: errCheck } = await checkQuery.maybeSingle();
-
-        if (errCheck) {
-          console.warn(`Aviso ao verificar existência do produto na loja ${empresaId}:`, errCheck);
-        }
+        const { data: produtoExistente } = await queryCheck.maybeSingle();
 
         if (produtoExistente?.id) {
-          // 2A. O produto existe: Faça um UPDATE usando o ID único da linha
-          console.log(`🔥 [UPDATE PRODUTO] Atualizando produto ID ${produtoExistente.id} na loja ${empresaId} para ${novaQuantidade} un.`);
+          // Se o produto com essa cor já existe na filial, atualiza apenas ele
           const { error: erroUpdate } = await supabase
             .from('produtos')
             .update({ quantidade: novaQuantidade })
             .eq('id', produtoExistente.id);
 
-          if (erroUpdate) {
-            console.error(`🚨 [ERRO UPDATE] Loja ${empresaId}:`, erroUpdate);
-            throw new Error(`Erro ao atualizar estoque da loja ${empresaId}: ${erroUpdate.message}`);
-          }
+          if (erroUpdate) throw erroUpdate;
         } else {
-          // 2B. O produto NÃO existe: Faça um INSERT completo (com sanitização de colunas)
-          console.log(`🔥 [INSERT PRODUTO] Inserindo novo produto na loja ${empresaId}`);
-          let itemPayload = {
+          // Se não existe, cria um novo registro físico já amarrado à cor correta
+          const { error: erroInsert } = await supabase.from('produtos').insert([{
             empresa_id: empresaId,
             filial_id: empresaId,
             nome: produtoDistribuir.nome,
             tipo: produtoDistribuir.tipo || 'ACESSORIO',
             categoria: produtoDistribuir.categoria || 'Geral',
             preco: parseFloat(produtoDistribuir.preco || 0),
-            preco_custo: parseFloat(produtoDistribuir.preco_custo || 0),
-            codigo_barras: produtoDistribuir.codigo_barras || null,
-            sku: produtoDistribuir.sku || null,
-            cor: produtoDistribuir.cor || null,
+            cor: corProduto, // <--- Aqui a cor é blindada e salva corretamente
             quantidade: novaQuantidade
-          };
+          }]);
 
-          let { error: erroInsert } = await supabase
-            .from('produtos')
-            .insert([itemPayload]);
-
-          if (erroInsert && (erroInsert.message?.includes('schema cache') || erroInsert.message?.includes('could not find') || erroInsert.code === 'PGRST204' || erroInsert.code === '42703')) {
-            console.warn(`Retentando inserção sanitizada na loja ${empresaId} sem colunas opcionais:`, erroInsert.message);
-            itemPayload = {
-              empresa_id: empresaId,
-              filial_id: empresaId,
-              nome: produtoDistribuir.nome,
-              tipo: produtoDistribuir.tipo || 'ACESSORIO',
-              categoria: produtoDistribuir.categoria || 'Geral',
-              preco: parseFloat(produtoDistribuir.preco || 0),
-              quantidade: novaQuantidade
-            };
-            const { error: retryErr } = await supabase.from('produtos').insert([itemPayload]);
-            erroInsert = retryErr;
-          }
-
-          if (erroInsert) {
-            console.error(`🚨 [ERRO INSERT] Loja ${empresaId}:`, erroInsert);
-            throw new Error(`Erro ao inserir produto na loja ${empresaId}: ${erroInsert.message}`);
-          }
+          if (erroInsert) throw erroInsert;
         }
 
         totalEnviado += qtyToAdd;
         countFiliais++;
       }
 
-      // 3. Registrar movimentação de auditoria / remessa
-      for (const [empresaId, qtyStr] of filiaisParaAtualizar) {
-        const qtyToAdd = parseInt(qtyStr, 10);
-        if (qtyToAdd <= 0) continue;
-
-        const recordPayload = {
-          produto_id: produtoDistribuir.id,
-          catalogo_id: produtoDistribuir.id,
-          empresa_id: company?.id || profile?.empresa_id,
-          empresa_id_destino: empresaId,
-          filial_destino_id: empresaId,
-          filial_origem_id: profile?.filial_id || profile?.empresa_id || company?.id,
-          quantidade_enviada: qtyToAdd,
-          quantidade: qtyToAdd,
-          tipo_movimentacao: 'DISTRIBUICAO_MATRIZ',
-          status: 'concluido',
-          data_envio: dataEnvio,
-          criado_por: profile?.id,
-          detalhes: JSON.stringify({
-            catalogo_id: produtoDistribuir.id,
-            nome: produtoDistribuir.nome,
-            tipo: produtoDistribuir.tipo || 'ACESSORIO',
-            categoria: produtoDistribuir.categoria || 'Geral',
-            preco: parseFloat(produtoDistribuir.preco || 0),
-            preco_custo: parseFloat(produtoDistribuir.preco_custo || 0),
-            codigo_barras: produtoDistribuir.codigo_barras || null,
-            sku: produtoDistribuir.sku || null,
-            cor: produtoDistribuir.cor || null
-          })
-        };
-
-        try {
-          let { error: err1 } = await supabase
-            .from('movimentacoes_estoque')
-            .insert([recordPayload]);
-
-          if (err1) {
-            await supabase.from('estoque_movimentacoes').insert([recordPayload]);
-          }
-        } catch (eMov) {
-          console.warn("Aviso ao salvar registro de movimentação:", eMov);
-        }
-      }
-
-      // 4. Feedback visual evidente + Forçar Recarregamento Imediato dos Dados
-      const msgSucesso = `✅ Sucesso! ${totalEnviado} un. de '${produtoDistribuir.nome}' distribuídas em lote para ${countFiliais} filial(is).`;
-      console.log("🔥 [BULK UPSERT ESTOQUE]", msgSucesso);
+      const msgSucesso = `✅ Sucesso! ${totalEnviado} un. de '${produtoDistribuir.nome}' ${corProduto ? `(${corProduto})` : ''} distribuídas para ${countFiliais} filial(is).`;
       showToast(msgSucesso, 'success');
       alert(msgSucesso);
 
-      // Limpar formulário do modal
       setDistribuirModalOpen(false);
       setProdutoDistribuir(null);
       setDistribuirQuantidades({});
 
-      // Recarregar dados das visões locais e globais
-      const activeTenantId = company?.id || profile?.empresa_id || activeEmpresaId;
+      const activeTenantId = profile?.empresa_id || company?.id;
       if (activeTenantId) {
         fetchCatalogoProdutos(activeTenantId);
       }
-      fetchTorreControlo();
-      fetchTransferenciasPendentes();
-
     } catch (err) {
-      console.error("🚨 [ERRO DISTRIBUIÇÃO EM LOTE]:", err);
-      const msgErro = "Falha ao distribuir estoque: " + (err.message || err);
-      showToast("🚨 Erro na Distribuição: " + (err.message || err), 'error');
-      alert(msgErro);
+      console.error("Erro na distribuição blindada:", err);
+      alert("Erro ao salvar distribuição: " + err.message);
     } finally {
       setLoadingDistribuir(false);
     }
@@ -19861,7 +19775,7 @@ export default function Dashboard({ session, profileDataProps }) {
                   transferenciasPendentes.map((item, idx) => {
                     let prodDetails = {};
                     if (item.detalhes) {
-                      try { prodDetails = typeof item.detalhes === 'string' ? JSON.parse(item.detalhes) : item.detalhes; } catch (e) {}
+                      try { prodDetails = typeof item.detalhes === 'string' ? JSON.parse(item.detalhes) : item.detalhes; } catch (e) { }
                     }
                     if (item.detalhes_obj) prodDetails = { ...prodDetails, ...item.detalhes_obj };
 
