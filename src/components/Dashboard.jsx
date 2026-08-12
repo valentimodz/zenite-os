@@ -4456,48 +4456,42 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Função auditada para buscar estoque por filial no Modal de Distribuição com Normalização de Cor
+  // Consulta direta na tabela física de produtos para evitar erro de relacionamento (PGRST200 / 400)
   const fetchEstoqueModalDistribuir = async (produtoSelecionado) => {
     if (!produtoSelecionado) return;
 
     const nomeBusca = produtoSelecionado.nome ? produtoSelecionado.nome.trim() : '';
     const corBusca = produtoSelecionado.cor ? produtoSelecionado.cor.trim().toLowerCase() : '';
+    const termoChave = nomeBusca.split(' ')[0] || nomeBusca;
 
-    // Esta query ignora a coluna 'quantidade' fixa e soma as movimentações reais
-    // Se você não tiver movimentações para todos, isso forçará você a ver o zero real
-    const { data: historico, error } = await supabase
-      .from('movimentacoes_estoque')
-      .select(`
-      empresa_id,
-      quantidade,
-      tipo,
-      produtos!inner(nome, cor)
-    `)
-      .ilike('produtos.nome', `%${nomeBusca.substring(0, 10)}%`);
+    // Consulta direta na tabela física de produtos para evitar qualquer erro de relacionamento (PGRST200 / 400)
+    let { data: estoqueFiliais, error } = await supabase
+      .from('produtos')
+      .select('empresa_id, quantidade, nome, cor')
+      .ilike('nome', `%${termoChave}%`);
 
     if (error) {
-      console.error("Erro na leitura real do estoque:", error);
+      console.error("Erro ao buscar estoque para o modal:", error);
       return;
     }
 
-    const mapaEstoqueReal = {};
+    const mapaEstoque = {};
+    if (estoqueFiliais) {
+      estoqueFiliais.forEach(item => {
+        const corItem = item.cor ? item.cor.trim().toLowerCase() : '';
+        const nomeItem = item.nome ? item.nome.trim().toLowerCase() : '';
+        
+        const corOk = (corItem === corBusca) || (!corItem && !corBusca);
+        const nomeOk = nomeItem.includes(nomeBusca.toLowerCase().substring(0, 8));
 
-    if (historico) {
-      historico.forEach(mov => {
-        const corMov = mov.produtos?.cor ? mov.produtos.cor.trim().toLowerCase() : '';
-
-        // Filtra apenas o que é da variante de cor correta
-        if (corMov === corBusca) {
-          const idFilial = mov.empresa_id;
-          // Se for entrada soma, se for saída subtrai (Ajuste o tipo conforme seu sistema)
-          const valor = (mov.tipo === 'SAIDA_VENDA' || mov.tipo === 'SAIDA_TRANSFERENCIA') ? -mov.quantidade : mov.quantidade;
-          mapaEstoqueReal[idFilial] = (mapaEstoqueReal[idFilial] || 0) + valor;
+        if (corOk && nomeOk) {
+          const idFilial = item.empresa_id;
+          mapaEstoque[idFilial] = (mapaEstoque[idFilial] || 0) + (item.quantidade || 0);
         }
       });
     }
 
-    console.log("🔥 [ESTOQUE REAL COMPUTADO]:", mapaEstoqueReal);
-    setDistribuirEstoqueAtualMap(mapaEstoqueReal);
+    setDistribuirEstoqueAtualMap(mapaEstoque);
   };
 
   // Abertura do Modal de Distribuição de Estoque Múltiplas Filiais
