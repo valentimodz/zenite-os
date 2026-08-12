@@ -4485,17 +4485,24 @@ export default function Dashboard({ session, profileDataProps }) {
       console.log("🔥 [DEBUG ESTOQUE] Filiais/Empresas encontradas:", empData);
       setDistribuirEmpresas(empData || []);
 
-      // 2. Query na tabela 'produtos' (Estoque Físico) com logs obrigatórios
-      let { data: estoqueFiliais, error: erroEstoque } = await supabase
+      // 2. Query na tabela 'produtos' (Estoque Físico) filtrando por nome e cor
+      let queryEstoque = supabase
         .from('produtos')
-        .select('id, empresa_id, filial_id, quantidade, nome, tipo')
+        .select('id, empresa_id, filial_id, quantidade, nome, tipo, cor')
         .ilike('nome', produto.nome || '');
 
+      // Se o produto mestre tem cor definida, filtre estritamente por ela
+      if (produto.cor) {
+        queryEstoque = queryEstoque.ilike('cor', produto.cor);
+      }
+
+      let { data: estoqueFiliais, error: erroEstoque } = await queryEstoque;
+
       if (erroEstoque) {
-        console.warn("Aviso ao buscar estoque por nome, buscando fallback:", erroEstoque);
+        console.warn("Aviso ao buscar estoque por nome e cor, buscando fallback:", erroEstoque);
         const { data: estFallback } = await supabase
           .from('produtos')
-          .select('id, empresa_id, filial_id, quantidade, nome, tipo')
+          .select('id, empresa_id, filial_id, quantidade, nome, tipo, cor')
           .eq('id', idDoProdutoSelecionado);
         estoqueFiliais = estFallback || [];
       }
@@ -4762,13 +4769,18 @@ export default function Dashboard({ session, profileDataProps }) {
 
         console.log(`🔥 [DISTRIBUIÇÃO MATRIZ] Processando loja ID ${empresaId}: estoque atual = ${estAtual}, adicionando = ${qtyToAdd}, nova quantidade = ${novaQuantidade}`);
 
-        // 1. Verifica se a filial já possui este produto no estoque local
-        const { data: produtoExistente, error: errCheck } = await supabase
+        // 1. Verifica se a filial já possui este produto (mesmo nome e mesma cor) no estoque local
+        let checkQuery = supabase
           .from('produtos')
           .select('id, quantidade')
           .eq('empresa_id', empresaId)
-          .ilike('nome', produtoDistribuir.nome)
-          .maybeSingle();
+          .ilike('nome', produtoDistribuir.nome);
+
+        if (produtoDistribuir.cor) {
+          checkQuery = checkQuery.ilike('cor', produtoDistribuir.cor);
+        }
+
+        const { data: produtoExistente, error: errCheck } = await checkQuery.maybeSingle();
 
         if (errCheck) {
           console.warn(`Aviso ao verificar existência do produto na loja ${empresaId}:`, errCheck);
