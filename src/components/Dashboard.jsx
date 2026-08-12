@@ -4457,112 +4457,58 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   // Função auditada para buscar estoque por filial no Modal de Distribuição com Normalização de Cor
-  const fetchEstoqueModalDistribuir = async (produto) => {
-    if (!produto) return;
-    const idDoProdutoSelecionado = produto.id || produto.catalogo_id;
-    const nomeBusca = produto.nome ? produto.nome.trim() : '';
-    const corBusca = produto.cor ? produto.cor.trim() : '';
+  const fetchEstoqueModalDistribuir = async (produtoSelecionado) => {
+    if (!produtoSelecionado) return;
 
-    console.log("🔥 [DEBUG ESTOQUE] Iniciando busca para produto:", produto, "Nome:", nomeBusca, "Cor:", corBusca);
+    const nomeBusca = produtoSelecionado.nome ? produtoSelecionado.nome.trim() : '';
+    const corBusca = produtoSelecionado.cor ? produtoSelecionado.cor.trim().toLowerCase() : '';
 
-    try {
-      // 1. Fetch de todas as empresas/filiais cadastradas
-      let { data: empData, error: empErr } = await supabase
-        .from('empresas')
-        .select('*')
-        .order('created_at', { ascending: false });
+    // 1. Fetch de empresas e filiais para popular a lista do modal
+    let { data: empData } = await supabase
+      .from('empresas')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-      if (empErr) {
-        console.error("🚨 [ERRO SUPABASE] Falha ao buscar empresas:", empErr);
-      }
+    if (!empData || empData.length === 0) {
+      const { data: filData } = await supabase.from('filiais').select('*').order('nome', { ascending: true });
+      empData = filData || [];
+    }
+    setDistribuirEmpresas(empData || []);
 
-      if (!empData || empData.length === 0) {
-        const { data: filData, error: filErr } = await supabase
-          .from('filiais')
-          .select('*')
-          .order('nome', { ascending: true });
-        if (filErr) console.error("🚨 [ERRO SUPABASE] Falha ao buscar filiais:", filErr);
-        empData = filData || [];
-      }
+    // 2. Busca todos os produtos da tabela que tenham relação com o nome (usando os primeiros 15 caracteres)
+    const termoBusca = nomeBusca.substring(0, 15);
+    let { data: estoqueFiliais, error } = await supabase
+      .from('produtos')
+      .select('id, empresa_id, filial_id, quantidade, nome, cor')
+      .ilike('nome', `%${termoBusca}%`);
 
-      console.log("🔥 [DEBUG ESTOQUE] Filiais/Empresas encontradas:", empData);
-      setDistribuirEmpresas(empData || []);
+    if (error) {
+      console.error("Erro ao buscar estoque para o modal:", error);
+      return;
+    }
 
-      // 2. Busca todos os registros do produto na tabela pelo nome
-      let { data: estoqueFiliais, error: erroEstoque } = await supabase
-        .from('produtos')
-        .select('id, empresa_id, filial_id, quantidade, nome, tipo, cor')
-        .ilike('nome', nomeBusca);
+    console.log("🔥 [DEBUG ESTOQUE] Produtos retornados do banco:", estoqueFiliais);
 
-      if (erroEstoque) {
-        console.warn("Aviso ao buscar estoque para o modal, tentando fallback por ID:", erroEstoque);
-        const { data: estFallback } = await supabase
-          .from('produtos')
-          .select('id, empresa_id, filial_id, quantidade, nome, tipo, cor')
-          .eq('id', idDoProdutoSelecionado);
-        estoqueFiliais = estFallback || [];
-      }
+    const mapaEstoque = {};
+    if (estoqueFiliais) {
+      estoqueFiliais.forEach(item => {
+        const corItem = item.cor ? item.cor.trim().toLowerCase() : '';
 
-      console.log("🔥 [DEBUG ESTOQUE] Dados retornados do banco (produtos):", estoqueFiliais);
-
-      // 3. Query na tabela 'imeis' para aparelhos celulares
-      let imeisPorEmpresa = {};
-      try {
-        const { data: imeisFiliais } = await supabase
-          .from('imeis')
-          .select('empresa_id, filial_id, produto_id, status, vendido')
-          .or(`status.eq.DISPONÍVEL,status.eq.Disponível,vendido.eq.false`);
-
-        if (imeisFiliais && imeisFiliais.length > 0) {
-          imeisFiliais.forEach(im => {
-            if (im.produto_id === idDoProdutoSelecionado || im.produto_id === produto.id) {
-              const kEmp = im.empresa_id || im.filial_id;
-              if (kEmp) {
-                imeisPorEmpresa[String(kEmp)] = (imeisPorEmpresa[String(kEmp)] || 0) + 1;
-              }
-            }
-          });
-        }
-      } catch (eImei) {
-        console.warn("Aviso ao buscar IMEIs para modal de distribuição:", eImei);
-      }
-
-      // 4. Mapeia o estoque considerando estritamente a cor correspondente (ignorando maiúsculas/minúsculas e espaços)
-      const mapaEstoque = {};
-      if (estoqueFiliais && estoqueFiliais.length > 0) {
-        estoqueFiliais.forEach(item => {
-          const corItem = item.cor ? item.cor.trim().toLowerCase() : '';
-          const corAlvo = corBusca.toLowerCase();
-
-          // Dupla checagem: se corAlvo for informada, filtra pela cor exata normalizada
-          if (!corAlvo || corItem === corAlvo) {
-            const keyEmp = item.empresa_id || item.filial_id;
-            if (keyEmp) {
-              const strKey = String(keyEmp);
-              const qtdProduto = parseInt(item.quantidade, 10) || 0;
-              const qtdImei = imeisPorEmpresa[strKey] || 0;
-              const totalFinalQtd = Math.max(qtdProduto, qtdImei);
-
-              mapaEstoque[keyEmp] = (mapaEstoque[keyEmp] || 0) + totalFinalQtd;
-              mapaEstoque[strKey] = (mapaEstoque[strKey] || 0) + totalFinalQtd;
-            }
+        // Se a cor do banco bate com a cor do produto selecionado
+        if (corItem === corBusca || (!corItem && !corBusca)) {
+          const idFilial = item.empresa_id || item.filial_id;
+          if (idFilial) {
+            const keyStr = String(idFilial);
+            const qtd = Number(item.quantidade || 0);
+            mapaEstoque[idFilial] = (mapaEstoque[idFilial] || 0) + qtd;
+            mapaEstoque[keyStr] = (mapaEstoque[keyStr] || 0) + qtd;
           }
-        });
-      }
-
-      // Preencher empresas que possuem contagem de IMEIs caso a tabela produtos esteja zerada
-      Object.keys(imeisPorEmpresa).forEach(k => {
-        if (!mapaEstoque[k]) {
-          mapaEstoque[k] = imeisPorEmpresa[k];
         }
       });
-
-      console.log("🔥 [DEBUG ESTOQUE] Mapa final de estoque compilado por cor:", mapaEstoque);
-      setDistribuirEstoqueAtualMap(mapaEstoque);
-
-    } catch (err) {
-      console.error("🚨 [ERRO GERAL] Exceção ao buscar estoque para distribuição:", err);
     }
+
+    console.log("🔥 [DEBUG ESTOQUE] Mapa final resolvido:", mapaEstoque);
+    setDistribuirEstoqueAtualMap(mapaEstoque);
   };
 
   // Abertura do Modal de Distribuição de Estoque Múltiplas Filiais
