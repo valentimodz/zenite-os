@@ -5991,15 +5991,21 @@ export default function Dashboard({ session, profileDataProps }) {
         complemento: clienteComplemento.trim() || null
       };
 
-      console.log("🔥 [CLIENTE FORM PAYLOAD] Inserindo/Atualizando cliente com autoria:", payload);
+      console.log("📦 Payload enviado para o banco (Cliente Form):", payload);
 
       if (editingCliente) {
-        const { error } = await supabase
+        const { data: updatedClients, error } = await supabase
           .from('clientes')
           .update(payload)
-          .eq('id', editingCliente.id);
+          .eq('id', editingCliente.id)
+          .select();
 
-        if (error) throw error;
+        if (error) {
+          console.error("🚨 ERRO BRUTO DO SUPABASE (UPDATE CLIENTE):", error);
+          alert(`Falha fatal ao salvar cliente: ${error.message} \nDetalhes: ${error.details || 'Nenhum'}`);
+          return; // Para a execução aqui, não fecha o modal nem limpa o formulário
+        }
+
         alert('Cliente atualizado com sucesso!');
         // Atualiza os dados no PDV se for o cliente atualmente selecionado
         if (selectedPdvClienteId === editingCliente.id || pdvClienteNome === editingCliente.nome) {
@@ -6015,7 +6021,12 @@ export default function Dashboard({ session, profileDataProps }) {
           .insert(payload)
           .select();
 
-        if (error) throw error;
+        if (error) {
+          console.error("🚨 ERRO BRUTO DO SUPABASE (INSERT CLIENTE):", error);
+          alert(`Falha fatal ao salvar cliente: ${error.message} \nDetalhes: ${error.details || 'Nenhum'}`);
+          return; // Para a execução aqui, não fecha o modal nem limpa o formulário
+        }
+
         alert('Cliente cadastrado com sucesso!');
         // Seleciona automaticamente o cliente recém-criado no PDV
         if (insertedClients && insertedClients.length > 0) {
@@ -8330,23 +8341,23 @@ export default function Dashboard({ session, profileDataProps }) {
           }
           clienteIdBanco = clienteExistente.id;
         } else {
+          console.log("📦 Payload enviado para o banco (PDV Novo Cliente):", payloadCliente);
+
           // SALVA novo cliente no banco obrigatoriamente
           const { data: novoCliente, error: erroCliente } = await supabase
             .from('clientes')
             .insert([payloadCliente])
-            .select('id')
-            .single();
+            .select();
 
           if (erroCliente) {
-            console.error("Erro crítico ao salvar cliente:", erroCliente);
-            showToast(`Falha ao registrar cliente: ${erroCliente.message}. A venda não pode ser concluída.`, "error");
-            alert(`Falha ao registrar cliente: ${erroCliente.message}. A venda não pode ser concluída.`);
+            console.error("🚨 ERRO BRUTO DO SUPABASE (PDV INSERT CLIENTE):", erroCliente);
+            alert(`Falha fatal ao salvar cliente: ${erroCliente.message} \nDetalhes: ${erroCliente.details || 'Nenhum'}`);
             setLoadingPdvVenda(false);
             return; // BLOQUEIA A VENDA se o cliente não for salvo
           }
 
-          if (novoCliente && novoCliente.id) {
-            clienteIdBanco = novoCliente.id;
+          if (novoCliente && novoCliente.length > 0) {
+            clienteIdBanco = novoCliente[0].id;
           }
         }
         setSelectedPdvClienteId(clienteIdBanco);
