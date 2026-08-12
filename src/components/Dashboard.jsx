@@ -78,6 +78,33 @@ const verificarElegibilidadeBoleto = (carrinho) => {
   return contemAndroid && !contemIphone;
 };
 
+// Validador de Elegibilidade de Participação Trainee/Treener (Exige Celular/Smartphone no carrinho)
+const permiteParticipacaoTreener = (carrinho) => {
+  if (!carrinho || carrinho.length === 0) return false;
+
+  return carrinho.some(item => {
+    const prod = item.produto || item;
+    const nome = (prod.nome || item.nome || "").toLowerCase();
+    const categoria = (prod.categoria || item.categoria || prod.tipo || item.tipo || "").toLowerCase();
+    const tipo = (prod.tipo || item.tipo || "").toLowerCase();
+
+    return (
+      categoria.includes('celular') ||
+      categoria.includes('smartphone') ||
+      categoria.includes('ios') ||
+      categoria.includes('android') ||
+      tipo.includes('celular') ||
+      nome.includes('iphone') ||
+      nome.includes('galaxy') ||
+      nome.includes('motorola') ||
+      nome.includes('xiaomi') ||
+      nome.includes('redmi') ||
+      nome.includes('realme') ||
+      nome.includes('poco')
+    );
+  });
+};
+
 export default function Dashboard({ session, profileDataProps }) {
   const [profile, setProfile] = useState(profileDataProps || null);
   const [company, setCompany] = useState(null);
@@ -996,7 +1023,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [categorias, categoriaProduto]);
 
-  // Busca dos Treeners da Filial Ativa
+  // Busca dos Treeners/Trainees da Filial Ativa (Filtro Estrito por cargo TRAINEE/TREENER/is_treinner)
   useEffect(() => {
     const fetchTreeners = async () => {
       if (!activeFilialId) {
@@ -1006,20 +1033,28 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let { data, error } = await supabase
           .from('usuarios')
-          .select('id, nome, role')
-          .eq('filial_id', activeFilialId)
+          .select('id, nome, role, is_treinner')
+          .or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`)
           .eq('status', 'ATIVO');
 
         if (error || !data || data.length === 0) {
           const { data: profs } = await supabase
             .from('profiles')
-            .select('id, nome, role')
-            .eq('filial_id', activeFilialId);
+            .select('id, nome, role, is_treinner')
+            .or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`);
           if (profs && profs.length > 0) {
             data = profs;
           }
         }
-        setTreenersFilial(data || []);
+
+        // Filtrar estritamente apenas os colaboradores com perfil TRAINEE, TREENER ou is_treinner === true
+        const filteredTreeners = (data || []).filter(u => {
+          const roleUpper = (u.role || u.cargo || u.perfil || '').toUpperCase();
+          return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER') || u.is_treinner === true;
+        });
+
+        console.log("🔥 [FETCH TREENERS] Treeners/Trainees elegíveis encontrados:", filteredTreeners.length);
+        setTreenersFilial(filteredTreeners);
       } catch (err) {
         console.error('Erro ao carregar treeners da filial:', err);
       }
@@ -1027,6 +1062,14 @@ export default function Dashboard({ session, profileDataProps }) {
 
     fetchTreeners();
   }, [activeFilialId]);
+
+  // Trava de Trainee: Se não houver celular no carrinho, limpa a seleção de Treener Responsável
+  useEffect(() => {
+    if (!permiteParticipacaoTreener(pdvCart)) {
+      if (selectedTreenerId) setSelectedTreenerId('');
+      if (pdvVendaTrainee) setPdvVendaTrainee(false);
+    }
+  }, [pdvCart, selectedTreenerId, pdvVendaTrainee]);
 
   useEffect(() => {
     if (pdvProdutoSelecionado) {
@@ -10988,33 +11031,35 @@ export default function Dashboard({ session, profileDataProps }) {
                           ></textarea>
                         </div>
 
-                        <div>
-                          <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-gray-400 uppercase tracking-wide flex items-center justify-between mb-1">
-                            <span>Treener Responsável (Participação)</span>
-                            {selectedTreenerId && (
-                              <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-800/40 font-mono">
-                                Selecionado
-                              </span>
-                            )}
-                          </label>
-                          <select
-                            id="pdvTreenerSelect"
-                            value={selectedTreenerId}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setSelectedTreenerId(val);
-                              setPdvVendaTrainee(!!val);
-                            }}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none cursor-pointer"
-                          >
-                            <option value="">Sem participação de Treener</option>
-                            {treenersFilial.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.nome} {t.role ? `(${t.role})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        {permiteParticipacaoTreener(pdvCart) && (
+                          <div>
+                            <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-purple-300 uppercase tracking-wide flex items-center justify-between mb-1">
+                              <span>Treener Responsável (Participação em Celulares)</span>
+                              {selectedTreenerId && (
+                                <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-800/40 font-mono">
+                                  Selecionado
+                                </span>
+                              )}
+                            </label>
+                            <select
+                              id="pdvTreenerSelect"
+                              value={selectedTreenerId}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setSelectedTreenerId(val);
+                                setPdvVendaTrainee(!!val);
+                              }}
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none cursor-pointer font-bold"
+                            >
+                              <option value="">Sem participação de Treener</option>
+                              {treenersFilial.map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.nome} {t.role ? `(${t.role})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
 
                       {/* RESUMO FINANCEIRO FINAL */}
