@@ -257,6 +257,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Dados do Estoque (Gerente)
   const [produtos, setProdutos] = useState([]);
+  const [estoqueConsolidadoLista, setEstoqueConsolidadoLista] = useState([]);
   const [loadingProdutos, setLoadingProdutos] = useState(false);
   const [nomeProduto, setNomeProduto] = useState('');
   const [tipoProduto, setTipoProduto] = useState('CELULAR'); // 'CELULAR' | 'ACESSORIO'
@@ -1550,6 +1551,11 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id]);
 
+  // Carregar Estoque Consolidado dinamicamente ao alterar filtros ou filial
+  useEffect(() => {
+    fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque);
+  }, [filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque, activeFilialId]);
+
   const fetchTenantSettings = async () => {
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -2559,6 +2565,57 @@ export default function Dashboard({ session, profileDataProps }) {
       setProdutosDisponiveisPDV(produtosLoja || []);
     } catch (err) {
       console.error("Erro ao executar fetchProdutosPDV:", err);
+    }
+  };
+
+  // Buscar produtos do Estoque Consolidado de forma tolerante filtrando por filial selecionada, busca e categoria
+  const fetchEstoqueConsolidado = async (filialSelecionadaId, termoBusca = '', categoriaFiltro = '') => {
+    try {
+      let query = supabase
+        .from('produtos')
+        .select('*');
+
+      // Se houver uma filial selecionada (e não for "todas"), filtra por ela de forma tolerante
+      if (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '') {
+        query = query.or(`empresa_id.eq.${filialSelecionadaId},filial_id.eq.${filialSelecionadaId}`);
+      }
+
+      // Filtra por termo de busca se houver
+      if (termoBusca && termoBusca.trim() !== '') {
+        query = query.ilike('nome', `%${termoBusca.trim()}%`);
+      }
+
+      // Filtra por categoria se não for o padrão geral
+      if (categoriaFiltro && categoriaFiltro !== 'Todas as Categorias (Geral)' && categoriaFiltro !== 'todas' && categoriaFiltro !== 'all' && categoriaFiltro !== '') {
+        query = query.eq('categoria', categoriaFiltro);
+      }
+
+      let { data: produtosConsolidados, error } = await query;
+
+      if (error || !produtosConsolidados) {
+        // Fallback em caso de falha na cláusula .or()
+        let fallbackQuery = supabase.from('produtos').select('*');
+        if (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '') {
+          fallbackQuery = fallbackQuery.eq('empresa_id', filialSelecionadaId);
+        }
+        if (termoBusca && termoBusca.trim() !== '') {
+          fallbackQuery = fallbackQuery.ilike('nome', `%${termoBusca.trim()}%`);
+        }
+        if (categoriaFiltro && categoriaFiltro !== 'Todas as Categorias (Geral)' && categoriaFiltro !== 'todas' && categoriaFiltro !== 'all' && categoriaFiltro !== '') {
+          fallbackQuery = fallbackQuery.eq('categoria', categoriaFiltro);
+        }
+        const { data: fallbackData, error: fallbackErr } = await fallbackQuery;
+
+        if (fallbackErr) {
+          console.error("Erro ao carregar estoque consolidado:", fallbackErr);
+          return;
+        }
+        produtosConsolidados = fallbackData;
+      }
+
+      setEstoqueConsolidadoLista(produtosConsolidados || []);
+    } catch (err) {
+      console.error("Erro ao executar fetchEstoqueConsolidado:", err);
     }
   };
 
@@ -9473,7 +9530,9 @@ export default function Dashboard({ session, profileDataProps }) {
       ? true
       : (
         String(p.filial_id) === String(filtroFilialEstoque) ||
+        String(p.empresa_id) === String(filtroFilialEstoque) ||
         (selectedFilialObj && String(p.filial_id) === String(selectedFilialObj.id)) ||
+        (selectedFilialObj && String(p.empresa_id) === String(selectedFilialObj.id)) ||
         (selectedFilialObj && p.filial_nome && p.filial_nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
         (selectedFilialObj && p.filiais?.nome && p.filiais.nome.toLowerCase().trim() === selectedFilialObj.nome.toLowerCase().trim()) ||
         isCatalogMasterItem
@@ -15947,7 +16006,11 @@ export default function Dashboard({ session, profileDataProps }) {
                               <input
                                 type="text"
                                 value={buscaEstoque}
-                                onChange={(e) => setBuscaEstoque(e.target.value)}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setBuscaEstoque(val);
+                                  fetchEstoqueConsolidado(filtroFilialEstoque, val, filtroCategoriaEstoque);
+                                }}
                                 placeholder="Nome, SKU, IMEI, EAN, Cor..."
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-8 pr-4 py-2 text-xs outline-none transition-all"
                               />
@@ -15962,7 +16025,11 @@ export default function Dashboard({ session, profileDataProps }) {
                             </button>
                             <select
                               value={filtroFilialEstoque}
-                              onChange={(e) => setFiltroFilialEstoque(e.target.value)}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setFiltroFilialEstoque(val);
+                                fetchEstoqueConsolidado(val, buscaEstoque, filtroCategoriaEstoque);
+                              }}
                               className="bg-black border border-[#222222] rounded-md text-white px-3 py-2 text-xs outline-none focus:border-[#6A0DAD] min-w-[120px]"
                             >
                               <option value="">Todas as Filiais</option>
@@ -15972,7 +16039,11 @@ export default function Dashboard({ session, profileDataProps }) {
                             </select>
                             <select
                               value={filtroCategoriaEstoque}
-                              onChange={(e) => setFiltroCategoriaEstoque(e.target.value)}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setFiltroCategoriaEstoque(val);
+                                fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, val);
+                              }}
                               className="bg-black border border-[#222222] rounded-md text-white px-3 py-2 text-xs outline-none focus:border-[#6A0DAD] min-w-[120px]"
                             >
                               <option value="">Todas as Categorias</option>
@@ -15992,32 +16063,45 @@ export default function Dashboard({ session, profileDataProps }) {
                           </div>
                         </div>
 
-                        {loadingDados ? (
-                          <div className="flex flex-col items-center justify-center py-16 gap-3">
-                            <div className="w-7 h-7 border-3 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
-                            <span className="text-xs text-gray-600">Carregando estoque...</span>
-                          </div>
-                        ) : filteredProdutosEstoque.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-16 text-gray-700">
-                            <Package size={30} className="mb-2 opacity-30" />
-                            <span className="text-sm italic">Nenhum produto no estoque.</span>
-                          </div>
-                        ) : (
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs border-collapse">
-                              <thead>
-                                <tr className="border-b border-[#222222] text-gray-600 font-bold uppercase tracking-wider">
-                                  <th className="pb-3">Produto</th>
-                                  <th className="pb-3">Filial</th>
-                                  <th className="pb-3">Cat.</th>
-                                  <th className="pb-3">Cor</th>
-                                  <th className="pb-3">Preço</th>
-                                  <th className="pb-3">Qtd</th>
-                                  <th className="pb-3 text-right">Ações</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-[#111111]">
-                                {filteredProdutosEstoque.map(p => (
+                        {(() => {
+                          const displayEstoqueConsolidado = (estoqueConsolidadoLista && estoqueConsolidadoLista.length > 0)
+                            ? estoqueConsolidadoLista
+                            : filteredProdutosEstoque;
+
+                          if (loadingDados) {
+                            return (
+                              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                                <div className="w-7 h-7 border-3 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
+                                <span className="text-xs text-gray-600">Carregando estoque...</span>
+                              </div>
+                            );
+                          }
+
+                          if (displayEstoqueConsolidado.length === 0) {
+                            return (
+                              <div className="flex flex-col items-center justify-center py-16 text-gray-700">
+                                <Package size={30} className="mb-2 opacity-30" />
+                                <span className="text-sm italic">Nenhum produto no estoque.</span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="border-b border-[#222222] text-gray-600 font-bold uppercase tracking-wider">
+                                    <th className="pb-3">Produto</th>
+                                    <th className="pb-3">Filial</th>
+                                    <th className="pb-3">Cat.</th>
+                                    <th className="pb-3">Cor</th>
+                                    <th className="pb-3">Preço</th>
+                                    <th className="pb-3">Qtd</th>
+                                    <th className="pb-3 text-right">Ações</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#111111]">
+                                  {displayEstoqueConsolidado.map(p => (
                                   <React.Fragment key={p.id}>
                                     <tr className="hover:bg-[#6A0DAD]/5 transition-colors">
                                       <td className="py-2.5 font-semibold text-white">
@@ -16139,7 +16223,8 @@ export default function Dashboard({ session, profileDataProps }) {
                               </tbody>
                             </table>
                           </div>
-                        )}
+                        );
+                      })()}
                       </div>
 
                     </div>
