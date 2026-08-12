@@ -15677,6 +15677,11 @@ export default function Dashboard({ session, profileDataProps }) {
                                 {p.categoria || 'Geral'}
                               </span>
                               <h5 className="text-sm font-bold text-white mt-1.5">{p.nome}</h5>
+                              {p.cor && (
+                                <span className="inline-block bg-[#1A1A1A] text-purple-300 border border-purple-900/50 text-[10px] font-bold px-2 py-0.5 rounded-full mt-1">
+                                  🎨 Cor: {p.cor}
+                                </span>
+                              )}
                               <p className="text-xs font-mono font-bold text-emerald-400 mt-1">R$ {parseFloat(p.preco || 0).toFixed(2)}</p>
                               {p.sku && <p className="text-[10px] text-gray-500 font-mono mt-0.5">SKU: {p.sku}</p>}
                             </div>
@@ -19694,6 +19699,14 @@ export default function Dashboard({ session, profileDataProps }) {
                   <span className="text-gray-500 block uppercase font-bold text-[9px]">Preço de Venda Padrão</span>
                   <span className="text-emerald-400 font-mono font-bold text-sm">R$ {parseFloat(produtoDistribuir.preco || 0).toFixed(2)}</span>
                 </div>
+                {produtoDistribuir.cor && (
+                  <div className="text-center">
+                    <span className="text-gray-500 block uppercase font-bold text-[9px]">Cor do Aparelho / Item</span>
+                    <span className="inline-block bg-[#1A1A1A] text-purple-300 border border-purple-900/50 text-[10px] font-bold px-2 py-0.5 rounded-full mt-0.5">
+                      🎨 {produtoDistribuir.cor}
+                    </span>
+                  </div>
+                )}
                 {produtoDistribuir.sku && (
                   <div className="text-right">
                     <span className="text-gray-500 block uppercase font-bold text-[9px]">Código SKU</span>
