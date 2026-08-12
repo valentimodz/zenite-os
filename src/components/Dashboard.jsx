@@ -47,6 +47,37 @@ const safeFetchJson = async (url, options = {}) => {
   }
 };
 
+// Motor de Elegibilidade de Crédito (Boleto exige Celular Android e proíbe iPhone/Apple ou apenas Acessórios)
+const verificarElegibilidadeBoleto = (carrinho) => {
+  if (!carrinho || carrinho.length === 0) return false;
+
+  let contemAndroid = false;
+  let contemIphone = false;
+
+  carrinho.forEach(item => {
+    const prod = item.produto || item;
+    const nome = (prod.nome || item.nome || "").toLowerCase();
+    const categoria = (prod.categoria || item.categoria || prod.tipo || item.tipo || "").toLowerCase();
+    const tipo = (prod.tipo || item.tipo || "").toLowerCase();
+
+    // Trava 1: Se achar QUALQUER iPhone/Apple/iPad/Macbook, contamina o carrinho (Bloqueio)
+    if (nome.includes('iphone') || nome.includes('apple') || nome.includes('ipad') || nome.includes('macbook') || categoria.includes('ios') || categoria.includes('apple')) {
+      contemIphone = true;
+    }
+
+    // Gatilho: Se achar um celular/smartphone que NÃO seja Apple, libera a flag
+    const isCelular = (categoria.includes('celular') || categoria.includes('smartphone') || categoria.includes('android') || tipo.includes('celular')) && !nome.includes('iphone') && !nome.includes('apple');
+
+    if (isCelular) {
+      contemAndroid = true;
+    }
+  });
+
+  // A Regra de Ouro: Para ter boleto, PRECISA ter um Android e NÃO PODE ter iPhone.
+  // (Se tiver apenas acessórios, contemAndroid será falso, e o boleto não aparece).
+  return contemAndroid && !contemIphone;
+};
+
 export default function Dashboard({ session, profileDataProps }) {
   const [profile, setProfile] = useState(profileDataProps || null);
   const [company, setCompany] = useState(null);
@@ -10729,6 +10760,13 @@ export default function Dashboard({ session, profileDataProps }) {
                       return;
                     }
 
+                    if (pdvNovoMetodo === 'boleto' && !verificarElegibilidadeBoleto(pdvCart)) {
+                      const msgBloqueio = '❌ A forma de pagamento BOLETO exige a presença de um celular Android no carrinho e proíbe iPhones/Apple ou apenas acessórios.';
+                      showToast(msgBloqueio, 'error');
+                      alert(msgBloqueio);
+                      return;
+                    }
+
                     if (pdvNovoMetodo !== 'dinheiro' && valNum > (faltaPagar + 0.01)) {
                       showToast(`O valor informado (R$ ${valNum.toFixed(2)}) excede o saldo restante a pagar (R$ ${faltaPagar.toFixed(2)}).`, 'error');
                       return;
@@ -10824,29 +10862,36 @@ export default function Dashboard({ session, profileDataProps }) {
                             + Adicionar Forma de Pagamento
                           </label>
 
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
+                          {(() => {
+                            const eElegivelBoleto = verificarElegibilidadeBoleto(pdvCart);
+                            const metodosDisponiveis = [
                               { value: 'pix', label: '⚡ Pix' },
                               { value: 'cartao', label: '💳 Cartão' },
                               { value: 'dinheiro', label: '💵 Dinheiro' },
-                              { value: 'boleto', label: '📄 Boleto' }
-                            ].map((m) => (
-                              <button
-                                key={m.value}
-                                type="button"
-                                onClick={() => {
-                                  setPdvNovoMetodo(m.value);
-                                  if (m.value !== 'cartao') setPdvNovoParcelas(1);
-                                }}
-                                className={`py-2 px-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
-                                  ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-purple-900/30'
-                                  : 'bg-black text-gray-400 border-[#222222] hover:text-white'
-                                  }`}
-                              >
-                                {m.label}
-                              </button>
-                            ))}
-                          </div>
+                              ...(eElegivelBoleto ? [{ value: 'boleto', label: '📄 Boleto' }] : [])
+                            ];
+
+                            return (
+                              <div className="grid grid-cols-2 gap-2">
+                                {metodosDisponiveis.map((m) => (
+                                  <button
+                                    key={m.value}
+                                    type="button"
+                                    onClick={() => {
+                                      setPdvNovoMetodo(m.value);
+                                      if (m.value !== 'cartao') setPdvNovoParcelas(1);
+                                    }}
+                                    className={`py-2 px-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
+                                      ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-purple-900/30'
+                                      : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                                      }`}
+                                  >
+                                    {m.label}
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })()}
 
                           {/* Se for Cartão de Crédito: Parcelas */}
                           {pdvNovoMetodo === 'cartao' && (
