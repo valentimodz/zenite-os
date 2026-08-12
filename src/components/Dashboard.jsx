@@ -2553,7 +2553,21 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }
       } catch (sErr) {
-        console.warn('Aviso: Erro ao buscar vendas do vendedor:', sErr);
+        console.warn('Aviso: Erro ao buscar vendas do vendedor via API:', sErr);
+      }
+
+      // Fallback incondicional para garantir busca completa de todas as vendas do vendedor no Supabase
+      if (!salesData || salesData.length === 0) {
+        try {
+          const { data: dbSales } = await supabase
+            .from('vendas')
+            .select('*, produtos(*), clientes(*)')
+            .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
+            .order('created_at', { ascending: false });
+          if (dbSales) salesData = dbSales;
+        } catch (dbErr) {
+          console.warn('Aviso: Erro ao buscar vendas do vendedor via Supabase:', dbErr);
+        }
       }
 
       let allProds = [];
@@ -9101,32 +9115,66 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // --- CALCULADOR DE COMISSÃO DINÂMICA POR ITEM ---
+  const calcularComissaoItem = (sale) => {
+    if (!sale) return 0;
+    if (sale.valor_comissao !== undefined && sale.valor_comissao !== null && sale.valor_comissao !== '') {
+      const val = parseFloat(sale.valor_comissao);
+      if (!isNaN(val) && val > 0) return val;
+    }
+    if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
+      const val = parseFloat(sale.comissao_vendedor);
+      if (!isNaN(val) && val > 0) return val;
+    }
+    if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
+      const val = parseFloat(sale.comissao);
+      if (!isNaN(val) && val > 0) return val;
+    }
+
+    const totalBruto = parseFloat(sale.valor_total || sale.valor || sale.preco || 0);
+    if (totalBruto <= 0) return 0;
+
+    const cat = (sale.produtos?.categoria || sale.categoria || '').toUpperCase();
+    const isTreinner = profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee;
+
+    if (cat === 'SERVICO') {
+      return totalBruto * (isTreinner ? 0.02 : 0.03);
+    } else if (cat.includes('ACESSORIO') || cat.includes('CAPA') || cat.includes('PELICULA')) {
+      return totalBruto * 0.05;
+    } else {
+      return totalBruto * 0.02; // taxa padrão celular / geral
+    }
+  };
+
   // --- HELPERS DE METAS DINÂMICAS & REBRANDING ---
   const getNormalizedMetaTipo = (tipo) => {
     const t = (tipo || '').toLowerCase();
-    if (t === 'faturamento_geral' || t === 'faturamento') return 'faturamento';
-    if (t === 'boleto' || t === 'quantidade') return 'quantidade';
+    if (t === 'faturamento_geral' || t === 'faturamento' || t === 'geral') return 'faturamento';
+    if (t === 'quantidade' || t === 'vendas_qtd') return 'quantidade';
+    if (t === 'boleto') return 'boleto';
     if (t === 'ativacao' || t === 'ativacoes') return 'ativacao';
     return t || 'faturamento';
   };
 
   const isUnitMetric = (tipo) => {
     const norm = getNormalizedMetaTipo(tipo);
-    return norm === 'quantidade' || norm === 'ativacao';
+    return norm === 'quantidade' || norm === 'boleto' || norm === 'ativacao';
   };
 
   const getMetricLabel = (tipo) => {
     const norm = getNormalizedMetaTipo(tipo);
-    if (norm === 'quantidade') return 'boletos';
+    if (norm === 'quantidade') return 'vendas';
+    if (norm === 'boleto') return 'boletos';
     if (norm === 'ativacao') return 'ativações';
     return '';
   };
 
   const getMetricName = (tipo) => {
     const norm = getNormalizedMetaTipo(tipo);
-    if (norm === 'quantidade') return 'Boleto Vendido';
+    if (norm === 'quantidade') return 'Unidades Vendidas';
+    if (norm === 'boleto') return 'Boleto Vendido';
     if (norm === 'ativacao') return 'Ativação';
-    return 'Faturamento';
+    return 'Faturamento Geral';
   };
 
   const formatMetaValue = (value, tipo) => {
@@ -9166,21 +9214,23 @@ export default function Dashboard({ session, profileDataProps }) {
   // Cálculo das Metas Pessoais do Vendedor com Motor de Progresso Condicional
   const getMetasVendedor = () => {
     const today = new Date();
+    const currentUserId = session?.user?.id || profile?.id;
     const mesRef = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-    const m = metas.find(x => x.vendedor_id === session?.user?.id && x.mes_referencia === mesRef);
+    const m = metas.find(x => (x.vendedor_id === currentUserId || x.usuario_id === currentUserId) && x.mes_referencia === mesRef);
     const tipoMeta = m?.tipo_meta || 'faturamento';
     const normType = getNormalizedMetaTipo(tipoMeta);
 
-    // Todas as vendas do mês corrente deste vendedor
-    const currentMonthSales = vendasVendedor.filter(sale => {
-      if (sale.vendedor_id !== session?.user?.id) return false;
-      const saleDate = new Date(sale.created_at);
+    // Todas as vendas do mês corrente deste vendedor (independente de método ou categoria)
+    const currentMonthSales = (vendasVendedor || []).filter(sale => {
+      const saleUserId = sale.vendedor_id || sale.usuario_id || sale.criado_por;
+      if (saleUserId && currentUserId && String(saleUserId) !== String(currentUserId)) return false;
+      const saleDate = new Date(sale.created_at || sale.data);
       return saleDate.getMonth() === today.getMonth() && saleDate.getFullYear() === today.getFullYear();
     });
 
     // MOTOR DE PROGRESSO CONDICIONAL: filtragem por tipo_meta
     let vendasParaMeta = currentMonthSales;
-    if (normType === 'quantidade') {
+    if (normType === 'boleto') {
       vendasParaMeta = currentMonthSales.filter(sale => {
         const mp = (sale.metodo_pagamento || '').toLowerCase();
         return mp === 'boleto';
@@ -9193,18 +9243,21 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const totalVendas = isUnitMetric(normType)
       ? vendasParaMeta.length
-      : vendasParaMeta.reduce((acc, s) => acc + parseFloat(s.valor_total || 0), 0);
-    const totalVendasGeral = currentMonthSales.reduce((acc, s) => acc + parseFloat(s.valor_total || 0), 0);
-    const totalComissoes = currentMonthSales.reduce((acc, s) => acc + parseFloat(s.comissao || 0), 0);
+      : vendasParaMeta.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
+
+    const totalVendasGeral = currentMonthSales.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
+    const totalComissoes = currentMonthSales.reduce((acc, s) => acc + calcularComissaoItem(s), 0);
     const salesCount = currentMonthSales.length;
     const ticketMedio = salesCount > 0 ? totalVendasGeral / salesCount : 0;
 
     const metaObjetivo = m ? Number(m.valor_meta) : (Number(profile?.meta_mensal) || 0);
-    const progressoPercent = metaObjetivo > 0 ? Math.min(100, Math.round((totalVendas / metaObjetivo) * 100)) : 100;
+
+    // FIX DO MEDIDOR DE META: se metaObjetivo <= 0, o progresso é 0% (evita bug visual 0 de 0 = 100%)
+    const progressoPercent = metaObjetivo > 0 ? Math.min(100, Math.round((totalVendas / metaObjetivo) * 100)) : 0;
 
     return {
       totalVendas,          // valor filtrado pelo tipo_meta (para o progresso)
-      totalVendasGeral,     // total real independente do tipo (para KPI)
+      totalVendasGeral,     // total real incondicional de tudo no mês
       totalComissoes,
       salesCount,
       ticketMedio,
@@ -17123,7 +17176,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                         </span>
                                       </td>
                                       <td className="py-3 text-center font-bold text-gray-300">{sale.quantidade}</td>
-                                      <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                      <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                      <td className="py-3 text-right font-mono font-bold text-emerald-400">
+                                        R$ {calcularComissaoItem(sale).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </td>
                                     </tr>
                                   );
                                 })
