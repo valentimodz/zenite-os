@@ -8557,6 +8557,8 @@ export default function Dashboard({ session, profileDataProps }) {
           }
 
           const payloadVendaUpdate = {
+            empresa_id: empresaId,
+            filial_id: activeFilialId,
             produto_nome: item.produto.nome,
             imei_novo: item.imei || null,
             imei: item.imei || null,
