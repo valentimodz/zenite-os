@@ -4170,6 +4170,12 @@ export default function Dashboard({ session, profileDataProps }) {
           await fetchVendedorData(targetFilialId, session.user.id, targetEmpresaId);
         }
       }
+
+      // Motor da Reatividade: Recarrega a tabela de Estoque Consolidado instantaneamente
+      const filialParaRecarregar = filtroFilialEstoque || targetFilialId || activeFilialId;
+      if (filialParaRecarregar) {
+        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
     } catch (err) {
       console.error('Erro ao atualizar quantidade do estoque:', err);
       showToast('Erro ao atualizar estoque: ' + err.message, 'error');
@@ -4752,7 +4758,13 @@ export default function Dashboard({ session, profileDataProps }) {
       showToast(`✅ Recebimento confirmado! +${qtyRecebida} un. de '${prodNome}' adicionadas ao estoque local.`, 'success');
 
       setTransferenciasPendentes(prev => prev.filter(x => String(x.id) !== String(item.id)));
-      if (targetEmpresaId) fetchEstoqueProdutos(targetEmpresaId);
+      if (targetEmpresaId) {
+        await fetchGerenteData(targetEmpresaId);
+      }
+      const filialParaRecarregar = filtroFilialEstoque || item.filial_destino_id || activeFilialId;
+      if (filialParaRecarregar) {
+        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
 
     } catch (err) {
       console.error("Erro ao confirmar entrada de transferência:", err);
@@ -6863,6 +6875,12 @@ export default function Dashboard({ session, profileDataProps }) {
           await fetchVendedorData(activeFilialId, session.user.id, targetEmpresaId);
         }
       }
+
+      // 5. MOTOR DA REATIVIDADE: Recarrega a tabela com os dados atualizados instantaneamente
+      const filialParaRecarregar = filtroFilialEstoque || selectedFilialDestino || activeFilialId;
+      if (filialParaRecarregar) {
+        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
     } catch (err) {
       console.error(err);
       alert('Erro ao salvar no estoque físico: ' + err.message);
@@ -6971,7 +6989,13 @@ export default function Dashboard({ session, profileDataProps }) {
       setEntradaQtdAcessorio('1');
 
       // Recarregar estoque
-      fetchGerenteData(company.id);
+      await fetchGerenteData(company.id);
+
+      // MOTOR DA REATIVIDADE: Recarrega a tabela com os dados atualizados instantaneamente
+      const filialParaRecarregar = filtroFilialEstoque || entradaFilial || activeFilialId;
+      if (filialParaRecarregar) {
+        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
     } catch (err) {
       console.error('Erro ao submeter entrada:', err);
       alert('Erro ao inserir no estoque: ' + err.message);
@@ -7222,6 +7246,12 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchGerenteData(company.id);
       fetchTorreControlo();
       fetchEstoqueMovimentacoes();
+
+      // MOTOR DA REATIVIDADE: Recarrega a tabela com os dados atualizados instantaneamente
+      const filialParaRecarregar = filtroFilialEstoque || ajusteFilialId || activeFilialId;
+      if (filialParaRecarregar) {
+        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
     } catch (err) {
       console.error(err);
       alert('Erro ao processar ajuste de estoque: ' + err.message);
@@ -7420,7 +7450,13 @@ export default function Dashboard({ session, profileDataProps }) {
       setImeisInput('');
 
       // Recarregar estoque
-      fetchGerenteData(company.id);
+      await fetchGerenteData(company.id);
+
+      // MOTOR DA REATIVIDADE: Recarrega a tabela com os dados atualizados instantaneamente
+      const filialParaRecarregar = filtroFilialEstoque || activeFilialId || company?.id;
+      if (filialParaRecarregar) {
+        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
     } catch (err) {
       console.error('Erro ao adicionar produto:', err);
       alert('Erro ao cadastrar produto: ' + err.message);
@@ -7478,6 +7514,12 @@ export default function Dashboard({ session, profileDataProps }) {
           fetchGerenteData(targetEmpresaId),
           fetchCatalogoProdutos(targetEmpresaId)
         ]);
+      }
+
+      // MOTOR DA REATIVIDADE: Recarrega a tabela com os dados atualizados instantaneamente
+      const filialParaRecarregar = filtroFilialEstoque || activeFilialId || targetEmpresaId;
+      if (filialParaRecarregar) {
+        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
       }
 
       alert('✅ Produto removido com sucesso!');
