@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase, supabaseAdmin, supabaseRegister } from '../supabaseClient';
 import {
   LogOut, User, Building, Shield, ShieldCheck, Plus, Users, ShoppingBag, UserPlus,
@@ -6,7 +6,7 @@ import {
   Smartphone, Tag, FileText as LucideFileText, Search, Upload, Award, DollarSign,
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
-  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2
+  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter
 } from 'lucide-react';
 import { emitirNfseStub } from '../services/fiscal';
 import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
@@ -380,6 +380,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // --- Poka-Yoke: Módulo de Entrada de Estoque Avançado ---
   const [catalogoProdutos, setCatalogoProdutos] = useState([]); // Produtos_Catalogo
+  const [buscaCatalogoMestre, setBuscaCatalogoMestre] = useState('');
+  const [buscaCatalogoMestreDebounced, setBuscaCatalogoMestreDebounced] = useState('');
+  const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
   const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
   const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
@@ -1079,6 +1082,39 @@ export default function Dashboard({ session, profileDataProps }) {
       setPdvComissaoPrevia(comissao);
     }
   }, [pdvVendaTrainee, pdvProdutoSelecionado, pdvQuantidade, profile?.is_treinner, pdvValorUnitario]);
+
+  // --- FILTROS E BUSCA ESCALÁVEL DO CATÁLOGO MESTRE ---
+  // Debounce para a busca textual do Catálogo Mestre (350ms)
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setBuscaCatalogoMestreDebounced(buscaCatalogoMestre);
+    }, 350);
+    return () => clearTimeout(handler);
+  }, [buscaCatalogoMestre]);
+
+  // Lista dinâmica de categorias disponíveis no catálogo mestre
+  const categoriasDisponiveisMestre = useMemo(() => {
+    const cats = new Set();
+    (catalogoProdutos || []).forEach(p => {
+      if (p.categoria && p.categoria.trim() !== '') {
+        cats.add(p.categoria.trim().toUpperCase());
+      }
+    });
+    return ['TODAS', ...Array.from(cats).sort()];
+  }, [catalogoProdutos]);
+
+  // Produtos filtrados do catálogo mestre
+  const catalogoProdutosFiltrados = useMemo(() => {
+    return (catalogoProdutos || []).filter(p => {
+      const term = (buscaCatalogoMestreDebounced || '').toLowerCase().trim();
+      const catFiltro = (categoriaCatalogoMestre || 'TODAS').toUpperCase();
+
+      const matchesName = !term || (p.nome || '').toLowerCase().includes(term) || (p.sku || '').toLowerCase().includes(term) || (p.cor || '').toLowerCase().includes(term);
+      const matchesCategory = catFiltro === 'TODAS' || (p.categoria || 'GERAL').toUpperCase() === catFiltro;
+
+      return matchesName && matchesCategory;
+    });
+  }, [catalogoProdutos, buscaCatalogoMestreDebounced, categoriaCatalogoMestre]);
 
   // --- ATALHOS DE TECLADO PDV ---
   useEffect(() => {
@@ -4339,9 +4375,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // --- FUNÇÕES POKA-YOKE: ENTRADA DE ESTOQUE AVANÇADA ---
 
-  // Buscar catálogo de produtos (Produtos_Catalogo)
-  // Buscar catálogo de produtos (produtos_catalogo com relacionamento de IMEIs e fallback)
-  const fetchCatalogoProdutos = async (empIdParam = null) => {
+  // Buscar catálogo de produtos (produtos_catalogo com suporte a busca server-side ilike, categoria e fallback)
+  const fetchCatalogoProdutos = async (empIdParam = null, searchParam = '', categoryParam = 'TODAS') => {
     const empresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
     if (!empresaId) {
       console.warn("fetchCatalogoProdutos: ID da empresa não encontrado.");
@@ -4350,8 +4385,8 @@ export default function Dashboard({ session, profileDataProps }) {
     }
     setLoadingCatalogo(true);
     try {
-      // 1. Tentar busca relacional produtos_catalogo -> imeis
-      const { data, error } = await supabase
+      // 1. Tentar busca relacional produtos_catalogo -> imeis com preparo de busca server-side
+      let query = supabase
         .from('produtos_catalogo')
         .select(`
           *,
@@ -4364,8 +4399,16 @@ export default function Dashboard({ session, profileDataProps }) {
             filiais ( id, nome )
           )
         `)
-        .eq('empresa_id', empresaId)
-        .order('nome', { ascending: true });
+        .eq('empresa_id', empresaId);
+
+      if (searchParam && searchParam.trim() !== '') {
+        query = query.ilike('nome', `%${searchParam.trim()}%`);
+      }
+      if (categoryParam && categoryParam !== 'TODAS') {
+        query = query.eq('categoria', categoryParam);
+      }
+
+      const { data, error } = await query.order('nome', { ascending: true });
 
       let baseCatalogo = data;
       let imeisDiretos = [];
@@ -15678,41 +15721,143 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* ABA CATÁLOGO MESTRE (DISTRIBUIR - RESTRITO ESTRITAMENTE PARA ADMIN E MASTER) */}
               {activeTab === 'catalogo_mestre' && ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
-                <div className="space-y-8 animate-fadeIn">
-                  <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="space-y-6 animate-fadeIn">
+                  {/* Banner do Topo */}
+                  <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg">
                     <div>
                       <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
                         <Share2 size={22} className="text-[#6A0DAD]" />
                         Catálogo Mestre & Distribuição em Lote
                       </h3>
-                      <p className="text-xs text-gray-500 mt-1">Gerencie os modelos mestre e distribua estoque diretamente para todas as filiais e lojas da rede.</p>
+                      <p className="text-xs text-gray-400 mt-1">Gerencie os modelos mestre e distribua estoque diretamente para todas as filiais e lojas da rede.</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-purple-300 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm">
+                        <Database size={14} className="text-[#6A0DAD]" />
+                        {catalogoProdutosFiltrados.length} {catalogoProdutosFiltrados.length === 1 ? 'modelo' : 'modelos'}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6">
-                    <div className="flex items-center justify-between gap-2 mb-4">
-                      <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                        <Database size={16} className="text-[#6A0DAD]" />
-                        Modelos de Produtos no Catálogo Mestre ({catalogoProdutos?.length || 0})
-                      </h4>
+                  {/* Painel Principal do Catálogo com Filtros e Buscas */}
+                  <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
+                    
+                    {/* Header Estratégico de Busca e Filtragem */}
+                    <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-[#111111]/80 border border-[#222222] p-4 rounded-xl shadow-inner">
+                      
+                      {/* Input de Busca Textual por Nome/Cor/SKU */}
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
+                        <input
+                          type="text"
+                          placeholder="Buscar modelo por nome, cor ou SKU..."
+                          value={buscaCatalogoMestre}
+                          onChange={(e) => setBuscaCatalogoMestre(e.target.value)}
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-xs text-white placeholder-gray-500 rounded-xl pl-10 pr-9 py-2.5 outline-none font-semibold transition-all"
+                        />
+                        {buscaCatalogoMestre && (
+                          <button
+                            type="button"
+                            onClick={() => setBuscaCatalogoMestre('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors p-1"
+                            title="Limpar busca"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Dropdown de Categoria */}
+                      <div className="relative min-w-[220px]">
+                        <Filter className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6A0DAD] pointer-events-none" size={15} />
+                        <select
+                          value={categoriaCatalogoMestre}
+                          onChange={(e) => setCategoriaCatalogoMestre(e.target.value)}
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-xs text-white rounded-xl pl-10 pr-8 py-2.5 outline-none font-semibold cursor-pointer appearance-none transition-all"
+                        >
+                          <option value="TODAS">Todas as Categorias ({catalogoProdutos.length})</option>
+                          {categoriasDisponiveisMestre.filter(c => c !== 'TODAS').map(cat => {
+                            const countCat = catalogoProdutos.filter(p => (p.categoria || 'GERAL').toUpperCase() === cat).length;
+                            return (
+                              <option key={cat} value={cat}>
+                                {cat} ({countCat})
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={14} />
+                      </div>
+
+                      {/* Botão Resetar Filtros se houver filtro ativo */}
+                      {(buscaCatalogoMestre || categoriaCatalogoMestre !== 'TODAS') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBuscaCatalogoMestre('');
+                            setCategoriaCatalogoMestre('TODAS');
+                          }}
+                          className="px-3.5 py-2.5 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-800/40 text-purple-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shrink-0 cursor-pointer"
+                          title="Resetar filtros"
+                        >
+                          <X size={14} />
+                          <span>Limpar Filtros</span>
+                        </button>
+                      )}
                     </div>
 
-                    {catalogoProdutos.length === 0 ? (
-                      <p className="text-xs text-gray-500 italic py-8 text-center">Nenhum produto cadastrado no catálogo mestre ainda.</p>
+                    {/* Barra de Status do Filtro e Contadores */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-400 px-1">
+                      <span className="font-semibold flex items-center gap-1.5">
+                        <Database size={14} className="text-[#6A0DAD]" />
+                        Exibindo <strong className="text-white">{catalogoProdutosFiltrados.length}</strong> de <strong className="text-gray-300">{catalogoProdutos.length}</strong> modelos no catálogo mestre
+                      </span>
+                      {buscaCatalogoMestreDebounced && (
+                        <span className="text-[11px] text-purple-300 bg-purple-950/40 border border-purple-800/40 px-2.5 py-0.5 rounded-full font-mono self-start sm:self-auto">
+                          Busca: "{buscaCatalogoMestreDebounced}"
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Grid de Produtos ou Empty State */}
+                    {catalogoProdutosFiltrados.length === 0 ? (
+                      <div className="py-16 px-4 text-center bg-black/40 border border-dashed border-[#222222] rounded-xl flex flex-col items-center justify-center space-y-3 animate-fadeIn">
+                        <div className="p-3.5 bg-purple-950/30 border border-purple-800/40 rounded-full text-purple-400">
+                          <Search size={32} />
+                        </div>
+                        <h4 className="text-base font-bold text-white">Nenhum produto encontrado</h4>
+                        <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
+                          Não encontramos nenhum modelo no catálogo mestre com os termos informados
+                          {buscaCatalogoMestreDebounced && <span> para a busca <strong className="text-purple-300">"{buscaCatalogoMestreDebounced}"</strong></span>}
+                          {categoriaCatalogoMestre !== 'TODAS' && <span> na categoria <strong className="text-purple-300">"{categoriaCatalogoMestre}"</strong></span>}.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBuscaCatalogoMestre('');
+                            setCategoriaCatalogoMestre('TODAS');
+                          }}
+                          className="px-4 py-2 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 border border-[#6A0DAD]/50 text-purple-300 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 mt-2 cursor-pointer"
+                        >
+                          <X size={14} />
+                          <span>Resetar Filtros de Busca</span>
+                        </button>
+                      </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {catalogoProdutos.map(p => (
-                          <div key={p.id} className="bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-4 rounded-xl flex flex-col justify-between gap-3 transition-all">
+                        {catalogoProdutosFiltrados.map(p => (
+                          <div key={p.id} className="bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-4 rounded-xl flex flex-col justify-between gap-3 transition-all group">
                             <div>
-                              <span className="text-[9px] bg-purple-950/30 text-purple-400 border border-purple-800/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
-                                {p.categoria || 'Geral'}
-                              </span>
-                              <h5 className="text-sm font-bold text-white mt-1.5">{p.nome}</h5>
-                              {p.cor && (
-                                <span className="inline-block bg-[#1A1A1A] text-purple-300 border border-purple-900/50 text-[10px] font-bold px-2 py-0.5 rounded-full mt-1">
-                                  🎨 Cor: {p.cor}
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[9px] bg-purple-950/30 text-purple-400 border border-purple-800/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                  {p.categoria || 'Geral'}
                                 </span>
-                              )}
+                                {p.cor && (
+                                  <span className="bg-[#1A1A1A] text-purple-300 border border-purple-900/50 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                    🎨 {p.cor}
+                                  </span>
+                                )}
+                              </div>
+                              <h5 className="text-sm font-bold text-white mt-2 group-hover:text-purple-300 transition-colors">{p.nome}</h5>
                               <p className="text-xs font-mono font-bold text-emerald-400 mt-1">R$ {parseFloat(p.preco || 0).toFixed(2)}</p>
                               {p.sku && <p className="text-[10px] text-gray-500 font-mono mt-0.5">SKU: {p.sku}</p>}
                             </div>
