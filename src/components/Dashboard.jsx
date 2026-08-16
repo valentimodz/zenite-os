@@ -9069,7 +9069,9 @@ export default function Dashboard({ session, profileDataProps }) {
             for (const pag of pdvListaPagamentos) {
               const mapMetodo = {
                 'pix': 'PIX',
-                'cartao': 'CARTAO',
+                'cartao': 'CARTAO_CREDITO',
+                'cartao_credito': 'CARTAO_CREDITO',
+                'cartao_debito': 'CARTAO_DEBITO',
                 'dinheiro': 'DINHEIRO',
                 'boleto': 'BOLETO'
               };
@@ -9078,14 +9080,16 @@ export default function Dashboard({ session, profileDataProps }) {
                 venda_id: rpcRes.venda_id,
                 valor_pago: pag.valor,
                 metodo_pagamento: metodoResolved,
-                parcelas: pag.parcelas || 1,
+                parcelas: pag.metodo === 'cartao_credito' ? (pag.parcelas || 1) : 1,
                 tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
               });
             }
           } else if (actualValorPago > 0) {
             const mapMetodo = {
               'pix': 'PIX',
-              'cartao': 'CARTAO',
+              'cartao': 'CARTAO_CREDITO',
+              'cartao_credito': 'CARTAO_CREDITO',
+              'cartao_debito': 'CARTAO_DEBITO',
               'dinheiro': 'DINHEIRO'
             };
             const metodoResolved = mapMetodo[pdvMetodoPagamento?.toLowerCase()] || 'DINHEIRO';
@@ -9093,6 +9097,7 @@ export default function Dashboard({ session, profileDataProps }) {
               venda_id: rpcRes.venda_id,
               valor_pago: actualValorPago,
               metodo_pagamento: metodoResolved,
+              parcelas: pdvMetodoPagamento === 'cartao_credito' ? (pdvCartaoParcelas || 1) : 1,
               tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
             });
           }
@@ -11416,7 +11421,8 @@ export default function Dashboard({ session, profileDataProps }) {
                     let labelMetodo = 'Pix';
                     if (pdvNovoMetodo === 'pix') labelMetodo = '⚡ Pix';
                     else if (pdvNovoMetodo === 'dinheiro') labelMetodo = '💵 Dinheiro';
-                    else if (pdvNovoMetodo === 'cartao') labelMetodo = `💳 Cartão (${pdvNovoParcelas}x)`;
+                    else if (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') labelMetodo = `💳 Crédito (${pdvNovoParcelas}x)`;
+                    else if (pdvNovoMetodo === 'cartao_debito') labelMetodo = '💳 Débito (À Vista)';
                     else if (pdvNovoMetodo === 'boleto') labelMetodo = `📄 Boleto (${pdvNovoFinanceira})`;
 
                     const novoItem = {
@@ -11424,7 +11430,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       metodo: pdvNovoMetodo,
                       label: labelMetodo,
                       valor: valNum,
-                      parcelas: pdvNovoMetodo === 'cartao' ? pdvNovoParcelas : 1,
+                      parcelas: (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') ? pdvNovoParcelas : 1,
                       financeira: pdvNovoMetodo === 'boleto' ? pdvNovoFinanceira : null
                     };
 
@@ -11507,22 +11513,25 @@ export default function Dashboard({ session, profileDataProps }) {
                             const eElegivelBoleto = verificarElegibilidadeBoleto(pdvCart);
                             const metodosDisponiveis = [
                               { value: 'pix', label: '⚡ Pix' },
-                              { value: 'cartao', label: '💳 Cartão' },
+                              { value: 'cartao_credito', label: '💳 Crédito' },
+                              { value: 'cartao_debito', label: '💳 Débito' },
                               { value: 'dinheiro', label: '💵 Dinheiro' },
                               ...(eElegivelBoleto ? [{ value: 'boleto', label: '📄 Boleto' }] : [])
                             ];
 
                             return (
-                              <div className="grid grid-cols-2 gap-2">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                 {metodosDisponiveis.map((m) => (
                                   <button
                                     key={m.value}
                                     type="button"
                                     onClick={() => {
                                       setPdvNovoMetodo(m.value);
-                                      if (m.value !== 'cartao') setPdvNovoParcelas(1);
+                                      if (m.value === 'cartao_debito' || m.value !== 'cartao_credito') {
+                                        setPdvNovoParcelas(1);
+                                      }
                                     }}
-                                    className={`py-2 px-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
+                                    className={`py-2 px-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
                                       ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-purple-900/30'
                                       : 'bg-black text-gray-400 border-[#222222] hover:text-white'
                                       }`}
@@ -11534,11 +11543,11 @@ export default function Dashboard({ session, profileDataProps }) {
                             );
                           })()}
 
-                          {/* Se for Cartão de Crédito: Parcelas */}
-                          {pdvNovoMetodo === 'cartao' && (
+                          {/* Se for Cartão de Crédito: Parcelas (1x a 12x) */}
+                          {(pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') && (
                             <div className="space-y-1 animate-fadeIn">
                               <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
-                                Número de Parcelas (Cartão)
+                                Número de Parcelas (Crédito)
                               </label>
                               <select
                                 value={pdvNovoParcelas}
@@ -11551,6 +11560,21 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </option>
                                 ))}
                               </select>
+                            </div>
+                          )}
+
+                          {/* Se for Cartão de Débito: Trava em 1x (À Vista) */}
+                          {pdvNovoMetodo === 'cartao_debito' && (
+                            <div className="space-y-1 animate-fadeIn">
+                              <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                                Parcelamento (Débito)
+                              </label>
+                              <input
+                                type="text"
+                                disabled
+                                value="1x (À Vista - Débito)"
+                                className="w-full bg-[#111111] border border-[#222222] text-gray-400 rounded px-3 py-1.5 text-xs font-mono font-bold cursor-not-allowed opacity-75"
+                              />
                             </div>
                           )}
 
@@ -12314,10 +12338,11 @@ export default function Dashboard({ session, profileDataProps }) {
                   <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
                     Forma de Pagamento Recebida
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       { value: 'PIX', label: '⚡ PIX' },
-                      { value: 'CARTAO', label: '💳 Cartão' },
+                      { value: 'CARTAO_CREDITO', label: '💳 Crédito' },
+                      { value: 'CARTAO_DEBITO', label: '💳 Débito' },
                       { value: 'DINHEIRO', label: '💵 Dinheiro' }
                     ].map(m => (
                       <button
