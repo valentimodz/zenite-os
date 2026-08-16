@@ -7816,24 +7816,42 @@ export default function Dashboard({ session, profileDataProps }) {
     }));
   };
 
-  // Atualizar preço de item no carrinho (descontos)
-  const handleUpdateCartPrice = (cartId, newPrice) => {
+  // Atualizar preço de item no carrinho (descontos - digitação livre)
+  const handleUpdateCartPrice = (cartId, rawPrice) => {
+    setPdvCart(prev => prev.map(item => {
+      if (item.cartId === cartId) {
+        return { ...item, valorUnitario: rawPrice };
+      }
+      return item;
+    }));
+  };
+
+  // Validar e consolidar preço de item no carrinho ao sair do input (onBlur)
+  const handleBlurCartPrice = (cartId) => {
     const item = pdvCart.find(i => i.cartId === cartId);
     if (!item) return;
 
-    const precoOriginal = Number(item.produto.preco) || 0;
-    const precoNovo = parseFloat(newPrice);
+    const precoOriginal = Number(item.produto?.preco) || 0;
+    let precoNovo = parseFloat(item.valorUnitario);
 
-    if (isNaN(precoNovo) || precoNovo < 0) return;
+    // Se o valor digitado estiver vazio ou for inválido (NaN), restaura o preço original
+    if (isNaN(precoNovo) || item.valorUnitario === '' || item.valorUnitario === null || item.valorUnitario === undefined) {
+      setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoOriginal } : i));
+      return;
+    }
 
-    const descontoProposto = Math.max(0, precoOriginal - precoNovo);
+    if (precoNovo < 0) precoNovo = 0;
+
     const descontoMaximoPermitido = calcularDescontoMaximo(item.produto);
+    const precoMinimoPermitido = Math.max(0, precoOriginal - descontoMaximoPermitido);
 
-    // Validação matemática rígida do teto de desconto por categoria/marca
-    if (descontoProposto > (descontoMaximoPermitido + 0.001)) {
-      const precoMinimoPermitido = Math.max(0, precoOriginal - descontoMaximoPermitido);
-      const nomeLower = (item.produto.nome || '').toLowerCase();
-      const isApple = nomeLower.includes('iphone') || nomeLower.includes('apple') || (item.produto.categoria || '').toLowerCase().includes('ios') || (item.produto.marca || '').toLowerCase().includes('apple');
+    // Bloqueia SOMENTE se o valor inserido for estritamente MENOR que o preço mínimo (Valor Inserido < Preço Mínimo)
+    if (precoNovo < (precoMinimoPermitido - 0.001)) {
+      const nomeLower = (item.produto?.nome || '').toLowerCase();
+      const isApple = nomeLower.includes('iphone') || 
+                      nomeLower.includes('apple') || 
+                      (item.produto?.categoria || '').toLowerCase().includes('ios') || 
+                      (item.produto?.marca || '').toLowerCase().includes('apple');
 
       if (isApple) {
         showToast('Desconto Bloqueado: iPhones e produtos Apple possuem 0% de desconto permitido.', 'error');
@@ -7842,30 +7860,22 @@ export default function Dashboard({ session, profileDataProps }) {
         showToast(`Desconto Bloqueado: O desconto máximo permitido para este item é ${percMax}% (Preço mínimo: R$ ${precoMinimoPermitido.toFixed(2)}).`, 'error');
       }
 
-      // Trava matematicamente o preço no valor mínimo permitido
-      setPdvCart(prev => prev.map(i => {
-        if (i.cartId === cartId) {
-          return { ...i, valorUnitario: precoMinimoPermitido };
-        }
-        return i;
-      }));
+      // Reverte e trava no preço mínimo permitido
+      setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoMinimoPermitido } : i));
       return;
     }
 
-    const custo = item.produto.preco_custo || 0;
-    if (precoNovo < custo) {
+    const custo = Number(item.produto?.preco_custo) || 0;
+    if (custo > 0 && precoNovo < custo) {
       if (!['GERENTE', 'ADMIN', 'SUPER_ADMIN'].includes(profile?.role)) {
         showToast('Desconto bloqueado: Somente administradores ou gerentes podem conceder descontos abaixo do preço de custo.', 'error');
+        setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoOriginal } : i));
         return;
       }
     }
 
-    setPdvCart(prev => prev.map(i => {
-      if (i.cartId === cartId) {
-        return { ...i, valorUnitario: precoNovo };
-      }
-      return i;
-    }));
+    // Se Valor Inserido >= Preço Mínimo, aceita livremente o valor
+    setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoNovo } : i));
   };
 
   // Atualizar IMEI de item no carrinho
@@ -8292,7 +8302,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     // Calcular valores do carrinho
-    const subtotalCart = pdvCart.reduce((sum, item) => sum + item.valorUnitario * item.quantidade, 0);
+    const subtotalCart = pdvCart.reduce((sum, item) => sum + (parseFloat(item.valorUnitario) || 0) * item.quantidade, 0);
     const valorUsadoTotal = isTrocaAtiva ? pdvUsadoList.reduce((acc, item) => acc + item.valor, 0) : 0;
 
     // Calcular juros/taxas do cartão se aplicável
@@ -10691,6 +10701,12 @@ export default function Dashboard({ session, profileDataProps }) {
                             step="0.01"
                             value={item.valorUnitario}
                             onChange={(e) => handleUpdateCartPrice(item.cartId, e.target.value)}
+                            onBlur={() => handleBlurCartPrice(item.cartId)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.target.blur();
+                              }
+                            }}
                             className="w-20 bg-black border border-[#222] focus:border-[#6A0DAD] rounded pl-6 pr-1.5 py-0.5 text-xs text-white text-right outline-none font-mono font-semibold"
                           />
                         </div>
