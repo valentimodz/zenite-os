@@ -105,6 +105,305 @@ const permiteParticipacaoTreener = (carrinho) => {
   });
 };
 
+// Subcomponente isolado para linha da tabela de produtos com edição inline e isolamento de estado
+function ProductTableRow({
+  produto: p,
+  filiais = [],
+  disponiveisImeis = [],
+  expandedProductImeis = {},
+  productImeisMap = {},
+  toggleVerImeis,
+  onUpdateProdutoField,
+  onDeleteProduto,
+  userRole
+}) {
+  const [editingField, setEditingField] = useState(null); // 'cor' | 'preco' | 'quantidade' | null
+  const [editValue, setEditValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const startEdit = (e, field, initialVal) => {
+    e.stopPropagation();
+    setEditingField(field);
+    setEditValue(initialVal !== undefined && initialVal !== null ? String(initialVal) : '');
+  };
+
+  const cancelEdit = (e) => {
+    if (e) e.stopPropagation();
+    setEditingField(null);
+    setEditValue('');
+  };
+
+  const saveEdit = async (e) => {
+    if (e) e.stopPropagation();
+    if (!editingField || isSaving) return;
+
+    setIsSaving(true);
+    try {
+      await onUpdateProdutoField(p.id, p.nome, editingField, editValue);
+      setEditingField(null);
+    } catch (err) {
+      console.error('Erro ao salvar alteração inline:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      saveEdit(e);
+    } else if (e.key === 'Escape') {
+      cancelEdit(e);
+    }
+  };
+
+  const handleDelete = async (e) => {
+    e.stopPropagation();
+    if (isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteProduto(p);
+    } catch (err) {
+      console.error('Erro ao excluir produto:', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const isCelular = p.tipo === 'CELULAR';
+  const isServico = p.categoria === 'SERVICO';
+
+  return (
+    <React.Fragment>
+      <tr className="hover:bg-[#6A0DAD]/5 transition-colors">
+        {/* Nome do Produto */}
+        <td className="py-2.5 font-semibold text-white">
+          <div className="flex items-center gap-1.5">
+            {isCelular ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
+            <span className="truncate max-w-[120px]" title={p.nome}>{p.nome}</span>
+          </div>
+        </td>
+
+        {/* Filial */}
+        <td className="py-2.5 text-gray-500 truncate max-w-[80px]">
+          {filiais.find(f => f.id === p.filial_id)?.nome || '-'}
+        </td>
+
+        {/* Categoria */}
+        <td className="py-2.5">
+          <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${
+            p.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
+            p.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
+            p.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
+            'bg-purple-950/20 text-purple-400 border border-purple-800/20'
+          }`}>{p.categoria || 'GERAL'}</span>
+        </td>
+
+        {/* Célula: Cor */}
+        <td className="py-2.5">
+          {editingField === 'cor' ? (
+            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <input
+                type="text"
+                autoFocus
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isSaving}
+                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-medium"
+              />
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={isSaving}
+                className="p-1 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                title="Salvar (Enter)"
+              >
+                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={isSaving}
+                className="p-1 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                title="Cancelar (Esc)"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium border ${
+                p.cor ? 'bg-purple-950/30 text-purple-300 border-purple-800/30 font-bold' : 'bg-zinc-900/50 text-gray-500 border-zinc-800/40'
+              }`}>
+                {p.cor || 'Sem cor'}
+              </span>
+              <button
+                type="button"
+                onClick={e => startEdit(e, 'cor', p.cor || '')}
+                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
+                title="Alterar Cor"
+              >
+                <Edit2 size={11} />
+              </button>
+            </div>
+          )}
+        </td>
+
+        {/* Célula: Preço */}
+        <td className="py-2.5 font-mono font-bold text-white text-[11px]">
+          {editingField === 'preco' ? (
+            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <span className="text-[10px] text-gray-500 font-bold">R$</span>
+              <input
+                type="number"
+                step="0.01"
+                autoFocus
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isSaving}
+                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono font-bold"
+              />
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={isSaving}
+                className="p-1 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                title="Salvar (Enter)"
+              >
+                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={isSaving}
+                className="p-1 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                title="Cancelar (Esc)"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span>R$ {parseFloat(p.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              <button
+                type="button"
+                onClick={e => startEdit(e, 'preco', p.preco || 0)}
+                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
+                title="Editar Preço"
+              >
+                <Edit2 size={12} />
+              </button>
+            </div>
+          )}
+        </td>
+
+        {/* Célula: Quantidade */}
+        <td className="py-2.5 font-mono text-xs">
+          {isCelular ? (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); toggleVerImeis(p.id); }}
+              className="text-[#6A0DAD] underline font-bold hover:text-purple-300 transition-colors cursor-pointer"
+            >
+              {disponiveisImeis.filter(im => im.produto_id === p.id && im.filial_id === p.filial_id && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length} (IMEIs)
+            </button>
+          ) : editingField === 'quantidade' ? (
+            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                autoFocus
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isSaving}
+                className="w-16 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono font-bold"
+              />
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={isSaving}
+                className="p-1 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                title="Salvar (Enter)"
+              >
+                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={isSaving}
+                className="p-1 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                title="Cancelar (Esc)"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-gray-300 font-bold">{isServico ? '∞' : (p.quantidade || 0)}</span>
+              {!isServico && (
+                <button
+                  type="button"
+                  onClick={e => startEdit(e, 'quantidade', p.quantidade || 0)}
+                  className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
+                  title="Alterar Estoque"
+                >
+                  <Edit2 size={12} />
+                </button>
+              )}
+            </div>
+          )}
+        </td>
+
+        {/* Ações (Exclusão) */}
+        {userRole !== 'DONO' && (
+          <td className="py-2.5 text-right">
+            {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(userRole) && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="p-1 border border-[#222222] hover:border-red-800/60 text-gray-600 hover:text-red-400 rounded bg-black transition-colors cursor-pointer disabled:opacity-50"
+                title="Remover produto"
+              >
+                {isDeleting ? <Loader2 size={12} className="animate-spin text-red-400" /> : <Trash2 size={12} />}
+              </button>
+            )}
+          </td>
+        )}
+      </tr>
+
+      {/* Accordion de IMEIs */}
+      {expandedProductImeis[p.id] && (
+        <tr className="bg-black">
+          <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
+            <div className="bg-[#050505] border border-[#1A1A1A] p-3 rounded-lg">
+              <span className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wide">
+                IMEIs de {p.nome} nesta filial
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5">
+                {(!productImeisMap[p.id] || productImeisMap[p.id].filter(imObj => imObj.filial_id === p.filial_id).length === 0) ? (
+                  <span className="text-xs italic text-gray-700 col-span-3">Nenhum IMEI registrado nesta filial.</span>
+                ) : (
+                  productImeisMap[p.id]?.filter(imObj => imObj.filial_id === p.filial_id).map((imObj, idx) => (
+                    <div key={idx} className="flex flex-col bg-black border border-[#222222] p-2.5 rounded text-xs font-mono gap-1">
+                      <span className="text-gray-300 font-bold">{imObj.imei}</span>
+                      {imObj.cor && <span className="text-[10px] text-purple-400">🎨 Cor: {imObj.cor}</span>}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </React.Fragment>
+  );
+}
+
 export default function Dashboard({ session, profileDataProps }) {
   const [profile, setProfile] = useState(profileDataProps || null);
   const [company, setCompany] = useState(null);
@@ -4048,6 +4347,112 @@ export default function Dashboard({ session, profileDataProps }) {
       alert('Falha ao excluir vendedor.');
     } finally {
       setLoadingVendedor(false);
+    }
+  };
+
+  const handleUpdateProdutoField = async (produtoId, nome, field, newValue) => {
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    const targetFilialId = activeFilialId || filiais[0]?.id;
+
+    if (field === 'cor') {
+      const corTrimmed = String(newValue || '').trim();
+      try {
+        if (produtoId && !String(produtoId).startsWith('synth_')) {
+          await supabase.from('produtos').update({ cor: corTrimmed }).eq('id', produtoId);
+        }
+        if (nome && targetEmpresaId) {
+          await supabase.from('produtos').update({ cor: corTrimmed }).eq('empresa_id', targetEmpresaId).ilike('nome', nome);
+          await supabase.from('produtos_catalogo').update({ cor: corTrimmed }).eq('empresa_id', targetEmpresaId).ilike('nome', nome);
+        }
+        // Optimistic UI updates
+        setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+        setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
+        showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
+      } catch (err) {
+        console.error('Erro ao atualizar cor:', err);
+        showToast('Erro ao atualizar cor: ' + err.message, 'error');
+      }
+    } else if (field === 'preco') {
+      const sanitized = String(newValue).replace(/[^\d.,]/g, '').replace(',', '.');
+      const novoPreco = parseFloat(sanitized);
+
+      if (isNaN(novoPreco) || novoPreco < 0) {
+        showToast('Por favor, informe um preço numérico válido.', 'error');
+        return;
+      }
+
+      try {
+        if (produtoId && !String(produtoId).startsWith('synth_')) {
+          await supabase.from('produtos').update({ preco: novoPreco }).eq('id', produtoId);
+        }
+        if (nome && targetEmpresaId) {
+          await supabase.from('produtos').update({ preco: novoPreco }).eq('empresa_id', targetEmpresaId).ilike('nome', nome);
+          await supabase.from('produtos_catalogo').update({ preco: novoPreco }).eq('empresa_id', targetEmpresaId).ilike('nome', nome);
+        }
+        // Optimistic UI updates
+        setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+        setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
+        showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
+      } catch (err) {
+        console.error('Erro ao atualizar preço:', err);
+        showToast('Erro ao atualizar preço: ' + err.message, 'error');
+      }
+    } else if (field === 'quantidade') {
+      const novaQtd = parseInt(newValue, 10);
+      if (isNaN(novaQtd) || novaQtd < 0) {
+        showToast('Por favor, informe uma quantidade inteira válida (>= 0).', 'error');
+        return;
+      }
+
+      try {
+        if (produtoId && !String(produtoId).startsWith('synth_')) {
+          await supabase.from('produtos').update({ quantidade: novaQtd, filial_id: targetFilialId }).eq('id', produtoId);
+        }
+
+        const { data: prodsBanco } = await supabase
+          .from('produtos')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .ilike('nome', nome);
+
+        if (prodsBanco && prodsBanco.length > 0) {
+          const matchFilial = prodsBanco.find(p => String(p.filial_id) === String(targetFilialId));
+          if (matchFilial) {
+            await supabase.from('produtos').update({ quantidade: novaQtd }).eq('id', matchFilial.id);
+          } else {
+            await supabase.from('produtos').update({ quantidade: novaQtd, filial_id: targetFilialId }).eq('id', prodsBanco[0].id);
+          }
+        }
+
+        // Optimistic UI updates
+        setProdutos(prev => {
+          const hasMatch = prev.some(p => p.nome?.toLowerCase() === nome?.toLowerCase());
+          if (hasMatch) {
+            return prev.map(p => p.nome?.toLowerCase() === nome?.toLowerCase() ? { ...p, quantidade: novaQtd, filial_id: targetFilialId } : p);
+          }
+          return [...prev, { id: produtoId || crypto.randomUUID(), empresa_id: targetEmpresaId, filial_id: targetFilialId, nome: nome, quantidade: novaQtd }];
+        });
+
+        setProdutosFilial(prev => {
+          const hasMatch = prev.some(p => p.nome?.toLowerCase() === nome?.toLowerCase());
+          if (hasMatch) {
+            return prev.map(p => p.nome?.toLowerCase() === nome?.toLowerCase() ? { ...p, quantidade: novaQtd, filial_id: targetFilialId } : p);
+          }
+          return [...prev, { id: produtoId || crypto.randomUUID(), nome: nome, quantidade: novaQtd, filial_id: targetFilialId }];
+        });
+
+        showToast(`Estoque de "${nome}" alterado para ${novaQtd} un. com sucesso!`, 'success');
+
+        const filialParaRecarregar = filtroFilialEstoque || targetFilialId || activeFilialId;
+        if (filialParaRecarregar) {
+          await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+        }
+      } catch (err) {
+        console.error('Erro ao atualizar quantidade:', err);
+        showToast('Erro ao atualizar estoque: ' + err.message, 'error');
+      }
     }
   };
 
@@ -16305,129 +16710,24 @@ export default function Dashboard({ session, profileDataProps }) {
                                 </thead>
                                 <tbody className="divide-y divide-[#111111]">
                                   {displayEstoqueConsolidado.map(p => (
-                                  <React.Fragment key={p.id}>
-                                    <tr className="hover:bg-[#6A0DAD]/5 transition-colors">
-                                      <td className="py-2.5 font-semibold text-white">
-                                        <div className="flex items-center gap-1.5">
-                                          {p.tipo === 'CELULAR' ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
-                                          <span className="truncate max-w-[120px]" title={p.nome}>{p.nome}</span>
-                                        </div>
-                                      </td>
-                                      <td className="py-2.5 text-gray-500 truncate max-w-[80px]">{filiais.find(f => f.id === p.filial_id)?.nome || '-'}</td>
-                                      <td className="py-2.5">
-                                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${p.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
-                                          p.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
-                                            p.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
-                                              'bg-purple-950/20 text-purple-400 border border-purple-800/20'
-                                          }`}>{p.categoria || 'GERAL'}</span>
-                                      </td>
-                                      <td className="py-2.5">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium border ${p.cor ? 'bg-purple-950/30 text-purple-300 border-purple-800/30 font-bold' : 'bg-zinc-900/50 text-gray-500 border-zinc-800/40'
-                                            }`}>
-                                            {p.cor || 'Sem cor'}
-                                          </span>
-                                          <button
-                                            onClick={() => handleUpdateProdutoCor(p.id, p.nome, p.cor)}
-                                            className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
-                                            title="Alterar Cor"
-                                          >
-                                            <Edit2 size={11} />
-                                          </button>
-                                        </div>
-                                      </td>
-                                      <td className="py-2.5 font-mono font-bold text-white text-[11px]">
-                                        <div className="flex items-center gap-2">
-                                          <span>R$ {parseFloat(p.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                          <button
-                                            onClick={() => handleUpdateProdutoPreco(p.id, p.nome, p.preco)}
-                                            className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
-                                            title="Editar Preço"
-                                          >
-                                            <Edit2 size={12} />
-                                          </button>
-                                        </div>
-                                      </td>
-                                      <td className="py-2.5 font-mono text-xs">
-                                        {p.tipo === 'CELULAR' ? (
-                                          <button
-                                            onClick={() => toggleVerImeis(p.id)}
-                                            className="text-[#6A0DAD] underline font-bold hover:text-purple-300 transition-colors"
-                                          >
-                                            {disponiveisImeis.filter(im => im.produto_id === p.id && im.filial_id === p.filial_id && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length} (IMEIs)
-                                          </button>
-                                        ) : (
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-gray-300 font-bold">{p.categoria === 'SERVICO' ? '∞' : (p.quantidade || 0)}</span>
-                                            {p.categoria !== 'SERVICO' && (
-                                              <button
-                                                onClick={() => handleUpdateProdutoQuantidade(p.id, p.nome, p.quantidade || 0)}
-                                                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
-                                                title="Alterar Estoque"
-                                              >
-                                                <Edit2 size={12} />
-                                              </button>
-                                            )}
-                                          </div>
-                                        )}
-                                      </td>
-                                      {profile?.role !== 'DONO' && (
-                                        <td className="py-2.5 text-right">
-                                          {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(profile?.role) && (
-                                            <button
-                                              onClick={() => handleDeleteProduto(p.id)}
-                                              className="p-1 border border-[#222222] hover:border-red-800/60 text-gray-600 hover:text-red-400 rounded bg-black transition-colors"
-                                              title="Remover produto"
-                                            >
-                                              <Trash2 size={12} />
-                                            </button>
-                                          )}
-                                        </td>
-                                      )}
-                                    </tr>
-                                    {expandedProductImeis[p.id] && (
-                                      <tr className="bg-black">
-                                        <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
-                                          <div className="bg-[#050505] border border-[#1A1A1A] p-3 rounded-lg">
-                                            <span className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wide">
-                                              IMEIs de {p.nome} nesta filial
-                                            </span>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5">
-                                              {(!productImeisMap[p.id] || productImeisMap[p.id].filter(imObj => imObj.filial_id === p.filial_id).length === 0) ? (
-                                                <span className="text-xs italic text-gray-700 col-span-3">Nenhum IMEI registrado nesta filial.</span>
-                                              ) : (
-                                                productImeisMap[p.id]?.filter(imObj => imObj.filial_id === p.filial_id).map((imObj, idx) => (
-                                                  <div key={idx} className="flex flex-col bg-black border border-[#222222] p-2.5 rounded text-xs font-mono gap-1">
-                                                    <div className="flex justify-between items-center">
-                                                      <span className="text-gray-400 tracking-wider font-bold">{imObj.imei}</span>
-                                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${imObj.vendido
-                                                        ? 'bg-red-950/20 text-red-400 border border-red-850/30'
-                                                        : 'bg-green-950/20 text-green-400 border border-green-800/30'
-                                                        }`}>
-                                                        {imObj.vendido ? 'Vendido' : 'Disponível'}
-                                                      </span>
-                                                    </div>
-                                                    {imObj.is_seminovo && (
-                                                      <div className="text-[10px] text-gray-500 border-t border-[#111] pt-1 mt-1 space-y-0.5">
-                                                        <p><span className="text-purple-400 font-bold">Semi-Novo:</span> {imObj.cor || 'Sem Cor'} · Bateria: {imObj.bateria_saude || '--'}% · Pago: R$ {parseFloat(imObj.preco_compra || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                                                        {imObj.observacoes && <p className="italic text-gray-600">Obs: {imObj.observacoes}</p>}
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                ))
-                                              )}
-                                            </div>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </React.Fragment>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        );
-                      })()}
+                                    <ProductTableRow
+                                      key={p.id}
+                                      produto={p}
+                                      filiais={filiais}
+                                      disponiveisImeis={disponiveisImeis}
+                                      expandedProductImeis={expandedProductImeis}
+                                      productImeisMap={productImeisMap}
+                                      toggleVerImeis={toggleVerImeis}
+                                      onUpdateProdutoField={handleUpdateProdutoField}
+                                      onDeleteProduto={handleDeleteProduto}
+                                      userRole={profile?.role}
+                                    />
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                     </div>
