@@ -18114,11 +18114,22 @@ export default function Dashboard({ session, profileDataProps }) {
                   Romaneio de Transferência
                 </span>
                 {transfRomaneioDados.filial_logo && transfRomaneioDados.filial_logo.trim() !== '' ? (
-                  <img
-                    src={transfRomaneioDados.filial_logo}
-                    alt="Logo da Filial"
-                    className="max-w-[150px] max-h-[80px] mx-auto object-contain mb-2 grayscale print:grayscale print:contrast-125"
-                  />
+                  <div className="recibo-logo-container w-full flex justify-center items-center my-2">
+                    <img
+                      src={transfRomaneioDados.filial_logo}
+                      alt="Logo da Filial"
+                      className="recibo-logo-img max-w-[160px] max-h-[90px] w-auto h-auto object-contain block mx-auto"
+                      style={{
+                        objectFit: 'contain',
+                        maxWidth: '160px',
+                        maxHeight: '90px',
+                        width: 'auto',
+                        height: 'auto',
+                        filter: 'none',
+                        WebkitFilter: 'none'
+                      }}
+                    />
+                  </div>
                 ) : (
                   <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2">
                     <Truck className="text-blue-500" size={20} /> ZÊNITE TRANSFER
@@ -18211,12 +18222,23 @@ export default function Dashboard({ session, profileDataProps }) {
                   Recibo de Venda Consolidado
                 </span>
                 {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
-                  <img
-                    src={pdvReciboDados.filial_logo}
-                    alt="Logo da Filial"
-                    onLoad={() => setIsImageLoaded(true)}
-                    className="max-w-[150px] max-h-[80px] mx-auto object-contain mb-2 grayscale print:grayscale print:contrast-125"
-                  />
+                  <div className="recibo-logo-container w-full flex justify-center items-center my-2">
+                    <img
+                      src={pdvReciboDados.filial_logo}
+                      alt="Logo da Filial"
+                      onLoad={() => setIsImageLoaded(true)}
+                      className="recibo-logo-img max-w-[160px] max-h-[90px] w-auto h-auto object-contain block mx-auto"
+                      style={{
+                        objectFit: 'contain',
+                        maxWidth: '160px',
+                        maxHeight: '90px',
+                        width: 'auto',
+                        height: 'auto',
+                        filter: 'none',
+                        WebkitFilter: 'none'
+                      }}
+                    />
+                  </div>
                 ) : (
                   <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2 mb-2">
                     {pdvReciboDados.filial_nome}
