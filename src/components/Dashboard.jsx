@@ -1960,6 +1960,37 @@ export default function Dashboard({ session, profileDataProps }) {
   const fetchAuditoriaDescontos = async (empresaId) => {
     const targetEmpresaId = empresaId || profile?.empresa_id || company?.id;
     try {
+      // 1. Tentar buscar primeiro na tabela auditoria_descontos
+      const { data: auditData, error: auditErr } = await supabase
+        .from('auditoria_descontos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!auditErr && auditData && auditData.length > 0) {
+        const filteredAudit = auditData
+          .filter(a => !targetEmpresaId || targetEmpresaId === 'MASTER' || String(a.empresa_id) === String(targetEmpresaId))
+          .map(a => ({
+            id: a.id,
+            vendedor_id: a.vendedor_id,
+            vendedor_nome: a.vendedor_nome || 'Vendedor',
+            filial_id: a.filial_id,
+            filial_nome: a.filial_nome || 'Filial',
+            cliente_nome: a.cliente_nome || 'Cliente Consumidor',
+            itens_resumo: a.itens_resumo || 'Venda com desconto',
+            valor_tabela: Number(a.valor_tabela || 0),
+            valor_final: Number(a.valor_final || 0),
+            valor_desconto: Number(a.valor_desconto || 0),
+            percentual_desconto: Number(a.percentual_desconto || 0),
+            created_at: a.created_at
+          }));
+
+        if (filteredAudit.length > 0) {
+          setDescontosLogs(filteredAudit);
+          return;
+        }
+      }
+
+      // 2. Buscar na tabela 'vendas' com filtro de desconto
       let query = supabase
         .from('vendas')
         .select(`
@@ -1969,18 +2000,22 @@ export default function Dashboard({ session, profileDataProps }) {
           valor_total,
           desconto,
           valor_desconto,
+          total_desconto,
           percentual_desconto,
+          preco_base,
+          preco_unitario_vendido,
           cliente_nome,
+          produto_nome,
           produtos_descricao,
           itens_resumo,
+          quantidade,
           vendedor_id,
           vendedor_nome,
           filial_id,
           filial_nome,
-          vendedor:usuarios!vendedor_id(nome),
+          vendedor:profiles!vendedor_id(nome),
           filial:filiais!filial_id(nome)
         `)
-        .or('desconto.gt.0,valor_desconto.gt.0')
         .order('created_at', { ascending: false });
 
       if (targetEmpresaId && targetEmpresaId !== 'MASTER') {
@@ -1993,7 +2028,6 @@ export default function Dashboard({ session, profileDataProps }) {
         let fallbackQuery = supabase
           .from('vendas')
           .select('*')
-          .or('desconto.gt.0,valor_desconto.gt.0')
           .order('created_at', { ascending: false });
 
         if (targetEmpresaId && targetEmpresaId !== 'MASTER') {
@@ -2008,10 +2042,19 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       if (!error && data) {
-        const formatted = data.map(v => {
-          const valDesc = Number(v.desconto || v.valor_desconto || 0);
+        const comDesconto = data.filter(v => {
+          const valDesc = Number(v.desconto || v.valor_desconto || v.total_desconto || 0);
+          const valTabela = Number(v.valor_tabela || (v.preco_base ? v.preco_base * (v.quantidade || 1) : 0));
+          const valTotal = Number(v.valor_total || v.valor_vendido || 0);
+          return valDesc > 0.001 || (valTabela > 0 && valTotal > 0 && valTabela > (valTotal + 0.01));
+        });
+
+        const formatted = comDesconto.map(v => {
           const valFinal = Number(v.valor_total || v.valor_vendido || v.total || 0);
-          const valTabela = Number(v.valor_tabela || 0) || (valFinal + valDesc);
+          let valDesc = Number(v.desconto || v.valor_desconto || v.total_desconto || 0);
+          let valTabela = Number(v.valor_tabela || (v.preco_base ? v.preco_base * (v.quantidade || 1) : 0));
+          if (!valTabela || valTabela <= 0) valTabela = valFinal + valDesc;
+          if (valDesc <= 0 && valTabela > valFinal) valDesc = valTabela - valFinal;
           const percDesc = Number(v.percentual_desconto || 0) || (valTabela > 0 ? (valDesc / valTabela) * 100 : 0);
 
           return {
@@ -2021,7 +2064,7 @@ export default function Dashboard({ session, profileDataProps }) {
             filial_id: v.filial_id,
             filial_nome: v.filial?.nome || v.filial_nome || 'Filial',
             cliente_nome: v.cliente_nome || 'Cliente Consumidor',
-            itens_resumo: v.produtos_descricao || v.itens_resumo || 'Venda com desconto',
+            itens_resumo: v.produtos_descricao || v.itens_resumo || v.produto_nome || 'Venda com desconto',
             valor_tabela: valTabela,
             valor_final: valFinal,
             valor_desconto: valDesc,
@@ -2029,13 +2072,25 @@ export default function Dashboard({ session, profileDataProps }) {
             created_at: v.created_at
           };
         });
-        setDescontosLogs(formatted);
+
+        // Combinar com logs locais recentes
+        const localLogs = JSON.parse(localStorage.getItem('zenite_descontos_logs') || '[]');
+        const combined = [...formatted];
+        localLogs.forEach(loc => {
+          if (!combined.some(c => c.id === loc.id)) {
+            combined.unshift(loc);
+          }
+        });
+
+        setDescontosLogs(combined);
       } else {
-        setDescontosLogs([]);
+        const localLogs = JSON.parse(localStorage.getItem('zenite_descontos_logs') || '[]');
+        setDescontosLogs(localLogs);
       }
     } catch (err) {
       console.warn('Aviso ao carregar auditoria de descontos:', err);
-      setDescontosLogs([]);
+      const localLogs = JSON.parse(localStorage.getItem('zenite_descontos_logs') || '[]');
+      setDescontosLogs(localLogs);
     }
   };
 
@@ -9043,15 +9098,20 @@ export default function Dashboard({ session, profileDataProps }) {
             vendedor_id: vendedor_id,
             usuario_id: vendedor_id,
             criado_por: vendedor_id,
-            vendedor_nome: profile?.nome || session?.user?.email || null,
+            vendedor_nome: profile?.nome || session?.user?.email || 'Vendedor',
             treener_id: selectedTreenerId || null,
             financeira_parceira: resolvedFinanceira,
             valor_pago: actualValorPago,
             status_pagamento: pdvStatusPagamento,
+            preco_base: itemPrecoTabela,
+            preco_unitario_vendido: itemValorVendido,
             valor_tabela: itemPrecoTabela * Number(item.quantidade),
             valor_desconto: itemDescontoTotal,
             desconto: itemDescontoTotal,
-            percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0
+            total_desconto: itemDescontoTotal,
+            percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0,
+            produtos_descricao: `${item.produto.nome} (Qtd: ${item.quantidade})`,
+            itens_resumo: `${item.produto.nome} (Qtd: ${item.quantidade})`
           };
 
           console.log("📦 Payload da Venda enviado ao banco:", payloadVendaUpdate);
@@ -9063,6 +9123,27 @@ export default function Dashboard({ session, profileDataProps }) {
 
           if (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
+          }
+
+          // Registrar item_venda para auditoria detalhada
+          try {
+            await supabase.from('itens_venda').insert({
+              venda_id: rpcRes.venda_id,
+              empresa_id: empresaId,
+              filial_id: activeFilialId,
+              vendedor_id: vendedor_id,
+              produto_id: realProdutoId || item.produto.id,
+              produto_nome: item.produto.nome,
+              quantidade: item.quantidade,
+              imei: item.imei || null,
+              preco_base: itemPrecoTabela,
+              preco_unitario_vendido: itemValorVendido,
+              valor_desconto: itemDescontoTotal,
+              percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0,
+              valor_total: valorTotalNovo
+            });
+          } catch (itemErr) {
+            console.warn("Aviso ao registrar item em itens_venda:", itemErr);
           }
 
           if (pdvListaPagamentos.length > 0) {
@@ -9162,14 +9243,17 @@ export default function Dashboard({ session, profileDataProps }) {
       const valorDescontoTotal = Math.max(0, totalTabelaCart - totalVendidoCart);
 
       if (itemsComDesconto.length > 0 || valorDescontoTotal > 0) {
-        const resumoItensText = itemsComDesconto.map(i => `${i.produto.nome} (De R$ ${i.produto.preco.toFixed(2)} por R$ ${Number(i.valorUnitario).toFixed(2)})`).join(', ') || 'Desconto aplicado';
+        const resumoItensText = itemsComDesconto.map(i => `${i.produto.nome} (De R$ ${Number(i.produto.preco).toFixed(2)} por R$ ${Number(i.valorUnitario).toFixed(2)})`).join(', ') || 'Desconto aplicado';
         const novoLogDesconto = {
-          id: 'desc-' + Date.now(),
+          id: createdVendaIds[0] || ('desc-' + Date.now()),
+          venda_id: createdVendaIds[0] || null,
+          empresa_id: empresaId,
           vendedor_id: session.user.id,
           vendedor_nome: profile.nome || 'Vendedor',
           filial_id: activeFilialId,
           filial_nome: activeFilialNome || 'Filial',
-          cliente_nome: pdvClienteNome || 'Cliente Balcão',
+          cliente_id: cliente_id,
+          cliente_nome: nomeClienteFinal || 'Cliente Balcão',
           itens_resumo: resumoItensText,
           valor_tabela: totalTabelaCart,
           valor_final: totalVendidoCart,
@@ -9178,10 +9262,32 @@ export default function Dashboard({ session, profileDataProps }) {
           created_at: new Date().toISOString()
         };
         setDescontosLogs(prev => [novoLogDesconto, ...prev]);
+
+        // Gravar no Supabase na tabela auditoria_descontos
+        try {
+          await supabase.from('auditoria_descontos').insert({
+            empresa_id: empresaId,
+            filial_id: activeFilialId,
+            filial_nome: activeFilialNome || 'Filial',
+            vendedor_id: session.user.id,
+            vendedor_nome: profile.nome || 'Vendedor',
+            cliente_id: cliente_id,
+            cliente_nome: nomeClienteFinal || 'Cliente Balcão',
+            venda_id: createdVendaIds[0] || null,
+            itens_resumo: resumoItensText,
+            valor_tabela: totalTabelaCart,
+            valor_final: totalVendidoCart,
+            valor_desconto: valorDescontoTotal,
+            percentual_desconto: totalTabelaCart > 0 ? (valorDescontoTotal / totalTabelaCart) * 100 : 0
+          });
+        } catch (audErr) {
+          console.warn("Aviso ao salvar log na tabela auditoria_descontos:", audErr);
+        }
+
         try {
           const storedStr = localStorage.getItem('zenite_descontos_logs');
           const stored = storedStr ? JSON.parse(storedStr) : [];
-          localStorage.setItem('zenite_descontos_logs', JSON.stringify([novoLogDesconto, ...stored]));
+          localStorage.setItem('zenite_descontos_logs', JSON.stringify([novoLogDesconto, ...stored.filter(x => x.id !== novoLogDesconto.id)]));
         } catch (e) { }
       }
 
