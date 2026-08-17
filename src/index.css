@@ -45,3 +45,15 @@ select option {
   }
 }
 
+/* Utilitários de Rolagem Oculta (Scrollbar Hide) */
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar,
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+

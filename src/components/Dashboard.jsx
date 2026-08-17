@@ -1870,9 +1870,12 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [activeTab, profile, session]);
 
-  // Recarregar automaticamente a lista de colaboradores e descontos quando o empresa_id for carregado ou alternado no menu
+  // Recarregar automaticamente a lista de colaboradores, descontos e categorias quando a empresa for carregada ou alternada
   useEffect(() => {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    if (targetEmpresaId) {
+      fetchCategorias(targetEmpresaId).catch(e => console.warn('Aviso ao carregar categorias:', e));
+    }
     if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
       fetchAuditoriaDescontos(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
@@ -10312,17 +10315,39 @@ export default function Dashboard({ session, profileDataProps }) {
       catUpper.includes('ACESSOR') || catUpper.includes('CAPA') || catUpper.includes('PELICULA') ||
       catUpper.includes('CARREGADOR') || catUpper.includes('CABO') || catUpper.includes('FONE');
 
-    const matchesCat = pdvCategoria === 'TUDO'
-      ? true
-      : pdvCategoria === 'IOS' && (catUpper === 'IOS' || nomeLower.includes('iphone'))
-        ? true
-        : pdvCategoria === 'ANDROID' && (catUpper === 'ANDROID' || nomeLower.includes('android') || nomeLower.includes('samsung') || nomeLower.includes('xiaomi') || nomeLower.includes('motorola'))
-          ? true
-          : pdvCategoria === 'APPLE_JBL_CONSOLE' && (catUpper === 'APPLE_JBL_CONSOLE' || catUpper.includes('JBL') || catUpper.includes('CONSOLE'))
-            ? true
-            : pdvCategoria === 'ACESSORIO' && isAcessorioCategory && catUpper !== 'SERVICO'
-              ? true
-              : pdvCategoria === 'SERVICO' && catUpper === 'SERVICO';
+    const matchesCat = (() => {
+      if (!pdvCategoria || pdvCategoria === 'TUDO' || pdvCategoria === 'TODAS' || pdvCategoria === 'ALL' || pdvCategoria === '') {
+        return true;
+      }
+
+      const pdvCatUpper = String(pdvCategoria).toUpperCase().trim();
+      const pdvCatLower = String(pdvCategoria).toLowerCase().trim();
+
+      // 1. Casamento direto por ID ou Nome de Categoria cadastrada
+      if (catUpper === pdvCatUpper || String(p.categoria_id) === String(pdvCategoria) || String(p.categoria || '').toLowerCase() === pdvCatLower) {
+        return true;
+      }
+
+      // 2. Apelidos e Categorias Específicas
+      if (pdvCatUpper === 'IOS' || pdvCatUpper === 'APPLE' || pdvCatUpper === 'IPHONE') {
+        return catUpper === 'IOS' || catUpper === 'APPLE' || nomeLower.includes('iphone') || nomeLower.includes('apple') || nomeLower.includes('ipad');
+      }
+      if (pdvCatUpper === 'ANDROID' || pdvCatUpper === 'CELULARES' || pdvCatUpper === 'SMARTPHONES') {
+        return catUpper === 'ANDROID' || catUpper === 'CELULARES' || nomeLower.includes('android') || nomeLower.includes('samsung') || nomeLower.includes('xiaomi') || nomeLower.includes('motorola');
+      }
+      if (pdvCatUpper === 'APPLE_JBL_CONSOLE' || pdvCatUpper.includes('JBL') || pdvCatUpper.includes('CONSOLE')) {
+        return catUpper === 'APPLE_JBL_CONSOLE' || catUpper.includes('JBL') || catUpper.includes('CONSOLE') || nomeLower.includes('jbl') || nomeLower.includes('ps5') || nomeLower.includes('xbox') || nomeLower.includes('nintendo');
+      }
+      if (pdvCatUpper === 'ACESSORIO' || pdvCatUpper === 'ACESSÓRIOS' || pdvCatUpper === 'ACESSORIOS') {
+        return isAcessorioCategory && catUpper !== 'SERVICO';
+      }
+      if (pdvCatUpper === 'SERVICO' || pdvCatUpper === 'SERVIÇO' || pdvCatUpper === 'SERVIÇOS') {
+        return catUpper === 'SERVICO' || tipoUpper === 'SERVICO';
+      }
+
+      // 3. Casamento por inclusão de texto (flexível)
+      return catUpper.includes(pdvCatUpper) || nomeLower.includes(pdvCatLower) || (p.tipo && String(p.tipo).toUpperCase().includes(pdvCatUpper));
+    })();
 
     return matchesSearch && matchesCat;
   });
@@ -10957,20 +10982,48 @@ export default function Dashboard({ session, profileDataProps }) {
               </form>
             </div>
 
-            {/* Filtros de Categoria */}
-            <div className="flex gap-2 flex-wrap border-b border-[#161616] pb-4">
-              {['TUDO', 'IOS', 'ANDROID', 'APPLE_JBL_CONSOLE', 'ACESSORIO', 'SERVICO'].map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setPdvCategoria(cat)}
-                  className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvCategoria === cat
-                    ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
-                    : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+            {/* Filtros de Categoria Dinâmicos (com Scroll Horizontal Oculto e Responsivo) */}
+            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide no-scrollbar border-b border-[#161616] pb-3 pt-1">
+              {/* Botão Fixo TUDO */}
+              <button
+                type="button"
+                onClick={() => setPdvCategoria('TUDO')}
+                className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-extrabold uppercase tracking-wider transition-all border cursor-pointer ${
+                  !pdvCategoria || pdvCategoria === 'TUDO'
+                    ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
+                    : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
+                }`}
+              >
+                TUDO
+              </button>
+
+              {/* Botões Dinâmicos da Tabela 'categorias' do Supabase */}
+              {(categorias && categorias.length > 0 ? categorias : [
+                { id: 'IOS', nome: 'IOS / Apple' },
+                { id: 'ANDROID', nome: 'Android' },
+                { id: 'APPLE_JBL_CONSOLE', nome: 'Apple/JBL/Console' },
+                { id: 'ACESSORIO', nome: 'Acessórios' },
+                { id: 'SERVICO', nome: 'Serviços' }
+              ]).map((cat) => {
+                const catNome = cat.nome || cat;
+                const catId = cat.id || catNome;
+                const isSelected = pdvCategoria === catNome || pdvCategoria === catId || (pdvCategoria && String(pdvCategoria).toLowerCase() === String(catNome).toLowerCase());
+
+                return (
+                  <button
+                    key={catId}
+                    type="button"
+                    onClick={() => setPdvCategoria(catNome)}
+                    className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
+                        : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
                     }`}
-                >
-                  {cat === 'TUDO' ? 'Tudo' : cat === 'APPLE_JBL_CONSOLE' ? 'Apple/JBL/Console' : cat}
-                </button>
-              ))}
+                  >
+                    {catNome}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Dica para busca mobile quando catálogo oculto */}
