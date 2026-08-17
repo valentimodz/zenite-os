@@ -1927,18 +1927,22 @@ export default function Dashboard({ session, profileDataProps }) {
     return () => clearTimeout(timer);
   }, [categorias, activeTab, currentView]);
 
-  // Atualizar produtos do PDV e verificar status do Caixa Aberto sempre que a filial ativa for alternada ou abrir o PDV
+  // Atualizar produtos do PDV e verificar status do Caixa Aberto (Bloqueio automático restrito a VENDEDOR)
   useEffect(() => {
     const targetFilialId = activeFilialId || profile?.filial_id || profile?.empresa_id || company?.id;
+    const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+    const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_') || !['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE', 'RH', 'RH_ADMIN', 'ESTOQUISTA', 'DIRETOR'].includes(userRoleUpper);
+
     if (targetFilialId) {
       fetchProdutosPDV(targetFilialId);
       fetchStatusCaixa(targetFilialId).then((cx) => {
-        if ((!cx || cx.status !== 'aberto') && (activeTab === 'pdv' || currentView === 'pdv')) {
+        // O modal de abertura obrigatória de caixa SÓ abre automaticamente para usuários com cargo de Vendedor
+        if (isVendedor && (!cx || cx.status !== 'aberto') && (activeTab === 'pdv' || currentView === 'pdv')) {
           setIsModalAbrirCaixaOpen(true);
         }
       });
     }
-  }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id, activeTab, currentView]);
+  }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id, profile?.role, profile?.cargo, activeTab, currentView]);
 
   // Carregar Estoque Consolidado dinamicamente ao alterar filtros ou filial
   useEffect(() => {
@@ -3111,6 +3115,7 @@ export default function Dashboard({ session, profileDataProps }) {
           filial_id: targetFilialId,
           operador_id: operadorId,
           saldo_inicial: saldoInicialNum,
+          observacoes_abertura: obsAberturaInput.trim() || null,
           status: 'aberto',
           data_abertura: new Date().toISOString()
         };
@@ -8332,7 +8337,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Adicionar item ao carrinho
   const handleAddToCart = async (produto, imei = null, forceAdd = false, origenFilialNome = null) => {
-    if (!caixaAtual || caixaAtual.status !== 'aberto') {
+    const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+    const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
+
+    if (isVendedor && (!caixaAtual || caixaAtual.status !== 'aberto')) {
       showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
       setIsModalAbrirCaixaOpen(true);
       return;
@@ -8631,7 +8639,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Bipar IMEI ou Código de Barras (EAN/SKU) no PDV e adicionar ao carrinho
   const handleBiparPdvNovo = async (inputOverride) => {
-    if (!caixaAtual || caixaAtual.status !== 'aberto') {
+    const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+    const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
+
+    if (isVendedor && (!caixaAtual || caixaAtual.status !== 'aberto')) {
       showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
       setIsModalAbrirCaixaOpen(true);
       return;
@@ -9106,8 +9117,10 @@ export default function Dashboard({ session, profileDataProps }) {
         pdvClienteCpfCnpj: pdvClienteCpfCnpj.trim()
       });
 
-      // GUARD CLAUSE 0: O PDV exige um Caixa Aberto para processar a venda
-      if (!caixaAtual || caixaAtual.status !== 'aberto') {
+      // GUARD CLAUSE 0: O PDV exige um Caixa Aberto para processar a venda (se for Vendedor)
+      const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+      const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
+      if (isVendedor && (!caixaAtual || caixaAtual.status !== 'aberto')) {
         const msgErrCaixa = "Caixa Fechado: É obrigatório abrir o caixa antes de finalizar vendas nesta filial.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCaixa);
         showToast(msgErrCaixa, "error");
@@ -11130,35 +11143,67 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   const renderPdvContent = () => {
+    const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+    const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
+    const isManagementRole = ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE', 'RH', 'RH_ADMIN', 'ESTOQUISTA', 'DIRETOR'].includes(userRoleUpper);
+
     const isCaixaFechado = !caixaAtual || caixaAtual.status !== 'aberto';
+    // O bloqueio do catálogo e dos inputs SÓ se aplica para usuários com cargo de Vendedor
+    const isPdvBloqueadoParaUsuario = isVendedor && isCaixaFechado;
 
     return (
       <div className="space-y-6">
         {/* BANNER DE STATUS DO CAIXA (ABERTO / FECHADO) */}
         {isCaixaFechado ? (
-          <div className="bg-amber-950/40 border border-amber-600/50 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-200 text-xs shadow-lg animate-fadeIn">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/40 text-amber-300 shrink-0">
-                <AlertTriangle size={20} />
+          isVendedor ? (
+            <div className="bg-amber-950/40 border border-amber-600/50 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-200 text-xs shadow-lg animate-fadeIn">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/40 text-amber-300 shrink-0">
+                  <AlertTriangle size={20} />
+                </div>
+                <div>
+                  <span className="font-extrabold text-amber-300 text-sm block flex items-center gap-1.5">
+                    <Lock size={14} /> Caixa Fechado nesta Filial ({activeFilialNome || 'Filial'})
+                  </span>
+                  <span className="text-[11px] text-amber-200/80">
+                    O PDV está bloqueado para emissão de vendas. É necessário abrir o caixa e informar o fundo de troco para operar.
+                  </span>
+                </div>
               </div>
-              <div>
-                <span className="font-extrabold text-amber-300 text-sm block flex items-center gap-1.5">
-                  <Lock size={14} /> Caixa Fechado nesta Filial ({activeFilialNome || 'Filial'})
-                </span>
-                <span className="text-[11px] text-amber-200/80">
-                  O PDV está bloqueado para emissão de vendas. É necessário abrir o caixa e informar o fundo de troco para operar.
-                </span>
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalAbrirCaixaOpen(true)}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-amber-950/50 cursor-pointer"
+              >
+                <Store size={14} />
+                Abrir Caixa Agora
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsModalAbrirCaixaOpen(true)}
-              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-amber-950/50 cursor-pointer"
-            >
-              <Store size={14} />
-              Abrir Caixa Agora
-            </button>
-          </div>
+          ) : (
+            <div className="bg-purple-950/25 border border-purple-800/40 p-3.5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-purple-200 text-xs shadow-lg animate-fadeIn">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-500/20 rounded-lg border border-purple-500/40 text-purple-300 shrink-0">
+                  <ShieldCheck size={20} />
+                </div>
+                <div>
+                  <span className="font-extrabold text-white text-sm block flex items-center gap-1.5">
+                    Visualização Administrativa / Gerencial ({activeFilialNome || 'Filial'})
+                  </span>
+                  <span className="text-[11px] text-purple-300/80">
+                    O caixa desta filial está fechado. Como Administrador/Gerente, seu acesso ao catálogo e ao PDV está livre para consulta e testes.
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalAbrirCaixaOpen(true)}
+                className="px-3.5 py-1.5 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-md shadow-purple-950/50"
+              >
+                <Store size={14} />
+                Abrir Caixa Manualmente
+              </button>
+            </div>
+          )
         ) : (
           <div className="bg-green-950/20 border border-green-800/40 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-green-300 animate-fadeIn">
             <div className="flex items-center gap-2.5">
@@ -11190,12 +11235,12 @@ export default function Dashboard({ session, profileDataProps }) {
                 <input
                   type="text"
                   id="pdv-busca-input"
-                  disabled={isCaixaFechado}
+                  disabled={isPdvBloqueadoParaUsuario}
                   value={pdvBusca}
                   onChange={(e) => setPdvBusca(e.target.value)}
-                  placeholder={isCaixaFechado ? "Caixa Fechado - Abra o caixa para operar [F2]" : "Busca, SKU ou Código... [F2]"}
+                  placeholder={isPdvBloqueadoParaUsuario ? "Caixa Fechado - Abra o caixa para operar [F2]" : "Busca, SKU ou Código... [F2]"}
                   className={`w-full bg-black border rounded-md text-white pl-9 pr-4 py-2 text-xs outline-none transition-all font-sans ${
-                    isCaixaFechado
+                    isPdvBloqueadoParaUsuario
                       ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
                       : 'border-[#222222] focus:border-[#6A0DAD]'
                   }`}
@@ -11297,9 +11342,9 @@ export default function Dashboard({ session, profileDataProps }) {
               </div>
             )}
 
-            {/* Grid de Produtos com Overlay Glassmorphic Dark de Bloqueio quando Caixa Fechado */}
+            {/* Grid de Produtos com Overlay Glassmorphic Dark de Bloqueio quando Caixa Fechado (Restrito a Vendedor) */}
             <div className="relative">
-              {isCaixaFechado && (
+              {isPdvBloqueadoParaUsuario && (
                 <div
                   onClick={() => {
                     showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
@@ -11349,7 +11394,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       <div
                         key={prod.id}
                         onClick={() => {
-                          if (isCaixaFechado) {
+                          if (isPdvBloqueadoParaUsuario) {
                             showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
                             setIsModalAbrirCaixaOpen(true);
                             return;
@@ -11361,7 +11406,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           }
                         }}
                         className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${
-                          isCaixaFechado
+                          isPdvBloqueadoParaUsuario
                             ? 'opacity-40 cursor-not-allowed border-[#222]'
                             : isSemEstoque
                               ? 'border-[#222222] hover:border-[#6A0DAD]/50 bg-black/60 cursor-pointer'
@@ -11404,11 +11449,11 @@ export default function Dashboard({ session, profileDataProps }) {
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
-                              disabled={isCaixaFechado}
+                              disabled={isPdvBloqueadoParaUsuario}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 e.preventDefault();
-                                if (isCaixaFechado) {
+                                if (isPdvBloqueadoParaUsuario) {
                                   showToast('Caixa Fechado: É necessário realizar a abertura do caixa.', 'error');
                                   setIsModalAbrirCaixaOpen(true);
                                   return;
@@ -11465,11 +11510,11 @@ export default function Dashboard({ session, profileDataProps }) {
 
             {/* Scanner de IMEI ou Código de Barras (EAN/Barcode) */}
             <div className={`space-y-2 bg-[#111111]/60 border rounded-lg p-3 transition-all ${
-              isCaixaFechado ? 'border-amber-900/30 opacity-70' : 'border-[#222222]'
+              isPdvBloqueadoParaUsuario ? 'border-amber-900/30 opacity-70' : 'border-[#222222]'
             }`}>
               <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider flex items-center justify-between">
                 <span>⚡ Bipar IMEI ou Código de Barras (EAN)</span>
-                {isCaixaFechado && (
+                {isPdvBloqueadoParaUsuario && (
                   <span className="text-amber-400 text-[9px] font-bold lowercase flex items-center gap-1">
                     <Lock size={10} /> bloqueado
                   </span>
@@ -11480,19 +11525,19 @@ export default function Dashboard({ session, profileDataProps }) {
                 <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full">
                   <input
                     type="text"
-                    disabled={isCaixaFechado}
+                    disabled={isPdvBloqueadoParaUsuario}
                     value={pdvScanImei}
                     onChange={(e) => setPdvScanImei(e.target.value)}
-                    placeholder={isCaixaFechado ? "Caixa Fechado - Leitor desabilitado..." : "Bipe o IMEI, EAN/barcode ou SKU..."}
+                    placeholder={isPdvBloqueadoParaUsuario ? "Caixa Fechado - Leitor desabilitado..." : "Bipe o IMEI, EAN/barcode ou SKU..."}
                     className={`flex-1 min-w-[180px] bg-black border rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider transition-all ${
-                      isCaixaFechado
+                      isPdvBloqueadoParaUsuario
                         ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
                         : 'border-[#222222] focus:border-[#6A0DAD]'
                     }`}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        if (isCaixaFechado) {
+                        if (isPdvBloqueadoParaUsuario) {
                           showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
                           setIsModalAbrirCaixaOpen(true);
                           return;
@@ -11505,9 +11550,9 @@ export default function Dashboard({ session, profileDataProps }) {
                   {/* Botão de Câmera Mobile (Visível apenas em mobile/telas pequenas) */}
                   <button
                     type="button"
-                    disabled={isCaixaFechado}
+                    disabled={isPdvBloqueadoParaUsuario}
                     onClick={() => {
-                      if (isCaixaFechado) {
+                      if (isPdvBloqueadoParaUsuario) {
                         showToast('Caixa Fechado: É necessário realizar a abertura do caixa.', 'error');
                         setIsModalAbrirCaixaOpen(true);
                         return;
@@ -11522,9 +11567,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
                   <button
                     type="button"
-                    disabled={isCaixaFechado}
+                    disabled={isPdvBloqueadoParaUsuario}
                     onClick={() => {
-                      if (isCaixaFechado) {
+                      if (isPdvBloqueadoParaUsuario) {
                         showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
                         setIsModalAbrirCaixaOpen(true);
                         return;
@@ -11540,9 +11585,9 @@ export default function Dashboard({ session, profileDataProps }) {
                 {/* Linha 2: Ação de atalho expandida */}
                 <button
                   type="button"
-                  disabled={isCaixaFechado}
+                  disabled={isPdvBloqueadoParaUsuario}
                   onClick={() => {
-                    if (isCaixaFechado) {
+                    if (isPdvBloqueadoParaUsuario) {
                       showToast('Caixa Fechado: É necessário realizar a abertura do caixa para vendas rápidas.', 'error');
                       setIsModalAbrirCaixaOpen(true);
                       return;
@@ -11550,13 +11595,13 @@ export default function Dashboard({ session, profileDataProps }) {
                     setIsVendaRapidaOpen(true);
                   }}
                   className={`w-full px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 ${
-                    isCaixaFechado
+                    isPdvBloqueadoParaUsuario
                       ? 'bg-gray-800/60 text-gray-500 border border-gray-700/30 opacity-60 cursor-not-allowed'
                       : 'bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white shadow-md shadow-purple-900/30 hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
                   }`}
                   title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
                 >
-                  <Zap size={14} className={`shrink-0 ${isCaixaFechado ? 'text-gray-500' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
+                  <Zap size={14} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-gray-500' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
                   <span>⚡ Venda Rápida</span>
                 </button>
               </div>
@@ -19137,11 +19182,12 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 </div>
 
-                {/* Fechar modal apenas se não estiver na aba PDV */}
-                {activeTab !== 'pdv' && (
+                {/* Fechar modal se não for vendedor ou se não estiver na aba PDV */}
+                {(!['VENDEDOR'].includes(String(profile?.role || profile?.cargo || '').toUpperCase()) && !String(profile?.role || profile?.cargo || '').toUpperCase().startsWith('VENDEDOR_') || activeTab !== 'pdv') && (
                   <button
                     onClick={() => setIsModalAbrirCaixaOpen(false)}
-                    className="p-1 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Fechar modal de abertura"
                   >
                     <X size={16} />
                   </button>
