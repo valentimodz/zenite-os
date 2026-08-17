@@ -13262,7 +13262,7 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white font-sans flex selection:bg-[#6A0DAD] selection:text-white w-full">
+    <div className="h-screen w-full bg-black text-white font-sans flex overflow-hidden selection:bg-[#6A0DAD] selection:text-white">
       {/* DRAWER MOBILE SIDEBAR OVERLAY */}
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 flex md:hidden print:hidden animate-fadeIn">
@@ -13361,7 +13361,7 @@ export default function Dashboard({ session, profileDataProps }) {
       )}
 
       {/* MENU LATERAL DESKTOP (SIDEBAR - ESCONDIDO NO MOBILE) */}
-      <aside className={`hidden md:flex bg-[#0A0A0A] border-r border-[#222222] min-h-screen flex-col transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} sticky top-0 shrink-0 z-30 print:hidden`}>
+      <aside className={`hidden md:flex bg-[#0A0A0A] border-r border-[#222222] h-full flex-col shrink-0 overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} z-30 print:hidden scrollbar-hide`}>
         {/* LOGO */}
         <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
           {sidebarOpen ? (
@@ -13488,10 +13488,10 @@ export default function Dashboard({ session, profileDataProps }) {
         </div>
       </aside>
 
-      {/* MAIN CONTAINER (100% LARGURA EM MOBILE) */}
-      <div className="flex-1 flex flex-col min-h-screen min-w-0 w-full">
+      {/* MAIN CONTAINER (100% LARGURA EM MOBILE, SCROLL INTERNO ISOLADO) */}
+      <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden">
         {/* SLENDER FIXED NAVBAR */}
-        <header className="border-b border-[#222222] bg-[#0A0A0A] py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 sticky top-0 z-20 print:hidden">
+        <header className="border-b border-[#222222] bg-[#0A0A0A] py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden">
           <div className="flex items-center gap-2">
             {/* ÍCONE HAMBÚRGUER MOBILE */}
             <button
@@ -13563,16 +13563,18 @@ export default function Dashboard({ session, profileDataProps }) {
           </div>
         </header>
 
-        {/* Global notice banner inside content container */}
-        {globalNotices.filter(n => n.active).length > 0 && profile?.role !== 'SUPER_ADMIN' && (
-          <div className="bg-[#6A0DAD] text-white p-2.5 text-center text-xs font-medium flex items-center justify-center gap-2 relative z-10 shadow-md">
-            <Megaphone size={14} />
-            {globalNotices.filter(n => n.active)[0].message}
-          </div>
-        )}
+        {/* SCROLLABLE MAIN CONTENT AREA (ÚNICO SCROLL VERTICAL) */}
+        <div className="flex-1 overflow-y-auto min-w-0 w-full flex flex-col relative scroll-smooth">
+          {/* Global notice banner inside content container */}
+          {globalNotices.filter(n => n.active).length > 0 && profile?.role !== 'SUPER_ADMIN' && (
+            <div className="bg-[#6A0DAD] text-white p-2.5 text-center text-xs font-medium flex items-center justify-center gap-2 relative z-10 shadow-md shrink-0">
+              <Megaphone size={14} />
+              {globalNotices.filter(n => n.active)[0].message}
+            </div>
+          )}
 
-        {/* FLUID CONTENT AREA */}
-        <main className="flex-1 p-6 md:p-8 w-full max-w-[1600px] mx-auto min-w-0">
+          {/* FLUID CONTENT AREA */}
+          <main className="flex-1 p-6 md:p-8 w-full max-w-[1600px] mx-auto min-w-0">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <div className="w-12 h-12 border-4 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
@@ -19266,9 +19268,10 @@ export default function Dashboard({ session, profileDataProps }) {
           </div>
         )}
 
-        <footer className="w-full text-center py-6 bg-black border-t border-[#111111] text-[#6B7280] text-xs font-medium mt-auto print:hidden font-sans">
-          © 2026 Vextron Lab | Developed by @Valentim
-        </footer>
+          <footer className="w-full text-center py-6 bg-black border-t border-[#111111] text-[#6B7280] text-xs font-medium mt-auto print:hidden font-sans">
+            © 2026 Vextron Lab | Developed by @Valentim
+          </footer>
+        </div>
 
         {/* MODAL PARA VER FOTO DO COMPROVANTE (GERENTE) */}
         {modalComprovante && (
