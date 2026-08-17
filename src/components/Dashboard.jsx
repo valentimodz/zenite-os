@@ -1960,7 +1960,76 @@ export default function Dashboard({ session, profileDataProps }) {
   const fetchAuditoriaDescontos = async (empresaId) => {
     const targetEmpresaId = empresaId || profile?.empresa_id || company?.id;
     try {
-      // 1. Tentar buscar primeiro na tabela auditoria_descontos
+      // 1. Tentar buscar primeiro na tabela itens_venda com desconto
+      const { data: itensData, error: itensErr } = await supabase
+        .from('itens_venda')
+        .select(`
+          id,
+          created_at,
+          venda_id,
+          empresa_id,
+          filial_id,
+          vendedor_id,
+          produto_id,
+          produto_nome,
+          quantidade,
+          preco_base,
+          preco_unitario,
+          preco_unitario_vendido,
+          valor_desconto,
+          desconto,
+          percentual_desconto,
+          valor_total,
+          vendedor:profiles!vendedor_id(nome),
+          filial:filiais!filial_id(nome)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (!itensErr && itensData && itensData.length > 0) {
+        const itensComDesconto = itensData.filter(i => {
+          const valDesc = Number(i.valor_desconto || i.desconto || 0);
+          const pBase = Number(i.preco_base || 0);
+          const pCobrado = Number(i.preco_unitario || i.preco_unitario_vendido || 0);
+          return valDesc > 0.001 || (pBase > 0 && pCobrado > 0 && pBase > (pCobrado + 0.001));
+        });
+
+        if (itensComDesconto.length > 0) {
+          const formatted = itensComDesconto
+            .filter(i => !targetEmpresaId || targetEmpresaId === 'MASTER' || String(i.empresa_id) === String(targetEmpresaId))
+            .map(i => {
+              const qtd = Number(i.quantidade || 1);
+              const pBase = Number(i.preco_base || 0);
+              const pCobrado = Number(i.preco_unitario || i.preco_unitario_vendido || 0);
+              let valDesc = Number(i.valor_desconto || i.desconto || 0);
+              if (valDesc <= 0 && pBase > pCobrado) valDesc = (pBase - pCobrado) * qtd;
+              const valTabela = pBase > 0 ? (pBase * qtd) : (Number(i.valor_total || 0) + valDesc);
+              const valFinal = Number(i.valor_total || (pCobrado * qtd));
+              const percDesc = Number(i.percentual_desconto || 0) || (valTabela > 0 ? (valDesc / valTabela) * 100 : 0);
+
+              return {
+                id: i.id,
+                vendedor_id: i.vendedor_id,
+                vendedor_nome: i.vendedor?.nome || 'Vendedor',
+                filial_id: i.filial_id,
+                filial_nome: i.filial?.nome || 'Filial',
+                cliente_nome: 'Cliente Consumidor',
+                itens_resumo: `${i.produto_nome} (Qtd: ${qtd})`,
+                valor_tabela: valTabela,
+                valor_final: valFinal,
+                valor_desconto: valDesc,
+                percentual_desconto: percDesc,
+                created_at: i.created_at
+              };
+            });
+
+          if (formatted.length > 0) {
+            setDescontosLogs(formatted);
+            return;
+          }
+        }
+      }
+
+      // 2. Tentar buscar na tabela auditoria_descontos
       const { data: auditData, error: auditErr } = await supabase
         .from('auditoria_descontos')
         .select('*')
@@ -1990,7 +2059,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       }
 
-      // 2. Buscar na tabela 'vendas' com filtro de desconto
+      // 3. Buscar na tabela 'vendas' com filtro de desconto
       let query = supabase
         .from('vendas')
         .select(`
@@ -9125,25 +9194,36 @@ export default function Dashboard({ session, profileDataProps }) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
           }
 
-          // Registrar item_venda para auditoria detalhada
-          try {
-            await supabase.from('itens_venda').insert({
-              venda_id: rpcRes.venda_id,
-              empresa_id: empresaId,
-              filial_id: activeFilialId,
-              vendedor_id: vendedor_id,
-              produto_id: realProdutoId || item.produto.id,
-              produto_nome: item.produto.nome,
-              quantidade: item.quantidade,
-              imei: item.imei || null,
-              preco_base: itemPrecoTabela,
-              preco_unitario_vendido: itemValorVendido,
-              valor_desconto: itemDescontoTotal,
-              percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0,
-              valor_total: valorTotalNovo
-            });
-          } catch (itemErr) {
-            console.warn("Aviso ao registrar item em itens_venda:", itemErr);
+          // Registrar item_venda para auditoria detalhada com validação estrita e log agressivo
+          const itemVendaPayload = {
+            venda_id: rpcRes.venda_id,
+            empresa_id: empresaId,
+            filial_id: activeFilialId,
+            vendedor_id: vendedor_id,
+            produto_id: realProdutoId || item.produto.id,
+            produto_nome: item.produto.nome,
+            quantidade: item.quantidade,
+            imei: item.imei || null,
+            preco_base: itemPrecoTabela,
+            preco_unitario: itemValorVendido,
+            preco_unitario_vendido: itemValorVendido,
+            valor_desconto: itemDescontoTotal,
+            desconto: itemDescontoTotal,
+            percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0,
+            valor_total: valorTotalNovo
+          };
+
+          console.log("🛒 [ITENS_VENDA PAYLOAD] Gravando item no Supabase:", itemVendaPayload);
+          const { error: itemInsertErr } = await supabase
+            .from('itens_venda')
+            .insert(itemVendaPayload);
+
+          if (itemInsertErr) {
+            console.error("🚨 [ERRO CRÍTICO AO GRAVAR EM ITENS_VENDA]:", itemInsertErr, "\n📦 Payload enviado:", itemVendaPayload);
+            const msgErroItem = `Falha ao gravar item '${item.produto.nome}' na tabela itens_venda: ${itemInsertErr.message || JSON.stringify(itemInsertErr)}`;
+            showToast(msgErroItem, "error");
+            alert(`❌ ERRO NO CHECKOUT (itens_venda):\n${msgErroItem}\n\nDetalhes: ${itemInsertErr.details || 'Nenhum'}\nDica: ${itemInsertErr.hint || 'Verifique se a tabela itens_venda possui as colunas necessárias'}`);
+            throw itemInsertErr;
           }
 
           if (pdvListaPagamentos.length > 0) {
