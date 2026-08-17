@@ -824,6 +824,14 @@ export default function Dashboard({ session, profileDataProps }) {
   const [pdvComissaoPrevia, setPdvComissaoPrevia] = useState(0);
   const [loadingPdvVenda, setLoadingPdvVenda] = useState(false);
 
+  // Estados para Abertura e Fechamento de Caixa Multi-filiais (PDV Lock)
+  const [caixaAtual, setCaixaAtual] = useState(null);
+  const [isLoadingCaixa, setIsLoadingCaixa] = useState(false);
+  const [isModalAbrirCaixaOpen, setIsModalAbrirCaixaOpen] = useState(false);
+  const [fundoTrocoInput, setFundoTrocoInput] = useState('');
+  const [obsAberturaInput, setObsAberturaInput] = useState('');
+  const [isSubmittingAbertura, setIsSubmittingAbertura] = useState(false);
+
   // Estados do PDV Híbrido com Crédito por Troca
   const [pdvScanImei, setPdvScanImei] = useState('');
   const [pdvMetodoPagamento, setPdvMetodoPagamento] = useState('pix'); // 'pix' | 'cartao' | 'dinheiro' | 'troca'
@@ -1919,13 +1927,18 @@ export default function Dashboard({ session, profileDataProps }) {
     return () => clearTimeout(timer);
   }, [categorias, activeTab, currentView]);
 
-  // Atualizar produtos do PDV sempre que a filial ativa for alternada
+  // Atualizar produtos do PDV e verificar status do Caixa Aberto sempre que a filial ativa for alternada ou abrir o PDV
   useEffect(() => {
     const targetFilialId = activeFilialId || profile?.filial_id || profile?.empresa_id || company?.id;
     if (targetFilialId) {
       fetchProdutosPDV(targetFilialId);
+      fetchStatusCaixa(targetFilialId).then((cx) => {
+        if ((!cx || cx.status !== 'aberto') && (activeTab === 'pdv' || currentView === 'pdv')) {
+          setIsModalAbrirCaixaOpen(true);
+        }
+      });
     }
-  }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id]);
+  }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id, activeTab, currentView]);
 
   // Carregar Estoque Consolidado dinamicamente ao alterar filtros ou filial
   useEffect(() => {
@@ -3017,6 +3030,106 @@ export default function Dashboard({ session, profileDataProps }) {
       console.error('Erro ao buscar transferências:', err);
     } finally {
       setLoadingTransferencias(false);
+    }
+  };
+
+  // Buscar status do Caixa Aberto da Filial Ativa (Bloqueio PDV)
+  const fetchStatusCaixa = async (filialId) => {
+    const targetFilialId = filialId || activeFilialId || profile?.filial_id;
+    if (!targetFilialId) return null;
+    setIsLoadingCaixa(true);
+    try {
+      const { data, error } = await supabase
+        .from('caixas')
+        .select('*')
+        .eq('filial_id', targetFilialId)
+        .order('data_abertura', { ascending: false })
+        .limit(1);
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const ultimoCaixa = data[0];
+        if (ultimoCaixa.status === 'aberto') {
+          setCaixaAtual(ultimoCaixa);
+          setIsModalAbrirCaixaOpen(false);
+          return ultimoCaixa;
+        }
+      }
+
+      setCaixaAtual(null);
+      return null;
+    } catch (err) {
+      console.warn('[Dashboard] Aviso ao verificar status do caixa:', err);
+      setCaixaAtual(null);
+      return null;
+    } finally {
+      setIsLoadingCaixa(false);
+    }
+  };
+
+  // Confirmar Abertura de Caixa (Inserir registro no Supabase e liberar PDV)
+  const handleConfirmarAberturaCaixa = async (e) => {
+    if (e) e.preventDefault();
+    const targetFilialId = activeFilialId || profile?.filial_id;
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    const operadorId = session?.user?.id || profile?.id;
+
+    if (!targetFilialId) {
+      showToast('Selecione uma filial antes de abrir o caixa.', 'error');
+      return;
+    }
+
+    const saldoInicialNum = parseFloat(String(fundoTrocoInput).replace(',', '.')) || 0;
+    if (isNaN(saldoInicialNum) || saldoInicialNum < 0) {
+      showToast('Informe um valor de Fundo de Troco válido (mínimo R$ 0,00).', 'error');
+      return;
+    }
+
+    setIsSubmittingAbertura(true);
+    try {
+      const filialObj = filiais.find(f => String(f.id) === String(targetFilialId));
+      const payloadCaixa = {
+        empresa_id: targetEmpresaId,
+        filial_id: targetFilialId,
+        filial_nome: filialObj?.nome || activeFilialNome || 'Filial',
+        operador_id: operadorId,
+        operador_nome: profile?.nome || session?.user?.email || 'Operador PDV',
+        saldo_inicial: saldoInicialNum,
+        status: 'aberto',
+        data_abertura: new Date().toISOString(),
+        observacoes_abertura: obsAberturaInput.trim() || null
+      };
+
+      const { data, error } = await supabase
+        .from('caixas')
+        .insert(payloadCaixa)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Erro ao abrir caixa no Supabase (tentando fallback):', error);
+        const fallbackPayload = {
+          filial_id: targetFilialId,
+          operador_id: operadorId,
+          saldo_inicial: saldoInicialNum,
+          status: 'aberto',
+          data_abertura: new Date().toISOString()
+        };
+        const resFallback = await supabase.from('caixas').insert(fallbackPayload).select().single();
+        if (resFallback.error) throw resFallback.error;
+        setCaixaAtual(resFallback.data);
+      } else {
+        setCaixaAtual(data);
+      }
+
+      setIsModalAbrirCaixaOpen(false);
+      setFundoTrocoInput('');
+      setObsAberturaInput('');
+      showToast(`Caixa aberto com sucesso! Fundo inicial: R$ ${saldoInicialNum.toFixed(2)}`, 'success');
+    } catch (err) {
+      console.error('Falha crítica ao abrir caixa:', err);
+      showToast(`Erro ao abrir caixa: ${err.message || 'Verifique se a migration da tabela caixas foi executada.'}`, 'error');
+    } finally {
+      setIsSubmittingAbertura(false);
     }
   };
 
@@ -8981,6 +9094,16 @@ export default function Dashboard({ session, profileDataProps }) {
         pdvClienteCpfCnpj: pdvClienteCpfCnpj.trim()
       });
 
+      // GUARD CLAUSE 0: O PDV exige um Caixa Aberto para processar a venda
+      if (!caixaAtual || caixaAtual.status !== 'aberto') {
+        const msgErrCaixa = "Caixa Fechado: É obrigatório abrir o caixa antes de finalizar vendas nesta filial.";
+        console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCaixa);
+        showToast(msgErrCaixa, "error");
+        setIsModalAbrirCaixaOpen(true);
+        setLoadingPdvVenda(false);
+        return;
+      }
+
       // GUARD CLAUSE 1: Se o usuário selecionou/informou um cliente, o ID NÃO PODE ser nulo.
       if (nomeClienteFinal && nomeClienteFinal !== 'Consumidor Final' && !cliente_id) {
         const msgErrCliente = "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo. Venda abortada.";
@@ -9125,6 +9248,7 @@ export default function Dashboard({ session, profileDataProps }) {
           const payloadVendaUpdate = {
             empresa_id: empresaId,
             filial_id: activeFilialId,
+            caixa_id: caixaAtual?.id || null,
             produto_nome: item.produto.nome,
             imei_novo: item.imei || null,
             imei: item.imei || null,
@@ -10994,8 +11118,51 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   const renderPdvContent = () => {
+    const isCaixaFechado = !caixaAtual || caixaAtual.status !== 'aberto';
+
     return (
       <div className="space-y-6">
+        {/* BANNER DE STATUS DO CAIXA (ABERTO / FECHADO) */}
+        {isCaixaFechado ? (
+          <div className="bg-amber-950/40 border border-amber-600/50 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-200 text-xs shadow-lg animate-fadeIn">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/40 text-amber-300 shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <span className="font-extrabold text-amber-300 text-sm block flex items-center gap-1.5">
+                  <Lock size={14} /> Caixa Fechado nesta Filial ({activeFilialNome || 'Filial'})
+                </span>
+                <span className="text-[11px] text-amber-200/80">
+                  O PDV está bloqueado para emissão de vendas. É necessário abrir o caixa e informar o fundo de troco para operar.
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsModalAbrirCaixaOpen(true)}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-amber-950/50 cursor-pointer"
+            >
+              <Store size={14} />
+              Abrir Caixa Agora
+            </button>
+          </div>
+        ) : (
+          <div className="bg-green-950/20 border border-green-800/40 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-green-300 animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shrink-0"></span>
+              <span className="font-bold text-white">Caixa Aberto</span>
+              <span className="text-gray-400">• Operador: <strong className="text-gray-200">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
+              <span className="text-gray-400">• Fundo Inicial: <strong className="text-green-400 font-mono">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+              <span className="text-gray-500 font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
+            </div>
+            <div className="text-[11px] text-gray-400 bg-black/60 border border-[#222] px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5">
+              <span className="text-gray-500">Gaveta (Dinheiro) =</span>
+              <span className="text-green-400 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3 lg:gap-8 items-start animate-fadeIn">
 
           {/* COLUNA ESQUERDA: CATALOGO (ORDER 2 NO MOBILE, ORDER 1 NO DESKTOP) */}
@@ -11011,10 +11178,15 @@ export default function Dashboard({ session, profileDataProps }) {
                 <input
                   type="text"
                   id="pdv-busca-input"
+                  disabled={isCaixaFechado}
                   value={pdvBusca}
                   onChange={(e) => setPdvBusca(e.target.value)}
-                  placeholder="Busca, SKU ou Código... [F2]"
-                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2 text-xs outline-none transition-all font-sans"
+                  placeholder={isCaixaFechado ? "Caixa Fechado - Abra o caixa para operar [F2]" : "Busca, SKU ou Código... [F2]"}
+                  className={`w-full bg-black border rounded-md text-white pl-9 pr-4 py-2 text-xs outline-none transition-all font-sans ${
+                    isCaixaFechado
+                      ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
+                      : 'border-[#222222] focus:border-[#6A0DAD]'
+                  }`}
                 />
               </form>
             </div>
@@ -18834,6 +19006,127 @@ export default function Dashboard({ session, profileDataProps }) {
           </div>
         )}
 
+
+        {/* MODAL DE ABERTURA DE CAIXA (BLOQUEIO PDV MULTI-FILIAIS) */}
+        {isModalAbrirCaixaOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fadeIn">
+            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/50 rounded-2xl max-w-md w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
+              
+              {/* Header do Modal */}
+              <div className="flex items-center justify-between pb-3 border-b border-[#222]">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
+                    <Store size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+                      Abrir Caixa
+                      <span className="text-[10px] bg-amber-950/40 text-amber-300 border border-amber-800/40 px-2 py-0.5 rounded-full font-bold uppercase">
+                        Início de Turno
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      {activeFilialNome || 'Filial Selecionada'} • Operador: {profile?.nome || session?.user?.email || 'Operador'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Fechar modal apenas se não estiver na aba PDV */}
+                {activeTab !== 'pdv' && (
+                  <button
+                    onClick={() => setIsModalAbrirCaixaOpen(false)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+
+              <form onSubmit={handleConfirmarAberturaCaixa} className="space-y-4">
+                {/* Aviso de Bloqueio */}
+                <div className="p-3.5 bg-purple-950/20 border border-[#6A0DAD]/30 rounded-xl flex items-start gap-2.5 text-xs text-purple-200/90">
+                  <ShieldCheck size={18} className="text-[#c084fc] shrink-0 mt-0.5" />
+                  <p>
+                    O PDV requer a abertura do caixa para emissão de pedidos e controle da gaveta nesta filial.
+                  </p>
+                </div>
+
+                {/* Campo Fundo de Troco (R$) */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                    <span>Fundo de Troco Inicial (R$) *</span>
+                    <span className="text-[10px] text-gray-500 font-normal">Dinheiro físico em gaveta</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-[#6A0DAD] font-mono">
+                      R$
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      autoFocus
+                      value={fundoTrocoInput}
+                      onChange={(e) => setFundoTrocoInput(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
+                    />
+                  </div>
+
+                  {/* Atalhos Rápidos de Fundo de Troco */}
+                  <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
+                    {[0, 50, 100, 200, 300, 500].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setFundoTrocoInput(val.toFixed(2))}
+                        className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-[#222] hover:border-[#6A0DAD]/50 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-all cursor-pointer shrink-0"
+                      >
+                        R$ {val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Observação de Abertura */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Observações de Abertura (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={obsAberturaInput}
+                    onChange={(e) => setObsAberturaInput(e.target.value)}
+                    placeholder="Ex: Turno da manhã, troco conferido..."
+                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-xl px-3.5 py-2 text-xs text-white outline-none transition-all"
+                  />
+                </div>
+
+                {/* Rodapé e Botões */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmittingAbertura}
+                    className="w-full py-3 bg-[#6A0DAD] hover:bg-[#500885] text-white text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-[#6A0DAD]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmittingAbertura ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin text-white" />
+                        Registrando Abertura de Caixa...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={16} />
+                        Confirmar e Abrir Caixa
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* MODAL DE RESTAURAÇÃO DE RASCUNHO (SRE) */}
         {showDraftModal && (
