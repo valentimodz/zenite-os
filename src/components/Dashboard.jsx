@@ -8332,6 +8332,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Adicionar item ao carrinho
   const handleAddToCart = async (produto, imei = null, forceAdd = false, origenFilialNome = null) => {
+    if (!caixaAtual || caixaAtual.status !== 'aberto') {
+      showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
+      setIsModalAbrirCaixaOpen(true);
+      return;
+    }
+
     let availableImeis = [];
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
     if (produto.tipo === 'CELULAR') {
@@ -8625,6 +8631,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Bipar IMEI ou Código de Barras (EAN/SKU) no PDV e adicionar ao carrinho
   const handleBiparPdvNovo = async (inputOverride) => {
+    if (!caixaAtual || caixaAtual.status !== 'aberto') {
+      showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
+      setIsModalAbrirCaixaOpen(true);
+      return;
+    }
+
     const stringToScan = typeof inputOverride === 'string' ? inputOverride : pdvScanImei;
     const rawInput = stringToScan.replace(/[\r\n]/g, '').trim();
     if (!rawInput) return;
@@ -11285,92 +11297,141 @@ export default function Dashboard({ session, profileDataProps }) {
               </div>
             )}
 
-            {/* Grid de Produtos (Oculto no mobile quando sem busca ativa para poupar espaço) */}
-            {loadingDados ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <Loader2 size={24} className="animate-spin text-[#6A0DAD]" />
-                <span className="text-xs text-gray-500">Buscando catálogo...</span>
-              </div>
-            ) : filteredProdutosPdv.length === 0 ? (
-              <div className="text-center py-20 text-gray-500 italic text-sm border border-dashed border-[#222] rounded-lg">
-                Nenhum produto em estoque correspondente aos filtros.
-              </div>
-            ) : (
-              <div className={`${!pdvBusca.trim() && pdvCategoria === 'TUDO' ? 'hidden lg:grid' : 'grid'} grid-cols-1 sm:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1`}>
-                {filteredProdutosPdv.map((prod) => {
-                  const isSemEstoque = prod.categoria !== 'SERVICO' && prod.quantidade <= 0;
-                  return (
-                    <div
-                      key={prod.id}
-                      onClick={() => {
-                        if (isSemEstoque) {
-                          handleVerMultiloja(prod);
-                        } else {
-                          handleAddToCart(prod);
-                        }
+            {/* Grid de Produtos com Overlay Glassmorphic Dark de Bloqueio quando Caixa Fechado */}
+            <div className="relative">
+              {isCaixaFechado && (
+                <div
+                  onClick={() => {
+                    showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
+                    setIsModalAbrirCaixaOpen(true);
+                  }}
+                  className="absolute inset-0 bg-black/75 backdrop-blur-sm z-20 cursor-not-allowed rounded-xl flex flex-col items-center justify-center p-6 text-center select-none animate-fadeIn border border-amber-500/20 shadow-2xl transition-all duration-300 min-h-[300px]"
+                >
+                  <div className="p-5 rounded-2xl bg-black/90 border border-amber-500/40 shadow-[0_0_40px_rgba(245,158,11,0.2)] flex flex-col items-center gap-3.5 max-w-sm">
+                    <div className="p-3.5 bg-amber-500/20 rounded-2xl border border-amber-500/40 text-amber-400">
+                      <Lock size={32} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-white tracking-tight">Catálogo Bloqueado</h4>
+                      <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                        O caixa desta filial está fechado. Realize a abertura com o fundo de troco para liberar os produtos e emitir pedidos.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsModalAbrirCaixaOpen(true);
                       }}
-                      className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all cursor-pointer ${isSemEstoque
-                        ? 'border-[#222222] hover:border-[#6A0DAD]/50 bg-black/60'
-                        : pdvCart.some(i => i.produto.id === prod.id)
-                          ? 'border-[#6A0DAD] bg-[#6A0DAD]/5'
-                          : 'border-[#222222] hover:border-[#6A0DAD]/40'
-                        }`}
+                      className="mt-1 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold text-xs rounded-xl transition-all shadow-lg shadow-amber-950/50 flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95"
                     >
-                      <div className="flex justify-between items-start w-full">
-                        <div className="flex flex-col gap-1.5 max-w-[70%]">
-                          <span className="font-extrabold text-sm text-white group-hover:text-purple-400 transition-colors">
-                            {prod.nome}
-                          </span>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-300 bg-[#160926] border border-[#6A0DAD]/30 px-1.5 py-0.5 rounded w-fit">
-                              <Store size={10} className="text-[#6A0DAD]" />
-                              {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
+                      <Store size={15} />
+                      Abrir Caixa com Fundo de Troco
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {loadingDados ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <Loader2 size={24} className="animate-spin text-[#6A0DAD]" />
+                  <span className="text-xs text-gray-500">Buscando catálogo...</span>
+                </div>
+              ) : filteredProdutosPdv.length === 0 ? (
+                <div className="text-center py-20 text-gray-500 italic text-sm border border-dashed border-[#222] rounded-lg">
+                  Nenhum produto em estoque correspondente aos filtros.
+                </div>
+              ) : (
+                <div className={`${!pdvBusca.trim() && pdvCategoria === 'TUDO' ? 'hidden lg:grid' : 'grid'} grid-cols-1 sm:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1`}>
+                  {filteredProdutosPdv.map((prod) => {
+                    const isSemEstoque = prod.categoria !== 'SERVICO' && prod.quantidade <= 0;
+                    return (
+                      <div
+                        key={prod.id}
+                        onClick={() => {
+                          if (isCaixaFechado) {
+                            showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
+                            setIsModalAbrirCaixaOpen(true);
+                            return;
+                          }
+                          if (isSemEstoque) {
+                            handleVerMultiloja(prod);
+                          } else {
+                            handleAddToCart(prod);
+                          }
+                        }}
+                        className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${
+                          isCaixaFechado
+                            ? 'opacity-40 cursor-not-allowed border-[#222]'
+                            : isSemEstoque
+                              ? 'border-[#222222] hover:border-[#6A0DAD]/50 bg-black/60 cursor-pointer'
+                              : pdvCart.some(i => i.produto.id === prod.id)
+                                ? 'border-[#6A0DAD] bg-[#6A0DAD]/5 cursor-pointer'
+                                : 'border-[#222222] hover:border-[#6A0DAD]/40 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start w-full">
+                          <div className="flex flex-col gap-1.5 max-w-[70%]">
+                            <span className="font-extrabold text-sm text-white group-hover:text-purple-400 transition-colors">
+                              {prod.nome}
                             </span>
-                            {prod.cor && (
-                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#e9d5ff] bg-purple-950/60 border border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
-                                <Tag size={9} className="text-purple-300" />
-                                {prod.cor}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-300 bg-[#160926] border border-[#6A0DAD]/30 px-1.5 py-0.5 rounded w-fit">
+                                <Store size={10} className="text-[#6A0DAD]" />
+                                {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
                               </span>
-                            )}
+                              {prod.cor && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#e9d5ff] bg-purple-950/60 border border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
+                                  <Tag size={9} className="text-purple-300" />
+                                  {prod.cor}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${prod.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
+                            prod.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
+                              prod.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
+                                'bg-purple-950/20 text-purple-400 border border-purple-800/20'
+                            }`}>
+                            {prod.categoria}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center w-full mt-2">
+                          <span className="font-mono font-bold text-xs text-white">
+                            R$ {Number(prod.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={isCaixaFechado}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                if (isCaixaFechado) {
+                                  showToast('Caixa Fechado: É necessário realizar a abertura do caixa.', 'error');
+                                  setIsModalAbrirCaixaOpen(true);
+                                  return;
+                                }
+                                handleVerMultiloja(prod);
+                              }}
+                              className="px-2.5 py-1 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD] disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-extrabold text-purple-300 hover:text-white rounded border border-[#6A0DAD]/50 hover:border-[#6A0DAD] transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                              title="Ver estoque e reservar de outras lojas da rede"
+                            >
+                              <Store size={11} />
+                              Rede
+                            </button>
+                            <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
+                              {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${prod.quantidade} un.`}
+                            </span>
                           </div>
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${prod.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
-                          prod.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
-                            prod.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
-                              'bg-purple-950/20 text-purple-400 border border-purple-800/20'
-                          }`}>
-                          {prod.categoria}
-                        </span>
                       </div>
-
-                      <div className="flex justify-between items-center w-full mt-2">
-                        <span className="font-mono font-bold text-xs text-white">
-                          R$ {Number(prod.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              handleVerMultiloja(prod);
-                            }}
-                            className="px-2.5 py-1 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD] text-[10px] font-extrabold text-purple-300 hover:text-white rounded border border-[#6A0DAD]/50 hover:border-[#6A0DAD] transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-                            title="Ver estoque e reservar de outras lojas da rede"
-                          >
-                            <Store size={11} />
-                            Rede
-                          </button>
-                          <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
-                            {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${prod.quantidade} un.`}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Dicas de Atalhos (Visível apenas no Desktop) */}
             <div className="hidden lg:flex bg-[#111111]/45 border border-[#222222] p-4 rounded-lg flex-wrap gap-4 text-[10px] text-gray-500 font-medium">
@@ -11403,22 +11464,39 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
 
             {/* Scanner de IMEI ou Código de Barras (EAN/Barcode) */}
-            <div className="space-y-2 bg-[#111111]/60 border border-[#222222] p-3 rounded-lg">
-              <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider">
-                ⚡ Bipar IMEI ou Código de Barras (EAN)
+            <div className={`space-y-2 bg-[#111111]/60 border rounded-lg p-3 transition-all ${
+              isCaixaFechado ? 'border-amber-900/30 opacity-70' : 'border-[#222222]'
+            }`}>
+              <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider flex items-center justify-between">
+                <span>⚡ Bipar IMEI ou Código de Barras (EAN)</span>
+                {isCaixaFechado && (
+                  <span className="text-amber-400 text-[9px] font-bold lowercase flex items-center gap-1">
+                    <Lock size={10} /> bloqueado
+                  </span>
+                )}
               </label>
               <div className="flex flex-col gap-2.5 w-full">
                 {/* Linha 1: Foco na bipagem */}
                 <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full">
                   <input
                     type="text"
+                    disabled={isCaixaFechado}
                     value={pdvScanImei}
                     onChange={(e) => setPdvScanImei(e.target.value)}
-                    placeholder="Bipe o IMEI, EAN/barcode ou SKU..."
-                    className="flex-1 min-w-[180px] bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider"
+                    placeholder={isCaixaFechado ? "Caixa Fechado - Leitor desabilitado..." : "Bipe o IMEI, EAN/barcode ou SKU..."}
+                    className={`flex-1 min-w-[180px] bg-black border rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider transition-all ${
+                      isCaixaFechado
+                        ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
+                        : 'border-[#222222] focus:border-[#6A0DAD]'
+                    }`}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
+                        if (isCaixaFechado) {
+                          showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
+                          setIsModalAbrirCaixaOpen(true);
+                          return;
+                        }
                         handleBiparPdvNovo();
                       }
                     }}
@@ -11427,8 +11505,16 @@ export default function Dashboard({ session, profileDataProps }) {
                   {/* Botão de Câmera Mobile (Visível apenas em mobile/telas pequenas) */}
                   <button
                     type="button"
-                    onClick={() => setIsCameraScannerOpen(true)}
-                    className="lg:hidden bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 border border-[#6A0DAD]/50 text-purple-300 p-2 rounded transition-all shrink-0 flex items-center justify-center cursor-pointer"
+                    disabled={isCaixaFechado}
+                    onClick={() => {
+                      if (isCaixaFechado) {
+                        showToast('Caixa Fechado: É necessário realizar a abertura do caixa.', 'error');
+                        setIsModalAbrirCaixaOpen(true);
+                        return;
+                      }
+                      setIsCameraScannerOpen(true);
+                    }}
+                    className="lg:hidden bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 disabled:opacity-30 disabled:cursor-not-allowed border border-[#6A0DAD]/50 text-purple-300 p-2 rounded transition-all shrink-0 flex items-center justify-center cursor-pointer"
                     title="Usar Câmera do Celular para Leitura"
                   >
                     <Camera size={16} />
@@ -11436,8 +11522,16 @@ export default function Dashboard({ session, profileDataProps }) {
 
                   <button
                     type="button"
-                    onClick={() => handleBiparPdvNovo()}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] px-3.5 py-2 rounded text-xs font-bold text-white transition-all shrink-0 whitespace-nowrap"
+                    disabled={isCaixaFechado}
+                    onClick={() => {
+                      if (isCaixaFechado) {
+                        showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
+                        setIsModalAbrirCaixaOpen(true);
+                        return;
+                      }
+                      handleBiparPdvNovo();
+                    }}
+                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed px-3.5 py-2 rounded text-xs font-bold text-white transition-all shrink-0 whitespace-nowrap"
                   >
                     Bipar
                   </button>
@@ -11446,11 +11540,23 @@ export default function Dashboard({ session, profileDataProps }) {
                 {/* Linha 2: Ação de atalho expandida */}
                 <button
                   type="button"
-                  onClick={() => setIsVendaRapidaOpen(true)}
-                  className="w-full bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 shadow-md shadow-purple-900/30 hover:scale-[1.01] active:scale-[0.99]"
+                  disabled={isCaixaFechado}
+                  onClick={() => {
+                    if (isCaixaFechado) {
+                      showToast('Caixa Fechado: É necessário realizar a abertura do caixa para vendas rápidas.', 'error');
+                      setIsModalAbrirCaixaOpen(true);
+                      return;
+                    }
+                    setIsVendaRapidaOpen(true);
+                  }}
+                  className={`w-full px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 ${
+                    isCaixaFechado
+                      ? 'bg-gray-800/60 text-gray-500 border border-gray-700/30 opacity-60 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white shadow-md shadow-purple-900/30 hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
+                  }`}
                   title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
                 >
-                  <Zap size={14} className="text-amber-300 fill-amber-300 animate-pulse shrink-0" />
+                  <Zap size={14} className={`shrink-0 ${isCaixaFechado ? 'text-gray-500' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
                   <span>⚡ Venda Rápida</span>
                 </button>
               </div>
