@@ -3053,48 +3053,47 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar Sessões de Caixa (Aberturas e Fechamentos) para o Relatório Gerencial
   const fetchSessoesCaixas = async (empresaId, filialId, mesStr) => {
-    const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
     setLoadingSessoesCaixas(true);
 
     try {
+      console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
+
+      // Busca direta na tabela caixas com ordenação
       let query = supabase
         .from('caixas')
-        .select('*, filiais(nome), profiles!operador_id(nome, email, avatar_url, role)')
+        .select('*')
         .order('data_abertura', { ascending: false });
 
-      if (targetEmpresaId) {
-        query = query.eq('empresa_id', targetEmpresaId);
+      // Filtro de filial apenas se houver uma filial específica selecionada
+      if (filialId && filialId !== 'todas' && filialId !== 'ALL' && filialId !== '') {
+        query = query.eq('filial_id', filialId);
       }
 
-      if (filialId && filialId !== 'todas') {
-        query = query.eq('filial_id', filialId);
+      // Filtro de empresa se especificado
+      const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
+      if (targetEmpresaId && targetEmpresaId !== 'MASTER' && targetEmpresaId !== 'all') {
+        query = query.or(`empresa_id.eq.${targetEmpresaId},empresa_id.is.null`);
       }
 
       const { data, error } = await query;
 
+      console.log('[Caixas] 📦 Resposta do Supabase:', data);
       if (error) {
-        console.warn('Tentando busca de caixas sem join complexo:', error);
-        let fallbackQuery = supabase
+        console.error('[Caixas] ⚠️ Erro na query filtrada:', error);
+        const { data: fallbackData, error: fallbackErr } = await supabase
           .from('caixas')
           .select('*')
           .order('data_abertura', { ascending: false });
 
-        if (targetEmpresaId) {
-          fallbackQuery = fallbackQuery.eq('empresa_id', targetEmpresaId);
+        console.log('[Caixas] 📦 Resposta Fallback:', fallbackData, fallbackErr);
+        if (fallbackData) {
+          setSessoesCaixas(fallbackData);
         }
-        if (filialId && filialId !== 'todas') {
-          fallbackQuery = fallbackQuery.eq('filial_id', filialId);
-        }
-        const resFallback = await fallbackQuery;
-        if (!resFallback.error && resFallback.data) {
-          setSessoesCaixas(resFallback.data);
-          return;
-        }
-      } else if (data) {
+      } else if (Array.isArray(data)) {
         setSessoesCaixas(data);
       }
     } catch (err) {
-      console.warn('Erro ao carregar sessões de caixa:', err);
+      console.error('[Caixas] ❌ Falha crítica ao carregar sessões de caixa:', err);
     } finally {
       setLoadingSessoesCaixas(false);
     }
@@ -3193,6 +3192,7 @@ export default function Dashboard({ session, profileDataProps }) {
       setFundoTrocoInput('');
       setObsAberturaInput('');
       showToast(`Caixa aberto com sucesso! Fundo inicial: R$ ${saldoInicialNum.toFixed(2)}`, 'success');
+      fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
     } catch (err) {
       console.error('Falha crítica ao abrir caixa:', err);
       showToast(`Erro ao abrir caixa: ${err.message || 'Verifique se a migration da tabela caixas foi executada.'}`, 'error');
@@ -17641,15 +17641,26 @@ export default function Dashboard({ session, profileDataProps }) {
                     {/* Resumo de KPIs do Mês */}
                     {(() => {
                       const sessoesMes = sessoesCaixas.filter(cx => {
-                        const dataAbertura = cx.data_abertura ? new Date(cx.data_abertura) : new Date(cx.created_at || Date.now());
-                        const [ano, mes] = filtroMes.split('-');
-                        const matchMes = dataAbertura.getFullYear() === parseInt(ano, 10) && (dataAbertura.getMonth() + 1) === parseInt(mes, 10);
-                        const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || String(cx.filial_id) === String(filtroFilialCaixa);
+                        const rawDate = cx.data_abertura || cx.created_at;
+                        let matchMes = true;
+                        if (filtroMes) {
+                          if (typeof rawDate === 'string' && rawDate.startsWith(filtroMes)) {
+                            matchMes = true;
+                          } else if (rawDate) {
+                            const d = new Date(rawDate);
+                            if (!isNaN(d.getTime())) {
+                              const ano = d.getFullYear();
+                              const mes = String(d.getMonth() + 1).padStart(2, '0');
+                              matchMes = `${ano}-${mes}` === filtroMes;
+                            }
+                          }
+                        }
+                        const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || String(cx.filial_id) === String(filtroFilialCaixa);
                         return matchMes && matchFilial;
                       });
 
-                      const totalAbertos = sessoesMes.filter(c => c.status === 'aberto').length;
-                      const totalFechados = sessoesMes.filter(c => c.status === 'fechado').length;
+                      const totalAbertos = sessoesMes.filter(c => String(c.status || '').toLowerCase() === 'aberto').length;
+                      const totalFechados = sessoesMes.filter(c => String(c.status || '').toLowerCase() === 'fechado').length;
                       const somaFundoTroco = sessoesMes.reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
                       const somaVendasFechadas = sessoesMes.reduce((acc, c) => {
                         const totalVendas = Number(c.total_vendas || (Number(c.total_dinheiro || 0) + Number(c.total_cartao || 0) + Number(c.total_pix || 0)) || c.saldo_final || 0);
@@ -17704,10 +17715,21 @@ export default function Dashboard({ session, profileDataProps }) {
                         <tbody className="divide-y divide-[#222222]/50">
                           {(() => {
                             const sessoesFiltradas = sessoesCaixas.filter(cx => {
-                              const dataAbertura = cx.data_abertura ? new Date(cx.data_abertura) : new Date(cx.created_at || Date.now());
-                              const [ano, mes] = filtroMes.split('-');
-                              const matchMes = dataAbertura.getFullYear() === parseInt(ano, 10) && (dataAbertura.getMonth() + 1) === parseInt(mes, 10);
-                              const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || String(cx.filial_id) === String(filtroFilialCaixa);
+                              const rawDate = cx.data_abertura || cx.created_at;
+                              let matchMes = true;
+                              if (filtroMes) {
+                                if (typeof rawDate === 'string' && rawDate.startsWith(filtroMes)) {
+                                  matchMes = true;
+                                } else if (rawDate) {
+                                  const d = new Date(rawDate);
+                                  if (!isNaN(d.getTime())) {
+                                    const ano = d.getFullYear();
+                                    const mes = String(d.getMonth() + 1).padStart(2, '0');
+                                    matchMes = `${ano}-${mes}` === filtroMes;
+                                  }
+                                }
+                              }
+                              const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || String(cx.filial_id) === String(filtroFilialCaixa);
                               const matchStatus = !filtroStatusCaixa || filtroStatusCaixa === 'TODOS' || String(cx.status || '').toLowerCase() === filtroStatusCaixa.toLowerCase();
                               return matchMes && matchFilial && matchStatus;
                             });
