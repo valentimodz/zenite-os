@@ -749,6 +749,11 @@ export default function Dashboard({ session, profileDataProps }) {
   // Vendas e Fechamentos Globais
   const [vendas, setVendas] = useState([]);
   const [fechamentos, setFechamentos] = useState([]);
+  const [sessoesCaixas, setSessoesCaixas] = useState([]);
+  const [loadingSessoesCaixas, setLoadingSessoesCaixas] = useState(false);
+  const [filtroFilialCaixa, setFiltroFilialCaixa] = useState('todas');
+  const [filtroStatusCaixa, setFiltroStatusCaixa] = useState('TODOS');
+  const [modalDetalheCaixa, setModalDetalheCaixa] = useState(null);
   const [loadingDados, setLoadingDados] = useState(false);
   const [filtroMes, setFiltroMes] = useState(() => new Date().toISOString().substring(0, 7)); // YYYY-MM
 
@@ -1949,6 +1954,14 @@ export default function Dashboard({ session, profileDataProps }) {
     fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque);
   }, [filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque, activeFilialId]);
 
+  // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios ou alterar filtros
+  useEffect(() => {
+    if (activeTab === 'fechamentos' || activeTab === 'gestao') {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+    }
+  }, [activeTab, filtroFilialCaixa, filtroMes, profile?.empresa_id, company?.id, activeEmpresaId]);
+
   const fetchTenantSettings = async () => {
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -3000,6 +3013,7 @@ export default function Dashboard({ session, profileDataProps }) {
       setFechamentos(fechRes.data || []);
       setUltimosRecebidos(imeisRes.data || []);
       setDisponiveisImeis(allImeisRes.data || []);
+      fetchSessoesCaixas(empresaId);
     } catch (err) {
       console.error('Erro ao buscar dados do gerente:', err);
     } finally {
@@ -3034,6 +3048,55 @@ export default function Dashboard({ session, profileDataProps }) {
       console.error('Erro ao buscar transferências:', err);
     } finally {
       setLoadingTransferencias(false);
+    }
+  };
+
+  // Buscar Sessões de Caixa (Aberturas e Fechamentos) para o Relatório Gerencial
+  const fetchSessoesCaixas = async (empresaId, filialId, mesStr) => {
+    const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
+    setLoadingSessoesCaixas(true);
+
+    try {
+      let query = supabase
+        .from('caixas')
+        .select('*, filiais(nome), profiles!operador_id(nome, email, avatar_url, role)')
+        .order('data_abertura', { ascending: false });
+
+      if (targetEmpresaId) {
+        query = query.eq('empresa_id', targetEmpresaId);
+      }
+
+      if (filialId && filialId !== 'todas') {
+        query = query.eq('filial_id', filialId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.warn('Tentando busca de caixas sem join complexo:', error);
+        let fallbackQuery = supabase
+          .from('caixas')
+          .select('*')
+          .order('data_abertura', { ascending: false });
+
+        if (targetEmpresaId) {
+          fallbackQuery = fallbackQuery.eq('empresa_id', targetEmpresaId);
+        }
+        if (filialId && filialId !== 'todas') {
+          fallbackQuery = fallbackQuery.eq('filial_id', filialId);
+        }
+        const resFallback = await fallbackQuery;
+        if (!resFallback.error && resFallback.data) {
+          setSessoesCaixas(resFallback.data);
+          return;
+        }
+      } else if (data) {
+        setSessoesCaixas(data);
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar sessões de caixa:', err);
+    } finally {
+      setLoadingSessoesCaixas(false);
     }
   };
 
@@ -17515,110 +17578,266 @@ export default function Dashboard({ session, profileDataProps }) {
                     </button>
                   </div>
 
-                  {/* 1. SEÇÃO DE FECHAMENTOS DIÁRIOS */}
-                  <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 print:hidden">
-                    <h3 className="text-base font-bold text-white flex items-center gap-2 mb-4">
-                      <ClipboardList size={16} className="text-[#6A0DAD]" />
-                      Fechamentos de Caixa Diários Recebidos
-                    </h3>
+                  {/* 1. SEÇÃO DE SESSÕES E FECHAMENTOS DE CAIXA (ABERTURA + FECHAMENTO) */}
+                  <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 print:hidden space-y-6">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#222222] pb-4">
+                      <div>
+                        <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                          <Store size={18} className="text-[#6A0DAD]" />
+                          Sessões e Fechamentos de Caixa
+                        </h3>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Acompanhamento detalhado do ciclo de vida dos caixas por filial, operador, fundo de troco e fechamento.
+                        </p>
+                      </div>
 
+                      {/* Filtros da Tabela de Caixas */}
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        {/* Filtro por Filial */}
+                        <select
+                          value={filtroFilialCaixa}
+                          onChange={(e) => setFiltroFilialCaixa(e.target.value)}
+                          className="bg-black border border-[#222] focus:border-[#6A0DAD] text-gray-300 text-xs rounded-lg px-2.5 py-1.5 outline-none font-medium"
+                        >
+                          <option value="todas">🏢 Todas as Filiais</option>
+                          {filiais.map(f => (
+                            <option key={f.id} value={f.id}>{f.nome}</option>
+                          ))}
+                        </select>
+
+                        {/* Filtro por Status */}
+                        <div className="flex items-center bg-black border border-[#222] rounded-lg p-0.5 text-xs">
+                          {['TODOS', 'ABERTO', 'FECHADO'].map(st => (
+                            <button
+                              key={st}
+                              type="button"
+                              onClick={() => setFiltroStatusCaixa(st)}
+                              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                                filtroStatusCaixa === st
+                                  ? 'bg-[#6A0DAD] text-white shadow-sm'
+                                  : 'text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              {st === 'TODOS' ? 'Todos' : st === 'ABERTO' ? '🟢 Abertos' : '🔒 Fechados'}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Botão de Recarregar */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+                            fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+                          }}
+                          className="p-1.5 rounded-lg bg-black border border-[#222] hover:border-[#6A0DAD] text-gray-400 hover:text-white transition-all cursor-pointer"
+                          title="Recarregar sessões de caixa"
+                        >
+                          <RefreshCw size={14} className={loadingSessoesCaixas ? 'animate-spin text-[#6A0DAD]' : ''} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Resumo de KPIs do Mês */}
+                    {(() => {
+                      const sessoesMes = sessoesCaixas.filter(cx => {
+                        const dataAbertura = cx.data_abertura ? new Date(cx.data_abertura) : new Date(cx.created_at || Date.now());
+                        const [ano, mes] = filtroMes.split('-');
+                        const matchMes = dataAbertura.getFullYear() === parseInt(ano, 10) && (dataAbertura.getMonth() + 1) === parseInt(mes, 10);
+                        const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || String(cx.filial_id) === String(filtroFilialCaixa);
+                        return matchMes && matchFilial;
+                      });
+
+                      const totalAbertos = sessoesMes.filter(c => c.status === 'aberto').length;
+                      const totalFechados = sessoesMes.filter(c => c.status === 'fechado').length;
+                      const somaFundoTroco = sessoesMes.reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
+                      const somaVendasFechadas = sessoesMes.reduce((acc, c) => {
+                        const totalVendas = Number(c.total_vendas || (Number(c.total_dinheiro || 0) + Number(c.total_cartao || 0) + Number(c.total_pix || 0)) || c.saldo_final || 0);
+                        return acc + totalVendas;
+                      }, 0);
+
+                      return (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <div className="bg-black/60 border border-[#222] p-3 rounded-xl flex flex-col gap-1">
+                            <span className="text-[10px] uppercase font-bold text-gray-500 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+                              Caixas Abertos
+                            </span>
+                            <span className="text-lg font-extrabold text-green-400 font-mono">{totalAbertos}</span>
+                          </div>
+                          <div className="bg-black/60 border border-[#222] p-3 rounded-xl flex flex-col gap-1">
+                            <span className="text-[10px] uppercase font-bold text-gray-500 flex items-center gap-1.5">
+                              <Lock size={12} className="text-gray-400" />
+                              Caixas Fechados
+                            </span>
+                            <span className="text-lg font-extrabold text-gray-200 font-mono">{totalFechados}</span>
+                          </div>
+                          <div className="bg-black/60 border border-[#222] p-3 rounded-xl flex flex-col gap-1">
+                            <span className="text-[10px] uppercase font-bold text-gray-500">Total Fundo de Troco</span>
+                            <span className="text-lg font-extrabold text-purple-300 font-mono">
+                              R$ {somaFundoTroco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          <div className="bg-black/60 border border-[#222] p-3 rounded-xl flex flex-col gap-1">
+                            <span className="text-[10px] uppercase font-bold text-gray-500">Volume Total Fechado</span>
+                            <span className="text-lg font-extrabold text-white font-mono">
+                              R$ {somaVendasFechadas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Tabela de Sessões */}
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
-                          <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
-                            <th className="pb-3">Data / Hora</th>
-                            <th className="pb-3">Vendedor</th>
-                            <th className="pb-3">Filial</th>
-                            <th className="pb-3">Dinheiro</th>
-                            <th className="pb-3">Cartão</th>
-                            <th className="pb-3">Pix</th>
-                            <th className="pb-3">Total Reportado</th>
-                            <th className="pb-3 text-center">Transf. Saída</th>
-                            <th className="pb-3 text-center">Transf. Entrada</th>
-                            <th className="pb-3">Comprovante</th>
-                            <th className="pb-3 text-right">Obs</th>
-                            {(profile?.role === 'ADMIN' || profile?.role === 'OWNER' || profile?.role === 'SUPER_ADMIN') && (
-                              <th className="pb-3 text-center">Ações</th>
-                            )}
+                          <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider text-[11px]">
+                            <th className="pb-3">Status</th>
+                            <th className="pb-3">Filial & Operador</th>
+                            <th className="pb-3">Abertura (Fundo)</th>
+                            <th className="pb-3">Fechamento</th>
+                            <th className="pb-3">Valores Reportados</th>
+                            <th className="pb-3 text-right">Ações</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#222222]/50">
-                          {fechamentos.filter(fech => {
-                            const date = new Date(fech.created_at);
-                            const [year, month] = filtroMes.split('-');
-                            return date.getMonth() === parseInt(month, 10) - 1 && date.getFullYear() === parseInt(year, 10);
-                          }).length === 0 ? (
-                            <tr>
-                              <td colSpan={(profile?.role === 'ADMIN' || profile?.role === 'OWNER' || profile?.role === 'SUPER_ADMIN') ? "12" : "11"} className="py-6 text-center italic text-gray-600">Nenhum fechamento diário enviado neste mês.</td>
-                            </tr>
-                          ) : (
-                            fechamentos.filter(fech => {
-                              const date = new Date(fech.created_at);
-                              const [year, month] = filtroMes.split('-');
-                              return date.getMonth() === parseInt(month, 10) - 1 && date.getFullYear() === parseInt(year, 10);
-                            }).map(fech => {
-                              const total = parseFloat(fech.valor_dinheiro) + parseFloat(fech.valor_cartao) + parseFloat(fech.valor_pix);
+                          {(() => {
+                            const sessoesFiltradas = sessoesCaixas.filter(cx => {
+                              const dataAbertura = cx.data_abertura ? new Date(cx.data_abertura) : new Date(cx.created_at || Date.now());
+                              const [ano, mes] = filtroMes.split('-');
+                              const matchMes = dataAbertura.getFullYear() === parseInt(ano, 10) && (dataAbertura.getMonth() + 1) === parseInt(mes, 10);
+                              const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || String(cx.filial_id) === String(filtroFilialCaixa);
+                              const matchStatus = !filtroStatusCaixa || filtroStatusCaixa === 'TODOS' || String(cx.status || '').toLowerCase() === filtroStatusCaixa.toLowerCase();
+                              return matchMes && matchFilial && matchStatus;
+                            });
+
+                            if (loadingSessoesCaixas) {
                               return (
-                                <tr key={fech.id} className="hover:bg-purple-950/5 transition-colors">
-                                  <td className="py-3 text-gray-400 font-mono">
-                                    {new Date(fech.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                <tr>
+                                  <td colSpan="6" className="py-12 text-center text-gray-500">
+                                    <Loader2 size={20} className="animate-spin text-[#6A0DAD] mx-auto mb-2" />
+                                    <span>Carregando sessões de caixa...</span>
                                   </td>
-                                  <td className="py-3 font-semibold text-white">{fech.profiles?.nome || 'Desconhecido'}</td>
-                                  <td className="py-3 text-gray-400">{fech.filiais?.nome || 'Sem filial'}</td>
-                                  <td className="py-3 font-mono text-gray-300">R$ {parseFloat(fech.valor_dinheiro).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                  <td className="py-3 font-mono text-gray-300">R$ {parseFloat(fech.valor_cartao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                  <td className="py-3 font-mono text-gray-300">R$ {parseFloat(fech.valor_pix).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                  <td className="py-3 font-mono font-bold text-white">
-                                    <div className="flex items-center gap-1.5">
-                                      <span>R$ {total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                      {fech.alterado_por && (
-                                        <span
-                                          className="px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-yellow-950/40 text-yellow-400 border border-yellow-800/30 cursor-help shrink-0"
-                                          title={`Motivo da correção: "${fech.motivo_alteracao}"\nValores Originais:\n- Dinheiro: R$ ${parseFloat(fech.valores_originais?.valor_dinheiro || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n- Cartão: R$ ${parseFloat(fech.valores_originais?.valor_cartao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n- Pix: R$ ${parseFloat(fech.valores_originais?.valor_pix || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-                                        >
-                                          [Corrigido]
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="py-3 text-center font-bold text-gray-300">
-                                    {fech.qtd_transferencias_saida || 0} <span className="text-[10px] text-gray-600">un</span>
-                                  </td>
-                                  <td className="py-3 text-center font-bold text-gray-300">
-                                    {fech.qtd_transferencias_entrada || 0} <span className="text-[10px] text-gray-600">un</span>
-                                  </td>
-                                  <td className="py-3">
-                                    {fech.comprovante_url ? (
-                                      <button
-                                        onClick={() => setModalComprovante(fech.comprovante_url)}
-                                        className="flex items-center gap-1 text-[#6A0DAD] hover:text-purple-400 font-bold outline-none"
-                                      >
-                                        <Eye size={12} />
-                                        Ver Foto
-                                      </button>
-                                    ) : (
-                                      <span className="text-gray-600 italic">Sem foto</span>
-                                    )}
-                                  </td>
-                                  <td className="py-3 text-gray-400 text-right pr-2 truncate max-w-xs" title={fech.observacoes}>
-                                    {fech.observacoes || '-'}
-                                  </td>
-                                  {(profile?.role === 'ADMIN' || profile?.role === 'OWNER' || profile?.role === 'SUPER_ADMIN') && (
-                                    <td className="py-3 text-center">
-                                      <button
-                                        onClick={() => handleAbrirAjusteCaixa(fech)}
-                                        className="flex items-center gap-1 text-[#6A0DAD] hover:text-purple-400 font-bold outline-none mx-auto"
-                                        title="Corrigir Valores"
-                                      >
-                                        <Edit2 size={12} />
-                                        Corrigir
-                                      </button>
-                                    </td>
-                                  )}
                                 </tr>
                               );
-                            })
-                          )}
+                            }
+
+                            if (sessoesFiltradas.length === 0) {
+                              return (
+                                <tr>
+                                  <td colSpan="6" className="py-12 text-center italic text-gray-500 bg-black/30 rounded-xl">
+                                    <Store size={28} className="text-gray-700 mx-auto mb-2 opacity-50" />
+                                    Nenhuma sessão de caixa registrada neste mês.
+                                  </td>
+                                </tr>
+                              );
+                            }
+
+                            return sessoesFiltradas.map((cx) => {
+                              const isAberto = cx.status === 'aberto';
+                              const filialNome = cx.filial_nome || cx.filiais?.nome || filiais.find(f => String(f.id) === String(cx.filial_id))?.nome || 'Filial';
+                              const operadorNome = cx.operador_nome || cx.profiles?.nome || 'Operador';
+                              const totalVendasCalc = Number(cx.total_vendas || (Number(cx.total_dinheiro || 0) + Number(cx.total_cartao || 0) + Number(cx.total_pix || 0)) || cx.saldo_final || 0);
+
+                              return (
+                                <tr key={cx.id} className="hover:bg-purple-950/10 transition-colors">
+                                  {/* Status */}
+                                  <td className="py-3.5 pr-3">
+                                    {isAberto ? (
+                                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-green-950/60 text-green-400 border border-green-700/50 shadow-sm">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+                                        ABERTO
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#161616] text-gray-400 border border-gray-800">
+                                        <Lock size={10} />
+                                        FECHADO
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  {/* Filial & Operador */}
+                                  <td className="py-3.5 pr-4">
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="font-extrabold text-white text-xs flex items-center gap-1">
+                                        {operadorNome}
+                                      </span>
+                                      <span className="text-[11px] text-gray-400 flex items-center gap-1">
+                                        <Store size={11} className="text-[#6A0DAD]" />
+                                        {filialNome}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Abertura & Fundo de Troco */}
+                                  <td className="py-3.5 pr-4">
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-gray-400 font-mono text-[11px]">
+                                        {new Date(cx.data_abertura).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                      <span className="text-green-400 font-mono font-extrabold text-xs">
+                                        Fundo: R$ {Number(cx.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Fechamento */}
+                                  <td className="py-3.5 pr-4">
+                                    {cx.data_fechamento ? (
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-gray-300 font-mono text-[11px]">
+                                          {new Date(cx.data_fechamento).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                        <span className="text-gray-500 text-[10px]">Turno encerrado</span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-amber-400/90 font-mono text-[11px] italic flex items-center gap-1">
+                                        <Clock size={12} className="animate-spin text-amber-400" />
+                                        Em operação...
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  {/* Valores Reportados */}
+                                  <td className="py-3.5 pr-4 font-mono">
+                                    {isAberto ? (
+                                      <div className="text-[11px] text-gray-400 flex flex-col gap-0.5">
+                                        <span className="text-green-400 font-bold">R$ {Number(cx.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
+                                        <span className="text-gray-500 text-[10px]">(Gaveta Ativa)</span>
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="font-extrabold text-white text-xs">
+                                          Total: R$ {totalVendasCalc.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                        <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                                          <span>Din: R$ {Number(cx.total_dinheiro || 0).toFixed(2)}</span>
+                                          <span>•</span>
+                                          <span>Pix: R$ {Number(cx.total_pix || 0).toFixed(2)}</span>
+                                          <span>•</span>
+                                          <span>Cartão: R$ {Number(cx.total_cartao || 0).toFixed(2)}</span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* Observações / Ações */}
+                                  <td className="py-3.5 text-right">
+                                    <button
+                                      type="button"
+                                      onClick={() => setModalDetalheCaixa(cx)}
+                                      className="px-2.5 py-1 rounded bg-[#6A0DAD]/20 hover:bg-[#6A0DAD] text-purple-300 hover:text-white font-bold text-xs transition-all border border-[#6A0DAD]/40 cursor-pointer inline-flex items-center gap-1"
+                                      title="Ver Detalhes da Sessão"
+                                    >
+                                      <Eye size={12} />
+                                      Detalhes
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
@@ -19058,6 +19277,132 @@ export default function Dashboard({ session, profileDataProps }) {
                 className="w-full bg-[#6A0DAD] hover:bg-[#500885] text-xs font-bold py-2 rounded transition-all"
               >
                 Fechar Visualização
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE DETALHES DA SESSÃO DE CAIXA */}
+        {modalDetalheCaixa && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn">
+            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl max-w-lg w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-[#222]">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
+                    <Store size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                      Sessão de Caixa
+                      {modalDetalheCaixa.status === 'aberto' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-green-950/60 text-green-400 border border-green-700/50">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+                          ABERTO
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#161616] text-gray-400 border border-gray-800">
+                          FECHADO
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      {modalDetalheCaixa.filial_nome || modalDetalheCaixa.filiais?.nome || 'Filial'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setModalDetalheCaixa(null)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Informações da Abertura */}
+              <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
+                <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
+                  Informações de Abertura
+                </span>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="text-gray-500 text-[10px] block">Operador Responsável</span>
+                    <strong className="text-white text-xs">{modalDetalheCaixa.operador_nome || modalDetalheCaixa.profiles?.nome || 'Operador'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 text-[10px] block">Data / Hora Abertura</span>
+                    <span className="text-gray-300 font-mono text-xs">{new Date(modalDetalheCaixa.data_abertura).toLocaleString('pt-BR')}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 text-[10px] block">Fundo de Troco Inicial</span>
+                    <span className="text-green-400 font-mono font-extrabold text-sm">
+                      R$ {Number(modalDetalheCaixa.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 text-[10px] block">Observações de Abertura</span>
+                    <span className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_abertura || 'Nenhuma'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informações de Fechamento / Vendas */}
+              <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
+                <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
+                  {modalDetalheCaixa.status === 'aberto' ? 'Status Atual do Turno' : 'Fechamento & Valores Reportados'}
+                </span>
+                {modalDetalheCaixa.status === 'aberto' ? (
+                  <div className="text-xs text-amber-300/90 flex items-center gap-2 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg">
+                    <Clock size={16} className="animate-spin text-amber-400 shrink-0" />
+                    <span>Este caixa continua aberto em operação no PDV. Os totais serão consolidados no encerramento.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 text-xs">
+                    <div className="grid grid-cols-2 gap-3 pb-2 border-b border-[#222]">
+                      <div>
+                        <span className="text-gray-500 text-[10px] block">Data / Hora Fechamento</span>
+                        <span className="text-gray-300 font-mono text-xs">
+                          {modalDetalheCaixa.data_fechamento ? new Date(modalDetalheCaixa.data_fechamento).toLocaleString('pt-BR') : '-'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 text-[10px] block">Total Consolidado</span>
+                        <span className="text-white font-mono font-black text-sm">
+                          R$ {Number(modalDetalheCaixa.total_vendas || (Number(modalDetalheCaixa.total_dinheiro || 0) + Number(modalDetalheCaixa.total_cartao || 0) + Number(modalDetalheCaixa.total_pix || 0)) || modalDetalheCaixa.saldo_final || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
+                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                        <span className="text-[10px] text-gray-500 block">Dinheiro</span>
+                        <span className="text-xs text-gray-200 font-bold">R$ {Number(modalDetalheCaixa.total_dinheiro || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                        <span className="text-[10px] text-gray-500 block">PIX</span>
+                        <span className="text-xs text-purple-300 font-bold">R$ {Number(modalDetalheCaixa.total_pix || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                        <span className="text-[10px] text-gray-500 block">Cartão</span>
+                        <span className="text-xs text-blue-300 font-bold">R$ {Number(modalDetalheCaixa.total_cartao || 0).toFixed(2)}</span>
+                      </div>
+                    </div>
+                    {modalDetalheCaixa.observacoes_fechamento && (
+                      <div className="pt-1">
+                        <span className="text-gray-500 text-[10px] block">Observações do Fechamento</span>
+                        <p className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_fechamento}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Botão Fechar */}
+              <button
+                type="button"
+                onClick={() => setModalDetalheCaixa(null)}
+                className="w-full py-2.5 bg-[#222] hover:bg-[#333] text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+              >
+                Fechar Detalhes
               </button>
             </div>
           </div>
