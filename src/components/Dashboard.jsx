@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase, supabaseAdmin, supabaseRegister } from '../supabaseClient';
 import {
   LogOut, User, Building, Shield, ShieldCheck, Plus, Users, ShoppingBag, UserPlus,
@@ -581,6 +581,27 @@ export default function Dashboard({ session, profileDataProps }) {
   const [novaCategoriaNome, setNovaCategoriaNome] = useState('');
   const [filtroCategoriaEstoque, setFiltroCategoriaEstoque] = useState('');
   const [filtroStatusEstoque, setFiltroStatusEstoque] = useState('');
+
+  // Referência e Navegação Horizontal de Categorias (PDV Desktop)
+  const categoriaScrollRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkCategoryScroll = () => {
+    if (categoriaScrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = categoriaScrollRef.current;
+      setCanScrollLeft(scrollLeft > 5);
+      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 5);
+    }
+  };
+
+  const handleScrollCategory = (direction) => {
+    if (categoriaScrollRef.current) {
+      const offset = direction === 'left' ? -260 : 260;
+      categoriaScrollRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+      setTimeout(checkCategoryScroll, 350);
+    }
+  };
 
   // Estados para Disponibilidade Multiloja
   const [selectedMultilojaProd, setSelectedMultilojaProd] = useState(null);
@@ -1881,6 +1902,22 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchAuditoriaDescontos(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
     }
   }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView]);
+
+  // Monitorar capacidade de rolagem horizontal das categorias no PDV
+  useEffect(() => {
+    const timer = setTimeout(() => checkCategoryScroll(), 200);
+    const el = categoriaScrollRef.current;
+    if (el) {
+      el.addEventListener('scroll', checkCategoryScroll);
+      window.addEventListener('resize', checkCategoryScroll);
+      return () => {
+        clearTimeout(timer);
+        el.removeEventListener('scroll', checkCategoryScroll);
+        window.removeEventListener('resize', checkCategoryScroll);
+      };
+    }
+    return () => clearTimeout(timer);
+  }, [categorias, activeTab, currentView]);
 
   // Atualizar produtos do PDV sempre que a filial ativa for alternada
   useEffect(() => {
@@ -10982,48 +11019,83 @@ export default function Dashboard({ session, profileDataProps }) {
               </form>
             </div>
 
-            {/* Filtros de Categoria Dinâmicos (com Scroll Horizontal Oculto e Responsivo) */}
-            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide no-scrollbar border-b border-[#161616] pb-3 pt-1">
-              {/* Botão Fixo TUDO */}
-              <button
-                type="button"
-                onClick={() => setPdvCategoria('TUDO')}
-                className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-extrabold uppercase tracking-wider transition-all border cursor-pointer ${
-                  !pdvCategoria || pdvCategoria === 'TUDO'
-                    ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
-                    : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
-                }`}
-              >
-                TUDO
-              </button>
-
-              {/* Botões Dinâmicos da Tabela 'categorias' do Supabase */}
-              {(categorias && categorias.length > 0 ? categorias : [
-                { id: 'IOS', nome: 'IOS / Apple' },
-                { id: 'ANDROID', nome: 'Android' },
-                { id: 'APPLE_JBL_CONSOLE', nome: 'Apple/JBL/Console' },
-                { id: 'ACESSORIO', nome: 'Acessórios' },
-                { id: 'SERVICO', nome: 'Serviços' }
-              ]).map((cat) => {
-                const catNome = cat.nome || cat;
-                const catId = cat.id || catNome;
-                const isSelected = pdvCategoria === catNome || pdvCategoria === catId || (pdvCategoria && String(pdvCategoria).toLowerCase() === String(catNome).toLowerCase());
-
-                return (
+            {/* Filtros de Categoria Dinâmicos (com Navegação por Setas e Scroll Horizontal Oculto) */}
+            <div className="relative group/catbar border-b border-[#161616] pb-3 pt-1">
+              {/* Seta de Rolagem Esquerda (Desktop) */}
+              {canScrollLeft && (
+                <div className="absolute left-0 top-1 bottom-3 z-10 flex items-center pr-4 bg-gradient-to-r from-black via-black/90 to-transparent">
                   <button
-                    key={catId}
                     type="button"
-                    onClick={() => setPdvCategoria(catNome)}
-                    className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
-                        : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
-                    }`}
+                    onClick={() => handleScrollCategory('left')}
+                    aria-label="Rolar categorias para esquerda"
+                    className="w-7 h-7 rounded-full bg-[#181818] border border-[#333] hover:border-[#6A0DAD] text-gray-300 hover:text-white flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95 cursor-pointer"
                   >
-                    {catNome}
+                    <ChevronLeft size={16} />
                   </button>
-                );
-              })}
+                </div>
+              )}
+
+              {/* Container de Categorias com Scroll Suave */}
+              <div
+                ref={categoriaScrollRef}
+                onScroll={checkCategoryScroll}
+                className="flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide no-scrollbar scroll-smooth px-0.5"
+              >
+                {/* Botão Fixo TUDO */}
+                <button
+                  type="button"
+                  onClick={() => setPdvCategoria('TUDO')}
+                  className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-extrabold uppercase tracking-wider transition-all border cursor-pointer ${
+                    !pdvCategoria || pdvCategoria === 'TUDO'
+                      ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
+                      : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
+                  }`}
+                >
+                  TUDO
+                </button>
+
+                {/* Botões Dinâmicos da Tabela 'categorias' do Supabase */}
+                {(categorias && categorias.length > 0 ? categorias : [
+                  { id: 'IOS', nome: 'IOS / Apple' },
+                  { id: 'ANDROID', nome: 'Android' },
+                  { id: 'APPLE_JBL_CONSOLE', nome: 'Apple/JBL/Console' },
+                  { id: 'ACESSORIO', nome: 'Acessórios' },
+                  { id: 'SERVICO', nome: 'Serviços' }
+                ]).map((cat) => {
+                  const catNome = cat.nome || cat;
+                  const catId = cat.id || catNome;
+                  const isSelected = pdvCategoria === catNome || pdvCategoria === catId || (pdvCategoria && String(pdvCategoria).toLowerCase() === String(catNome).toLowerCase());
+
+                  return (
+                    <button
+                      key={catId}
+                      type="button"
+                      onClick={() => setPdvCategoria(catNome)}
+                      className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
+                          : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
+                      }`}
+                    >
+                      {catNome}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Seta de Rolagem Direita (Desktop) */}
+              {canScrollRight && (
+                <div className="absolute right-0 top-1 bottom-3 z-10 flex items-center pl-4 bg-gradient-to-l from-black via-black/90 to-transparent">
+                  <button
+                    type="button"
+                    onClick={() => handleScrollCategory('right')}
+                    aria-label="Rolar categorias para direita"
+                    className="w-7 h-7 rounded-full bg-[#181818] border border-[#333] hover:border-[#6A0DAD] text-gray-300 hover:text-white flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95 cursor-pointer"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Dica para busca mobile quando catálogo oculto */}
