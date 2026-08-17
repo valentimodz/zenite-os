@@ -2157,7 +2157,7 @@ export default function Dashboard({ session, profileDataProps }) {
         setDescontosLogs(localLogs);
       }
     } catch (err) {
-      console.warn('Aviso ao carregar auditoria de descontos:', err);
+      console.error('[Dashboard] Erro ao buscar descontos do mês:', err);
       const localLogs = JSON.parse(localStorage.getItem('zenite_descontos_logs') || '[]');
       setDescontosLogs(localLogs);
     }
@@ -2889,6 +2889,8 @@ export default function Dashboard({ session, profileDataProps }) {
             .from('vendas')
             .select(`
               *,
+              vendedor:profiles!vendedor_id(id, nome),
+              filial:filiais!filial_id(id, nome),
               clientes:cliente_id (
                 id,
                 nome,
@@ -2920,18 +2922,24 @@ export default function Dashboard({ session, profileDataProps }) {
 
           const { data: dbSales, error: dbErr } = await q;
 
+          if (dbErr) {
+            console.error("[Dashboard] Erro ao buscar descontos do mês (query principal):", dbErr);
+            throw dbErr;
+          }
+
           console.log("🔥 [RAW DATA - PRIMEIRA VENDA]:", dbSales && dbSales.length > 0 ? dbSales[0] : "NENHUMA VENDA");
 
-          if (!dbErr && dbSales) return dbSales;
-
-          const { data: simpleSales } = await supabase
+          if (dbSales) return dbSales;
+        } catch (err) {
+          console.error("[Dashboard] Erro ao buscar descontos do mês:", err);
+          const { data: simpleSales, error: simpleErr } = await supabase
             .from('vendas')
             .select('*, clientes(*)')
             .order('created_at', { ascending: false });
+          if (simpleErr) {
+            console.error("[Dashboard] Erro ao buscar descontos do mês (fallback):", simpleErr);
+          }
           return simpleSales || [];
-        } catch (err) {
-          console.error("Erro no fallback de vendas:", err);
-          return [];
         }
       };
 
@@ -13897,18 +13905,28 @@ export default function Dashboard({ session, profileDataProps }) {
                       </div>
 
                       {(() => {
-                        // Métricas Consolidadas do Mês Selecionado
-                        const [anoFiltro, mesFiltro] = filtroMes.split('-');
-                        const vendasMes = vendas.filter(sale => {
-                          const rawDate = sale.created_at || sale.data;
+                        // Métricas Consolidadas do Mês Selecionado (Timezone Safe)
+                        const [anoFiltroStr, mesFiltroStr] = (filtroMes || new Date().toISOString().slice(0, 7)).split('-');
+                        const anoFiltroNum = parseInt(anoFiltroStr, 10);
+                        const mesFiltroNum = parseInt(mesFiltroStr, 10);
+
+                        const isSameMonthTimezoneSafe = (rawDate) => {
                           if (!rawDate) return false;
-                          const strDate = String(rawDate);
-                          if (strDate.length >= 7) {
-                            return strDate.startsWith(`${anoFiltro}-${mesFiltro}`);
-                          }
-                          const date = new Date(rawDate);
-                          return date.getUTCMonth() === parseInt(mesFiltro, 10) - 1 && date.getUTCFullYear() === parseInt(anoFiltro, 10);
-                        });
+                          const str = String(rawDate);
+                          if (str.startsWith(`${anoFiltroStr}-${mesFiltroStr}`)) return true;
+
+                          const d = new Date(rawDate);
+                          if (isNaN(d.getTime())) return false;
+
+                          const yLocal = d.getFullYear();
+                          const mLocal = d.getMonth() + 1;
+                          const yUTC = d.getUTCFullYear();
+                          const mUTC = d.getUTCMonth() + 1;
+
+                          return (yLocal === anoFiltroNum && mLocal === mesFiltroNum) || (yUTC === anoFiltroNum && mUTC === mesFiltroNum);
+                        };
+
+                        const vendasMes = vendas.filter(sale => isSameMonthTimezoneSafe(sale.created_at || sale.data || sale.date));
 
                         const totalVendasCount = vendasMes.length;
                         const faturamentoBruto = vendasMes.reduce((acc, sale) => {
@@ -13927,8 +13945,25 @@ export default function Dashboard({ session, profileDataProps }) {
                         const margemLucro = faturamentoBruto > 0 ? ((lucroReal / faturamentoBruto) * 100) : 0;
                         const roiCalculado = custoTotal > 0 ? ((lucroReal / custoTotal) * 100) : 0;
 
-                        const vendasComDesconto = vendasMes.filter(s => parseFloat(s.desconto || s.valor_desconto || 0) > 0 || s.desconto_autorizado_por);
-                        const totalDescontosConcedidos = vendasMes.reduce((acc, s) => acc + (parseFloat(s.desconto || s.valor_desconto || 0)), 0);
+                        const vendasComDesconto = vendasMes.filter(s => {
+                          const descVal = parseFloat(s.valor_desconto || s.desconto || s.total_desconto || 0);
+                          const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
+                          const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
+                          const temDiferenca = pBase > 0 && pVendido > 0 && pBase > (pVendido + 0.001);
+                          return descVal > 0.001 || temDiferenca || Boolean(s.desconto_autorizado_por);
+                        });
+
+                        const totalDescontosConcedidos = vendasMes.reduce((acc, s) => {
+                          let val = parseFloat(s.valor_desconto || s.desconto || s.total_desconto || 0);
+                          if (!val || isNaN(val) || val <= 0) {
+                            const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
+                            const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
+                            if (pBase > pVendido && pBase > 0) {
+                              val = pBase - pVendido;
+                            }
+                          }
+                          return acc + (isNaN(val) || !val ? 0 : val);
+                        }, 0);
 
                         // Agrupamento por Vendedor com Ticket Médio e Comissões Geradas
                         const vendedorMap = {};
@@ -14181,22 +14216,32 @@ export default function Dashboard({ session, profileDataProps }) {
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-[#222222]/50">
-                                        {vendasComDesconto.slice(0, 10).map((sale) => (
-                                          <tr key={sale.id} className="hover:bg-white/5 transition-colors">
-                                            <td className="py-2 text-gray-400 font-mono text-[11px]">
-                                              {new Date(sale.created_at || sale.data).toLocaleDateString('pt-BR')}
-                                            </td>
-                                            <td className="py-2 text-gray-300 font-semibold text-[11px]">
-                                              {sale.profiles?.nome || sale.vendedor_nome || 'Vendedor'}
-                                            </td>
-                                            <td className="py-3 text-right font-mono font-bold text-amber-400">
-                                              - R$ {parseFloat(sale.desconto || sale.valor_desconto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                            </td>
-                                            <td className="py-3 text-right font-semibold text-purple-300">
-                                              {sale.autorizador?.nome || sale.desconto_autorizado_por || 'Gerente / Dono'}
-                                            </td>
-                                          </tr>
-                                        ))}
+                                        {vendasComDesconto.slice(0, 10).map((sale) => {
+                                          let descAmount = parseFloat(sale.desconto || sale.valor_desconto || sale.total_desconto || 0);
+                                          if (!descAmount || isNaN(descAmount) || descAmount <= 0) {
+                                            const pBase = parseFloat(sale.preco_base || sale.valor_tabela || 0);
+                                            const pVendido = parseFloat(sale.preco_unitario_vendido || sale.preco_unitario || sale.valor_total || sale.valor_vendido || (sale.preco * sale.quantidade) || 0);
+                                            if (pBase > pVendido && pBase > 0) {
+                                              descAmount = pBase - pVendido;
+                                            }
+                                          }
+                                          return (
+                                            <tr key={sale.id} className="hover:bg-white/5 transition-colors">
+                                              <td className="py-2 text-gray-400 font-mono text-[11px]">
+                                                {new Date(sale.created_at || sale.data).toLocaleDateString('pt-BR')}
+                                              </td>
+                                              <td className="py-2 text-gray-300 font-semibold text-[11px]">
+                                                {sale.profiles?.nome || sale.vendedor?.nome || sale.vendedor_nome || 'Vendedor'}
+                                              </td>
+                                              <td className="py-3 text-right font-mono font-bold text-amber-400">
+                                                - R$ {(descAmount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                              </td>
+                                              <td className="py-3 text-right font-semibold text-purple-300">
+                                                {sale.autorizador?.nome || sale.desconto_autorizado_por || 'Gerente / Dono'}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
                                       </tbody>
                                     </table>
                                   </div>
