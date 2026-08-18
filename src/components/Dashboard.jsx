@@ -17,6 +17,7 @@ import SaasBilling from '../pages/SaaS/SaasBilling';
 import SaasSettings from '../pages/SaaS/SaasSettings';
 import PainelVendaRapida from './PainelVendaRapida';
 import CameraScanner from './CameraScanner';
+import ImportadorVendasCSV from './ImportadorVendasCSV';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -16634,6 +16635,30 @@ export default function Dashboard({ session, profileDataProps }) {
                               </table>
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* CARD DE FERRAMENTAS ADMINISTRATIVAS - IMPORTAÇÃO CSV */}
+                      {(profile?.role === 'ADMIN' || profile?.role === 'SUPER_ADMIN' || profile?.role === 'OWNER' || profile?.role === 'DONO') && (
+                        <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6 shadow-xl">
+                          <div className="border-b border-[#222] pb-4">
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                              <span className="text-xl">🛠️</span> Ferramentas Administrativas
+                            </h3>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Importação de Histórico de Vendas (Apenas Financeiro/Comissões)
+                            </p>
+                          </div>
+                          <ImportadorVendasCSV
+                            empresaId={profile?.empresa_id || company?.id}
+                            profile={profile}
+                            onImportSuccess={() => {
+                              const targetEmpId = profile?.empresa_id || company?.id;
+                              if (targetEmpId && typeof fetchGerenteData === 'function') {
+                                fetchGerenteData(targetEmpId);
+                              }
+                            }}
+                          />
                         </div>
                       )}
                     </div>
