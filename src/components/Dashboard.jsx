@@ -3201,33 +3201,33 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar produtos disponíveis para venda no PDV filtrando pela filial ativa de forma tolerante
+  // Buscar produtos disponíveis para venda no PDV filtrando pela filial ativa
   const fetchProdutosPDV = async (filialIdAtiva) => {
     const targetFilialId = filialIdAtiva || activeFilialId || profile?.filial_id || profile?.empresa_id || company?.id;
     if (!targetFilialId) return;
 
     try {
-      // Query tolerante: busca onde a filial é empresa_id OU filial_id
-      let { data: produtosLoja, error } = await supabase
+      // Busca os produtos físicos diretamente da filial logada
+      const { data: produtosLoja, error } = await supabase
         .from('produtos')
         .select('*')
-        .or(`empresa_id.eq.${targetFilialId},filial_id.eq.${targetFilialId}`);
+        .eq('empresa_id', targetFilialId);
 
-      if (error || !produtosLoja || produtosLoja.length === 0) {
-        // Fallback por empresa_id estrito
-        const { data: fallbackLoja, error: fallbackErr } = await supabase
-          .from('produtos')
-          .select('*')
-          .eq('empresa_id', targetFilialId);
-
-        if (fallbackErr) {
-          console.error("Erro ao carregar produtos no PDV:", fallbackErr);
-          return;
-        }
-        produtosLoja = fallbackLoja;
+      if (error) {
+        console.error("Erro ao carregar produtos na vitrine do PDV:", error);
+        return;
       }
 
-      setProdutosDisponiveisPDV(produtosLoja || []);
+      // Mapeamento forçado: clona o valor de 'quantidade' para os nomes prováveis que o componente do Card (UI) utiliza
+      const produtosMapeados = (produtosLoja || []).map(item => ({
+        ...item,
+        estoque: item.quantidade || 0,
+        estoque_local: item.quantidade || 0,
+        quantidade_local: item.quantidade || 0
+      }));
+
+      // Define o estado com os dados já mastigados para a UI
+      setProdutosDisponiveisPDV(produtosMapeados);
     } catch (err) {
       console.error("Erro ao executar fetchProdutosPDV:", err);
     }
@@ -10535,14 +10535,17 @@ export default function Dashboard({ session, profileDataProps }) {
           if (prEan && pEan && prEan !== pEan) return false;
           return true;
         });
-        localQty = localProds.reduce((sum, item) => sum + (item.quantidade || 0), 0);
+        localQty = localProds.reduce((sum, item) => sum + (item.quantidade || item.estoque || item.estoque_local || item.quantidade_local || 0), 0);
       }
 
       return {
         ...p,
         filial_id: activeFilialId,
         filial_nome: activeFilialNome,
-        quantidade: localQty
+        quantidade: localQty,
+        estoque: localQty,
+        estoque_local: localQty,
+        quantidade_local: localQty
       };
     });
   }, [listaProdutosConsolidada, disponiveisImeis, produtos, produtosFilial, produtosDisponiveisPDV, activeFilialId, activeFilialNome]);
