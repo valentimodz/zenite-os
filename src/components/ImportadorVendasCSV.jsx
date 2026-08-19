@@ -26,7 +26,7 @@ import {
  * 🔴 TRAVA DE ESTOQUE ABSOLUTA:
  * Esta ferramenta NÃO faz UPDATE na tabela 'produtos' (quantidade) nem INSERT em 'movimentacoes_estoque'.
  */
-export default function ImportadorVendasCSV({ empresaId, profile, onImportSuccess }) {
+export default function ImportadorVendasCSV({ empresaId, profile, colaboradores = [], vendedores = [], onImportSuccess }) {
   const [file, setFile] = useState(null);
   const [parsedRows, setParsedRows] = useState([]);
   const [validationErrors, setValidationErrors] = useState([]);
@@ -47,24 +47,105 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
   const activeEmpresaId = empresaId || profile?.empresa_id || null;
 
-  // Carregar lista de colaboradores para auxílio de UUIDs
+  // Carregar lista de colaboradores para auxílio de UUIDs e cruzamento de nomes
   useEffect(() => {
+    // 1. Inicializar imediatamente com os colaboradores/vendedores recebidos via props
+    const propsList = [...(colaboradores || []), ...(vendedores || [])];
+    if (propsList.length > 0) {
+      const map = new Map();
+      propsList.forEach(item => {
+        if (item && item.id) map.set(String(item.id).trim().toLowerCase(), item);
+      });
+      setVendedoresList(Array.from(map.values()));
+    }
+
+    // 2. Complementar via busca no Supabase
     async function loadVendedores() {
       try {
-        let q = supabase.from('profiles').select('id, nome, email, role');
+        let q = supabase.from('profiles').select('id, nome, email, role, empresa_id');
         if (activeEmpresaId && activeEmpresaId !== 'MASTER') {
           q = q.eq('empresa_id', activeEmpresaId);
         }
         const { data, error } = await q;
-        if (!error && data) {
-          setVendedoresList(data);
+        if (!error && data && data.length > 0) {
+          setVendedoresList(prev => {
+            const map = new Map();
+            (prev || []).forEach(item => {
+              if (item && item.id) map.set(String(item.id).trim().toLowerCase(), item);
+            });
+            data.forEach(item => {
+              if (item && item.id) map.set(String(item.id).trim().toLowerCase(), item);
+            });
+            return Array.from(map.values());
+          });
         }
       } catch (err) {
         console.warn('Erro ao carregar lista de vendedores:', err);
       }
     }
     loadVendedores();
-  }, [activeEmpresaId]);
+  }, [activeEmpresaId, colaboradores, vendedores]);
+
+  // 3. Buscar automaticamente no banco quaisquer perfis presentes no CSV que ainda não estejam na lista
+  useEffect(() => {
+    if (!parsedRows || parsedRows.length === 0) return;
+
+    const knownIds = new Set(
+      (vendedoresList || []).map(v => String(v.id || '').trim().toLowerCase())
+    );
+
+    const missingIds = [];
+    parsedRows.forEach(r => {
+      if (r.vendedor_id) {
+        const cleanV = String(r.vendedor_id).trim().toLowerCase();
+        if (cleanV && !knownIds.has(cleanV) && !missingIds.includes(r.vendedor_id.trim())) {
+          missingIds.push(r.vendedor_id.trim());
+        }
+      }
+      if (r.trainee_id) {
+        const cleanT = String(r.trainee_id).trim().toLowerCase();
+        if (cleanT && !knownIds.has(cleanT) && !missingIds.includes(r.trainee_id.trim())) {
+          missingIds.push(r.trainee_id.trim());
+        }
+      }
+    });
+
+    if (missingIds.length === 0) return;
+
+    async function fetchMissingProfiles() {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, nome, email, role')
+          .in('id', missingIds);
+
+        if (!error && data && data.length > 0) {
+          setVendedoresList(prev => {
+            const map = new Map();
+            (prev || []).forEach(p => { if (p?.id) map.set(String(p.id).trim().toLowerCase(), p); });
+            data.forEach(p => { if (p?.id) map.set(String(p.id).trim().toLowerCase(), p); });
+            return Array.from(map.values());
+          });
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar perfis complementares do CSV:', err);
+      }
+    }
+
+    fetchMissingProfiles();
+  }, [parsedRows]);
+
+  // Helper de busca resiliente de colaborador por UUID ou email
+  const getColaborador = (id) => {
+    if (!id) return null;
+    const cleanId = String(id).trim().toLowerCase();
+    return (vendedoresList || []).find(v => {
+      if (!v) return false;
+      const vId = String(v.id || v.usuario_id || '').trim().toLowerCase();
+      const vEmail = String(v.email || '').trim().toLowerCase();
+      return vId === cleanId || vEmail === cleanId;
+    });
+  };
 
   // Download do modelo CSV oficial com delimitador ';'
   const handleDownloadTemplate = () => {
@@ -222,7 +303,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
       const dataVenda = parseDate(rawData);
       const vendedorId = rawVendedor ? rawVendedor.trim() : '';
-      const traineeId = rawTrainee && rawTrainee.trim() !== '0' && rawTrainee.trim().toLowerCase() !== 'none' && rawTrainee.trim().toLowerCase() !== 'null' && rawTrainee.trim().toLowerCase() !== 'undefined' ? rawTrainee.trim() : null;
+      const traineeId = rawTrainee && rawTrainee.trim() !== '' && rawTrainee.trim() !== '0' && rawTrainee.trim().toLowerCase() !== 'none' && rawTrainee.trim().toLowerCase() !== 'null' && rawTrainee.trim().toLowerCase() !== 'undefined' ? rawTrainee.trim() : null;
       const formaPagamento = rawFormaPagto ? rawFormaPagto.trim().toUpperCase() : 'OUTROS';
 
       const qtdPremium = parseInteger(rawPremium);
@@ -834,7 +915,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
                     <th className="py-2.5 px-3">Status</th>
                     <th className="py-2.5 px-3">Linha</th>
                     <th className="py-2.5 px-3">Data</th>
-                    <th className="py-2.5 px-3">Vendedor</th>
+                    <th className="py-2.5 px-3">Vendedor Principal</th>
                     <th className="py-2.5 px-3">Trainee</th>
                     <th className="py-2.5 px-3">Pagamento</th>
                     <th className="py-2.5 px-3 text-center">Premium</th>
@@ -846,8 +927,9 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
                 </thead>
                 <tbody className="divide-y divide-[#1A1A1A]">
                   {parsedRows.slice(0, 50).map((row, idx) => {
-                    const sellerObj = vendedoresList.find(v => v.id === row.vendedor_id);
-                    const traineeObj = vendedoresList.find(v => v.id === row.trainee_id);
+                    const sellerObj = getColaborador(row.vendedor_id);
+                    const traineeObj = getColaborador(row.trainee_id);
+
                     return (
                       <tr key={idx} className={row.isValid ? 'hover:bg-white/5' : 'bg-red-950/10 hover:bg-red-950/20'}>
                         <td className="py-2 px-3">
@@ -866,15 +948,25 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
                           {row.data_venda ? new Date(row.data_venda).toLocaleDateString('pt-BR') : '-'}
                         </td>
                         <td className="py-2 px-3 font-mono text-gray-300 text-[11px]">
-                          {sellerObj ? sellerObj.nome : <span className="truncate max-w-[100px] inline-block">{row.vendedor_id}</span>}
+                          {sellerObj?.nome ? (
+                            <span className="font-semibold text-white">{sellerObj.nome}</span>
+                          ) : (
+                            <span className="truncate max-w-[120px] inline-block font-mono" title={row.vendedor_id}>
+                              {row.vendedor_id}
+                            </span>
+                          )}
                         </td>
                         <td className="py-2 px-3 font-mono text-[11px]">
-                          {traineeObj ? (
-                            <span className="text-purple-300 font-semibold">{traineeObj.nome}</span>
-                          ) : row.trainee_id ? (
-                            <span className="text-purple-300 truncate max-w-[100px] inline-block">{row.trainee_id}</span>
+                          {row.trainee_id ? (
+                            traineeObj?.nome ? (
+                              <span className="text-purple-300 font-semibold">{traineeObj.nome}</span>
+                            ) : (
+                              <span className="text-purple-300 truncate max-w-[120px] inline-block font-mono" title={row.trainee_id}>
+                                {row.trainee_id}
+                              </span>
+                            )
                           ) : (
-                            <span className="text-gray-600 font-sans italic">Sem trainee</span>
+                            <span className="text-gray-500 font-sans italic">Sem trainee</span>
                           )}
                         </td>
                         <td className="py-2 px-3">

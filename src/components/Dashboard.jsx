@@ -16652,6 +16652,8 @@ export default function Dashboard({ session, profileDataProps }) {
                           <ImportadorVendasCSV
                             empresaId={profile?.empresa_id || company?.id}
                             profile={profile}
+                            colaboradores={colaboradores}
+                            vendedores={vendedores}
                             onImportSuccess={() => {
                               const targetEmpId = profile?.empresa_id || company?.id;
                               if (targetEmpId && typeof fetchGerenteData === 'function') {
