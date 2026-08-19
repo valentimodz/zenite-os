@@ -407,77 +407,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
     }
   };
 
-  // Helper de inserção segura em 'vendas' com sanitização e fallback resiliente
-  const insertVendaSegura = async (payload) => {
-    try {
-      const { data, error } = await supabase
-        .from('vendas')
-        .insert(payload)
-        .select('id')
-        .single();
 
-      if (!error && data?.id) return { id: data.id, error: null };
-
-      if (error && error.message) {
-        const cleanPayload = { ...payload };
-        // Remover colunas opcionais ou chaves com restrição de FK inexistente caso a tabela no banco reclame
-        if (error.message.includes('filial_id') || error.message.includes('foreign key') || error.message.includes('violates foreign key')) {
-          delete cleanPayload.filial_id;
-        }
-        if (error.message.includes('criado_at')) delete cleanPayload.criado_at;
-        if (error.message.includes('comissao_gerada')) delete cleanPayload.comissao_gerada;
-        if (error.message.includes('comissao_vendedor')) delete cleanPayload.comissao_vendedor;
-        if (error.message.includes('trainee_id')) delete cleanPayload.trainee_id;
-        if (error.message.includes('comissao_trainee')) delete cleanPayload.comissao_trainee;
-        if (error.message.includes('teve_participacao_trainee')) delete cleanPayload.teve_participacao_trainee;
-        if (error.message.includes('forma_pagamento')) delete cleanPayload.forma_pagamento;
-        if (error.message.includes('valor')) delete cleanPayload.valor;
-
-        const retry = await supabase
-          .from('vendas')
-          .insert(cleanPayload)
-          .select('id')
-          .single();
-        return { id: retry.data?.id, error: retry.error };
-      }
-
-      return { id: data?.id, error };
-    } catch (err) {
-      return { id: null, error: err };
-    }
-  };
-
-  // Helper de inserção segura em 'itens_venda' com fallback resiliente
-  const insertItensVendaSegura = async (itens) => {
-    if (!itens || itens.length === 0) return { error: null };
-    try {
-      const { data, error } = await supabase
-        .from('itens_venda')
-        .insert(itens);
-
-      if (!error) return { error: null };
-
-      if (error && error.message) {
-        const itensSanitizados = itens.map(item => {
-          const clean = { ...item };
-          if (error.message.includes('filial_id') || error.message.includes('foreign key')) delete clean.filial_id;
-          if (error.message.includes('subtotal')) delete clean.subtotal;
-          if (error.message.includes('comissao_gerada')) delete clean.comissao_gerada;
-          if (error.message.includes('trainee_id')) delete clean.trainee_id;
-          if (error.message.includes('comissao_trainee')) delete clean.comissao_trainee;
-          return clean;
-        });
-        const retry = await supabase
-          .from('itens_venda')
-          .insert(itensSanitizados);
-        return { error: retry.error };
-      }
-
-      return { error };
-    } catch (err) {
-      return { error: err };
-    }
-  };
 
   // Processamento da Importação
   const handleImport = async () => {
@@ -550,7 +480,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           hasTrainee
         );
 
-        // 2. Criar registro de Venda com filial_id herdada e valor_total figurativo para validar nos rankings
+        // 2. Montar objeto da venda
         const payloadVenda = {
           empresa_id: vendedorEmpresaId || activeEmpresaId,
           filial_id: vendedorFilialId || null,
@@ -575,11 +505,21 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           trainee_id: hasTrainee ? row.trainee_id : null
         };
 
-        const { id: generatedVendaId, error: vendaErr } = await insertVendaSegura(payloadVenda);
+        // 3. Inserir venda no Supabase com validação estrita de erro
+        const { data: vendaData, error: vendaErr } = await supabase
+          .from('vendas')
+          .insert(payloadVenda)
+          .select('id')
+          .single();
 
-        if (vendaErr || !generatedVendaId) {
-          throw new Error(vendaErr?.message || 'Falha ao gravar venda.');
+        if (vendaErr || !vendaData?.id) {
+          console.error("ERRO FATAL DO SUPABASE (vendas):", vendaErr);
+          alert(`Erro do Banco de Dados ao salvar venda (Linha ${row.lineNum}):\n${vendaErr?.message || 'Falha na inserção'}\n\nDetalhes: ${vendaErr?.details || vendaErr?.hint || 'Verifique o console do navegador'}`);
+          setIsImporting(false);
+          return; // Impede que o código continue e mostre a tela de sucesso
         }
+
+        const generatedVendaId = vendaData.id;
 
         // 3. Criar registros em 'itens_venda' com filial_id, categorias e valores figurativos
         const itensParaInserir = [];
@@ -651,9 +591,15 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         }
 
         if (itensParaInserir.length > 0) {
-          const { error: itensErr } = await insertItensVendaSegura(itensParaInserir);
+          const { error: itensErr } = await supabase
+            .from('itens_venda')
+            .insert(itensParaInserir);
+
           if (itensErr) {
-            console.warn(`[ImportadorCSV] Aviso nos itens da venda ${generatedVendaId}:`, itensErr);
+            console.error("ERRO FATAL DO SUPABASE (itens_venda):", itensErr);
+            alert(`Erro do Banco de Dados ao salvar itens da venda (Linha ${row.lineNum}):\n${itensErr.message}\n\nDetalhes: ${itensErr.details || itensErr.hint || 'Verifique o console do navegador'}`);
+            setIsImporting(false);
+            return; // Impede que o código continue e mostre a tela de sucesso
           }
         }
 
@@ -665,8 +611,10 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         totalComissaoTrainees += comissao_trainee;
         totalFaturamentoFigurativoImportado += faturamentoFigurativo;
       } catch (errRow) {
-        errorCount++;
-        processErrors.push(`Linha ${row.lineNum}: ${errRow.message || errRow}`);
+        console.error("ERRO INESPERADO NA IMPORTAÇÃO:", errRow);
+        alert(`Erro inesperado ao processar linha ${row.lineNum}:\n${errRow.message || errRow}`);
+        setIsImporting(false);
+        return; // Impede que o código continue e mostre a tela de sucesso
       }
 
       setImportProgress(Math.round(((i + 1) / validRows.length) * 100));
