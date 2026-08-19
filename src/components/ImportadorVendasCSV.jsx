@@ -493,7 +493,6 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           observacoes: 'IMPORTAÇÃO RETROATIVA - FOCO EM COMISSÃO/QTD',
           metodo_pagamento: row.forma_pagamento || 'OUTROS',
           forma_pagamento: row.forma_pagamento || 'OUTROS',
-          criado_at: row.data_venda,
           created_at: row.data_venda,
           status_pagamento: 'PAGO',
           quantidade: row.total_qtd,
