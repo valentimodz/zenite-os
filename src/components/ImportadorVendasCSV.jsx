@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   Upload, FileText, CheckCircle2, AlertTriangle, XCircle, Loader2,
-  Download, RefreshCw, Users, ShieldAlert, Award, Eye, DollarSign
+  Download, RefreshCw, Users, ShieldAlert, Award, Eye, DollarSign, Building2
 } from 'lucide-react';
 
 /**
@@ -22,6 +22,10 @@ import {
  * 3. ACESSÓRIOS (Multiplicador 2.50):
  *    - Vendedor recebe R$ 2,50 por unidade (qtd_acessorios * 2.50).
  *    - Trainee NÃO recebe comissão sobre acessórios (0%).
+ * 
+ * 🎯 AMARRAÇÃO DE FILIAL & PESO CONTÁBIL (BYPASS DO ZERO):
+ * - Herda dinamicamente a filial do vendedor (`filial_id`) para garantir alinhamento com dashboards/filtros.
+ * - Aplica faturamento figurativo contábil: Premium (R$ 1000) + Androids (R$ 1000) + Acessórios (R$ 50) para validação nos rankings.
  * 
  * 🔴 TRAVA DE ESTOQUE ABSOLUTA:
  * Esta ferramenta NÃO faz UPDATE na tabela 'produtos' (quantidade) nem INSERT em 'movimentacoes_estoque'.
@@ -45,13 +49,18 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
   const TAXA_ANDROID_PADRAO = 2.00; // Multiplicador 2 por Android em outras formas
   const TAXA_ACESSORIO = 2.50;    // Multiplicador 2.5 por unidade de Acessório
 
+  // Valores Figurativos por Unidade para Peso Contábil nos Rankings
+  const VALOR_FIGURATIVO_PREMIUM = 1000.00;
+  const VALOR_FIGURATIVO_ANDROID = 1000.00;
+  const VALOR_FIGURATIVO_ACESSORIO = 50.00;
+
   const activeEmpresaId = empresaId || profile?.empresa_id || null;
 
-  // Carregar lista de colaboradores para auxílio de UUIDs e cruzamento de nomes
+  // Carregar lista de colaboradores com filial_id para herança dinâmica
   useEffect(() => {
     const fetchColaboradores = async () => {
       try {
-        let q = supabase.from('profiles').select('id, nome, email, role, empresa_id');
+        let q = supabase.from('profiles').select('id, nome, email, role, empresa_id, filial_id');
         if (activeEmpresaId && activeEmpresaId !== 'MASTER') {
           q = q.eq('empresa_id', activeEmpresaId);
         }
@@ -60,7 +69,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           setColaboradores(data);
         } else {
           // Fallback para tabela usuarios caso profiles retorne vazio
-          const { data: usersData } = await supabase.from('usuarios').select('id, nome, email');
+          const { data: usersData } = await supabase.from('usuarios').select('id, nome, email, filial_id, empresa_id');
           if (usersData) setColaboradores(usersData);
         }
       } catch (err) {
@@ -100,11 +109,11 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       try {
         let { data } = await supabase
           .from('profiles')
-          .select('id, nome, email, role')
+          .select('id, nome, email, role, empresa_id, filial_id')
           .in('id', missingIds);
 
         if (!data || data.length === 0) {
-          const res = await supabase.from('usuarios').select('id, nome, email').in('id', missingIds);
+          const res = await supabase.from('usuarios').select('id, nome, email, filial_id, empresa_id').in('id', missingIds);
           data = res.data;
         }
 
@@ -197,6 +206,11 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       comissao_vendedor += vendAcessorioComm;
     }
 
+    // 4. Faturamento Figurativo para Peso Contábil
+    const faturamentoFigurativo = (qtdPremium * VALOR_FIGURATIVO_PREMIUM) +
+                                  (qtdAndroids * VALOR_FIGURATIVO_ANDROID) +
+                                  (qtdAcessorios * VALOR_FIGURATIVO_ACESSORIO);
+
     return {
       comissao_vendedor,
       comissao_trainee,
@@ -204,7 +218,8 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       vendPremiumComm,
       vendAndroidComm,
       traineeAndroidComm,
-      vendAcessorioComm
+      vendAcessorioComm,
+      faturamentoFigurativo
     };
   };
 
@@ -323,7 +338,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         errors.push(...lineErrors);
       }
 
-      // Pré-calcular comissões da linha
+      // Pré-calcular comissões da linha e faturamento figurativo
       const comissaoCalc = calcularComissoesLinha(qtdPremium, qtdAndroids, qtdAcessorios, formaPagamento, Boolean(traineeId));
 
       rows.push({
@@ -345,6 +360,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         vendAndroidComm: comissaoCalc.vendAndroidComm,
         traineeAndroidComm: comissaoCalc.traineeAndroidComm,
         vendAcessorioComm: comissaoCalc.vendAcessorioComm,
+        faturamentoFigurativo: comissaoCalc.faturamentoFigurativo,
         isValid: lineValid,
         errors: lineErrors
       });
@@ -404,7 +420,10 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
       if (error && error.message) {
         const cleanPayload = { ...payload };
-        // Remover colunas opcionais caso a tabela no banco não as possua
+        // Remover colunas opcionais ou chaves com restrição de FK inexistente caso a tabela no banco reclame
+        if (error.message.includes('filial_id') || error.message.includes('foreign key') || error.message.includes('violates foreign key')) {
+          delete cleanPayload.filial_id;
+        }
         if (error.message.includes('criado_at')) delete cleanPayload.criado_at;
         if (error.message.includes('comissao_gerada')) delete cleanPayload.comissao_gerada;
         if (error.message.includes('comissao_vendedor')) delete cleanPayload.comissao_vendedor;
@@ -412,6 +431,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         if (error.message.includes('comissao_trainee')) delete cleanPayload.comissao_trainee;
         if (error.message.includes('teve_participacao_trainee')) delete cleanPayload.teve_participacao_trainee;
         if (error.message.includes('forma_pagamento')) delete cleanPayload.forma_pagamento;
+        if (error.message.includes('valor')) delete cleanPayload.valor;
 
         const retry = await supabase
           .from('vendas')
@@ -440,6 +460,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       if (error && error.message) {
         const itensSanitizados = itens.map(item => {
           const clean = { ...item };
+          if (error.message.includes('filial_id') || error.message.includes('foreign key')) delete clean.filial_id;
           if (error.message.includes('subtotal')) delete clean.subtotal;
           if (error.message.includes('comissao_gerada')) delete clean.comissao_gerada;
           if (error.message.includes('trainee_id')) delete clean.trainee_id;
@@ -481,6 +502,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
     let totalAcessoriosImportados = 0;
     let totalComissaoVendedores = 0;
     let totalComissaoTrainees = 0;
+    let totalFaturamentoFigurativoImportado = 0;
     const processErrors = [];
 
     for (let i = 0; i < validRows.length; i++) {
@@ -489,14 +511,37 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       try {
         const hasTrainee = row.hasTrainee;
 
-        // MOTOR DE CÁLCULO FECHADO (Multiplicadores x Quantidades)
+        // 1. Identificar e herdar dinamicamente filial_id e empresa_id do vendedor
+        const sellerObj = getColaborador(row.vendedor_id);
+        let vendedorFilialId = sellerObj?.filial_id || null;
+        let vendedorEmpresaId = sellerObj?.empresa_id || activeEmpresaId;
+
+        if (!vendedorFilialId) {
+          try {
+            const { data: profData } = await supabase
+              .from('profiles')
+              .select('filial_id, empresa_id')
+              .eq('id', row.vendedor_id)
+              .maybeSingle();
+
+            if (profData) {
+              if (profData.filial_id) vendedorFilialId = profData.filial_id;
+              if (profData.empresa_id) vendedorEmpresaId = profData.empresa_id;
+            }
+          } catch (errProf) {
+            console.warn('Aviso ao resolver filial do vendedor:', errProf);
+          }
+        }
+
+        // MOTOR DE CÁLCULO FECHADO (Multiplicadores x Quantidades) & FATURAMENTO FIGURATIVO
         const {
           comissao_vendedor,
           comissao_trainee,
           vendPremiumComm,
           vendAndroidComm,
           traineeAndroidComm,
-          vendAcessorioComm
+          vendAcessorioComm,
+          faturamentoFigurativo
         } = calcularComissoesLinha(
           row.qtd_premium,
           row.qtd_androids,
@@ -505,12 +550,15 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           hasTrainee
         );
 
-        // 1. Criar registro de Venda (valor_total: 0 pois o foco é volume e comissão)
+        // 2. Criar registro de Venda com filial_id herdada e valor_total figurativo para validar nos rankings
         const payloadVenda = {
-          empresa_id: activeEmpresaId,
+          empresa_id: vendedorEmpresaId || activeEmpresaId,
+          filial_id: vendedorFilialId || null,
           usuario_id: row.vendedor_id,
           vendedor_id: row.vendedor_id,
-          valor_total: 0,
+          valor_total: faturamentoFigurativo,
+          valor_pago: faturamentoFigurativo,
+          valor: faturamentoFigurativo,
           status: 'CONCLUIDO',
           observacoes: 'IMPORTAÇÃO RETROATIVA - FOCO EM COMISSÃO/QTD',
           metodo_pagamento: row.forma_pagamento || 'OUTROS',
@@ -518,7 +566,6 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           criado_at: row.data_venda,
           created_at: row.data_venda,
           status_pagamento: 'PAGO',
-          valor_pago: 0,
           quantidade: row.total_qtd,
           comissao: comissao_vendedor,
           comissao_gerada: comissao_vendedor,
@@ -534,23 +581,24 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           throw new Error(vendaErr?.message || 'Falha ao gravar venda.');
         }
 
-        // 2. Criar registros em 'itens_venda' com categorias e comissões segregadas
+        // 3. Criar registros em 'itens_venda' com filial_id, categorias e valores figurativos
         const itensParaInserir = [];
 
         // Item Premium (iPhones/Consoles)
         if (row.qtd_premium > 0) {
           itensParaInserir.push({
             venda_id: generatedVendaId,
-            empresa_id: activeEmpresaId,
+            empresa_id: vendedorEmpresaId || activeEmpresaId,
+            filial_id: vendedorFilialId || null,
             vendedor_id: row.vendedor_id,
             usuario_id: row.vendedor_id,
             trainee_id: null,
             categoria: 'PREMIUM',
             produto_nome: 'Premium / iPhone (Importação Retroativa)',
             quantidade: row.qtd_premium,
-            preco_unitario: 0,
-            preco_base: 0,
-            valor_total: 0,
+            preco_unitario: VALOR_FIGURATIVO_PREMIUM,
+            preco_base: VALOR_FIGURATIVO_PREMIUM,
+            valor_total: row.qtd_premium * VALOR_FIGURATIVO_PREMIUM,
             comissao: vendPremiumComm,
             comissao_gerada: vendPremiumComm,
             comissao_trainee: 0,
@@ -562,16 +610,17 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         if (row.qtd_androids > 0) {
           itensParaInserir.push({
             venda_id: generatedVendaId,
-            empresa_id: activeEmpresaId,
+            empresa_id: vendedorEmpresaId || activeEmpresaId,
+            filial_id: vendedorFilialId || null,
             vendedor_id: row.vendedor_id,
             usuario_id: row.vendedor_id,
             trainee_id: hasTrainee ? row.trainee_id : null,
             categoria: 'ANDROID',
             produto_nome: 'Android (Importação Retroativa)',
             quantidade: row.qtd_androids,
-            preco_unitario: 0,
-            preco_base: 0,
-            valor_total: 0,
+            preco_unitario: VALOR_FIGURATIVO_ANDROID,
+            preco_base: VALOR_FIGURATIVO_ANDROID,
+            valor_total: row.qtd_androids * VALOR_FIGURATIVO_ANDROID,
             comissao: vendAndroidComm,
             comissao_gerada: vendAndroidComm,
             comissao_trainee: hasTrainee ? traineeAndroidComm : 0,
@@ -583,16 +632,17 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         if (row.qtd_acessorios > 0) {
           itensParaInserir.push({
             venda_id: generatedVendaId,
-            empresa_id: activeEmpresaId,
+            empresa_id: vendedorEmpresaId || activeEmpresaId,
+            filial_id: vendedorFilialId || null,
             vendedor_id: row.vendedor_id,
             usuario_id: row.vendedor_id,
             trainee_id: null,
             categoria: 'ACESSORIO',
             produto_nome: 'Acessório (Importação Retroativa)',
             quantidade: row.qtd_acessorios,
-            preco_unitario: 0,
-            preco_base: 0,
-            valor_total: 0,
+            preco_unitario: VALOR_FIGURATIVO_ACESSORIO,
+            preco_base: VALOR_FIGURATIVO_ACESSORIO,
+            valor_total: row.qtd_acessorios * VALOR_FIGURATIVO_ACESSORIO,
             comissao: vendAcessorioComm,
             comissao_gerada: vendAcessorioComm,
             comissao_trainee: 0,
@@ -613,6 +663,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         totalAcessoriosImportados += row.qtd_acessorios;
         totalComissaoVendedores += comissao_vendedor;
         totalComissaoTrainees += comissao_trainee;
+        totalFaturamentoFigurativoImportado += faturamentoFigurativo;
       } catch (errRow) {
         errorCount++;
         processErrors.push(`Linha ${row.lineNum}: ${errRow.message || errRow}`);
@@ -631,11 +682,12 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       totalAcessorios: totalAcessoriosImportados,
       totalComissaoVendedores,
       totalComissaoTrainees,
+      totalFaturamentoFigurativo: totalFaturamentoFigurativoImportado,
       detalhesErros: processErrors
     });
 
     if (onImportSuccess && successCount > 0) {
-      onImportSuccess({ successCount, totalComissaoVendedores });
+      onImportSuccess({ successCount, totalComissaoVendedores, totalFaturamentoFigurativo: totalFaturamentoFigurativoImportado });
     }
   };
 
@@ -653,6 +705,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
   const sumAcessorios = parsedRows.filter(r => r.isValid).reduce((acc, curr) => acc + curr.qtd_acessorios, 0);
   const sumComissaoVendedoresPrevia = parsedRows.filter(r => r.isValid).reduce((acc, curr) => acc + curr.comissao_vendedor, 0);
   const sumComissaoTraineesPrevia = parsedRows.filter(r => r.isValid).reduce((acc, curr) => acc + curr.comissao_trainee, 0);
+  const sumFaturamentoFigurativoPrevia = parsedRows.filter(r => r.isValid).reduce((acc, curr) => acc + curr.faturamentoFigurativo, 0);
   const validCount = parsedRows.filter(r => r.isValid).length;
   const invalidCount = parsedRows.filter(r => !r.isValid).length;
 
@@ -664,26 +717,27 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="font-bold text-purple-200">
-              Motor de Importação por Quantidades & Multiplicadores Fechados
+              Motor de Importação por Quantidades, Filiais Herdadas & Multiplicadores
             </p>
             <span className="text-[10px] bg-emerald-950/60 border border-emerald-700/60 text-emerald-300 font-mono px-2 py-0.5 rounded">
               🔒 Trava de Estoque Blindada
             </span>
           </div>
           <p className="text-gray-400 leading-relaxed">
-            As quantidades alimentam as comissões e os rankings de volume. <strong>O estoque físico (produtos/movimentações) não é alterado</strong>.
+            As vendas herdam dinamicamente a filial do vendedor e recebem peso contábil figurativo para aparecer com destaque nos Rankings & Metas. <strong>O estoque físico (produtos/movimentações) não é alterado</strong>.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono mt-2">
             <div className="p-2 bg-black/60 rounded border border-purple-900/40 text-purple-300">
-              💎 <strong>Premium:</strong> R$ 30,00 / un (Vendedor)
+              💎 <strong>Premium:</strong> R$ 30,00 / un (Vendedor)<br/>
+              <span className="text-[10px] text-gray-400">Peso: R$ 1.000 / un</span>
             </div>
             <div className="p-2 bg-black/60 rounded border border-purple-900/40 text-purple-300">
               📱 <strong>Androids:</strong> Boleto (x3) | Outros (x2)<br/>
-              <span className="text-[10px] text-gray-400">*Trainee: R$ 1/un | Vendedor: restante</span>
+              <span className="text-[10px] text-gray-400">*Trainee: R$ 1/un | Peso: R$ 1.000 / un</span>
             </div>
             <div className="p-2 bg-black/60 rounded border border-purple-900/40 text-purple-300">
               🎧 <strong>Acessórios:</strong> R$ 2,50 / un<br/>
-              <span className="text-[10px] text-gray-400">*100% para o Vendedor</span>
+              <span className="text-[10px] text-gray-400">*100% Vendedor | Peso: R$ 50 / un</span>
             </div>
           </div>
         </div>
@@ -751,6 +805,12 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
                     <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded font-mono">
                       {colab.role || 'COLABORADOR'}
                     </span>
+                    {colab.filial_id && (
+                      <span className="text-[10px] text-gray-400 bg-black px-1.5 py-0.5 rounded border border-[#333] flex items-center gap-1">
+                        <Building2 size={10} className="text-[#6A0DAD]" />
+                        Filial Vinculada
+                      </span>
+                    )}
                     {colab.email && <span className="text-[11px] text-gray-500">({colab.email})</span>}
                   </div>
                   <div className="flex items-center gap-2">
@@ -863,9 +923,9 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             </div>
 
             <div className="bg-black border border-[#222] p-4 rounded-xl">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Comissões Estimadas</span>
-              <span className="text-xl font-extrabold text-emerald-400 font-mono block mt-1">
-                {sumComissaoVendedoresPrevia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Volume Figurativo</span>
+              <span className="text-xl font-extrabold text-purple-400 font-mono block mt-1">
+                {sumFaturamentoFigurativoPrevia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </span>
             </div>
           </div>
@@ -992,7 +1052,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
               <div className="flex justify-between text-xs text-gray-300 font-bold">
                 <span className="flex items-center gap-2">
                   <Loader2 size={14} className="animate-spin text-[#6A0DAD]" />
-                  Processando multiplicadores de comissões e injetando vendas...
+                  Processando filiais, multiplicadores de comissões e injetando vendas...
                 </span>
                 <span className="font-mono text-purple-400">{importProgress}%</span>
               </div>
@@ -1037,14 +1097,14 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
               <CheckCircle2 size={24} />
             </div>
             <div>
-              <h4 className="text-base font-bold text-white">Importação de Quantidades Concluída!</h4>
+              <h4 className="text-base font-bold text-white">Importação Retroativa Concluída!</h4>
               <p className="text-xs text-gray-400 mt-0.5">
-                Os volumes de vendas e as comissões por multiplicadores foram gravadas com sucesso.
+                Os volumes de vendas com filiais vinculadas, valores figurativos e comissões por multiplicadores foram gravados com sucesso.
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-black border border-[#222] p-3 rounded-lg">
               <span className="text-[10px] text-gray-500 uppercase font-bold block">Vendas Registradas</span>
               <span className="text-lg font-bold text-emerald-400 font-mono block mt-1">
@@ -1053,23 +1113,16 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             </div>
 
             <div className="bg-black border border-[#222] p-3 rounded-lg">
-              <span className="text-[10px] text-gray-500 uppercase font-bold block">Premium (iPhones/Consoles)</span>
+              <span className="text-[10px] text-gray-500 uppercase font-bold block">Volume Contábil Total</span>
+              <span className="text-base font-bold text-purple-400 font-mono block mt-1">
+                {(importResult.totalFaturamentoFigurativo || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              </span>
+            </div>
+
+            <div className="bg-black border border-[#222] p-3 rounded-lg">
+              <span className="text-[10px] text-gray-500 uppercase font-bold block">Celulares (Prem + And)</span>
               <span className="text-base font-bold text-blue-400 font-mono block mt-1">
-                {importResult.totalPremium} un
-              </span>
-            </div>
-
-            <div className="bg-black border border-[#222] p-3 rounded-lg">
-              <span className="text-[10px] text-gray-500 uppercase font-bold block">Androids</span>
-              <span className="text-base font-bold text-green-400 font-mono block mt-1">
-                {importResult.totalAndroids} un
-              </span>
-            </div>
-
-            <div className="bg-black border border-[#222] p-3 rounded-lg">
-              <span className="text-[10px] text-gray-500 uppercase font-bold block">Acessórios</span>
-              <span className="text-base font-bold text-pink-400 font-mono block mt-1">
-                {importResult.totalAcessorios} un
+                {importResult.totalPremium + importResult.totalAndroids} un
               </span>
             </div>
 
