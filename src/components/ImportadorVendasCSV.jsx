@@ -26,7 +26,7 @@ import {
  * 🔴 TRAVA DE ESTOQUE ABSOLUTA:
  * Esta ferramenta NÃO faz UPDATE na tabela 'produtos' (quantidade) nem INSERT em 'movimentacoes_estoque'.
  */
-export default function ImportadorVendasCSV({ empresaId, profile, colaboradores = [], vendedores = [], onImportSuccess }) {
+export default function ImportadorVendasCSV({ empresaId, profile, onImportSuccess }) {
   const [file, setFile] = useState(null);
   const [parsedRows, setParsedRows] = useState([]);
   const [validationErrors, setValidationErrors] = useState([]);
@@ -34,7 +34,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importResult, setImportResult] = useState(null);
-  const [vendedoresList, setVendedoresList] = useState([]);
+  const [colaboradores, setColaboradores] = useState([]);
   const [showVendedoresGuide, setShowVendedoresGuide] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
@@ -49,18 +49,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
 
   // Carregar lista de colaboradores para auxílio de UUIDs e cruzamento de nomes
   useEffect(() => {
-    // 1. Inicializar imediatamente com os colaboradores/vendedores recebidos via props
-    const propsList = [...(colaboradores || []), ...(vendedores || [])];
-    if (propsList.length > 0) {
-      const map = new Map();
-      propsList.forEach(item => {
-        if (item && item.id) map.set(String(item.id).trim().toLowerCase(), item);
-      });
-      setVendedoresList(Array.from(map.values()));
-    }
-
-    // 2. Complementar via busca no Supabase
-    async function loadVendedores() {
+    const fetchColaboradores = async () => {
       try {
         let q = supabase.from('profiles').select('id, nome, email, role, empresa_id');
         if (activeEmpresaId && activeEmpresaId !== 'MASTER') {
@@ -68,30 +57,25 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
         }
         const { data, error } = await q;
         if (!error && data && data.length > 0) {
-          setVendedoresList(prev => {
-            const map = new Map();
-            (prev || []).forEach(item => {
-              if (item && item.id) map.set(String(item.id).trim().toLowerCase(), item);
-            });
-            data.forEach(item => {
-              if (item && item.id) map.set(String(item.id).trim().toLowerCase(), item);
-            });
-            return Array.from(map.values());
-          });
+          setColaboradores(data);
+        } else {
+          // Fallback para tabela usuarios caso profiles retorne vazio
+          const { data: usersData } = await supabase.from('usuarios').select('id, nome, email');
+          if (usersData) setColaboradores(usersData);
         }
       } catch (err) {
-        console.warn('Erro ao carregar lista de vendedores:', err);
+        console.warn('Erro ao carregar colaboradores no Importador:', err);
       }
-    }
-    loadVendedores();
-  }, [activeEmpresaId, colaboradores, vendedores]);
+    };
+    fetchColaboradores();
+  }, [activeEmpresaId]);
 
-  // 3. Buscar automaticamente no banco quaisquer perfis presentes no CSV que ainda não estejam na lista
+  // Buscar automaticamente no banco quaisquer perfis presentes no CSV que ainda não estejam na lista
   useEffect(() => {
     if (!parsedRows || parsedRows.length === 0) return;
 
     const knownIds = new Set(
-      (vendedoresList || []).map(v => String(v.id || '').trim().toLowerCase())
+      (colaboradores || []).map(c => String(c.id || '').trim().toLowerCase())
     );
 
     const missingIds = [];
@@ -112,15 +96,20 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
 
     if (missingIds.length === 0) return;
 
-    async function fetchMissingProfiles() {
+    async function fetchMissingColaboradores() {
       try {
-        const { data, error } = await supabase
+        let { data } = await supabase
           .from('profiles')
           .select('id, nome, email, role')
           .in('id', missingIds);
 
-        if (!error && data && data.length > 0) {
-          setVendedoresList(prev => {
+        if (!data || data.length === 0) {
+          const res = await supabase.from('usuarios').select('id, nome, email').in('id', missingIds);
+          data = res.data;
+        }
+
+        if (data && data.length > 0) {
+          setColaboradores(prev => {
             const map = new Map();
             (prev || []).forEach(p => { if (p?.id) map.set(String(p.id).trim().toLowerCase(), p); });
             data.forEach(p => { if (p?.id) map.set(String(p.id).trim().toLowerCase(), p); });
@@ -132,26 +121,26 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
       }
     }
 
-    fetchMissingProfiles();
+    fetchMissingColaboradores();
   }, [parsedRows]);
 
   // Helper de busca resiliente de colaborador por UUID ou email
   const getColaborador = (id) => {
     if (!id) return null;
     const cleanId = String(id).trim().toLowerCase();
-    return (vendedoresList || []).find(v => {
-      if (!v) return false;
-      const vId = String(v.id || v.usuario_id || '').trim().toLowerCase();
-      const vEmail = String(v.email || '').trim().toLowerCase();
-      return vId === cleanId || vEmail === cleanId;
+    return (colaboradores || []).find(c => {
+      if (!c) return false;
+      const cId = String(c.id || c.usuario_id || '').trim().toLowerCase();
+      const cEmail = String(c.email || '').trim().toLowerCase();
+      return cId === cleanId || cEmail === cleanId;
     });
   };
 
   // Download do modelo CSV oficial com delimitador ';'
   const handleDownloadTemplate = () => {
     const header = 'data_venda;vendedor_id;trainee_id;forma_pagamento;qtd_premium;qtd_androids;qtd_acessorios\n';
-    const exampleSellerId = vendedoresList.length > 0 ? vendedoresList[0].id : '00000000-0000-0000-0000-000000000000';
-    const exampleTraineeId = vendedoresList.length > 1 ? vendedoresList[1].id : '';
+    const exampleSellerId = colaboradores.length > 0 ? colaboradores[0].id : '00000000-0000-0000-0000-000000000000';
+    const exampleTraineeId = colaboradores.length > 1 ? colaboradores[1].id : '';
 
     const sampleRows = [
       `2024-01-15;${exampleSellerId};${exampleTraineeId};BOLETO;2;1;5`,
@@ -744,15 +733,15 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
               Colaboradores Cadastrados (Copie o UUID para a planilha)
             </h4>
             <span className="text-[10px] text-gray-500 font-mono">
-              {vendedoresList.length} cadastrados
+              {colaboradores.length} cadastrados
             </span>
           </div>
 
-          {vendedoresList.length === 0 ? (
+          {colaboradores.length === 0 ? (
             <p className="text-xs text-gray-500 italic">Nenhum colaborador encontrado na empresa.</p>
           ) : (
             <div className="max-h-48 overflow-y-auto border border-[#222] rounded-lg divide-y divide-[#222]">
-              {vendedoresList.map((colab) => (
+              {colaboradores.map((colab) => (
                 <div
                   key={colab.id}
                   className="p-2 flex items-center justify-between hover:bg-[#1A1A1A] text-xs transition-colors"
@@ -760,7 +749,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-white">{colab.nome}</span>
                     <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded font-mono">
-                      {colab.role || 'VENDEDOR'}
+                      {colab.role || 'COLABORADOR'}
                     </span>
                     {colab.email && <span className="text-[11px] text-gray-500">({colab.email})</span>}
                   </div>
@@ -958,15 +947,17 @@ export default function ImportadorVendasCSV({ empresaId, profile, colaboradores 
                         </td>
                         <td className="py-2 px-3 font-mono text-[11px]">
                           {row.trainee_id ? (
-                            traineeObj?.nome ? (
-                              <span className="text-purple-300 font-semibold">{traineeObj.nome}</span>
+                            (colaboradores.find(u => String(u.id).trim().toLowerCase() === String(row.trainee_id).trim().toLowerCase())?.nome || traineeObj?.nome) ? (
+                              <span className="text-purple-300 font-semibold">
+                                {colaboradores.find(u => String(u.id).trim().toLowerCase() === String(row.trainee_id).trim().toLowerCase())?.nome || traineeObj?.nome}
+                              </span>
                             ) : (
                               <span className="text-purple-300 truncate max-w-[120px] inline-block font-mono" title={row.trainee_id}>
                                 {row.trainee_id}
                               </span>
                             )
                           ) : (
-                            <span className="text-gray-500 font-sans italic">Sem trainee</span>
+                            <span className="text-gray-500 font-sans italic text-[11px]">Sem trainee</span>
                           )}
                         </td>
                         <td className="py-2 px-3">
