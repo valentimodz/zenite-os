@@ -498,8 +498,6 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           status_pagamento: 'PAGO',
           quantidade: row.total_qtd,
           comissao: comissao_vendedor,
-          comissao_gerada: comissao_vendedor,
-          comissao_vendedor: comissao_vendedor,
           teve_participacao_trainee: hasTrainee,
           comissao_trainee: comissao_trainee,
           trainee_id: hasTrainee ? row.trainee_id : null
@@ -540,7 +538,6 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             preco_base: VALOR_FIGURATIVO_PREMIUM,
             valor_total: row.qtd_premium * VALOR_FIGURATIVO_PREMIUM,
             comissao: vendPremiumComm,
-            comissao_gerada: vendPremiumComm,
             comissao_trainee: 0,
             created_at: row.data_venda
           });
@@ -562,7 +559,6 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             preco_base: VALOR_FIGURATIVO_ANDROID,
             valor_total: row.qtd_androids * VALOR_FIGURATIVO_ANDROID,
             comissao: vendAndroidComm,
-            comissao_gerada: vendAndroidComm,
             comissao_trainee: hasTrainee ? traineeAndroidComm : 0,
             created_at: row.data_venda
           });
@@ -584,7 +580,6 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             preco_base: VALOR_FIGURATIVO_ACESSORIO,
             valor_total: row.qtd_acessorios * VALOR_FIGURATIVO_ACESSORIO,
             comissao: vendAcessorioComm,
-            comissao_gerada: vendAcessorioComm,
             comissao_trainee: 0,
             created_at: row.data_venda
           });
