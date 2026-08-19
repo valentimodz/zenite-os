@@ -2,17 +2,21 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   Upload, FileText, CheckCircle2, AlertTriangle, XCircle, Loader2,
-  Download, RefreshCw, Users, ShieldAlert, DollarSign, HelpCircle, Check, Eye
+  Download, RefreshCw, Users, ShieldAlert, Award, HelpCircle, Check, Eye, DollarSign
 } from 'lucide-react';
 
 /**
  * Componente: ImportadorVendasCSV
  * 
- * Permite a importação gerencial de vendas retroativas puramente financeiras
- * via arquivo .csv para alimentar dashboards e comissões.
+ * Permite a importação gerencial de vendas retroativas focada em QUANTIDADE e COMISSÕES,
+ * alimentando os rankings e aplicando as regras de comissionamento (incluindo divisão com Trainee).
  * 
- * 🔴 RESTRIÇÃO CRÍTICA DO ESTOQUE:
- * Esta ferramenta NÃO lê, altera ou aciona as tabelas 'produtos' e 'movimentacoes_estoque'.
+ * 🔴 REGRA DE NEGÓCIO CRÍTICA DO TRAINEE:
+ * - Trainee divide comissão APENAS sobre celulares (iPhones e Androids).
+ * - Trainee NÃO recebe comissão sobre Acessórios (100% do valor vai para o Vendedor).
+ * 
+ * 🔴 TRAVA DE ESTOQUE ABSOLUTA:
+ * Esta ferramenta NÃO faz UPDATE na tabela 'produtos' (quantidade) nem INSERT em 'movimentacoes_estoque'.
  */
 export default function ImportadorVendasCSV({ empresaId, profile, onImportSuccess }) {
   const [file, setFile] = useState(null);
@@ -26,6 +30,12 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
   const [showVendedoresGuide, setShowVendedoresGuide] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Parâmetros de Comissionamento Nativos (customizáveis pelo Admin na tela de importação)
+  const [comissaoIphone, setComissaoIphone] = useState(30.00); // R$ 30 por iPhone
+  const [comissaoAndroid, setComissaoAndroid] = useState(20.00); // R$ 20 por Android
+  const [comissaoAcessorio, setComissaoAcessorio] = useState(5.00); // R$ 5 por Acessório
+  const [pctDivisaoTrainee, setPctDivisaoTrainee] = useState(50); // 50% para Trainee em Celulares
 
   const activeEmpresaId = empresaId || profile?.empresa_id || null;
 
@@ -50,29 +60,30 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
   // Função para download de template CSV de exemplo
   const handleDownloadTemplate = () => {
-    const header = 'data_venda,vendedor_id,total_celulares,total_acessorios\n';
+    const header = 'data_venda,vendedor_id,trainee_id,qtd_iphones,qtd_androids,qtd_acessorios\n';
     const exampleSellerId = vendedoresList.length > 0 ? vendedoresList[0].id : '00000000-0000-0000-0000-000000000000';
+    const exampleTraineeId = vendedoresList.length > 1 ? vendedoresList[1].id : '';
+
     const sampleRows = [
-      `2024-01-15,${exampleSellerId},2500.00,350.00`,
-      `2024-01-16,${exampleSellerId},1800.50,120.00`,
-      `2024-01-17,${exampleSellerId},0.00,450.00`
+      `2024-01-15,${exampleSellerId},${exampleTraineeId},2,1,5`,
+      `2024-01-16,${exampleSellerId},,1,0,3`,
+      `2024-01-17,${exampleSellerId},${exampleTraineeId},0,2,10`
     ].join('\n');
 
     const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent(header + sampleRows);
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', csvContent);
-    downloadAnchor.setAttribute('download', 'modelo_importacao_vendas.csv');
+    downloadAnchor.setAttribute('download', 'modelo_importacao_comissoes_qtd.csv');
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
   };
 
-  // Parser robusto de CSV
+  // Parser de CSV
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
     if (lines.length === 0) return { rows: [], errors: ['O arquivo CSV está vazio.'] };
 
-    // Identificar separador (vírgula ou ponto e vírgula)
     const firstLine = lines[0];
     const separator = firstLine.includes(';') && (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ';' : ',';
 
@@ -87,22 +98,20 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
     const headerParts = lines[0].split(separator).map(h => cleanCell(h).toLowerCase().replace(/\s+/g, '_'));
 
-    // Validar cabeçalhos esperados
-    const requiredHeaders = ['data_venda', 'vendedor_id', 'total_celulares', 'total_acessorios'];
-    const missingHeaders = requiredHeaders.filter(req => !headerParts.some(h => h.includes(req) || req.includes(h)));
-
     const colIndex = {
       data_venda: headerParts.findIndex(h => h.includes('data_venda') || h.includes('data') || h.includes('dt_venda')),
       vendedor_id: headerParts.findIndex(h => h.includes('vendedor_id') || h.includes('vendedor') || h.includes('usuario_id')),
-      total_celulares: headerParts.findIndex(h => h.includes('total_celulares') || h.includes('celular') || h.includes('celulares')),
-      total_acessorios: headerParts.findIndex(h => h.includes('total_acessorios') || h.includes('acessorio') || h.includes('acessorios'))
+      trainee_id: headerParts.findIndex(h => h.includes('trainee_id') || h.includes('trainee') || h.includes('treener_id')),
+      qtd_iphones: headerParts.findIndex(h => h.includes('qtd_iphones') || h.includes('iphones') || h.includes('iphone')),
+      qtd_androids: headerParts.findIndex(h => h.includes('qtd_androids') || h.includes('androids') || h.includes('android')),
+      qtd_acessorios: headerParts.findIndex(h => h.includes('qtd_acessorios') || h.includes('acessorios') || h.includes('acessorio'))
     };
 
-    if (colIndex.data_venda === -1 || colIndex.vendedor_id === -1 || colIndex.total_celulares === -1 || colIndex.total_acessorios === -1) {
+    if (colIndex.data_venda === -1 || colIndex.vendedor_id === -1 || colIndex.qtd_iphones === -1 || colIndex.qtd_androids === -1 || colIndex.qtd_acessorios === -1) {
       return {
         rows: [],
         errors: [
-          `Cabeçalho inválido ou incompleto. O arquivo precisa conter: data_venda, vendedor_id, total_celulares, total_acessorios.`,
+          `Cabeçalho inválido ou incompleto. O arquivo precisa conter: data_venda, vendedor_id, trainee_id, qtd_iphones, qtd_androids, qtd_acessorios.`,
           `Cabeçalhos detectados: [${headerParts.join(', ')}]`
         ]
       };
@@ -111,23 +120,15 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
     const rows = [];
     const errors = [];
 
-    const parseNumber = (val) => {
+    const parseInteger = (val) => {
       if (!val) return 0;
-      let clean = String(val).trim().replace('R$', '').replace(/\s/g, '');
-      // Tratar formato brasileiro "1.500,50" -> "1500.50"
-      if (clean.includes(',') && clean.includes('.')) {
-        clean = clean.replace(/\./g, '').replace(',', '.');
-      } else if (clean.includes(',')) {
-        clean = clean.replace(',', '.');
-      }
-      const num = parseFloat(clean);
-      return isNaN(num) ? 0 : num;
+      const num = parseInt(String(val).trim(), 10);
+      return isNaN(num) ? 0 : Math.max(0, num);
     };
 
     const parseDate = (val) => {
       if (!val) return null;
       const str = String(val).trim();
-      // Formato DD/MM/YYYY ou DD/MM/YYYY HH:mm
       if (/^\d{2}\/\d{2}\/\d{4}/.test(str)) {
         const parts = str.split('/');
         const day = parts[0];
@@ -135,12 +136,10 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         const year = parts[2].slice(0, 4);
         return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T12:00:00Z`;
       }
-      // Formato YYYY-MM-DD
       if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
         if (str.length === 10) return `${str}T12:00:00Z`;
         return new Date(str).toISOString();
       }
-      // Tentar parsing padrão
       const parsed = new Date(str);
       return isNaN(parsed.getTime()) ? null : parsed.toISOString();
     };
@@ -152,21 +151,26 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       const cells = lineStr.split(separator).map(cleanCell);
       const rawData = cells[colIndex.data_venda];
       const rawVendedor = cells[colIndex.vendedor_id];
-      const rawCelulares = cells[colIndex.total_celulares];
-      const rawAcessorios = cells[colIndex.total_acessorios];
+      const rawTrainee = colIndex.trainee_id !== -1 ? cells[colIndex.trainee_id] : '';
+      const rawIphones = cells[colIndex.qtd_iphones];
+      const rawAndroids = cells[colIndex.qtd_androids];
+      const rawAcessorios = cells[colIndex.qtd_acessorios];
 
       const dataVenda = parseDate(rawData);
       const vendedorId = rawVendedor ? rawVendedor.trim() : '';
-      const totalCelulares = parseNumber(rawCelulares);
-      const totalAcessorios = parseNumber(rawAcessorios);
-      const valorTotal = totalCelulares + totalAcessorios;
+      const traineeId = rawTrainee && rawTrainee.trim() !== '0' && rawTrainee.trim().toLowerCase() !== 'none' && rawTrainee.trim().toLowerCase() !== 'null' ? rawTrainee.trim() : null;
+
+      const qtdIphones = parseInteger(rawIphones);
+      const qtdAndroids = parseInteger(rawAndroids);
+      const qtdAcessorios = parseInteger(rawAcessorios);
+      const totalQtd = qtdIphones + qtdAndroids + qtdAcessorios;
 
       const lineNum = i + 1;
       let lineValid = true;
       const lineErrors = [];
 
       if (!dataVenda) {
-        lineErrors.push(`Linha ${lineNum}: Data inválida "${rawData}". Use o formato AAAA-MM-DD ou DD/MM/AAAA.`);
+        lineErrors.push(`Linha ${lineNum}: Data inválida "${rawData}". Use AAAA-MM-DD ou DD/MM/AAAA.`);
         lineValid = false;
       }
 
@@ -175,13 +179,8 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         lineValid = false;
       }
 
-      if (valorTotal <= 0) {
-        lineErrors.push(`Linha ${lineNum}: O valor total (celulares + acessórios) deve ser maior que 0.`);
-        lineValid = false;
-      }
-
-      if (totalCelulares < 0 || totalAcessorios < 0) {
-        lineErrors.push(`Linha ${lineNum}: Valores não podem ser negativos.`);
+      if (totalQtd <= 0) {
+        lineErrors.push(`Linha ${lineNum}: A quantidade total de itens (iPhones + Androids + Acessórios) deve ser > 0.`);
         lineValid = false;
       }
 
@@ -194,9 +193,12 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         raw: lineStr,
         data_venda: dataVenda || rawData,
         vendedor_id: vendedorId,
-        total_celulares: totalCelulares,
-        total_acessorios: totalAcessorios,
-        valor_total: valorTotal,
+        trainee_id: traineeId,
+        hasTrainee: Boolean(traineeId),
+        qtd_iphones: qtdIphones,
+        qtd_androids: qtdAndroids,
+        qtd_acessorios: qtdAcessorios,
+        total_qtd: totalQtd,
         isValid: lineValid,
         errors: lineErrors
       });
@@ -245,7 +247,6 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
   // Helper seguro para inserção na tabela vendas
   const insertVendaSegura = async (payload) => {
-    // Tenta primeiro com todas as propriedades (incluindo criado_at e created_at)
     try {
       const { data, error } = await supabase
         .from('vendas')
@@ -255,13 +256,17 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
       if (!error && data?.id) return { id: data.id, error: null };
 
-      // Se falhou por motivo de coluna 'criado_at' inexistente, tenta sem criado_at
-      if (error && error.message && error.message.includes('criado_at')) {
-        const payloadSemCriadoAt = { ...payload };
-        delete payloadSemCriadoAt.criado_at;
+      // Se falhou por colunas inexistentes (criado_at ou trainee_id), tenta fallback limpo
+      if (error && error.message) {
+        const cleanPayload = { ...payload };
+        if (error.message.includes('criado_at')) delete cleanPayload.criado_at;
+        if (error.message.includes('trainee_id')) delete cleanPayload.trainee_id;
+        if (error.message.includes('comissao_trainee')) delete cleanPayload.comissao_trainee;
+        if (error.message.includes('teve_participacao_trainee')) delete cleanPayload.teve_participacao_trainee;
+
         const retry = await supabase
           .from('vendas')
-          .insert(payloadSemCriadoAt)
+          .insert(cleanPayload)
           .select('id')
           .single();
         return { id: retry.data?.id, error: retry.error };
@@ -283,12 +288,12 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
       if (!error) return { error: null };
 
-      // Se falhou devido a colunas extras (ex: subtotal ou categoria), sanitiza
-      if (error && error.message && (error.message.includes('subtotal') || error.message.includes('categoria'))) {
+      if (error && error.message) {
         const itensSanitizados = itens.map(item => {
           const clean = { ...item };
           if (error.message.includes('subtotal')) delete clean.subtotal;
-          if (error.message.includes('categoria')) delete clean.categoria;
+          if (error.message.includes('trainee_id')) delete clean.trainee_id;
+          if (error.message.includes('comissao_trainee')) delete clean.comissao_trainee;
           return clean;
         });
         const retry = await supabase
@@ -312,7 +317,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
     }
 
     if (!activeEmpresaId) {
-      alert('ID da empresa não identificado. Certifique-se de estar conectado com uma conta com empresa vinculada.');
+      alert('ID da empresa não identificado. Certifique-se de estar conectado em uma conta vinculada.');
       return;
     }
 
@@ -321,30 +326,58 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
     let successCount = 0;
     let errorCount = 0;
-    let totalItensCriados = 0;
-    let valorTotalImportado = 0;
+    let totalIphonesImportados = 0;
+    let totalAndroidsImportados = 0;
+    let totalAcessoriosImportados = 0;
+    let totalComissaoVendedores = 0;
+    let totalComissaoTrainees = 0;
     const processErrors = [];
+
+    const factorTrainee = Math.min(100, Math.max(0, pctDivisaoTrainee)) / 100;
+    const factorVendedor = 1 - factorTrainee;
 
     for (let i = 0; i < validRows.length; i++) {
       const row = validRows[i];
 
       try {
-        // Passo A: valor_total = (total_celulares + total_acessorios)
-        const valor_total = row.total_celulares + row.total_acessorios;
+        const hasTrainee = row.hasTrainee;
 
-        // Passo B: INSERT na tabela vendas com dados da importação
+        // --- CÁLCULO DAS COMISSÕES ---
+        // 1. iPhones (Comissão dividida com Trainee se houver)
+        const totalCommIphone = row.qtd_iphones * comissaoIphone;
+        const vendCommIphone = hasTrainee ? (totalCommIphone * factorVendedor) : totalCommIphone;
+        const traineeCommIphone = hasTrainee ? (totalCommIphone * factorTrainee) : 0;
+
+        // 2. Androids (Comissão dividida com Trainee se houver)
+        const totalCommAndroid = row.qtd_androids * comissaoAndroid;
+        const vendCommAndroid = hasTrainee ? (totalCommAndroid * factorVendedor) : totalCommAndroid;
+        const traineeCommAndroid = hasTrainee ? (totalCommAndroid * factorTrainee) : 0;
+
+        // 3. Acessórios (REGRA CRÍTICA: Trainee NÃO RECEBE COMISSÃO DE ACESSÓRIOS - 100% para o Vendedor)
+        const totalCommAcessorio = row.qtd_acessorios * comissaoAcessorio;
+        const vendCommAcessorio = totalCommAcessorio; // 100% Vendedor
+        const traineeCommAcessorio = 0; // ZERO para Trainee
+
+        const comissaoTotalVendedor = vendCommIphone + vendCommAndroid + vendCommAcessorio;
+        const comissaoTotalTrainee = traineeCommIphone + traineeCommAndroid + traineeCommAcessorio;
+
+        // Passo 2: Criar Venda na tabela 'vendas'
         const payloadVenda = {
           empresa_id: activeEmpresaId,
           usuario_id: row.vendedor_id,
           vendedor_id: row.vendedor_id,
-          valor_total: valor_total,
+          valor_total: 0, // Valor simbólico 0 conforme especificado (foco em comissões e quantidade)
           status: 'CONCLUIDO',
-          observacoes: 'IMPORTAÇÃO RETROATIVA VIA CSV',
+          observacoes: 'IMPORTAÇÃO RETROATIVA - FOCO EM COMISSÃO/QTD',
           criado_at: row.data_venda,
           created_at: row.data_venda,
           status_pagamento: 'PAGO',
-          valor_pago: valor_total,
-          quantidade: (row.total_celulares > 0 ? 1 : 0) + (row.total_acessorios > 0 ? 1 : 0) || 1
+          valor_pago: 0,
+          quantidade: row.total_qtd,
+          comissao: comissaoTotalVendedor,
+          teve_participacao_trainee: hasTrainee,
+          comissao_trainee: comissaoTotalTrainee,
+          trainee_id: hasTrainee ? row.trainee_id : null
         };
 
         const { id: generatedVendaId, error: vendaErr } = await insertVendaSegura(payloadVenda);
@@ -353,41 +386,65 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           throw new Error(vendaErr?.message || 'Falha ao registrar venda na tabela vendas.');
         }
 
-        // Passo C: INSERT na tabela itens_venda usando o ID gerado
+        // Passo 3: Injeção dos Itens em 'itens_venda'
         const itensParaInserir = [];
 
-        if (row.total_celulares > 0) {
+        // Item iPhone
+        if (row.qtd_iphones > 0) {
           itensParaInserir.push({
             venda_id: generatedVendaId,
             empresa_id: activeEmpresaId,
             vendedor_id: row.vendedor_id,
             usuario_id: row.vendedor_id,
-            categoria: 'Celulares',
-            produto_nome: 'Celulares (Importação Retroativa)',
-            quantidade: 1,
-            preco_unitario: row.total_celulares,
-            preco_unitario_vendido: row.total_celulares,
-            preco_base: row.total_celulares,
-            subtotal: row.total_celulares,
-            valor_total: row.total_celulares,
+            trainee_id: hasTrainee ? row.trainee_id : null,
+            categoria: 'IOS',
+            produto_nome: 'iPhone (Importação Retroativa)',
+            quantidade: row.qtd_iphones,
+            preco_unitario: 0,
+            preco_base: 0,
+            valor_total: 0,
+            comissao: vendCommIphone,
+            comissao_trainee: traineeCommIphone,
             created_at: row.data_venda
           });
         }
 
-        if (row.total_acessorios > 0) {
+        // Item Android
+        if (row.qtd_androids > 0) {
           itensParaInserir.push({
             venda_id: generatedVendaId,
             empresa_id: activeEmpresaId,
             vendedor_id: row.vendedor_id,
             usuario_id: row.vendedor_id,
-            categoria: 'Acessorios',
-            produto_nome: 'Acessorios (Importação Retroativa)',
-            quantidade: 1,
-            preco_unitario: row.total_acessorios,
-            preco_unitario_vendido: row.total_acessorios,
-            preco_base: row.total_acessorios,
-            subtotal: row.total_acessorios,
-            valor_total: row.total_acessorios,
+            trainee_id: hasTrainee ? row.trainee_id : null,
+            categoria: 'ANDROID',
+            produto_nome: 'Android (Importação Retroativa)',
+            quantidade: row.qtd_androids,
+            preco_unitario: 0,
+            preco_base: 0,
+            valor_total: 0,
+            comissao: vendCommAndroid,
+            comissao_trainee: traineeCommAndroid,
+            created_at: row.data_venda
+          });
+        }
+
+        // Item Acessório (EXCEÇÃO: FORCE trainee_id como null e comissao_trainee = 0)
+        if (row.qtd_acessorios > 0) {
+          itensParaInserir.push({
+            venda_id: generatedVendaId,
+            empresa_id: activeEmpresaId,
+            vendedor_id: row.vendedor_id,
+            usuario_id: row.vendedor_id,
+            trainee_id: null, // FORCE NULL PARA ACESSÓRIOS
+            categoria: 'ACESSORIO',
+            produto_nome: 'Acessório (Importação Retroativa)',
+            quantidade: row.qtd_acessorios,
+            preco_unitario: 0,
+            preco_base: 0,
+            valor_total: 0,
+            comissao: vendCommAcessorio,
+            comissao_trainee: 0, // ZERO PARA TRAINEE EM ACESSÓRIOS
             created_at: row.data_venda
           });
         }
@@ -396,13 +453,15 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           const { error: itensErr } = await insertItensVendaSegura(itensParaInserir);
           if (itensErr) {
             console.warn(`[ImportadorCSV] Aviso ao inserir itens da venda ${generatedVendaId}:`, itensErr);
-          } else {
-            totalItensCriados += itensParaInserir.length;
           }
         }
 
         successCount++;
-        valorTotalImportado += valor_total;
+        totalIphonesImportados += row.qtd_iphones;
+        totalAndroidsImportados += row.qtd_androids;
+        totalAcessoriosImportados += row.qtd_acessorios;
+        totalComissaoVendedores += comissaoTotalVendedor;
+        totalComissaoTrainees += comissaoTotalTrainee;
       } catch (errRow) {
         errorCount++;
         processErrors.push(`Linha ${row.lineNum}: ${errRow.message || errRow}`);
@@ -416,13 +475,16 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       totalProcessado: validRows.length,
       sucesso: successCount,
       erros: errorCount,
-      totalItens: totalItensCriados,
-      valorTotal: valorTotalImportado,
+      totalIphones: totalIphonesImportados,
+      totalAndroids: totalAndroidsImportados,
+      totalAcessorios: totalAcessoriosImportados,
+      totalComissaoVendedores,
+      totalComissaoTrainees,
       detalhesErros: processErrors
     });
 
     if (onImportSuccess && successCount > 0) {
-      onImportSuccess({ successCount, valorTotalImportado });
+      onImportSuccess({ successCount, totalComissaoVendedores });
     }
   };
 
@@ -435,33 +497,79 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const totalGeralPrevisto = parsedRows
-    .filter(r => r.isValid)
-    .reduce((acc, curr) => acc + curr.valor_total, 0);
-
-  const totalCelularesPrevisto = parsedRows
-    .filter(r => r.isValid)
-    .reduce((acc, curr) => acc + curr.total_celulares, 0);
-
-  const totalAcessoriosPrevisto = parsedRows
-    .filter(r => r.isValid)
-    .reduce((acc, curr) => acc + curr.total_acessorios, 0);
-
+  const sumIphones = parsedRows.filter(r => r.isValid).reduce((acc, curr) => acc + curr.qtd_iphones, 0);
+  const sumAndroids = parsedRows.filter(r => r.isValid).reduce((acc, curr) => acc + curr.qtd_androids, 0);
+  const sumAcessorios = parsedRows.filter(r => r.isValid).reduce((acc, curr) => acc + curr.qtd_acessorios, 0);
   const validCount = parsedRows.filter(r => r.isValid).length;
   const invalidCount = parsedRows.filter(r => !r.isValid).length;
 
   return (
-    <div className="space-y-6">
-      {/* Alerta de Segurança e Escopo */}
+    <div className="space-y-6 font-sans">
+      {/* Alerta de Segurança e Regra do Trainee */}
       <div className="p-4 bg-purple-950/20 border border-purple-800/30 rounded-xl flex items-start gap-3 text-xs">
         <ShieldAlert size={20} className="text-purple-400 shrink-0 mt-0.5" />
         <div className="space-y-1">
           <p className="font-bold text-purple-200">
-            Ambiente Financeiro Retroativo Seguro
+            Importação Retroativa Focada em Quantidade & Comissionamento NATIVO
           </p>
           <p className="text-gray-400 leading-relaxed">
-            As vendas importadas por esta ferramenta alimentarão diretamente as métricas de faturamento, dashboards gerenciais e comissões dos vendedores. <strong className="text-purple-300">O estoque físico, produtos e movimentações não sofrem qualquer alteração</strong>.
+            Esta ferramenta calcula as comissões e contabiliza as quantidades vendidas para rankings. <strong className="text-purple-300">O estoque físico não é alterado (trava de estoque ativa)</strong>.
           </p>
+          <div className="p-2 bg-black/60 rounded border border-purple-900/40 text-[11px] text-purple-300 font-mono mt-1">
+            ⚡ <strong>Regra do Trainee:</strong> Trainee divide comissão APENAS sobre Celulares (iPhones e Androids). Em Acessórios, 100% da comissão vai para o Vendedor Principal.
+          </div>
+        </div>
+      </div>
+
+      {/* Ajuste de Taxas de Comissão por Unidade */}
+      <div className="p-4 bg-black border border-[#222] rounded-xl space-y-3">
+        <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+          <Award size={16} className="text-[#6A0DAD]" />
+          Configuração das Taxas de Comissão Retroativas (por Unidade)
+        </h4>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div>
+            <label className="block text-[10px] text-gray-400 uppercase tracking-wider mb-1 font-bold">Comissão por iPhone (R$)</label>
+            <input
+              type="number"
+              step="0.50"
+              value={comissaoIphone}
+              onChange={(e) => setComissaoIphone(parseFloat(e.target.value) || 0)}
+              className="w-full bg-[#111] border border-[#333] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-white font-mono font-bold outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-400 uppercase tracking-wider mb-1 font-bold">Comissão por Android (R$)</label>
+            <input
+              type="number"
+              step="0.50"
+              value={comissaoAndroid}
+              onChange={(e) => setComissaoAndroid(parseFloat(e.target.value) || 0)}
+              className="w-full bg-[#111] border border-[#333] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-white font-mono font-bold outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-400 uppercase tracking-wider mb-1 font-bold">Comissão Acessório (R$)</label>
+            <input
+              type="number"
+              step="0.50"
+              value={comissaoAcessorio}
+              onChange={(e) => setComissaoAcessorio(parseFloat(e.target.value) || 0)}
+              className="w-full bg-[#111] border border-[#333] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-white font-mono font-bold outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-purple-300 uppercase tracking-wider mb-1 font-bold">% Divisão Trainee (Celular)</label>
+            <input
+              type="number"
+              step="5"
+              min="0"
+              max="100"
+              value={pctDivisaoTrainee}
+              onChange={(e) => setPctDivisaoTrainee(parseFloat(e.target.value) || 0)}
+              className="w-full bg-[#111] border border-purple-900/60 focus:border-[#6A0DAD] rounded px-3 py-1.5 text-purple-200 font-mono font-bold outline-none"
+            />
+          </div>
         </div>
       </div>
 
@@ -474,7 +582,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             className="px-3 py-2 bg-black border border-[#333] hover:border-[#6A0DAD] text-gray-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
           >
             <Download size={14} className="text-[#6A0DAD]" />
-            Baixar Modelo CSV
+            Baixar Modelo CSV Simplificado
           </button>
 
           <button
@@ -483,7 +591,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             className="px-3 py-2 bg-black border border-[#333] hover:border-purple-600 text-gray-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
           >
             <Users size={14} className="text-purple-400" />
-            {showVendedoresGuide ? 'Ocultar IDs dos Vendedores' : 'Consultar IDs dos Vendedores'}
+            {showVendedoresGuide ? 'Ocultar Lista de IDs' : 'Consultar IDs dos Vendedores & Trainees'}
           </button>
         </div>
 
@@ -500,13 +608,13 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         )}
       </div>
 
-      {/* Guia de IDs dos Vendedores (para facilitar preenchimento do CSV) */}
+      {/* Guia de IDs dos Vendedores/Trainees */}
       {showVendedoresGuide && (
         <div className="p-4 bg-[#0F0F0F] border border-[#2A2A2A] rounded-xl space-y-3 animate-fadeIn">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
               <Users size={14} className="text-[#6A0DAD]" />
-              Colaboradores Cadastrados (Copie o UUID para a coluna vendedor_id)
+              Colaboradores Cadastrados (Vendedores & Trainees)
             </h4>
             <span className="text-[10px] text-gray-500 font-mono">
               {vendedoresList.length} cadastrados
@@ -537,7 +645,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
                       type="button"
                       onClick={() => {
                         navigator.clipboard.writeText(colab.id);
-                        alert(`ID de ${colab.nome} copiado para a área de transferência!`);
+                        alert(`ID de ${colab.nome} copiado!`);
                       }}
                       className="text-[10px] text-purple-300 hover:text-white bg-[#6A0DAD]/30 hover:bg-[#6A0DAD] px-2 py-0.5 rounded transition-all cursor-pointer"
                     >
@@ -585,7 +693,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
               Arraste seu arquivo .CSV aqui ou clique para selecionar
             </h4>
             <p className="text-xs text-gray-500 mt-1">
-              Estrutura esperada: <span className="font-mono text-purple-300">data_venda, vendedor_id, total_celulares, total_acessorios</span>
+              Cabeçalho esperado: <span className="font-mono text-purple-300">data_venda, vendedor_id, trainee_id, qtd_iphones, qtd_androids, qtd_acessorios</span>
             </p>
           </div>
 
@@ -607,7 +715,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       {/* Resultados da Validação & Pré-visualização */}
       {!isParsing && file && parsedRows.length > 0 && !importResult && (
         <div className="space-y-6 animate-fadeIn">
-          {/* Cartões de Métricas da Importação */}
+          {/* Cartões de Quantidades e Linhas */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-black border border-[#222] p-4 rounded-xl">
               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Linhas Válidas</span>
@@ -618,41 +726,38 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             </div>
 
             <div className="bg-black border border-[#222] p-4 rounded-xl">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Total Geral</span>
-              <span className="text-xl font-extrabold text-white font-mono block mt-1">
-                {totalGeralPrevisto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Total iPhones</span>
+              <span className="text-xl font-extrabold text-blue-400 font-mono block mt-1">
+                {sumIphones} un
               </span>
             </div>
 
             <div className="bg-black border border-[#222] p-4 rounded-xl">
-              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Total Celulares</span>
-              <span className="text-base font-bold text-purple-400 font-mono block mt-1">
-                {totalCelularesPrevisto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Total Androids</span>
+              <span className="text-xl font-extrabold text-green-400 font-mono block mt-1">
+                {sumAndroids} un
               </span>
             </div>
 
             <div className="bg-black border border-[#222] p-4 rounded-xl">
               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Total Acessórios</span>
-              <span className="text-base font-bold text-pink-400 font-mono block mt-1">
-                {totalAcessoriosPrevisto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              <span className="text-xl font-extrabold text-pink-400 font-mono block mt-1">
+                {sumAcessorios} un
               </span>
             </div>
           </div>
 
-          {/* Avisos ou Erros de Validação */}
+          {/* Avisos de Validação */}
           {validationErrors.length > 0 && (
             <div className="p-4 bg-amber-950/20 border border-amber-800/40 rounded-xl space-y-2 text-xs">
               <div className="flex items-center gap-2 font-bold text-amber-300">
                 <AlertTriangle size={16} className="shrink-0" />
-                <span>{invalidCount} linha(s) contêm erros e serão ignoradas durante a importação:</span>
+                <span>{invalidCount} linha(s) contêm erros e serão ignoradas:</span>
               </div>
               <ul className="list-disc list-inside space-y-1 text-gray-300 max-h-32 overflow-y-auto font-mono text-[11px]">
                 {validationErrors.slice(0, 10).map((err, idx) => (
                   <li key={idx}>{err}</li>
                 ))}
-                {validationErrors.length > 10 && (
-                  <li className="text-amber-400">...e mais {validationErrors.length - 10} avisos.</li>
-                )}
               </ul>
             </div>
           )}
@@ -662,7 +767,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             <div className="p-3 bg-[#0E0E0E] border-b border-[#222] flex items-center justify-between">
               <span className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
                 <Eye size={14} className="text-[#6A0DAD]" />
-                Pré-visualização dos Dados ({parsedRows.length} linhas)
+                Pré-visualização dos Registros ({parsedRows.length} linhas)
               </span>
               <span className="text-[11px] text-gray-500 font-mono">
                 Arquivo: {file.name}
@@ -675,25 +780,27 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
                   <tr className="border-b border-[#222] bg-[#0A0A0A] text-gray-500 font-bold uppercase tracking-wider text-[10px]">
                     <th className="py-2.5 px-3">Status</th>
                     <th className="py-2.5 px-3">Linha</th>
-                    <th className="py-2.5 px-3">Data da Venda</th>
-                    <th className="py-2.5 px-3">Vendedor ID</th>
-                    <th className="py-2.5 px-3 text-right">Celulares</th>
-                    <th className="py-2.5 px-3 text-right">Acessórios</th>
-                    <th className="py-2.5 px-3 text-right">Valor Total</th>
+                    <th className="py-2.5 px-3">Data</th>
+                    <th className="py-2.5 px-3">Vendedor Principal</th>
+                    <th className="py-2.5 px-3">Trainee</th>
+                    <th className="py-2.5 px-3 text-center">iPhones</th>
+                    <th className="py-2.5 px-3 text-center">Androids</th>
+                    <th className="py-2.5 px-3 text-center">Acessórios</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1A1A1A]">
                   {parsedRows.slice(0, 50).map((row, idx) => {
                     const sellerObj = vendedoresList.find(v => v.id === row.vendedor_id);
+                    const traineeObj = vendedoresList.find(v => v.id === row.trainee_id);
                     return (
                       <tr key={idx} className={row.isValid ? 'hover:bg-white/5' : 'bg-red-950/10 hover:bg-red-950/20'}>
                         <td className="py-2 px-3">
                           {row.isValid ? (
                             <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/30 px-1.5 py-0.5 rounded font-semibold">
-                              <CheckCircle2 size={10} /> Válido
+                              <CheckCircle2 size={10} /> OK
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-red-400 bg-red-950/30 px-1.5 py-0.5 rounded font-semibold" title={row.errors.join(', ')}>
+                            <span className="inline-flex items-center gap-1 text-[10px] text-red-400 bg-red-950/30 px-1.5 py-0.5 rounded font-semibold">
                               <XCircle size={10} /> Erro
                             </span>
                           )}
@@ -702,45 +809,36 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
                         <td className="py-2 px-3 font-mono text-gray-300">
                           {row.data_venda ? new Date(row.data_venda).toLocaleDateString('pt-BR') : '-'}
                         </td>
-                        <td className="py-2 px-3 font-mono text-gray-400 text-[11px]">
-                          {sellerObj ? (
-                            <span className="text-white font-semibold">{sellerObj.nome}</span>
+                        <td className="py-2 px-3 font-mono text-gray-300 text-[11px]">
+                          {sellerObj ? sellerObj.nome : <span className="truncate max-w-[100px] inline-block">{row.vendedor_id}</span>}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[11px]">
+                          {traineeObj ? (
+                            <span className="text-purple-300 font-semibold">{traineeObj.nome}</span>
+                          ) : row.trainee_id ? (
+                            <span className="text-purple-300 truncate max-w-[100px] inline-block">{row.trainee_id}</span>
                           ) : (
-                            <span className="truncate max-w-[130px] inline-block" title={row.vendedor_id}>
-                              {row.vendedor_id}
-                            </span>
+                            <span className="text-gray-600 font-sans italic">Sem trainee</span>
                           )}
                         </td>
-                        <td className="py-2 px-3 text-right font-mono text-purple-300">
-                          {row.total_celulares.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </td>
-                        <td className="py-2 px-3 text-right font-mono text-pink-300">
-                          {row.total_acessorios.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </td>
-                        <td className="py-2 px-3 text-right font-mono font-bold text-white">
-                          {row.valor_total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                        </td>
+                        <td className="py-2 px-3 text-center font-mono text-blue-400 font-bold">{row.qtd_iphones}</td>
+                        <td className="py-2 px-3 text-center font-mono text-green-400 font-bold">{row.qtd_androids}</td>
+                        <td className="py-2 px-3 text-center font-mono text-pink-400 font-bold">{row.qtd_acessorios}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-
-            {parsedRows.length > 50 && (
-              <div className="p-2 bg-[#0A0A0A] border-t border-[#222] text-center text-[11px] text-gray-500">
-                Mostrando as primeiras 50 de {parsedRows.length} linhas.
-              </div>
-            )}
           </div>
 
-          {/* Barra de Progresso durante a importação */}
+          {/* Barra de Progresso */}
           {isImporting && (
             <div className="space-y-2 p-4 bg-black border border-[#6A0DAD]/40 rounded-xl">
               <div className="flex justify-between text-xs text-gray-300 font-bold">
                 <span className="flex items-center gap-2">
                   <Loader2 size={14} className="animate-spin text-[#6A0DAD]" />
-                  Gravando vendas retroativas no Supabase...
+                  Calculando comissões e inserindo vendas retroativas...
                 </span>
                 <span className="font-mono text-purple-400">{importProgress}%</span>
               </div>
@@ -753,7 +851,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             </div>
           )}
 
-          {/* Botão de Confirmação */}
+          {/* Botões de Ação */}
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
@@ -771,13 +869,13 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
               className="px-6 py-2.5 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white rounded-lg text-xs font-bold transition-all shadow-lg shadow-[#6A0DAD]/30 flex items-center gap-2 cursor-pointer"
             >
               {isImporting ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-              {isImporting ? `Importando (${importProgress}%)...` : `Confirmar Importação de ${validCount} Vendas`}
+              {isImporting ? `Processando (${importProgress}%)...` : `Confirmar Importação de ${validCount} Registros`}
             </button>
           </div>
         </div>
       )}
 
-      {/* Relatório de Conclusão da Importação */}
+      {/* Relatório Final de Conclusão */}
       {importResult && (
         <div className="p-6 bg-[#0B0B0B] border border-emerald-800/40 rounded-2xl space-y-6 animate-fadeIn">
           <div className="flex items-center gap-3 border-b border-[#222] pb-4">
@@ -785,9 +883,9 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
               <CheckCircle2 size={24} />
             </div>
             <div>
-              <h4 className="text-base font-bold text-white">Importação Concluída com Sucesso!</h4>
+              <h4 className="text-base font-bold text-white">Comissões & Quantidades Importadas!</h4>
               <p className="text-xs text-gray-400 mt-0.5">
-                Os registros financeiros e comissões foram atualizados no sistema.
+                Os rankings e históricos de comissão foram atualizados com sucesso.
               </p>
             </div>
           </div>
@@ -801,35 +899,30 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
             </div>
 
             <div className="bg-black border border-[#222] p-3 rounded-lg">
-              <span className="text-[10px] text-gray-500 uppercase font-bold block">Itens Registrados</span>
-              <span className="text-lg font-bold text-purple-400 font-mono block mt-1">
-                {importResult.totalItens}
+              <span className="text-[10px] text-gray-500 uppercase font-bold block">iPhones + Androids</span>
+              <span className="text-base font-bold text-blue-400 font-mono block mt-1">
+                {importResult.totalIphones + importResult.totalAndroids} un
               </span>
             </div>
 
             <div className="bg-black border border-[#222] p-3 rounded-lg">
-              <span className="text-[10px] text-gray-500 uppercase font-bold block">Total Financeiro</span>
-              <span className="text-base font-bold text-white font-mono block mt-1">
-                {importResult.valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              <span className="text-[10px] text-gray-500 uppercase font-bold block">Total Acessórios</span>
+              <span className="text-base font-bold text-pink-400 font-mono block mt-1">
+                {importResult.totalAcessorios} un
               </span>
             </div>
 
             <div className="bg-black border border-[#222] p-3 rounded-lg">
-              <span className="text-[10px] text-gray-500 uppercase font-bold block">Falhas</span>
-              <span className={`text-lg font-bold font-mono block mt-1 ${importResult.erros > 0 ? 'text-red-400' : 'text-gray-500'}`}>
-                {importResult.erros}
+              <span className="text-[10px] text-gray-500 uppercase font-bold block">Comissões Vendedores</span>
+              <span className="text-base font-bold text-emerald-400 font-mono block mt-1">
+                {importResult.totalComissaoVendedores.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </span>
             </div>
           </div>
 
-          {importResult.detalhesErros.length > 0 && (
-            <div className="p-3 bg-red-950/20 border border-red-800/30 rounded-lg text-xs space-y-1 font-mono">
-              <span className="text-red-400 font-bold block font-sans">Erros durante a gravação:</span>
-              <ul className="list-disc list-inside text-gray-300 text-[11px]">
-                {importResult.detalhesErros.map((err, idx) => (
-                  <li key={idx}>{err}</li>
-                ))}
-              </ul>
+          {importResult.totalComissaoTrainees > 0 && (
+            <div className="p-3 bg-purple-950/30 border border-purple-800/40 rounded-lg text-xs font-mono text-purple-200">
+              💜 <strong>Comissão Distribuída para Trainees (Celulares):</strong> {importResult.totalComissaoTrainees.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
             </div>
           )}
 
@@ -839,7 +932,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
               onClick={handleReset}
               className="px-5 py-2.5 bg-[#6A0DAD] hover:bg-[#500885] text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-2"
             >
-              <RefreshCw size={14} /> Importar Outro Arquivo
+              <RefreshCw size={14} /> Importar Outra Planilha
             </button>
           </div>
         </div>
