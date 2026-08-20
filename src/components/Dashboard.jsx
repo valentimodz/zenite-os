@@ -10082,21 +10082,31 @@ export default function Dashboard({ session, profileDataProps }) {
   // --- CALCULAR LEADERBOARD / METAS (MÊS CORRENTE) ---
 
   const getLeaderboard = () => {
-    return vendedores.map(v => {
+    return vendedores.map(colab => {
       const currentMonthSales = vendas.filter(sale => {
-        if (sale.vendedor_id !== v.id) return false;
+        const isColaborador = sale.vendedor_id === colab.id || sale.treener_id === colab.id || sale.trainee_id === colab.id;
+        if (!isColaborador) return false;
         const saleDate = new Date(sale.created_at);
         const [year, month] = filtroMes.split('-');
         return saleDate.getMonth() === parseInt(month, 10) - 1 && saleDate.getFullYear() === parseInt(year, 10);
       });
 
       const totalSalesVolume = currentMonthSales.reduce((acc, s) => acc + parseFloat(s.valor_total || 0), 0);
-      const totalComission = currentMonthSales.reduce((acc, s) => acc + parseFloat(s.comissao || 0), 0);
+      const totalComission = currentMonthSales.reduce((acc, v) => {
+        let soma = 0;
+        if (v.vendedor_id === colab.id) {
+          soma += Number(v.comissao || 0);
+        }
+        if (v.treener_id === colab.id || v.trainee_id === colab.id) {
+          soma += Number(v.comissao_trainee || 0);
+        }
+        return acc + soma;
+      }, 0);
       const salesCount = currentMonthSales.length;
       const ticketMedio = salesCount > 0 ? totalSalesVolume / salesCount : 0;
 
       return {
-        ...v,
+        ...colab,
         totalSalesVolume,
         totalComission,
         salesCount,
@@ -10189,7 +10199,7 @@ export default function Dashboard({ session, profileDataProps }) {
     });
 
     const volumeTotal = mesSales.reduce((acc, s) => acc + parseFloat(s.valor_total || 0), 0);
-    const comissoesTotal = mesSales.reduce((acc, s) => acc + parseFloat(s.comissao || 0), 0);
+    const comissoesTotal = mesSales.reduce((acc, s) => acc + parseFloat(s.comissao || 0) + parseFloat(s.comissao_trainee || 0), 0);
 
     // Melhor vendedor
     const leaderboard = getLeaderboard();
@@ -14494,6 +14504,18 @@ export default function Dashboard({ session, profileDataProps }) {
                           vendedorMap[vId].totalVendido += val;
                           vendedorMap[vId].qtdVendas += 1;
                           vendedorMap[vId].comissaoTotal += (parseFloat(s.comissao) || 0);
+
+                          const tId = s.treener_id || s.trainee_id;
+                          if (tId && (s.teve_participacao_trainee || Number(s.comissao_trainee) > 0)) {
+                            const traineeMember = teamMembers.find(m => String(m.id) === String(tId));
+                            const tNome = traineeMember?.nome || 'Trainee';
+                            if (!vendedorMap[tId]) {
+                              vendedorMap[tId] = { id: tId, nome: tNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
+                            }
+                            vendedorMap[tId].totalVendido += val;
+                            vendedorMap[tId].qtdVendas += 1;
+                            vendedorMap[tId].comissaoTotal += (parseFloat(s.comissao_trainee) || 0);
+                          }
                         });
 
                         const rankingVendedores = Object.values(vendedorMap).sort((a, b) => b.totalVendido - a.totalVendido);
