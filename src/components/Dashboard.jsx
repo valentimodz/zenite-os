@@ -18,6 +18,7 @@ import SaasSettings from '../pages/SaaS/SaasSettings';
 import PainelVendaRapida from './PainelVendaRapida';
 import CameraScanner from './CameraScanner';
 import ImportadorVendasCSV from './ImportadorVendasCSV';
+import RankingVendedores from './RankingVendedores';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -17502,109 +17503,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* ABA 3: RANKING & METAS (GERENTE) */}
               {activeTab === 'ranking' && profile?.role !== 'RH_ADMIN' && (
-                <div className="space-y-8 animate-fadeIn">
-                  {/* Painel do Mês */}
-                  <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div>
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Award size={20} className="text-[#6A0DAD]" />
-                        Ranking Geral de Vendas da Equipe
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-1">Classificação em tempo real baseada no volume bruto faturado.</p>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-black border border-[#222222] p-2 rounded">
-                      <Calendar size={14} className="text-[#6A0DAD]" />
-                      <span className="text-xs font-semibold text-gray-400">Filtrar Mês:</span>
-                      <input
-                        type="month"
-                        value={filtroMes}
-                        onChange={(e) => setFiltroMes(e.target.value)}
-                        className="bg-black text-white text-xs font-bold focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Métricas do Mês do Gerente */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl">
-                      <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Faturamento Bruto</span>
-                      <span className="text-2xl font-black text-white mt-2 block font-mono">
-                        R$ {gerenteMetrics.volumeTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                    <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl border-l-4 border-l-[#6A0DAD]">
-                      <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Total Comissões Pagas</span>
-                      <span className="text-2xl font-black text-[#6A0DAD] mt-2 block font-mono">
-                        R$ {gerenteMetrics.comissoesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                    <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl">
-                      <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Transações Efetuadas</span>
-                      <span className="text-2xl font-black text-white mt-2 block">{gerenteMetrics.vendasCount} vendas</span>
-                    </div>
-                    <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl border-l-4 border-l-yellow-500">
-                      <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Líder de Vendas 🏆</span>
-                      <span className="text-sm font-extrabold text-white mt-2 block truncate">
-                        {gerenteMetrics.melhorVendedor ? `${gerenteMetrics.melhorVendedor.nome} (R$ ${gerenteMetrics.melhorVendedor.totalSalesVolume.toLocaleString('pt-BR', { maximumFractionDigits: 0 })})` : 'Nenhum vendedor'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Tabela do Leaderboard */}
-                  <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
-                    <h4 className="text-sm font-bold text-gray-300 mb-4 uppercase tracking-wider">Classificação de Vendedores</h4>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
-                            <th className="pb-3">Posição</th>
-                            <th className="pb-3">Vendedor</th>
-                            <th className="pb-3">Filial</th>
-                            <th className="pb-3">Perfil</th>
-                            <th className="pb-3 text-center">Transações</th>
-                            <th className="pb-3">Volume de Vendas</th>
-                            <th className="pb-3">Ticket Médio</th>
-                            <th className="pb-3 text-right">Comissão Acumulada</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#222222]/60">
-                          {getLeaderboard().map((v, index) => {
-                            const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}º`;
-                            return (
-                              <tr key={v.id} className="hover:bg-purple-950/5 transition-colors">
-                                <td className="py-4 font-black text-sm text-center sm:text-left pr-4">{medal}</td>
-                                <td className="py-4 font-extrabold text-white">{v.nome}</td>
-                                <td className="py-4 text-gray-400">
-                                  {filiais.find(f => f.id === v.filial_id)?.nome || 'Sem filial'}
-                                </td>
-                                <td className="py-4">
-                                  <span className={`inline-flex px-2 py-0.5 rounded text-[9px] font-bold ${v.is_treinner
-                                    ? 'bg-yellow-950/20 text-yellow-400 border border-yellow-800/20'
-                                    : 'bg-green-950/20 text-green-400 border border-green-800/20'
-                                    }`}>
-                                    {v.is_treinner ? 'Trainee' : 'Profissional'}
-                                  </span>
-                                </td>
-                                <td className="py-4 text-center font-bold text-gray-300">{v.salesCount}</td>
-                                <td className="py-4 font-mono font-bold text-white">
-                                  R$ {v.totalSalesVolume.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </td>
-                                <td className="py-4 font-mono font-bold text-blue-400">
-                                  R$ {v.ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </td>
-                                <td className="py-4 font-mono font-bold text-[#6A0DAD] text-right">
-                                  R$ {v.totalComission.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
+                <RankingVendedores
+                  colaboradores={teamMembers}
+                  vendas={vendas}
+                  filiais={filiais}
+                  filtroMes={filtroMes}
+                  setFiltroMes={setFiltroMes}
+                />
               )}
 
               {/* ABA 4: RELATÓRIOS & FECHAMENTOS (GERENTE) */}
