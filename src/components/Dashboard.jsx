@@ -18,8 +18,8 @@ import SaasSettings from '../pages/SaaS/SaasSettings';
 import PainelVendaRapida from './PainelVendaRapida';
 import CameraScanner from './CameraScanner';
 import ImportadorVendasCSV from './ImportadorVendasCSV';
-import RankingVendedores from './RankingVendedores';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
+import RankingVendedores from './RankingVendedores';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -29,7 +29,7 @@ const FISCAL_MAP = {
   'Capas': { ncm: '39269090', cest: '', cfop: '5102', origem: '0' },
   'Acessórios': { ncm: '85044010', cest: '2103300', cfop: '5102', origem: '0' }
 };
-
+const [vendaDetalheSelecionada, setVendaDetalheSelecionada] = useState(null);
 // Helper de requisição segura que valida Content-Type e impede exceções SyntaxError (ex: quando SPA Vite retorna HTML 404)
 const safeFetchJson = async (url, options = {}) => {
   try {
@@ -193,12 +193,11 @@ function ProductTableRow({
 
         {/* Categoria */}
         <td className="py-2.5">
-          <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${
-            p.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
+          <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${p.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
             p.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
-            p.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
-            'bg-purple-950/20 text-purple-400 border border-purple-800/20'
-          }`}>{p.categoria || 'GERAL'}</span>
+              p.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
+                'bg-purple-950/20 text-purple-400 border border-purple-800/20'
+            }`}>{p.categoria || 'GERAL'}</span>
         </td>
 
         {/* Célula: Cor */}
@@ -235,9 +234,8 @@ function ProductTableRow({
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
-              <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium border ${
-                p.cor ? 'bg-purple-950/30 text-purple-300 border-purple-800/30 font-bold' : 'bg-zinc-900/50 text-gray-500 border-zinc-800/40'
-              }`}>
+              <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium border ${p.cor ? 'bg-purple-950/30 text-purple-300 border-purple-800/30 font-bold' : 'bg-zinc-900/50 text-gray-500 border-zinc-800/40'
+                }`}>
                 {p.cor || 'Sem cor'}
               </span>
               <button
@@ -2135,7 +2133,7 @@ export default function Dashboard({ session, profileDataProps }) {
             // Comparar com produtos/catálogo se não houver preco_base ou desconto explícito
             if (valDesc <= 0 && valTabela <= 0) {
               const prodObj = (produtos || []).find(p => p.id === v.produto_id || p.nome?.toLowerCase() === v.produto_nome?.toLowerCase() || p.nome?.toLowerCase() === v.produtos_descricao?.toLowerCase()) ||
-                              (catalogoProdutos || []).find(c => c.id === v.produto_id || c.nome?.toLowerCase() === v.produto_nome?.toLowerCase() || c.nome?.toLowerCase() === v.produtos_descricao?.toLowerCase());
+                (catalogoProdutos || []).find(c => c.id === v.produto_id || c.nome?.toLowerCase() === v.produto_nome?.toLowerCase() || c.nome?.toLowerCase() === v.produtos_descricao?.toLowerCase());
               if (prodObj && Number(prodObj.preco) > 0) {
                 const pCat = Number(prodObj.preco);
                 const precoUnitCobrado = valFinal / (qtd || 1);
@@ -5311,7 +5309,7 @@ export default function Dashboard({ session, profileDataProps }) {
       estoqueFiliais.forEach(item => {
         const corItem = item.cor ? item.cor.trim().toLowerCase() : '';
         const nomeItem = item.nome ? item.nome.trim().toLowerCase() : '';
-        
+
         const corOk = (corItem === corBusca) || (!corItem && !corBusca);
         const nomeOk = nomeItem.includes(nomeBusca.toLowerCase().substring(0, 8));
 
@@ -8581,10 +8579,10 @@ export default function Dashboard({ session, profileDataProps }) {
     // Bloqueia SOMENTE se o valor inserido for estritamente MENOR que o preço mínimo (Valor Inserido < Preço Mínimo)
     if (precoNovo < (precoMinimoPermitido - 0.001)) {
       const nomeLower = (item.produto?.nome || '').toLowerCase();
-      const isApple = nomeLower.includes('iphone') || 
-                      nomeLower.includes('apple') || 
-                      (item.produto?.categoria || '').toLowerCase().includes('ios') || 
-                      (item.produto?.marca || '').toLowerCase().includes('apple');
+      const isApple = nomeLower.includes('iphone') ||
+        nomeLower.includes('apple') ||
+        (item.produto?.categoria || '').toLowerCase().includes('ios') ||
+        (item.produto?.marca || '').toLowerCase().includes('apple');
 
       if (isApple) {
         showToast('Desconto Bloqueado: iPhones e produtos Apple possuem 0% de desconto permitido.', 'error');
@@ -11317,11 +11315,10 @@ export default function Dashboard({ session, profileDataProps }) {
                   value={pdvBusca}
                   onChange={(e) => setPdvBusca(e.target.value)}
                   placeholder={isPdvBloqueadoParaUsuario ? "Caixa Fechado - Abra o caixa para operar [F2]" : "Busca, SKU ou Código... [F2]"}
-                  className={`w-full bg-black border rounded-md text-white pl-9 pr-4 py-2 text-xs outline-none transition-all font-sans ${
-                    isPdvBloqueadoParaUsuario
-                      ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
-                      : 'border-[#222222] focus:border-[#6A0DAD]'
-                  }`}
+                  className={`w-full bg-black border rounded-md text-white pl-9 pr-4 py-2 text-xs outline-none transition-all font-sans ${isPdvBloqueadoParaUsuario
+                    ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
+                    : 'border-[#222222] focus:border-[#6A0DAD]'
+                    }`}
                 />
               </form>
             </div>
@@ -11352,11 +11349,10 @@ export default function Dashboard({ session, profileDataProps }) {
                 <button
                   type="button"
                   onClick={() => setPdvCategoria('TUDO')}
-                  className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-extrabold uppercase tracking-wider transition-all border cursor-pointer ${
-                    !pdvCategoria || pdvCategoria === 'TUDO'
-                      ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
-                      : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
-                  }`}
+                  className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-extrabold uppercase tracking-wider transition-all border cursor-pointer ${!pdvCategoria || pdvCategoria === 'TUDO'
+                    ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
+                    : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
+                    }`}
                 >
                   TUDO
                 </button>
@@ -11378,11 +11374,10 @@ export default function Dashboard({ session, profileDataProps }) {
                       key={catId}
                       type="button"
                       onClick={() => setPdvCategoria(catNome)}
-                      className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${
-                        isSelected
-                          ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
-                          : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
-                      }`}
+                      className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${isSelected
+                        ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
+                        : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
+                        }`}
                     >
                       {catNome}
                     </button>
@@ -11483,15 +11478,14 @@ export default function Dashboard({ session, profileDataProps }) {
                             handleAddToCart(prod);
                           }
                         }}
-                        className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${
-                          isPdvBloqueadoParaUsuario
-                            ? 'opacity-40 cursor-not-allowed border-[#222]'
-                            : isSemEstoque
-                              ? 'border-[#222222] hover:border-[#6A0DAD]/50 bg-black/60 cursor-pointer'
-                              : pdvCart.some(i => i.produto.id === prod.id)
-                                ? 'border-[#6A0DAD] bg-[#6A0DAD]/5 cursor-pointer'
-                                : 'border-[#222222] hover:border-[#6A0DAD]/40 cursor-pointer'
-                        }`}
+                        className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${isPdvBloqueadoParaUsuario
+                          ? 'opacity-40 cursor-not-allowed border-[#222]'
+                          : isSemEstoque
+                            ? 'border-[#222222] hover:border-[#6A0DAD]/50 bg-black/60 cursor-pointer'
+                            : pdvCart.some(i => i.produto.id === prod.id)
+                              ? 'border-[#6A0DAD] bg-[#6A0DAD]/5 cursor-pointer'
+                              : 'border-[#222222] hover:border-[#6A0DAD]/40 cursor-pointer'
+                          }`}
                       >
                         <div className="flex justify-between items-start w-full">
                           <div className="flex flex-col gap-1.5 max-w-[70%]">
@@ -11587,9 +11581,8 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
 
             {/* Scanner de IMEI ou Código de Barras (EAN/Barcode) */}
-            <div className={`space-y-2 bg-[#111111]/60 border rounded-lg p-3 transition-all ${
-              isPdvBloqueadoParaUsuario ? 'border-amber-900/30 opacity-70' : 'border-[#222222]'
-            }`}>
+            <div className={`space-y-2 bg-[#111111]/60 border rounded-lg p-3 transition-all ${isPdvBloqueadoParaUsuario ? 'border-amber-900/30 opacity-70' : 'border-[#222222]'
+              }`}>
               <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider flex items-center justify-between">
                 <span>⚡ Bipar IMEI ou Código de Barras (EAN)</span>
                 {isPdvBloqueadoParaUsuario && (
@@ -11607,11 +11600,10 @@ export default function Dashboard({ session, profileDataProps }) {
                     value={pdvScanImei}
                     onChange={(e) => setPdvScanImei(e.target.value)}
                     placeholder={isPdvBloqueadoParaUsuario ? "Caixa Fechado - Leitor desabilitado..." : "Bipe o IMEI, EAN/barcode ou SKU..."}
-                    className={`flex-1 min-w-[180px] bg-black border rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider transition-all ${
-                      isPdvBloqueadoParaUsuario
-                        ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
-                        : 'border-[#222222] focus:border-[#6A0DAD]'
-                    }`}
+                    className={`flex-1 min-w-[180px] bg-black border rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider transition-all ${isPdvBloqueadoParaUsuario
+                      ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
+                      : 'border-[#222222] focus:border-[#6A0DAD]'
+                      }`}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -11672,11 +11664,10 @@ export default function Dashboard({ session, profileDataProps }) {
                     }
                     setIsVendaRapidaOpen(true);
                   }}
-                  className={`w-full px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 ${
-                    isPdvBloqueadoParaUsuario
-                      ? 'bg-gray-800/60 text-gray-500 border border-gray-700/30 opacity-60 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white shadow-md shadow-purple-900/30 hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
-                  }`}
+                  className={`w-full px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 ${isPdvBloqueadoParaUsuario
+                    ? 'bg-gray-800/60 text-gray-500 border border-gray-700/30 opacity-60 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white shadow-md shadow-purple-900/30 hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
+                    }`}
                   title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
                 >
                   <Zap size={14} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-gray-500' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
@@ -12768,683 +12759,573 @@ export default function Dashboard({ session, profileDataProps }) {
                             )}
 
                             <button
-                              onClick={() => {
-                                const cTarget = clienteObj || {
-                                  id: venda.cliente_id,
-                                  nome: clienteNomeResolved,
-                                  cpf_cnpj: clienteCpfResolved,
-                                  telefone: venda.cliente_telefone || ''
-                                };
-                                handleOpenClienteHistorico(cTarget);
-                              }}
-                              className="bg-emerald-950/40 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-800/40 hover:border-emerald-500 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1 cursor-pointer shadow-sm"
-                              title="Gerar Oferta WhatsApp & Checar Quitação de Carnê/PayJoy"
+                              onClick={() => setVendaDetalheSelecionada(venda)}
+                              className="bg-blue-950/40 text-blue-400 border border-blue-800/40 hover:bg-blue-900/60 px-3 py-1.5 rounded flex items-center gap-2 transition-colors text-xs font-bold"
                             >
-                              <MessageCircle size={12} className="text-emerald-400" />
-                              Promo Whats / Quitação
+                              <FileText size={14} />
+                              Detalhes & NF-e
                             </button>
-                          </div>
-                        </td>
+
+                          <button
+                            onClick={() => {
+                              const cTarget = clienteObj || {
+                                id: venda.cliente_id,
+                                nome: clienteNomeResolved,
+                                cpf_cnpj: clienteCpfResolved,
+                                telefone: venda.cliente_telefone || ''
+                              };
+                              handleOpenClienteHistorico(cTarget);
+                            }}
+                            className="bg-emerald-950/40 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-800/40 hover:border-emerald-500 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1 cursor-pointer shadow-sm"
+                            title="Gerar Oferta WhatsApp & Checar Quitação de Carnê/PayJoy"
+                          >
+                            <MessageCircle size={12} className="text-emerald-400" />
+                            Promo Whats / Quitação
+                          </button>
+                        </div>
+                      </td>
                       </tr>
-                    );
+                );
                   })}
-                </tbody>
-              </table>
+              </tbody>
+            </table>
             </div>
           )}
-        </div>
+      </div>
 
-        {/* MODAL DE ALTERAÇÃO DE STATUS DE CRÉDITO */}
-        {isAuditModalOpen && selectedAuditVenda && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl p-6 w-full max-w-md space-y-6 shadow-2xl">
-              <div className="flex justify-between items-start border-b border-[#222222] pb-4">
-                <div>
-                  <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
-                    <ShieldCheck size={20} className="text-[#6A0DAD]" />
-                    Auditoria de Crédito do Cliente
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Altere a adimplência de <strong className="text-white">{selectedAuditVenda.cliente_nome}</strong>
-                  </p>
+        {/* MODAL DE ALTERAÇÃO DE STATUS DE CRÉDITO */ }
+    {
+      isAuditModalOpen && selectedAuditVenda && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl p-6 w-full max-w-md space-y-6 shadow-2xl">
+            <div className="flex justify-between items-start border-b border-[#222222] pb-4">
+              <div>
+                <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                  <ShieldCheck size={20} className="text-[#6A0DAD]" />
+                  Auditoria de Crédito do Cliente
+                </h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  Altere a adimplência de <strong className="text-white">{selectedAuditVenda.cliente_nome}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsAuditModalOpen(false);
+                  setSelectedAuditVenda(null);
+                }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCreditStatus} className="space-y-4 text-xs">
+              <div className="bg-black/60 border border-[#222222] p-3.5 rounded-xl space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">CPF/CNPJ:</span>
+                  <span className="font-mono text-white font-bold">{selectedAuditVenda.cliente_cpf_cnpj}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Última Venda:</span>
+                  <span className="text-gray-300 font-bold">{selectedAuditVenda.produtos?.nome || 'Aparelho'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Financeira:</span>
+                  <span className="text-purple-300 font-bold uppercase">{selectedAuditVenda.financeira}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-2">
+                  Novo Status de Crédito (Poka-Yoke):
+                </label>
+                <div className="space-y-2">
+                  <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedAuditClienteStatus === 'EM DIA'
+                    ? 'bg-green-950/20 border-green-500 text-green-400 font-bold'
+                    : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
+                    }`}>
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="radio"
+                        name="statusCredito"
+                        value="EM DIA"
+                        checked={selectedAuditClienteStatus === 'EM DIA'}
+                        onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
+                        className="accent-green-500 cursor-pointer"
+                      />
+                      <span>🟢 Pagamento Normal (Em Dia)</span>
+                    </div>
+                    <span className="text-[10px] bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">Permite Vendas</span>
+                  </label>
+
+                  <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedAuditClienteStatus === 'ATRASO'
+                    ? 'bg-yellow-950/20 border-yellow-500 text-yellow-400 font-bold'
+                    : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
+                    }`}>
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="radio"
+                        name="statusCredito"
+                        value="ATRASO"
+                        checked={selectedAuditClienteStatus === 'ATRASO'}
+                        onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
+                        className="accent-yellow-500 cursor-pointer"
+                      />
+                      <span>🟡 Atraso Leve</span>
+                    </div>
+                    <span className="text-[10px] bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/20">Alerta de Risco</span>
+                  </label>
+
+                  <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedAuditClienteStatus === 'INADIMPLENTE'
+                    ? 'bg-red-950/20 border-red-500 text-red-500 font-bold'
+                    : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
+                    }`}>
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="radio"
+                        name="statusCredito"
+                        value="INADIMPLENTE"
+                        checked={selectedAuditClienteStatus === 'INADIMPLENTE'}
+                        onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
+                        className="accent-red-500 cursor-pointer"
+                      />
+                      <span>🔴 Bloqueado / Inadimplente</span>
+                    </div>
+                    <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30 uppercase">Bloqueia PDV</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-gray-400 bg-purple-950/20 border border-purple-900/30 p-3 rounded-lg leading-relaxed">
+                💡 <strong>Impacto Imediato:</strong> Ao marcar como <span className="text-red-400 font-bold">Bloqueado / Inadimplente</span>, a alteração será salva diretamente na tabela de clientes. Caso este cliente tente comprar outro aparelho em qualquer filial, o sistema bloqueará a venda no PDV.
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t border-[#222222]">
                 <button
+                  type="button"
                   onClick={() => {
                     setIsAuditModalOpen(false);
                     setSelectedAuditVenda(null);
                   }}
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="bg-[#111111] hover:bg-[#1A1A1A] text-gray-300 border border-[#333333] font-bold py-2.5 px-4 rounded-xl transition-all"
                 >
-                  <X size={20} />
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAuditStatus}
+                  className="bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-[#6A0DAD]/30 cursor-pointer"
+                >
+                  {isSavingAuditStatus ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  Salvar Auditoria de Crédito
                 </button>
               </div>
-
-              <form onSubmit={handleSaveCreditStatus} className="space-y-4 text-xs">
-                <div className="bg-black/60 border border-[#222222] p-3.5 rounded-xl space-y-1.5">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">CPF/CNPJ:</span>
-                    <span className="font-mono text-white font-bold">{selectedAuditVenda.cliente_cpf_cnpj}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Última Venda:</span>
-                    <span className="text-gray-300 font-bold">{selectedAuditVenda.produtos?.nome || 'Aparelho'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Financeira:</span>
-                    <span className="text-purple-300 font-bold uppercase">{selectedAuditVenda.financeira}</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-2">
-                    Novo Status de Crédito (Poka-Yoke):
-                  </label>
-                  <div className="space-y-2">
-                    <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedAuditClienteStatus === 'EM DIA'
-                      ? 'bg-green-950/20 border-green-500 text-green-400 font-bold'
-                      : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
-                      }`}>
-                      <div className="flex items-center gap-2.5">
-                        <input
-                          type="radio"
-                          name="statusCredito"
-                          value="EM DIA"
-                          checked={selectedAuditClienteStatus === 'EM DIA'}
-                          onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
-                          className="accent-green-500 cursor-pointer"
-                        />
-                        <span>🟢 Pagamento Normal (Em Dia)</span>
-                      </div>
-                      <span className="text-[10px] bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">Permite Vendas</span>
-                    </label>
-
-                    <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedAuditClienteStatus === 'ATRASO'
-                      ? 'bg-yellow-950/20 border-yellow-500 text-yellow-400 font-bold'
-                      : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
-                      }`}>
-                      <div className="flex items-center gap-2.5">
-                        <input
-                          type="radio"
-                          name="statusCredito"
-                          value="ATRASO"
-                          checked={selectedAuditClienteStatus === 'ATRASO'}
-                          onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
-                          className="accent-yellow-500 cursor-pointer"
-                        />
-                        <span>🟡 Atraso Leve</span>
-                      </div>
-                      <span className="text-[10px] bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/20">Alerta de Risco</span>
-                    </label>
-
-                    <label className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedAuditClienteStatus === 'INADIMPLENTE'
-                      ? 'bg-red-950/20 border-red-500 text-red-500 font-bold'
-                      : 'bg-black border-[#222222] text-gray-400 hover:border-gray-700'
-                      }`}>
-                      <div className="flex items-center gap-2.5">
-                        <input
-                          type="radio"
-                          name="statusCredito"
-                          value="INADIMPLENTE"
-                          checked={selectedAuditClienteStatus === 'INADIMPLENTE'}
-                          onChange={(e) => setSelectedAuditClienteStatus(e.target.value)}
-                          className="accent-red-500 cursor-pointer"
-                        />
-                        <span>🔴 Bloqueado / Inadimplente</span>
-                      </div>
-                      <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30 uppercase">Bloqueia PDV</span>
-                    </label>
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-gray-400 bg-purple-950/20 border border-purple-900/30 p-3 rounded-lg leading-relaxed">
-                  💡 <strong>Impacto Imediato:</strong> Ao marcar como <span className="text-red-400 font-bold">Bloqueado / Inadimplente</span>, a alteração será salva diretamente na tabela de clientes. Caso este cliente tente comprar outro aparelho em qualquer filial, o sistema bloqueará a venda no PDV.
-                </div>
-
-                <div className="flex justify-end gap-3 pt-2 border-t border-[#222222]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsAuditModalOpen(false);
-                      setSelectedAuditVenda(null);
-                    }}
-                    className="bg-[#111111] hover:bg-[#1A1A1A] text-gray-300 border border-[#333333] font-bold py-2.5 px-4 rounded-xl transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingAuditStatus}
-                    className="bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-[#6A0DAD]/30 cursor-pointer"
-                  >
-                    {isSavingAuditStatus ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                    Salvar Auditoria de Crédito
-                  </button>
-                </div>
-              </form>
-            </div>
+            </form>
           </div>
-        )}
+        </div>
+      )
+    }
 
-        {/* MODAL DE BAIXA DE PAGAMENTO / CONTAS A RECEBER */}
-        {modalBaixaVenda && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-emerald-500/40 rounded-2xl p-6 w-full max-w-md space-y-5 shadow-2xl">
-              <div className="flex justify-between items-start border-b border-[#222222] pb-4">
-                <div>
-                  <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
-                    <DollarSign size={20} className="text-emerald-400" />
-                    Registrar Recebimento / Baixa
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Cliente: <strong className="text-white">{modalBaixaVenda.cliente_nome || 'Consumidor Final'}</strong>
-                  </p>
+    {/* MODAL DE BAIXA DE PAGAMENTO / CONTAS A RECEBER */ }
+    {
+      modalBaixaVenda && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-emerald-500/40 rounded-2xl p-6 w-full max-w-md space-y-5 shadow-2xl">
+            <div className="flex justify-between items-start border-b border-[#222222] pb-4">
+              <div>
+                <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                  <DollarSign size={20} className="text-emerald-400" />
+                  Registrar Recebimento / Baixa
+                </h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  Cliente: <strong className="text-white">{modalBaixaVenda.cliente_nome || 'Consumidor Final'}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setModalBaixaVenda(null);
+                  setBaixaValor('');
+                }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmarBaixaPagamento} className="space-y-4 text-xs">
+              <div className="bg-black/60 border border-[#222222] p-3.5 rounded-xl space-y-2 font-mono">
+                <div className="flex justify-between text-gray-400">
+                  <span>Valor Total da Venda:</span>
+                  <span className="text-white font-bold">
+                    R$ {parseFloat(modalBaixaVenda.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
                 </div>
+                <div className="flex justify-between text-gray-400">
+                  <span>Valor Já Pago (Sinais / Entradas):</span>
+                  <span className="text-emerald-400 font-bold">
+                    R$ {parseFloat(modalBaixaVenda.valor_pago || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-[#222222] pt-2 text-xs">
+                  <span className="text-red-400 font-bold uppercase">Saldo Devedor Restante:</span>
+                  <span className="text-red-400 font-black text-sm">
+                    R$ {Math.max(0, parseFloat(modalBaixaVenda.valor_total || 0) - parseFloat(modalBaixaVenda.valor_pago || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
+                  Valor do Pagamento Atual <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-xs text-gray-500 font-mono">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    value={baixaValor}
+                    onChange={(e) => setBaixaValor(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-black border border-[#222222] focus:border-emerald-500 rounded-lg text-white pl-8 pr-3 py-2 text-sm outline-none font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
+                  Forma de Pagamento Recebida
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { value: 'PIX', label: '⚡ PIX' },
+                    { value: 'CARTAO_CREDITO', label: '💳 Crédito' },
+                    { value: 'CARTAO_DEBITO', label: '💳 Débito' },
+                    { value: 'DINHEIRO', label: '💵 Dinheiro' }
+                  ].map(m => (
+                    <button
+                      key={m.value}
+                      type="button"
+                      onClick={() => setBaixaMetodo(m.value)}
+                      className={`py-2 px-1 rounded-lg text-xs font-bold transition-all border ${baixaMetodo === m.value
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/20'
+                        : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                        }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-[#222222]">
                 <button
+                  type="button"
                   onClick={() => {
                     setModalBaixaVenda(null);
                     setBaixaValor('');
                   }}
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="bg-[#111111] hover:bg-[#1A1A1A] text-gray-300 border border-[#333333] font-bold py-2.5 px-4 rounded-xl transition-all"
                 >
-                  <X size={20} />
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={loadingBaixa}
+                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer text-xs"
+                >
+                  {loadingBaixa ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
+                  Confirmar Recebimento
                 </button>
               </div>
-
-              <form onSubmit={handleConfirmarBaixaPagamento} className="space-y-4 text-xs">
-                <div className="bg-black/60 border border-[#222222] p-3.5 rounded-xl space-y-2 font-mono">
-                  <div className="flex justify-between text-gray-400">
-                    <span>Valor Total da Venda:</span>
-                    <span className="text-white font-bold">
-                      R$ {parseFloat(modalBaixaVenda.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Valor Já Pago (Sinais / Entradas):</span>
-                    <span className="text-emerald-400 font-bold">
-                      R$ {parseFloat(modalBaixaVenda.valor_pago || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between border-t border-[#222222] pt-2 text-xs">
-                    <span className="text-red-400 font-bold uppercase">Saldo Devedor Restante:</span>
-                    <span className="text-red-400 font-black text-sm">
-                      R$ {Math.max(0, parseFloat(modalBaixaVenda.valor_total || 0) - parseFloat(modalBaixaVenda.valor_pago || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
-                    Valor do Pagamento Atual <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-xs text-gray-500 font-mono">R$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      required
-                      value={baixaValor}
-                      onChange={(e) => setBaixaValor(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-black border border-[#222222] focus:border-emerald-500 rounded-lg text-white pl-8 pr-3 py-2 text-sm outline-none font-mono font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5">
-                    Forma de Pagamento Recebida
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {[
-                      { value: 'PIX', label: '⚡ PIX' },
-                      { value: 'CARTAO_CREDITO', label: '💳 Crédito' },
-                      { value: 'CARTAO_DEBITO', label: '💳 Débito' },
-                      { value: 'DINHEIRO', label: '💵 Dinheiro' }
-                    ].map(m => (
-                      <button
-                        key={m.value}
-                        type="button"
-                        onClick={() => setBaixaMetodo(m.value)}
-                        className={`py-2 px-1 rounded-lg text-xs font-bold transition-all border ${baixaMetodo === m.value
-                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/20'
-                          : 'bg-black text-gray-400 border-[#222222] hover:text-white'
-                          }`}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-3 border-t border-[#222222]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setModalBaixaVenda(null);
-                      setBaixaValor('');
-                    }}
-                    className="bg-[#111111] hover:bg-[#1A1A1A] text-gray-300 border border-[#333333] font-bold py-2.5 px-4 rounded-xl transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={loadingBaixa}
-                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-2.5 px-6 rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer text-xs"
-                  >
-                    {loadingBaixa ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-                    Confirmar Recebimento
-                  </button>
-                </div>
-              </form>
-            </div>
+            </form>
           </div>
-        )}
-      </div>
+        </div>
+      )
+    }
+      </div >
     );
-  };
+};
 
-  const getTopRightHeaderName = () => {
-    if (!profile) return 'Rede Cred';
-    const role = profile.role;
+const getTopRightHeaderName = () => {
+  if (!profile) return 'Rede Cred';
+  const role = profile.role;
 
-    // Se for Vendedor ou Estoquista, tenta exibir o nome da filial dele
-    if (['VENDEDOR', 'ESTOQUISTA'].includes(role)) {
-      if (profile.filial_id && filiais && filiais.length > 0) {
-        const userFilial = filiais.find(f => f.id === profile.filial_id);
-        if (userFilial && userFilial.nome) {
-          return userFilial.nome;
-        }
+  // Se for Vendedor ou Estoquista, tenta exibir o nome da filial dele
+  if (['VENDEDOR', 'ESTOQUISTA'].includes(role)) {
+    if (profile.filial_id && filiais && filiais.length > 0) {
+      const userFilial = filiais.find(f => f.id === profile.filial_id);
+      if (userFilial && userFilial.nome) {
+        return userFilial.nome;
       }
-      if (activeFilialNome) {
-        return activeFilialNome;
-      }
-      return 'Rede Cred';
     }
-
+    if (activeFilialNome) {
+      return activeFilialNome;
+    }
     return 'Rede Cred';
+  }
+
+  return 'Rede Cred';
+};
+
+const getCertificadoFileName = (path) => {
+  if (!path) return '';
+  const parts = path.split('/');
+  const rawName = parts[parts.length - 1];
+  return rawName.replace(/^\d{13}_/, '');
+};
+
+const getViewLabel = () => {
+  switch (currentView) {
+    case 'supremo': return 'Painel Supremo';
+    case 'gestao': return 'Dashboard';
+    case 'pdv': return 'Frente de Caixa (PDV)';
+    case 'clientes': return 'Cadastro de Clientes';
+    case 'equipe': return 'Equipe / Funcionários';
+    case 'descontos': return 'Auditoria de Descontos por Vendedor';
+    case 'auditoria_credito': return 'Auditoria de Vendas & Crédito';
+    case 'estoque': return 'Entrada de Estoque';
+    case 'categorias': return 'Categorias';
+    case 'transferencias': return 'Transferências de Estoque';
+    case 'ranking': return 'Metas & Rankings';
+    case 'metas': return 'Minhas Metas & Comissões';
+    case 'fechamentos': return 'Relatórios & Fechamentos';
+    case 'fechamento': return 'Fechamento de Caixa';
+    case 'configuracoes': return 'Configurações';
+    default: return 'Zênite';
+  }
+};
+
+const renderSidebarItems = (isMobileDrawer = false) => {
+  if (!profile) return null;
+
+  const currentRole = profile.role;
+  const userEmail = (profile.email || session?.user?.email || '').toLowerCase().trim();
+
+  // Checagem estrita por email e por role para o Gerente Rodrigo
+  const isGerente = currentRole === 'GERENTE' || userEmail === 'rodrigo.gerenciamonkeyshop@gmail.com';
+  const isAdmin = (currentRole === 'ADMIN' || currentRole === 'SUPER_ADMIN' || userEmail === 'valentimodz2@gmail.com' || userEmail === 'valentimodz2@gmail.com') && !isGerente;
+
+  const itemClass = (view) => {
+    const active = currentView === view;
+    return `flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-all w-full text-left ${active
+      ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/10'
+      : 'text-gray-400 hover:text-white hover:bg-white/5'
+      }`;
   };
 
-  const getCertificadoFileName = (path) => {
-    if (!path) return '';
-    const parts = path.split('/');
-    const rawName = parts[parts.length - 1];
-    return rawName.replace(/^\d{13}_/, '');
+  const iconOnlyClass = (view) => {
+    const active = currentView === view;
+    return `flex items-center justify-center p-3 rounded-lg transition-all w-full ${active
+      ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/10'
+      : 'text-gray-400 hover:text-white hover:bg-white/5'
+      }`;
   };
 
-  const getViewLabel = () => {
-    switch (currentView) {
-      case 'supremo': return 'Painel Supremo';
-      case 'gestao': return 'Dashboard';
-      case 'pdv': return 'Frente de Caixa (PDV)';
-      case 'clientes': return 'Cadastro de Clientes';
-      case 'equipe': return 'Equipe / Funcionários';
-      case 'descontos': return 'Auditoria de Descontos por Vendedor';
-      case 'auditoria_credito': return 'Auditoria de Vendas & Crédito';
-      case 'estoque': return 'Entrada de Estoque';
-      case 'categorias': return 'Categorias';
-      case 'transferencias': return 'Transferências de Estoque';
-      case 'ranking': return 'Metas & Rankings';
-      case 'metas': return 'Minhas Metas & Comissões';
-      case 'fechamentos': return 'Relatórios & Fechamentos';
-      case 'fechamento': return 'Fechamento de Caixa';
-      case 'configuracoes': return 'Configurações';
-      default: return 'Zênite';
+  const sidebarItem = (view, label, IconComponent) => {
+    if (sidebarOpen || isMobileDrawer) {
+      return (
+        <button
+          key={view}
+          onClick={() => handleNavigate(view)}
+          className={itemClass(view)}
+        >
+          <IconComponent size={16} className="shrink-0" />
+          <span>{label}</span>
+        </button>
+      );
+    } else {
+      return (
+        <button
+          key={view}
+          onClick={() => handleNavigate(view)}
+          className={iconOnlyClass(view)}
+          title={label}
+        >
+          <IconComponent size={18} className="shrink-0" />
+        </button>
+      );
     }
   };
 
-  const renderSidebarItems = (isMobileDrawer = false) => {
-    if (!profile) return null;
+  const isSuperAdmin = currentRole === 'SUPER_ADMIN' && !isGerente;
+  const items = [];
 
-    const currentRole = profile.role;
-    const userEmail = (profile.email || session?.user?.email || '').toLowerCase().trim();
+  if (isSuperAdmin) {
+    /* MENU EXCLUSIVO DO DONO DO SOFTWARE (SAAS BACKOFFICE) */
+    items.push(sidebarItem('gestao', 'Dashboard SaaS', LayoutDashboard));
+    items.push(sidebarItem('equipe', 'Gestão de Lojas (Tenants)', Building));
+    items.push(sidebarItem('assinatura', 'Planos & Mensalidades SaaS', CreditCard));
+    items.push(sidebarItem('configuracoes', 'Configurações Globais', Settings));
+  } else {
+    /* MENU OPERACIONAL DA LOJA (GERENTES, VENDEDORES, LOJISTAS) */
 
-    // Checagem estrita por email e por role para o Gerente Rodrigo
-    const isGerente = currentRole === 'GERENTE' || userEmail === 'rodrigo.gerenciamonkeyshop@gmail.com';
-    const isAdmin = (currentRole === 'ADMIN' || currentRole === 'SUPER_ADMIN' || userEmail === 'valentimodz2@gmail.com' || userEmail === 'valentimodz2@gmail.com') && !isGerente;
+    // 1. Dashboard Home (Loja)
+    if (['ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
+      items.push(sidebarItem('gestao', 'Dashboard (Home)', LayoutDashboard));
+    }
 
-    const itemClass = (view) => {
-      const active = currentView === view;
-      return `flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-all w-full text-left ${active
-        ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/10'
-        : 'text-gray-400 hover:text-white hover:bg-white/5'
-        }`;
-    };
+    // 2. Frente de Caixa (PDV) - Oculto para DONO
+    if (!isGerente && ['ADMIN', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
+      items.push(sidebarItem('pdv', 'Frente de Caixa (PDV)', ShoppingBag));
+    }
 
-    const iconOnlyClass = (view) => {
-      const active = currentView === view;
-      return `flex items-center justify-center p-3 rounded-lg transition-all w-full ${active
-        ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/10'
-        : 'text-gray-400 hover:text-white hover:bg-white/5'
-        }`;
-    };
+    // 3. Clientes - Oculto para DONO
+    if (['ADMIN', 'GERENTE', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
+      items.push(sidebarItem('clientes', 'Clientes', Users));
+    }
 
-    const sidebarItem = (view, label, IconComponent) => {
+    // 4. Transferências (Liberado para Vendedores) - Oculto para DONO
+    if (currentRole === 'VENDEDOR') {
+      items.push(sidebarItem('transferencias', 'Transferências', Truck));
+    }
+
+    // 5. Equipe / Funcionários
+    if (['ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH'].includes(currentRole)) {
+      items.push(sidebarItem('equipe', 'Equipe / Funcionários', UserPlus));
+    }
+
+    // 6. Auditoria de Descontos
+    if (['GERENTE', 'ADMIN', 'OWNER', 'DONO'].includes(currentRole)) {
+      items.push(sidebarItem('descontos', 'Auditoria de Descontos', Tag));
+    }
+
+    // 7. Auditoria de Vendas & Crédito
+    if (['GERENTE', 'ADMIN', 'OWNER', 'DONO'].includes(currentRole)) {
+      items.push(sidebarItem('auditoria_credito', 'Auditoria Vendas & Crédito', ShieldCheck));
+    }
+
+    // 8. Gestão de Estoque
+    if (!isGerente && ['ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
+      const showEstoque = !isGerente;
+      const isStrictAdmin = ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
+      const showCatalogoMestre = isStrictAdmin;
+      const showTransferencias = !isGerente && currentRole !== 'DONO';
+      const showCategorias = !isGerente && currentRole !== 'DONO';
+
       if (sidebarOpen || isMobileDrawer) {
-        return (
-          <button
-            key={view}
-            onClick={() => handleNavigate(view)}
-            className={itemClass(view)}
-          >
-            <IconComponent size={16} className="shrink-0" />
-            <span>{label}</span>
-          </button>
+        items.push(
+          <div key="agrupador-estoque" className="space-y-1">
+            <button
+              onClick={() => setEstoqueSubMenuOpen(!estoqueSubMenuOpen)}
+              className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-gray-500 hover:text-white w-full text-left transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <Package size={16} className="shrink-0" />
+                <span>Gestão de Estoque</span>
+              </div>
+              <ChevronDown size={14} className={`transition-transform duration-200 ${estoqueSubMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {estoqueSubMenuOpen && (
+              <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
+                {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
+                {showCatalogoMestre && sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2)}
+                {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
+                {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
+              </div>
+            )}
+          </div>
         );
       } else {
-        return (
-          <button
-            key={view}
-            onClick={() => handleNavigate(view)}
-            className={iconOnlyClass(view)}
-            title={label}
-          >
-            <IconComponent size={18} className="shrink-0" />
-          </button>
-        );
-      }
-    };
-
-    const isSuperAdmin = currentRole === 'SUPER_ADMIN' && !isGerente;
-    const items = [];
-
-    if (isSuperAdmin) {
-      /* MENU EXCLUSIVO DO DONO DO SOFTWARE (SAAS BACKOFFICE) */
-      items.push(sidebarItem('gestao', 'Dashboard SaaS', LayoutDashboard));
-      items.push(sidebarItem('equipe', 'Gestão de Lojas (Tenants)', Building));
-      items.push(sidebarItem('assinatura', 'Planos & Mensalidades SaaS', CreditCard));
-      items.push(sidebarItem('configuracoes', 'Configurações Globais', Settings));
-    } else {
-      /* MENU OPERACIONAL DA LOJA (GERENTES, VENDEDORES, LOJISTAS) */
-
-      // 1. Dashboard Home (Loja)
-      if (['ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
-        items.push(sidebarItem('gestao', 'Dashboard (Home)', LayoutDashboard));
-      }
-
-      // 2. Frente de Caixa (PDV) - Oculto para DONO
-      if (!isGerente && ['ADMIN', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
-        items.push(sidebarItem('pdv', 'Frente de Caixa (PDV)', ShoppingBag));
-      }
-
-      // 3. Clientes - Oculto para DONO
-      if (['ADMIN', 'GERENTE', 'OWNER', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
-        items.push(sidebarItem('clientes', 'Clientes', Users));
-      }
-
-      // 4. Transferências (Liberado para Vendedores) - Oculto para DONO
-      if (currentRole === 'VENDEDOR') {
-        items.push(sidebarItem('transferencias', 'Transferências', Truck));
-      }
-
-      // 5. Equipe / Funcionários
-      if (['ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH'].includes(currentRole)) {
-        items.push(sidebarItem('equipe', 'Equipe / Funcionários', UserPlus));
-      }
-
-      // 6. Auditoria de Descontos
-      if (['GERENTE', 'ADMIN', 'OWNER', 'DONO'].includes(currentRole)) {
-        items.push(sidebarItem('descontos', 'Auditoria de Descontos', Tag));
-      }
-
-      // 7. Auditoria de Vendas & Crédito
-      if (['GERENTE', 'ADMIN', 'OWNER', 'DONO'].includes(currentRole)) {
-        items.push(sidebarItem('auditoria_credito', 'Auditoria Vendas & Crédito', ShieldCheck));
-      }
-
-      // 8. Gestão de Estoque
-      if (!isGerente && ['ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
-        const showEstoque = !isGerente;
-        const isStrictAdmin = ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
-        const showCatalogoMestre = isStrictAdmin;
-        const showTransferencias = !isGerente && currentRole !== 'DONO';
-        const showCategorias = !isGerente && currentRole !== 'DONO';
-
-        if (sidebarOpen || isMobileDrawer) {
-          items.push(
-            <div key="agrupador-estoque" className="space-y-1">
-              <button
-                onClick={() => setEstoqueSubMenuOpen(!estoqueSubMenuOpen)}
-                className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-xs font-bold text-gray-500 hover:text-white w-full text-left transition-all"
-              >
-                <div className="flex items-center gap-3">
-                  <Package size={16} className="shrink-0" />
-                  <span>Gestão de Estoque</span>
-                </div>
-                <ChevronDown size={14} className={`transition-transform duration-200 ${estoqueSubMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {estoqueSubMenuOpen && (
-                <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
-                  {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
-                  {showCatalogoMestre && sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2)}
-                  {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
-                  {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
-                </div>
-              )}
-            </div>
-          );
-        } else {
-          if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
-          if (showCatalogoMestre) items.push(sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2));
-          if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
-          if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
-        }
-      }
-
-      // 9. Metas & Rankings
-      if (['GERENTE'].includes(currentRole)) {
-        items.push(sidebarItem('ranking', 'Metas & Rankings', Award));
-      } else if (currentRole === 'VENDEDOR') {
-        items.push(sidebarItem('metas', 'Minhas Metas & Comissões', Award));
-      }
-
-      // 10. Relatórios & Fechamentos
-      if (['ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
-        items.push(sidebarItem('fechamentos', 'Relatórios & Fechamentos', ClipboardList));
-      } else if (currentRole === 'VENDEDOR') {
-        items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
-      }
-
-      // 11. Configurações - Oculto para DONO
-      if (currentRole !== 'DONO') {
-        items.push(sidebarItem('configuracoes', 'Configurações', Settings));
-      }
-
-      // 12. Assinatura & Faturas - Oculto para DONO
-      if (!isGerente && (['OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
-        items.push(sidebarItem('assinatura', 'Assinatura & Faturas', CreditCard));
+        if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
+        if (showCatalogoMestre) items.push(sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2));
+        if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
+        if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
       }
     }
 
-    // Filtro de segurança final extra
-    return items.filter(item => {
-      if (!item) return false;
-      if (isGerente) {
-        const key = item.key;
-        if (['estoque', 'transferencias', 'assinatura', 'pdv'].includes(key)) {
-          return false;
-        }
+    // 9. Metas & Rankings
+    if (['GERENTE'].includes(currentRole)) {
+      items.push(sidebarItem('ranking', 'Metas & Rankings', Award));
+    } else if (currentRole === 'VENDEDOR') {
+      items.push(sidebarItem('metas', 'Minhas Metas & Comissões', Award));
+    }
+
+    // 10. Relatórios & Fechamentos
+    if (['ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
+      items.push(sidebarItem('fechamentos', 'Relatórios & Fechamentos', ClipboardList));
+    } else if (currentRole === 'VENDEDOR') {
+      items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
+    }
+
+    // 11. Configurações - Oculto para DONO
+    if (currentRole !== 'DONO') {
+      items.push(sidebarItem('configuracoes', 'Configurações', Settings));
+    }
+
+    // 12. Assinatura & Faturas - Oculto para DONO
+    if (!isGerente && (['OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
+      items.push(sidebarItem('assinatura', 'Assinatura & Faturas', CreditCard));
+    }
+  }
+
+  // Filtro de segurança final extra
+  return items.filter(item => {
+    if (!item) return false;
+    if (isGerente) {
+      const key = item.key;
+      if (['estoque', 'transferencias', 'assinatura', 'pdv'].includes(key)) {
+        return false;
       }
-      if (currentRole === 'DONO') {
-        const key = item.key;
-        if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura', 'configuracoes'].includes(key)) {
-          return false;
-        }
+    }
+    if (currentRole === 'DONO') {
+      const key = item.key;
+      if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura', 'configuracoes'].includes(key)) {
+        return false;
       }
-      return true;
-    });
-  };
+    }
+    return true;
+  });
+};
 
-  return (
-    <div className="h-screen w-full bg-black text-white font-sans flex overflow-hidden selection:bg-[#6A0DAD] selection:text-white">
-      {/* DRAWER MOBILE SIDEBAR OVERLAY */}
-      {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden print:hidden animate-fadeIn">
-          {/* Backdrop Escuro com clique para fechar */}
-          <div
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
-            onClick={() => setIsMobileMenuOpen(false)}
-          />
+return (
+  <div className="h-screen w-full bg-black text-white font-sans flex overflow-hidden selection:bg-[#6A0DAD] selection:text-white">
+    {/* DRAWER MOBILE SIDEBAR OVERLAY */}
+    {isMobileMenuOpen && (
+      <div className="fixed inset-0 z-50 flex md:hidden print:hidden animate-fadeIn">
+        {/* Backdrop Escuro com clique para fechar */}
+        <div
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
 
-          {/* Painel Lateral Mobile Drawer */}
-          <aside className="relative w-72 max-w-[85vw] bg-[#0A0A0A] border-r border-[#222222] h-full flex flex-col shadow-2xl z-50 animate-slideRight">
-            {/* HEADER DO DRAWER MOBILE */}
-            <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
-              <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-1.5">
-                Zênite<span className="text-[#6A0DAD]">.</span>
-              </h1>
-              <button
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="p-1.5 text-gray-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
-                title="Fechar Menu"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* SELETOR GLOBAL DE FILIAIS (MOBILE DRAWER) */}
-            {(() => {
-              const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
-              const role = profile?.role;
-
-              if (role === 'VENDEDOR' || role === 'SUPER_ADMIN') return null;
-
-              const canViewSelector = ['ADMIN', 'GERENTE', 'RH', 'OWNER', 'DONO'].includes(role) || userEmail === 'valentimodz2@gmail.com';
-              if (!canViewSelector) return null;
-
-              const gerenteFilialNome = activeFilialNome || filiais.find(f => f.id === profile?.filial_id)?.nome || 'Filial Vinculada';
-
-              return (
-                <div className="px-3 py-3 border-b border-[#222222] bg-[#050505]">
-                  <div className="flex items-center justify-between mb-1.5 px-0.5">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
-                      <Store size={12} className="text-[#6A0DAD]" />
-                      Filial de Operação
-                    </span>
-                  </div>
-                  <div className="relative">
-                    <select
-                      value={activeFilialId || ''}
-                      onChange={(e) => {
-                        const selectedId = e.target.value;
-                        const selectedFilial = filiais.find(f => f.id === selectedId);
-                        const selectedNome = selectedFilial ? selectedFilial.nome : 'Todas as Filiais';
-
-                        setActiveFilialId(selectedId);
-                        setActiveFilialNome(selectedNome);
-                        localStorage.setItem('zenite_active_filial_id', selectedId);
-                        localStorage.setItem('zenite_active_filial_nome', selectedNome);
-
-                        const tenantId = profile?.empresa_id;
-                        if (tenantId) {
-                          fetchGerenteData(tenantId);
-                          if (selectedId) {
-                            fetchVendedorData(selectedId, session?.user?.id, tenantId);
-                            fetchTransferencias(selectedId, tenantId);
-                          }
-                        }
-                        setIsMobileMenuOpen(false);
-                      }}
-                      className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer"
-                    >
-                      <option value="">[ Todas as Filiais ]</option>
-                      {filiais.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.nome} ({f.tipo === 'LOJA' ? 'PDV' : 'Estoque'})
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* NAV ITEMS DO DRAWER MOBILE */}
-            <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1.5 custom-scrollbar">
-              {renderSidebarItems(true)}
-            </div>
-
-            {/* FOOTER DO DRAWER MOBILE */}
-            <div className="p-4 border-t border-[#222222] flex items-center justify-between text-xs text-gray-500 font-mono">
-              <span>Zênite OS Mobile</span>
-              <span className="text-[10px]">v1.2</span>
-            </div>
-          </aside>
-        </div>
-      )}
-
-      {/* MENU LATERAL DESKTOP (SIDEBAR - ESCONDIDO NO MOBILE) */}
-      <aside className={`hidden md:flex bg-[#0A0A0A] border-r border-[#222222] h-full flex-col shrink-0 overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} z-30 print:hidden scrollbar-hide`}>
-        {/* LOGO */}
-        <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
-          {sidebarOpen ? (
-            <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-1.5 animate-fadeIn">
+        {/* Painel Lateral Mobile Drawer */}
+        <aside className="relative w-72 max-w-[85vw] bg-[#0A0A0A] border-r border-[#222222] h-full flex flex-col shadow-2xl z-50 animate-slideRight">
+          {/* HEADER DO DRAWER MOBILE */}
+          <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
+            <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-1.5">
               Zênite<span className="text-[#6A0DAD]">.</span>
             </h1>
-          ) : (
-            <span className="text-lg font-extrabold text-[#6A0DAD] mx-auto">Z.</span>
-          )}
-          {sidebarOpen && (
             <button
-              onClick={() => { setSidebarOpen(false); localStorage.setItem('zenite_sidebar_open', 'false'); }}
-              className="text-gray-500 hover:text-white transition-colors"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="p-1.5 text-gray-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+              title="Fechar Menu"
             >
-              <ChevronLeft size={16} />
+              <X size={18} />
             </button>
-          )}
-        </div>
+          </div>
 
-        {/* SELETOR GLOBAL DE FILIAIS (SIDEBAR DESKTOP) */}
-        {(() => {
-          const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
-          const role = profile?.role;
+          {/* SELETOR GLOBAL DE FILIAIS (MOBILE DRAWER) */}
+          {(() => {
+            const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
+            const role = profile?.role;
 
-          // VENDEDOR e SUPER_ADMIN: Ocultar o seletor completamente do menu lateral
-          if (role === 'VENDEDOR' || role === 'SUPER_ADMIN') {
-            return null;
-          }
+            if (role === 'VENDEDOR' || role === 'SUPER_ADMIN') return null;
 
-          // Roles autorizadas a ver e usar o seletor: ADMIN, GERENTE, RH, OWNER, DONO
-          const canViewSelector = ['ADMIN', 'GERENTE', 'RH', 'OWNER', 'DONO'].includes(role) || userEmail === 'valentimodz2@gmail.com';
-          if (!canViewSelector) {
-            return null;
-          }
+            const canViewSelector = ['ADMIN', 'GERENTE', 'RH', 'OWNER', 'DONO'].includes(role) || userEmail === 'valentimodz2@gmail.com';
+            if (!canViewSelector) return null;
 
-          const isRodrigoGerenteLocked = false;
-          const gerenteFilialNome = activeFilialNome || filiais.find(f => f.id === profile?.filial_id)?.nome || 'Filial Vinculada';
+            const gerenteFilialNome = activeFilialNome || filiais.find(f => f.id === profile?.filial_id)?.nome || 'Filial Vinculada';
 
-          if (!sidebarOpen) {
             return (
-              <div className="p-3 border-b border-[#222222] flex justify-center" title={`Filial Ativa: ${activeFilialNome || 'Todas as Filiais'}`}>
-                <div className="w-9 h-9 rounded-lg bg-[#6A0DAD]/10 border border-[#6A0DAD]/30 flex items-center justify-center text-[#6A0DAD]">
-                  <Store size={18} />
-                </div>
-              </div>
-            );
-          }
-
-          return (
-            <div className="px-3 py-3 border-b border-[#222222] bg-[#050505]">
-              <div className="flex items-center justify-between mb-1.5 px-0.5">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
-                  <Store size={12} className="text-[#6A0DAD]" />
-                  Filial de Operação
-                </span>
-                {isRodrigoGerenteLocked && (
-                  <span className="text-[9px] bg-purple-950/80 text-purple-300 px-1.5 py-0.5 rounded border border-purple-800/50 font-mono flex items-center gap-1">
-                    <Lock size={10} /> Trava Gerente
+              <div className="px-3 py-3 border-b border-[#222222] bg-[#050505]">
+                <div className="flex items-center justify-between mb-1.5 px-0.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                    <Store size={12} className="text-[#6A0DAD]" />
+                    Filial de Operação
                   </span>
-                )}
-              </div>
-
-              {isRodrigoGerenteLocked ? (
-                <div className="bg-[#111111] border border-[#222222] text-gray-300 px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-between opacity-90 shadow-inner" title="Filial fixa associada ao perfil de Gerente">
-                  <span className="truncate">{gerenteFilialNome}</span>
-                  <Lock size={12} className="text-gray-500 shrink-0 ml-1" />
                 </div>
-              ) : (
                 <div className="relative">
                   <select
                     value={activeFilialId || ''}
@@ -13466,8 +13347,9 @@ export default function Dashboard({ session, profileDataProps }) {
                           fetchTransferencias(selectedId, tenantId);
                         }
                       }
+                      setIsMobileMenuOpen(false);
                     }}
-                    className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer transition-all hover:bg-[#161616] appearance-none"
+                    className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer"
                   >
                     <option value="">[ Todas as Filiais ]</option>
                     {filiais.map((f) => (
@@ -13478,118 +13360,239 @@ export default function Dashboard({ session, profileDataProps }) {
                   </select>
                   <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 </div>
-              )}
+              </div>
+            );
+          })()}
+
+          {/* NAV ITEMS DO DRAWER MOBILE */}
+          <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1.5 custom-scrollbar">
+            {renderSidebarItems(true)}
+          </div>
+
+          {/* FOOTER DO DRAWER MOBILE */}
+          <div className="p-4 border-t border-[#222222] flex items-center justify-between text-xs text-gray-500 font-mono">
+            <span>Zênite OS Mobile</span>
+            <span className="text-[10px]">v1.2</span>
+          </div>
+        </aside>
+      </div>
+    )}
+
+    {/* MENU LATERAL DESKTOP (SIDEBAR - ESCONDIDO NO MOBILE) */}
+    <aside className={`hidden md:flex bg-[#0A0A0A] border-r border-[#222222] h-full flex-col shrink-0 overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} z-30 print:hidden scrollbar-hide`}>
+      {/* LOGO */}
+      <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
+        {sidebarOpen ? (
+          <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-1.5 animate-fadeIn">
+            Zênite<span className="text-[#6A0DAD]">.</span>
+          </h1>
+        ) : (
+          <span className="text-lg font-extrabold text-[#6A0DAD] mx-auto">Z.</span>
+        )}
+        {sidebarOpen && (
+          <button
+            onClick={() => { setSidebarOpen(false); localStorage.setItem('zenite_sidebar_open', 'false'); }}
+            className="text-gray-500 hover:text-white transition-colors"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        )}
+      </div>
+
+      {/* SELETOR GLOBAL DE FILIAIS (SIDEBAR DESKTOP) */}
+      {(() => {
+        const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
+        const role = profile?.role;
+
+        // VENDEDOR e SUPER_ADMIN: Ocultar o seletor completamente do menu lateral
+        if (role === 'VENDEDOR' || role === 'SUPER_ADMIN') {
+          return null;
+        }
+
+        // Roles autorizadas a ver e usar o seletor: ADMIN, GERENTE, RH, OWNER, DONO
+        const canViewSelector = ['ADMIN', 'GERENTE', 'RH', 'OWNER', 'DONO'].includes(role) || userEmail === 'valentimodz2@gmail.com';
+        if (!canViewSelector) {
+          return null;
+        }
+
+        const isRodrigoGerenteLocked = false;
+        const gerenteFilialNome = activeFilialNome || filiais.find(f => f.id === profile?.filial_id)?.nome || 'Filial Vinculada';
+
+        if (!sidebarOpen) {
+          return (
+            <div className="p-3 border-b border-[#222222] flex justify-center" title={`Filial Ativa: ${activeFilialNome || 'Todas as Filiais'}`}>
+              <div className="w-9 h-9 rounded-lg bg-[#6A0DAD]/10 border border-[#6A0DAD]/30 flex items-center justify-center text-[#6A0DAD]">
+                <Store size={18} />
+              </div>
             </div>
           );
-        })()}
+        }
 
-        {/* NAV ITEMS */}
-        <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1.5 custom-scrollbar">
+        return (
+          <div className="px-3 py-3 border-b border-[#222222] bg-[#050505]">
+            <div className="flex items-center justify-between mb-1.5 px-0.5">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <Store size={12} className="text-[#6A0DAD]" />
+                Filial de Operação
+              </span>
+              {isRodrigoGerenteLocked && (
+                <span className="text-[9px] bg-purple-950/80 text-purple-300 px-1.5 py-0.5 rounded border border-purple-800/50 font-mono flex items-center gap-1">
+                  <Lock size={10} /> Trava Gerente
+                </span>
+              )}
+            </div>
+
+            {isRodrigoGerenteLocked ? (
+              <div className="bg-[#111111] border border-[#222222] text-gray-300 px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-between opacity-90 shadow-inner" title="Filial fixa associada ao perfil de Gerente">
+                <span className="truncate">{gerenteFilialNome}</span>
+                <Lock size={12} className="text-gray-500 shrink-0 ml-1" />
+              </div>
+            ) : (
+              <div className="relative">
+                <select
+                  value={activeFilialId || ''}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    const selectedFilial = filiais.find(f => f.id === selectedId);
+                    const selectedNome = selectedFilial ? selectedFilial.nome : 'Todas as Filiais';
+
+                    setActiveFilialId(selectedId);
+                    setActiveFilialNome(selectedNome);
+                    localStorage.setItem('zenite_active_filial_id', selectedId);
+                    localStorage.setItem('zenite_active_filial_nome', selectedNome);
+
+                    const tenantId = profile?.empresa_id;
+                    if (tenantId) {
+                      fetchGerenteData(tenantId);
+                      if (selectedId) {
+                        fetchVendedorData(selectedId, session?.user?.id, tenantId);
+                        fetchTransferencias(selectedId, tenantId);
+                      }
+                    }
+                  }}
+                  className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer transition-all hover:bg-[#161616] appearance-none"
+                >
+                  <option value="">[ Todas as Filiais ]</option>
+                  {filiais.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.nome} ({f.tipo === 'LOJA' ? 'PDV' : 'Estoque'})
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* NAV ITEMS */}
+      <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1.5 custom-scrollbar">
+        {!sidebarOpen && (
+          <button
+            onClick={() => { setSidebarOpen(true); localStorage.setItem('zenite_sidebar_open', 'true'); }}
+            className="w-full flex items-center justify-center p-3 text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition-all mb-4"
+            title="Expandir Menu"
+          >
+            <Menu size={20} />
+          </button>
+        )}
+        {renderSidebarItems()}
+      </div>
+
+      {/* SIDEBAR FOOTER */}
+      <div className="p-4 border-t border-[#222222] flex items-center justify-center">
+        <span className="text-[10px] text-gray-600 font-mono">{sidebarOpen ? 'Rede Cred v1.2' : 'v1.2'}</span>
+      </div>
+    </aside>
+
+    {/* MAIN CONTAINER (100% LARGURA EM MOBILE, SCROLL INTERNO ISOLADO) */}
+    <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden">
+      {/* SLENDER FIXED NAVBAR */}
+      <header className="border-b border-[#222222] bg-[#0A0A0A] py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden">
+        <div className="flex items-center gap-2">
+          {/* ÍCONE HAMBÚRGUER MOBILE */}
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="p-1.5 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-1 md:hidden"
+            title="Abrir Menu Principal"
+          >
+            <Menu size={18} />
+          </button>
+
+          {/* ÍCONE DE RECOLHER MENU DESKTOP */}
           {!sidebarOpen && (
             <button
               onClick={() => { setSidebarOpen(true); localStorage.setItem('zenite_sidebar_open', 'true'); }}
-              className="w-full flex items-center justify-center p-3 text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition-all mb-4"
+              className="hidden md:block p-1 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-2"
               title="Expandir Menu"
             >
-              <Menu size={20} />
+              <Menu size={16} />
             </button>
           )}
-          {renderSidebarItems()}
+
+          <span className="text-xs bg-[#6A0DAD]/10 text-purple-400 border border-[#6A0DAD]/30 px-2.5 py-1 rounded font-bold uppercase tracking-wider">
+            {getViewLabel()}
+          </span>
         </div>
 
-        {/* SIDEBAR FOOTER */}
-        <div className="p-4 border-t border-[#222222] flex items-center justify-center">
-          <span className="text-[10px] text-gray-600 font-mono">{sidebarOpen ? 'Rede Cred v1.2' : 'v1.2'}</span>
-        </div>
-      </aside>
-
-      {/* MAIN CONTAINER (100% LARGURA EM MOBILE, SCROLL INTERNO ISOLADO) */}
-      <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden">
-        {/* SLENDER FIXED NAVBAR */}
-        <header className="border-b border-[#222222] bg-[#0A0A0A] py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden">
-          <div className="flex items-center gap-2">
-            {/* ÍCONE HAMBÚRGUER MOBILE */}
-            <button
-              onClick={() => setIsMobileMenuOpen(true)}
-              className="p-1.5 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-1 md:hidden"
-              title="Abrir Menu Principal"
-            >
-              <Menu size={18} />
-            </button>
-
-            {/* ÍCONE DE RECOLHER MENU DESKTOP */}
-            {!sidebarOpen && (
-              <button
-                onClick={() => { setSidebarOpen(true); localStorage.setItem('zenite_sidebar_open', 'true'); }}
-                className="hidden md:block p-1 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-2"
-                title="Expandir Menu"
-              >
-                <Menu size={16} />
-              </button>
-            )}
-
-            <span className="text-xs bg-[#6A0DAD]/10 text-purple-400 border border-[#6A0DAD]/30 px-2.5 py-1 rounded font-bold uppercase tracking-wider">
-              {getViewLabel()}
+        <div className="flex items-center gap-4">
+          {profile?.role === 'SUPER_ADMIN' && (
+            <div className="flex items-center gap-2 mr-2">
+              {window.location.pathname === '/super-admin' ? (
+                <>
+                  <button
+                    onClick={() => window.location.href = '/dashboard/ceo'}
+                    className="text-xs bg-transparent hover:bg-white/5 text-gray-400 hover:text-white border border-gray-800 rounded px-2.5 py-1.5 font-medium transition-all"
+                  >
+                    Painel CEO
+                  </button>
+                  <button
+                    onClick={() => window.location.href = '/'}
+                    className="text-xs bg-transparent hover:bg-white/5 text-gray-400 hover:text-white border border-gray-800 rounded px-2.5 py-1.5 font-medium transition-all"
+                  >
+                    Painel Geral
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => window.location.href = '/super-admin'}
+                  className="text-xs bg-[#6A0DAD]/10 hover:bg-[#6A0DAD]/20 text-purple-400 hover:text-purple-300 border border-[#6A0DAD]/30 rounded px-2.5 py-1.5 font-medium transition-all flex items-center gap-1"
+                >
+                  <Shield size={12} />
+                  Painel Super Admin
+                </button>
+              )}
+            </div>
+          )}
+          <div className="flex flex-col text-right">
+            <span className="text-xs font-bold text-white leading-tight">{getTopRightHeaderName()}</span>
+            <span className="text-[10px] text-gray-500 font-medium">
+              {profile?.nome} | {profile?.role}
             </span>
           </div>
+          <button
+            onClick={handleSignOut}
+            className="flex items-center gap-1.5 border border-[#222222] hover:border-red-800/60 hover:text-red-400 bg-black px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+          >
+            <LogOut size={12} />
+            <span>Sair</span>
+          </button>
+        </div>
+      </header>
 
-          <div className="flex items-center gap-4">
-            {profile?.role === 'SUPER_ADMIN' && (
-              <div className="flex items-center gap-2 mr-2">
-                {window.location.pathname === '/super-admin' ? (
-                  <>
-                    <button
-                      onClick={() => window.location.href = '/dashboard/ceo'}
-                      className="text-xs bg-transparent hover:bg-white/5 text-gray-400 hover:text-white border border-gray-800 rounded px-2.5 py-1.5 font-medium transition-all"
-                    >
-                      Painel CEO
-                    </button>
-                    <button
-                      onClick={() => window.location.href = '/'}
-                      className="text-xs bg-transparent hover:bg-white/5 text-gray-400 hover:text-white border border-gray-800 rounded px-2.5 py-1.5 font-medium transition-all"
-                    >
-                      Painel Geral
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={() => window.location.href = '/super-admin'}
-                    className="text-xs bg-[#6A0DAD]/10 hover:bg-[#6A0DAD]/20 text-purple-400 hover:text-purple-300 border border-[#6A0DAD]/30 rounded px-2.5 py-1.5 font-medium transition-all flex items-center gap-1"
-                  >
-                    <Shield size={12} />
-                    Painel Super Admin
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="flex flex-col text-right">
-              <span className="text-xs font-bold text-white leading-tight">{getTopRightHeaderName()}</span>
-              <span className="text-[10px] text-gray-500 font-medium">
-                {profile?.nome} | {profile?.role}
-              </span>
-            </div>
-            <button
-              onClick={handleSignOut}
-              className="flex items-center gap-1.5 border border-[#222222] hover:border-red-800/60 hover:text-red-400 bg-black px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
-            >
-              <LogOut size={12} />
-              <span>Sair</span>
-            </button>
+      {/* SCROLLABLE MAIN CONTENT AREA (ÚNICO SCROLL VERTICAL) */}
+      <div className="flex-1 overflow-y-auto min-w-0 w-full flex flex-col relative scroll-smooth">
+        {/* Global notice banner inside content container */}
+        {globalNotices.filter(n => n.active).length > 0 && profile?.role !== 'SUPER_ADMIN' && (
+          <div className="bg-[#6A0DAD] text-white p-2.5 text-center text-xs font-medium flex items-center justify-center gap-2 relative z-10 shadow-md shrink-0">
+            <Megaphone size={14} />
+            {globalNotices.filter(n => n.active)[0].message}
           </div>
-        </header>
+        )}
 
-        {/* SCROLLABLE MAIN CONTENT AREA (ÚNICO SCROLL VERTICAL) */}
-        <div className="flex-1 overflow-y-auto min-w-0 w-full flex flex-col relative scroll-smooth">
-          {/* Global notice banner inside content container */}
-          {globalNotices.filter(n => n.active).length > 0 && profile?.role !== 'SUPER_ADMIN' && (
-            <div className="bg-[#6A0DAD] text-white p-2.5 text-center text-xs font-medium flex items-center justify-center gap-2 relative z-10 shadow-md shrink-0">
-              <Megaphone size={14} />
-              {globalNotices.filter(n => n.active)[0].message}
-            </div>
-          )}
-
-          {/* FLUID CONTENT AREA */}
-          <main className="flex-1 p-6 md:p-8 w-full max-w-[1600px] mx-auto min-w-0">
+        {/* FLUID CONTENT AREA */}
+        <main className="flex-1 p-6 md:p-8 w-full max-w-[1600px] mx-auto min-w-0">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 gap-4">
               <div className="w-12 h-12 border-4 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
@@ -14470,15 +14473,15 @@ export default function Dashboard({ session, profileDataProps }) {
                         const listaDescontosExecutivo = descontosMes.length > 0
                           ? descontosMes
                           : ((descontosLogs && descontosLogs.length > 0)
-                              ? descontosLogs
-                              : vendasMes.filter(s => {
-                                  const descVal = parseFloat(s.valor_desconto || s.desconto || s.total_desconto || 0);
-                                  const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
-                                  const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
-                                  const temDiferenca = pBase > 0 && pVendido > 0 && pBase > (pVendido + 0.001);
-                                  return descVal > 0.001 || temDiferenca || Boolean(s.desconto_autorizado_por);
-                                })
-                            );
+                            ? descontosLogs
+                            : vendasMes.filter(s => {
+                              const descVal = parseFloat(s.valor_desconto || s.desconto || s.total_desconto || 0);
+                              const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
+                              const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
+                              const temDiferenca = pBase > 0 && pVendido > 0 && pBase > (pVendido + 0.001);
+                              return descVal > 0.001 || temDiferenca || Boolean(s.desconto_autorizado_por);
+                            })
+                          );
 
                         const totalDescontosConcedidos = listaDescontosExecutivo.reduce((acc, s) => {
                           let val = parseFloat(s.valor_desconto || s.desconto || s.total_desconto || 0);
@@ -16911,10 +16914,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
                   {/* Painel Principal do Catálogo com Filtros e Buscas */}
                   <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
-                    
+
                     {/* Header Estratégico de Busca e Filtragem */}
                     <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-[#111111]/80 border border-[#222222] p-4 rounded-xl shadow-inner">
-                      
+
                       {/* Input de Busca Textual por Nome/Cor/SKU */}
                       <div className="relative flex-1">
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
@@ -17504,7 +17507,7 @@ export default function Dashboard({ session, profileDataProps }) {
               {/* ABA 3: RANKING & METAS (GERENTE) */}
               {activeTab === 'ranking' && profile?.role !== 'RH_ADMIN' && (
                 <RankingVendedores
-                  colaboradores={teamMembers}
+                  vendedores={teamMembers}
                   vendas={vendas}
                   filiais={filiais}
                   filtroMes={filtroMes}
@@ -17569,11 +17572,10 @@ export default function Dashboard({ session, profileDataProps }) {
                               key={st}
                               type="button"
                               onClick={() => setFiltroStatusCaixa(st)}
-                              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
-                                filtroStatusCaixa === st
-                                  ? 'bg-[#6A0DAD] text-white shadow-sm'
-                                  : 'text-gray-400 hover:text-white'
-                              }`}
+                              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${filtroStatusCaixa === st
+                                ? 'bg-[#6A0DAD] text-white shadow-sm'
+                                : 'text-gray-400 hover:text-white'
+                                }`}
                             >
                               {st === 'TODOS' ? 'Todos' : st === 'ABERTO' ? '🟢 Abertos' : '🔒 Fechados'}
                             </button>
@@ -19223,1608 +19225,1795 @@ export default function Dashboard({ session, profileDataProps }) {
           </div>
         )}
 
-          <footer className="w-full text-center py-6 bg-black border-t border-[#111111] text-[#6B7280] text-xs font-medium mt-auto print:hidden font-sans">
-            © 2026 Vextron Lab | Developed by @Valentim
-          </footer>
-        </div>
+        <footer className="w-full text-center py-6 bg-black border-t border-[#111111] text-[#6B7280] text-xs font-medium mt-auto print:hidden font-sans">
+          © 2026 Vextron Lab | Developed by @Valentim
+        </footer>
+      </div>
 
-        {/* MODAL PARA VER FOTO DO COMPROVANTE (GERENTE) */}
-        {modalComprovante && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-4 flex flex-col relative max-h-[90vh]">
+      {/* MODAL PARA VER FOTO DO COMPROVANTE (GERENTE) */}
+      {modalComprovante && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-4 flex flex-col relative max-h-[90vh]">
+            <button
+              onClick={() => setModalComprovante(null)}
+              className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors"
+            >
+              <X size={16} />
+            </button>
+
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Eye size={18} className="text-[#6A0DAD]" />
+              Foto do Recibo do Caixa
+            </h3>
+
+            <div className="flex-1 overflow-auto bg-black rounded border border-[#222222] p-2 flex items-center justify-center">
+              <img
+                src={modalComprovante}
+                alt="Comprovante de Maquininha"
+                className="max-h-[60vh] object-contain rounded"
+              />
+            </div>
+
+            <button
+              onClick={() => setModalComprovante(null)}
+              className="w-full bg-[#6A0DAD] hover:bg-[#500885] text-xs font-bold py-2 rounded transition-all"
+            >
+              Fechar Visualização
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE DETALHES DA SESSÃO DE CAIXA */}
+      {modalDetalheCaixa && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl max-w-lg w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#222]">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
+                  <Store size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    Sessão de Caixa
+                    {modalDetalheCaixa.status === 'aberto' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-green-950/60 text-green-400 border border-green-700/50">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+                        ABERTO
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#161616] text-gray-400 border border-gray-800">
+                        FECHADO
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    {modalDetalheCaixa.filial_nome || modalDetalheCaixa.filiais?.nome || 'Filial'}
+                  </p>
+                </div>
+              </div>
               <button
-                onClick={() => setModalComprovante(null)}
-                className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors"
+                onClick={() => setModalDetalheCaixa(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <X size={16} />
               </button>
+            </div>
 
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Eye size={18} className="text-[#6A0DAD]" />
-                Foto do Recibo do Caixa
-              </h3>
+            {/* Informações da Abertura */}
+            <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
+              <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
+                Informações de Abertura
+              </span>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-gray-500 text-[10px] block">Operador Responsável</span>
+                  <strong className="text-white text-xs">{modalDetalheCaixa.operador_nome || modalDetalheCaixa.profiles?.nome || 'Operador'}</strong>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-[10px] block">Data / Hora Abertura</span>
+                  <span className="text-gray-300 font-mono text-xs">{new Date(modalDetalheCaixa.data_abertura).toLocaleString('pt-BR')}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-[10px] block">Fundo de Troco Inicial</span>
+                  <span className="text-green-400 font-mono font-extrabold text-sm">
+                    R$ {Number(modalDetalheCaixa.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-[10px] block">Observações de Abertura</span>
+                  <span className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_abertura || 'Nenhuma'}</span>
+                </div>
+              </div>
+            </div>
 
-              <div className="flex-1 overflow-auto bg-black rounded border border-[#222222] p-2 flex items-center justify-center">
-                <img
-                  src={modalComprovante}
-                  alt="Comprovante de Maquininha"
-                  className="max-h-[60vh] object-contain rounded"
+            {/* Informações de Fechamento / Vendas */}
+            <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
+              <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
+                {modalDetalheCaixa.status === 'aberto' ? 'Status Atual do Turno' : 'Fechamento & Valores Reportados'}
+              </span>
+              {modalDetalheCaixa.status === 'aberto' ? (
+                <div className="text-xs text-amber-300/90 flex items-center gap-2 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg">
+                  <Clock size={16} className="animate-spin text-amber-400 shrink-0" />
+                  <span>Este caixa continua aberto em operação no PDV. Os totais serão consolidados no encerramento.</span>
+                </div>
+              ) : (
+                <div className="space-y-2.5 text-xs">
+                  <div className="grid grid-cols-2 gap-3 pb-2 border-b border-[#222]">
+                    <div>
+                      <span className="text-gray-500 text-[10px] block">Data / Hora Fechamento</span>
+                      <span className="text-gray-300 font-mono text-xs">
+                        {modalDetalheCaixa.data_fechamento ? new Date(modalDetalheCaixa.data_fechamento).toLocaleString('pt-BR') : '-'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 text-[10px] block">Total Consolidado</span>
+                      <span className="text-white font-mono font-black text-sm">
+                        R$ {Number(modalDetalheCaixa.total_vendas || (Number(modalDetalheCaixa.total_dinheiro || 0) + Number(modalDetalheCaixa.total_cartao || 0) + Number(modalDetalheCaixa.total_pix || 0)) || modalDetalheCaixa.saldo_final || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
+                    <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                      <span className="text-[10px] text-gray-500 block">Dinheiro</span>
+                      <span className="text-xs text-gray-200 font-bold">R$ {Number(modalDetalheCaixa.total_dinheiro || 0).toFixed(2)}</span>
+                    </div>
+                    <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                      <span className="text-[10px] text-gray-500 block">PIX</span>
+                      <span className="text-xs text-purple-300 font-bold">R$ {Number(modalDetalheCaixa.total_pix || 0).toFixed(2)}</span>
+                    </div>
+                    <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                      <span className="text-[10px] text-gray-500 block">Cartão</span>
+                      <span className="text-xs text-blue-300 font-bold">R$ {Number(modalDetalheCaixa.total_cartao || 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                  {modalDetalheCaixa.observacoes_fechamento && (
+                    <div className="pt-1">
+                      <span className="text-gray-500 text-[10px] block">Observações do Fechamento</span>
+                      <p className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_fechamento}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Botão Fechar */}
+            <button
+              type="button"
+              onClick={() => setModalDetalheCaixa(null)}
+              className="w-full py-2.5 bg-[#222] hover:bg-[#333] text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+            >
+              Fechar Detalhes
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE AJUSTE GERENCIAL DE FECHAMENTO DE CAIXA */}
+      {modalAjusteCaixaOpen && ajusteCaixaSelecionado && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-md w-full p-6 space-y-4 flex flex-col relative">
+            <button
+              onClick={() => setModalAjusteCaixaOpen(false)}
+              className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors"
+            >
+              <X size={16} />
+            </button>
+
+            <h3 className="text-base font-bold text-white flex items-center gap-2 pb-2 border-b border-[#222222]">
+              <Edit2 size={18} className="text-[#6A0DAD]" />
+              Corrigir Fechamento de Caixa
+            </h3>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  Valor em Dinheiro (R$)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={ajusteValorDinheiro}
+                  onChange={(e) => setAjusteValorDinheiro(e.target.value)}
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono"
+                  placeholder="0.00"
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  Valor em Cartão (R$)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={ajusteValorCartao}
+                  onChange={(e) => setAjusteValorCartao(e.target.value)}
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  Valor em PIX (R$)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={ajusteValorPix}
+                  onChange={(e) => setAjusteValorPix(e.target.value)}
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                  Motivo da Correção <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={ajusteMotivo}
+                  onChange={(e) => setAjusteMotivo(e.target.value)}
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[80px]"
+                  placeholder="Ex: Vendedor esqueceu de somar a última venda no PIX..."
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
               <button
-                onClick={() => setModalComprovante(null)}
-                className="w-full bg-[#6A0DAD] hover:bg-[#500885] text-xs font-bold py-2 rounded transition-all"
+                type="button"
+                onClick={() => setModalAjusteCaixaOpen(false)}
+                className="flex-1 bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 text-xs font-bold py-2.5 rounded transition-all"
               >
-                Fechar Visualização
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={loadingAjusteCaixa || !ajusteMotivo.trim()}
+                onClick={handleSalvarAjusteCaixa}
+                className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-xs font-bold py-2.5 rounded transition-all"
+              >
+                {loadingAjusteCaixa ? 'Salvando...' : 'Salvar Alterações'}
               </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* MODAL DE DETALHES DA SESSÃO DE CAIXA */}
-        {modalDetalheCaixa && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl max-w-lg w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
-              {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-[#222]">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
-                    <Store size={22} />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                      Sessão de Caixa
-                      {modalDetalheCaixa.status === 'aberto' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-green-950/60 text-green-400 border border-green-700/50">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
-                          ABERTO
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#161616] text-gray-400 border border-gray-800">
-                          FECHADO
-                        </span>
-                      )}
-                    </h3>
-                    <p className="text-xs text-gray-400">
-                      {modalDetalheCaixa.filial_nome || modalDetalheCaixa.filiais?.nome || 'Filial'}
-                    </p>
-                  </div>
+
+      {/* MODAL DE ABERTURA DE CAIXA (BLOQUEIO PDV MULTI-FILIAIS) */}
+      {isModalAbrirCaixaOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/50 rounded-2xl max-w-md w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
+
+            {/* Header do Modal */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#222]">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
+                  <Store size={22} />
                 </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+                    Abrir Caixa
+                    <span className="text-[10px] bg-amber-950/40 text-amber-300 border border-amber-800/40 px-2 py-0.5 rounded-full font-bold uppercase">
+                      Início de Turno
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    {activeFilialNome || 'Filial Selecionada'} • Operador: {profile?.nome || session?.user?.email || 'Operador'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Fechar modal se não for vendedor ou se não estiver na aba PDV */}
+              {(!['VENDEDOR'].includes(String(profile?.role || profile?.cargo || '').toUpperCase()) && !String(profile?.role || profile?.cargo || '').toUpperCase().startsWith('VENDEDOR_') || activeTab !== 'pdv') && (
                 <button
-                  onClick={() => setModalDetalheCaixa(null)}
+                  onClick={() => setIsModalAbrirCaixaOpen(false)}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Fechar modal de abertura"
                 >
                   <X size={16} />
                 </button>
-              </div>
-
-              {/* Informações da Abertura */}
-              <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
-                <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
-                  Informações de Abertura
-                </span>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
-                    <span className="text-gray-500 text-[10px] block">Operador Responsável</span>
-                    <strong className="text-white text-xs">{modalDetalheCaixa.operador_nome || modalDetalheCaixa.profiles?.nome || 'Operador'}</strong>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 text-[10px] block">Data / Hora Abertura</span>
-                    <span className="text-gray-300 font-mono text-xs">{new Date(modalDetalheCaixa.data_abertura).toLocaleString('pt-BR')}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 text-[10px] block">Fundo de Troco Inicial</span>
-                    <span className="text-green-400 font-mono font-extrabold text-sm">
-                      R$ {Number(modalDetalheCaixa.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500 text-[10px] block">Observações de Abertura</span>
-                    <span className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_abertura || 'Nenhuma'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Informações de Fechamento / Vendas */}
-              <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
-                <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
-                  {modalDetalheCaixa.status === 'aberto' ? 'Status Atual do Turno' : 'Fechamento & Valores Reportados'}
-                </span>
-                {modalDetalheCaixa.status === 'aberto' ? (
-                  <div className="text-xs text-amber-300/90 flex items-center gap-2 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg">
-                    <Clock size={16} className="animate-spin text-amber-400 shrink-0" />
-                    <span>Este caixa continua aberto em operação no PDV. Os totais serão consolidados no encerramento.</span>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5 text-xs">
-                    <div className="grid grid-cols-2 gap-3 pb-2 border-b border-[#222]">
-                      <div>
-                        <span className="text-gray-500 text-[10px] block">Data / Hora Fechamento</span>
-                        <span className="text-gray-300 font-mono text-xs">
-                          {modalDetalheCaixa.data_fechamento ? new Date(modalDetalheCaixa.data_fechamento).toLocaleString('pt-BR') : '-'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 text-[10px] block">Total Consolidado</span>
-                        <span className="text-white font-mono font-black text-sm">
-                          R$ {Number(modalDetalheCaixa.total_vendas || (Number(modalDetalheCaixa.total_dinheiro || 0) + Number(modalDetalheCaixa.total_cartao || 0) + Number(modalDetalheCaixa.total_pix || 0)) || modalDetalheCaixa.saldo_final || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
-                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
-                        <span className="text-[10px] text-gray-500 block">Dinheiro</span>
-                        <span className="text-xs text-gray-200 font-bold">R$ {Number(modalDetalheCaixa.total_dinheiro || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
-                        <span className="text-[10px] text-gray-500 block">PIX</span>
-                        <span className="text-xs text-purple-300 font-bold">R$ {Number(modalDetalheCaixa.total_pix || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
-                        <span className="text-[10px] text-gray-500 block">Cartão</span>
-                        <span className="text-xs text-blue-300 font-bold">R$ {Number(modalDetalheCaixa.total_cartao || 0).toFixed(2)}</span>
-                      </div>
-                    </div>
-                    {modalDetalheCaixa.observacoes_fechamento && (
-                      <div className="pt-1">
-                        <span className="text-gray-500 text-[10px] block">Observações do Fechamento</span>
-                        <p className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_fechamento}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Botão Fechar */}
-              <button
-                type="button"
-                onClick={() => setModalDetalheCaixa(null)}
-                className="w-full py-2.5 bg-[#222] hover:bg-[#333] text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
-              >
-                Fechar Detalhes
-              </button>
+              )}
             </div>
-          </div>
-        )}
 
-        {/* MODAL DE AJUSTE GERENCIAL DE FECHAMENTO DE CAIXA */}
-        {modalAjusteCaixaOpen && ajusteCaixaSelecionado && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-md w-full p-6 space-y-4 flex flex-col relative">
-              <button
-                onClick={() => setModalAjusteCaixaOpen(false)}
-                className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors"
-              >
-                <X size={16} />
-              </button>
-
-              <h3 className="text-base font-bold text-white flex items-center gap-2 pb-2 border-b border-[#222222]">
-                <Edit2 size={18} className="text-[#6A0DAD]" />
-                Corrigir Fechamento de Caixa
-              </h3>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                    Valor em Dinheiro (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={ajusteValorDinheiro}
-                    onChange={(e) => setAjusteValorDinheiro(e.target.value)}
-                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono"
-                    placeholder="0.00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                    Valor em Cartão (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={ajusteValorCartao}
-                    onChange={(e) => setAjusteValorCartao(e.target.value)}
-                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono"
-                    placeholder="0.00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                    Valor em PIX (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={ajusteValorPix}
-                    onChange={(e) => setAjusteValorPix(e.target.value)}
-                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono"
-                    placeholder="0.00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                    Motivo da Correção <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    value={ajusteMotivo}
-                    onChange={(e) => setAjusteMotivo(e.target.value)}
-                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[80px]"
-                    placeholder="Ex: Vendedor esqueceu de somar a última venda no PIX..."
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setModalAjusteCaixaOpen(false)}
-                  className="flex-1 bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 text-xs font-bold py-2.5 rounded transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  disabled={loadingAjusteCaixa || !ajusteMotivo.trim()}
-                  onClick={handleSalvarAjusteCaixa}
-                  className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-xs font-bold py-2.5 rounded transition-all"
-                >
-                  {loadingAjusteCaixa ? 'Salvando...' : 'Salvar Alterações'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-
-        {/* MODAL DE ABERTURA DE CAIXA (BLOQUEIO PDV MULTI-FILIAIS) */}
-        {isModalAbrirCaixaOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/50 rounded-2xl max-w-md w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
-              
-              {/* Header do Modal */}
-              <div className="flex items-center justify-between pb-3 border-b border-[#222]">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
-                    <Store size={22} />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
-                      Abrir Caixa
-                      <span className="text-[10px] bg-amber-950/40 text-amber-300 border border-amber-800/40 px-2 py-0.5 rounded-full font-bold uppercase">
-                        Início de Turno
-                      </span>
-                    </h3>
-                    <p className="text-xs text-gray-400">
-                      {activeFilialNome || 'Filial Selecionada'} • Operador: {profile?.nome || session?.user?.email || 'Operador'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Fechar modal se não for vendedor ou se não estiver na aba PDV */}
-                {(!['VENDEDOR'].includes(String(profile?.role || profile?.cargo || '').toUpperCase()) && !String(profile?.role || profile?.cargo || '').toUpperCase().startsWith('VENDEDOR_') || activeTab !== 'pdv') && (
-                  <button
-                    onClick={() => setIsModalAbrirCaixaOpen(false)}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-                    title="Fechar modal de abertura"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
-              </div>
-
-              <form onSubmit={handleConfirmarAberturaCaixa} className="space-y-4">
-                {/* Aviso de Bloqueio */}
-                <div className="p-3.5 bg-purple-950/20 border border-[#6A0DAD]/30 rounded-xl flex items-start gap-2.5 text-xs text-purple-200/90">
-                  <ShieldCheck size={18} className="text-[#c084fc] shrink-0 mt-0.5" />
-                  <p>
-                    O PDV requer a abertura do caixa para emissão de pedidos e controle da gaveta nesta filial.
-                  </p>
-                </div>
-
-                {/* Campo Fundo de Troco (R$) */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>Fundo de Troco Inicial (R$) *</span>
-                    <span className="text-[10px] text-gray-500 font-normal">Dinheiro físico em gaveta</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-[#6A0DAD] font-mono">
-                      R$
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      autoFocus
-                      value={fundoTrocoInput}
-                      onChange={(e) => setFundoTrocoInput(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
-                    />
-                  </div>
-
-                  {/* Atalhos Rápidos de Fundo de Troco */}
-                  <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
-                    {[0, 50, 100, 200, 300, 500].map((val) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setFundoTrocoInput(val.toFixed(2))}
-                        className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-[#222] hover:border-[#6A0DAD]/50 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-all cursor-pointer shrink-0"
-                      >
-                        R$ {val}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Observação de Abertura */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">
-                    Observações de Abertura (Opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={obsAberturaInput}
-                    onChange={(e) => setObsAberturaInput(e.target.value)}
-                    placeholder="Ex: Turno da manhã, troco conferido..."
-                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-xl px-3.5 py-2 text-xs text-white outline-none transition-all"
-                  />
-                </div>
-
-                {/* Rodapé e Botões */}
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={isSubmittingAbertura}
-                    className="w-full py-3 bg-[#6A0DAD] hover:bg-[#500885] text-white text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-[#6A0DAD]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {isSubmittingAbertura ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin text-white" />
-                        Registrando Abertura de Caixa...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={16} />
-                        Confirmar e Abrir Caixa
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL DE RESTAURAÇÃO DE RASCUNHO (SRE) */}
-        {showDraftModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-md w-full p-6 shadow-2xl relative">
-              <div className="flex justify-center mb-4">
-                <div className="bg-purple-900/20 p-4 rounded-full border border-purple-500/30">
-                  <Save size={32} className="text-purple-400" />
-                </div>
-              </div>
-              <h3 className="text-xl font-bold text-white text-center mb-2">
-                Venda em Andamento Encontrada
-              </h3>
-              <p className="text-sm text-gray-400 text-center mb-6">
-                Detectamos que você não finalizou a última venda (produto: <span className="text-purple-400 font-bold">{draftDataToRestore?.pdvProdutoSelecionado?.nome}</span>). Deseja restaurar os dados preenchidos no carrinho ou iniciar um novo atendimento limpo?
-              </p>
-              <div className="flex gap-4">
-                <button
-                  onClick={discardDraft}
-                  className="flex-1 bg-transparent hover:bg-white/5 border border-[#333] text-white font-bold py-3 rounded transition-colors"
-                >
-                  Descartar Rascunho
-                </button>
-                <button
-                  onClick={restoreDraft}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded transition-colors shadow-lg shadow-purple-900/50"
-                >
-                  Restaurar Venda
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL DE ROMANEIO DE TRANSFERÊNCIA */}
-        {transfRomaneioAtivo && transfRomaneioDados && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-6 relative print:border-none print:bg-white print:text-black">
-
-              <button
-                onClick={() => setTransfRomaneioAtivo(false)}
-                className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors print:hidden"
-              >
-                <X size={16} />
-              </button>
-
-              <div className="text-center space-y-2">
-                <span className="text-[10px] bg-blue-950/40 text-blue-400 border border-blue-800/40 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
-                  Romaneio de Transferência
-                </span>
-                {transfRomaneioDados.filial_logo && transfRomaneioDados.filial_logo.trim() !== '' ? (
-                  <div className="recibo-logo-container w-full flex justify-center items-center my-2">
-                    <img
-                      src={transfRomaneioDados.filial_logo}
-                      alt="Logo da Filial"
-                      className="recibo-logo-img max-w-[160px] max-h-[90px] w-auto h-auto object-contain block mx-auto"
-                      style={{
-                        objectFit: 'contain',
-                        maxWidth: '160px',
-                        maxHeight: '90px',
-                        width: 'auto',
-                        height: 'auto',
-                        filter: 'none',
-                        WebkitFilter: 'none'
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2">
-                    <Truck className="text-blue-500" size={20} /> ZÊNITE TRANSFER
-                  </h2>
-                )}
-                <p className="text-[10px] text-gray-500 font-mono">ID: {transfRomaneioDados.id}</p>
-                <p className="text-[10px] text-gray-550">
-                  {new Date(transfRomaneioDados.data).toLocaleString('pt-BR')}
+            <form onSubmit={handleConfirmarAberturaCaixa} className="space-y-4">
+              {/* Aviso de Bloqueio */}
+              <div className="p-3.5 bg-purple-950/20 border border-[#6A0DAD]/30 rounded-xl flex items-start gap-2.5 text-xs text-purple-200/90">
+                <ShieldCheck size={18} className="text-[#c084fc] shrink-0 mt-0.5" />
+                <p>
+                  O PDV requer a abertura do caixa para emissão de pedidos e controle da gaveta nesta filial.
                 </p>
               </div>
 
-              <hr className="border-[#222222] print:border-gray-300" />
-
-              <div className="grid grid-cols-2 gap-4 text-xs font-mono">
-                <div>
-                  <span className="block text-gray-500 uppercase tracking-wider mb-1 font-bold">Origem</span>
-                  <span className="text-white print:text-black font-black">{transfRomaneioDados.origem}</span>
-                </div>
-                <div className="text-right">
-                  <span className="block text-gray-500 uppercase tracking-wider mb-1 font-bold">Destino</span>
-                  <span className="text-white print:text-black font-black">{transfRomaneioDados.destino}</span>
-                </div>
-              </div>
-
-              {transfRomaneioDados.observacoes && (
-                <div className="bg-black/50 border border-[#222222] p-3 rounded-lg text-xs print:bg-white print:border-gray-300">
-                  <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1">
-                    Observações
+              {/* Campo Fundo de Troco (R$) */}
+              <div>
+                <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>Fundo de Troco Inicial (R$) *</span>
+                  <span className="text-[10px] text-gray-500 font-normal">Dinheiro físico em gaveta</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-[#6A0DAD] font-mono">
+                    R$
                   </span>
-                  <p className="text-white print:text-black">{transfRomaneioDados.observacoes}</p>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    autoFocus
+                    value={fundoTrocoInput}
+                    onChange={(e) => setFundoTrocoInput(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
+                  />
                 </div>
-              )}
 
-              <div className="bg-black border border-[#222222] p-4 rounded-lg space-y-2.5 print:bg-white print:border-gray-300">
-                <span className="text-[9px] text-blue-400 font-bold uppercase tracking-wider block print:text-blue-600">
-                  Itens Transferidos ({transfRomaneioDados.itens.length})
-                </span>
-                <div className="divide-y divide-[#222222] print:divide-gray-300">
-                  {transfRomaneioDados.itens.map((item, idx) => (
-                    <div key={idx} className="py-2 flex justify-between items-center">
-                      <div>
-                        <p className="text-sm font-bold text-white print:text-black">{item.nome}</p>
-                        {item.imei && <p className="text-xs text-gray-500 font-mono">IMEI: {item.imei}</p>}
-                      </div>
-                      <span className="text-sm font-black text-white print:text-black">{item.quantidade} un</span>
-                    </div>
+                {/* Atalhos Rápidos de Fundo de Troco */}
+                <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
+                  {[0, 50, 100, 200, 300, 500].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setFundoTrocoInput(val.toFixed(2))}
+                      className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-[#222] hover:border-[#6A0DAD]/50 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-all cursor-pointer shrink-0"
+                    >
+                      R$ {val}
+                    </button>
                   ))}
                 </div>
               </div>
 
-              <div className="pt-6 mt-6 border-t border-dashed border-[#222222] print:border-gray-300 flex justify-between">
-                <div className="w-1/2 text-center border-t border-[#222222] mx-2 pt-2">
-                  <span className="text-[10px] text-gray-500 uppercase tracking-wider">Assinatura Expedição</span>
-                </div>
-                <div className="w-1/2 text-center border-t border-[#222222] mx-2 pt-2">
-                  <span className="text-[10px] text-gray-500 uppercase tracking-wider">Assinatura Recebimento</span>
-                </div>
+              {/* Observação de Abertura */}
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                  Observações de Abertura (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={obsAberturaInput}
+                  onChange={(e) => setObsAberturaInput(e.target.value)}
+                  placeholder="Ex: Turno da manhã, troco conferido..."
+                  className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-xl px-3.5 py-2 text-xs text-white outline-none transition-all"
+                />
               </div>
 
-              <div className="pt-6 flex justify-center print:hidden">
+              {/* Rodapé e Botões */}
+              <div className="pt-2">
                 <button
-                  onClick={() => window.print()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg flex items-center gap-2 transition-all uppercase tracking-wider text-sm"
+                  type="submit"
+                  disabled={isSubmittingAbertura}
+                  className="w-full py-3 bg-[#6A0DAD] hover:bg-[#500885] text-white text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-[#6A0DAD]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  <Printer size={18} />
-                  Imprimir Romaneio
+                  {isSubmittingAbertura ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin text-white" />
+                      Registrando Abertura de Caixa...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={16} />
+                      Confirmar e Abrir Caixa
+                    </>
+                  )}
                 </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE RESTAURAÇÃO DE RASCUNHO (SRE) */}
+      {showDraftModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-md w-full p-6 shadow-2xl relative">
+            <div className="flex justify-center mb-4">
+              <div className="bg-purple-900/20 p-4 rounded-full border border-purple-500/30">
+                <Save size={32} className="text-purple-400" />
+              </div>
+            </div>
+            <h3 className="text-xl font-bold text-white text-center mb-2">
+              Venda em Andamento Encontrada
+            </h3>
+            <p className="text-sm text-gray-400 text-center mb-6">
+              Detectamos que você não finalizou a última venda (produto: <span className="text-purple-400 font-bold">{draftDataToRestore?.pdvProdutoSelecionado?.nome}</span>). Deseja restaurar os dados preenchidos no carrinho ou iniciar um novo atendimento limpo?
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={discardDraft}
+                className="flex-1 bg-transparent hover:bg-white/5 border border-[#333] text-white font-bold py-3 rounded transition-colors"
+              >
+                Descartar Rascunho
+              </button>
+              <button
+                onClick={restoreDraft}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded transition-colors shadow-lg shadow-purple-900/50"
+              >
+                Restaurar Venda
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
+      {/* MODAL DE ROMANEIO DE TRANSFERÊNCIA */}
+      {transfRomaneioAtivo && transfRomaneioDados && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-6 relative print:border-none print:bg-white print:text-black">
 
-        {/* MODAL DE RECIBO DE VENDA CONSOLIDADO */}
-        {pdvReciboAtivo && pdvReciboDados && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-6 relative print:border-none print:bg-white print:text-black">
+            <button
+              onClick={() => setTransfRomaneioAtivo(false)}
+              className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors print:hidden"
+            >
+              <X size={16} />
+            </button>
 
-              {/* Botão de Fechar no topo */}
-              <button
-                onClick={() => setPdvReciboAtivo(false)}
-                className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors print:hidden"
-              >
-                <X size={16} />
-              </button>
+            <div className="text-center space-y-2">
+              <span className="text-[10px] bg-blue-950/40 text-blue-400 border border-blue-800/40 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
+                Romaneio de Transferência
+              </span>
+              {transfRomaneioDados.filial_logo && transfRomaneioDados.filial_logo.trim() !== '' ? (
+                <div className="recibo-logo-container w-full flex justify-center items-center my-2">
+                  <img
+                    src={transfRomaneioDados.filial_logo}
+                    alt="Logo da Filial"
+                    className="recibo-logo-img max-w-[160px] max-h-[90px] w-auto h-auto object-contain block mx-auto"
+                    style={{
+                      objectFit: 'contain',
+                      maxWidth: '160px',
+                      maxHeight: '90px',
+                      width: 'auto',
+                      height: 'auto',
+                      filter: 'none',
+                      WebkitFilter: 'none'
+                    }}
+                  />
+                </div>
+              ) : (
+                <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2">
+                  <Truck className="text-blue-500" size={20} /> ZÊNITE TRANSFER
+                </h2>
+              )}
+              <p className="text-[10px] text-gray-500 font-mono">ID: {transfRomaneioDados.id}</p>
+              <p className="text-[10px] text-gray-550">
+                {new Date(transfRomaneioDados.data).toLocaleString('pt-BR')}
+              </p>
+            </div>
 
-              {/* Cabeçalho */}
-              <div className="text-center space-y-1">
-                <span className="text-[10px] bg-purple-950/40 text-purple-400 border border-purple-800/40 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
-                  Recibo de Venda Consolidado
+            <hr className="border-[#222222] print:border-gray-300" />
+
+            <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+              <div>
+                <span className="block text-gray-500 uppercase tracking-wider mb-1 font-bold">Origem</span>
+                <span className="text-white print:text-black font-black">{transfRomaneioDados.origem}</span>
+              </div>
+              <div className="text-right">
+                <span className="block text-gray-500 uppercase tracking-wider mb-1 font-bold">Destino</span>
+                <span className="text-white print:text-black font-black">{transfRomaneioDados.destino}</span>
+              </div>
+            </div>
+
+            {transfRomaneioDados.observacoes && (
+              <div className="bg-black/50 border border-[#222222] p-3 rounded-lg text-xs print:bg-white print:border-gray-300">
+                <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1">
+                  Observações
                 </span>
-                {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
-                  <div className="recibo-logo-container w-full flex justify-center items-center my-2">
-                    <img
-                      src={pdvReciboDados.filial_logo}
-                      alt="Logo da Filial"
-                      onLoad={() => setIsImageLoaded(true)}
-                      className="recibo-logo-img max-w-[160px] max-h-[90px] w-auto h-auto object-contain block mx-auto"
-                      style={{
-                        objectFit: 'contain',
-                        maxWidth: '160px',
-                        maxHeight: '90px',
-                        width: 'auto',
-                        height: 'auto',
-                        filter: 'none',
-                        WebkitFilter: 'none'
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2 mb-2">
-                    {pdvReciboDados.filial_nome}
-                  </h2>
-                )}
+                <p className="text-white print:text-black">{transfRomaneioDados.observacoes}</p>
+              </div>
+            )}
 
-                <div className="text-[10px] text-gray-500 font-mono leading-tight mb-2">
-                  <p className="font-bold">{pdvReciboDados.filial_nome}</p>
-                  <p>{pdvReciboDados.filial_endereco}</p>
-                  <p>CNPJ: {pdvReciboDados.filial_cnpj} | Tel: {pdvReciboDados.filial_telefone}</p>
+            <div className="bg-black border border-[#222222] p-4 rounded-lg space-y-2.5 print:bg-white print:border-gray-300">
+              <span className="text-[9px] text-blue-400 font-bold uppercase tracking-wider block print:text-blue-600">
+                Itens Transferidos ({transfRomaneioDados.itens.length})
+              </span>
+              <div className="divide-y divide-[#222222] print:divide-gray-300">
+                {transfRomaneioDados.itens.map((item, idx) => (
+                  <div key={idx} className="py-2 flex justify-between items-center">
+                    <div>
+                      <p className="text-sm font-bold text-white print:text-black">{item.nome}</p>
+                      {item.imei && <p className="text-xs text-gray-500 font-mono">IMEI: {item.imei}</p>}
+                    </div>
+                    <span className="text-sm font-black text-white print:text-black">{item.quantidade} un</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-6 mt-6 border-t border-dashed border-[#222222] print:border-gray-300 flex justify-between">
+              <div className="w-1/2 text-center border-t border-[#222222] mx-2 pt-2">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Assinatura Expedição</span>
+              </div>
+              <div className="w-1/2 text-center border-t border-[#222222] mx-2 pt-2">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Assinatura Recebimento</span>
+              </div>
+            </div>
+
+            <div className="pt-6 flex justify-center print:hidden">
+              <button
+                onClick={() => window.print()}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg flex items-center gap-2 transition-all uppercase tracking-wider text-sm"
+              >
+                <Printer size={18} />
+                Imprimir Romaneio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* MODAL DE RECIBO DE VENDA CONSOLIDADO */}
+      {pdvReciboAtivo && pdvReciboDados && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-6 relative print:border-none print:bg-white print:text-black">
+
+            {/* Botão de Fechar no topo */}
+            <button
+              onClick={() => setPdvReciboAtivo(false)}
+              className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors print:hidden"
+            >
+              <X size={16} />
+            </button>
+
+            {/* Cabeçalho */}
+            <div className="text-center space-y-1">
+              <span className="text-[10px] bg-purple-950/40 text-purple-400 border border-purple-800/40 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
+                Recibo de Venda Consolidado
+              </span>
+              {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
+                <div className="recibo-logo-container w-full flex justify-center items-center my-2">
+                  <img
+                    src={pdvReciboDados.filial_logo}
+                    alt="Logo da Filial"
+                    onLoad={() => setIsImageLoaded(true)}
+                    className="recibo-logo-img max-w-[160px] max-h-[90px] w-auto h-auto object-contain block mx-auto"
+                    style={{
+                      objectFit: 'contain',
+                      maxWidth: '160px',
+                      maxHeight: '90px',
+                      width: 'auto',
+                      height: 'auto',
+                      filter: 'none',
+                      WebkitFilter: 'none'
+                    }}
+                  />
                 </div>
+              ) : (
+                <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2 mb-2">
+                  {pdvReciboDados.filial_nome}
+                </h2>
+              )}
 
-                {pdvReciboDados.is_trainee && (
-                  <div className="border border-dashed border-gray-400 p-2 text-center text-[10px] font-bold uppercase mb-2">
-                    Teve participação de Trainee
-                  </div>
-                )}
-
-                <p className="text-[10px] text-gray-500 font-mono mt-2">ID da Venda: {pdvReciboDados.venda_id}</p>
-                <p className="text-[10px] text-gray-550">
-                  {new Date(pdvReciboDados.data).toLocaleString('pt-BR')}
-                </p>
+              <div className="text-[10px] text-gray-500 font-mono leading-tight mb-2">
+                <p className="font-bold">{pdvReciboDados.filial_nome}</p>
+                <p>{pdvReciboDados.filial_endereco}</p>
+                <p>CNPJ: {pdvReciboDados.filial_cnpj} | Tel: {pdvReciboDados.filial_telefone}</p>
               </div>
 
-
-
-              <hr className="border-[#222222] print:border-gray-300" />
-
-              {/* Informações Básicas */}
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Vendedor</span>
-                  <span className="text-white print:text-black font-semibold">{pdvReciboDados.vendedor_nome}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Filial</span>
-                  <span className="text-white print:text-black font-semibold">{pdvReciboDados.filial_nome}</span>
-                </div>
-
-                {/* Cliente Vinculado */}
-                {(pdvReciboDados.cliente_nome || pdvReciboDados.cliente_cpf_cnpj) && (
-                  <div className="col-span-2 border-t border-[#222222]/60 pt-2">
-                    <span className="text-gray-500 block uppercase font-bold text-[9px]">Cliente Vinculado</span>
-                    <p className="text-white print:text-black font-semibold">
-                      {pdvReciboDados.cliente_nome || 'Consumidor Final'}
-                      {pdvReciboDados.cliente_cpf_cnpj && ` (CPF/CNPJ: ${pdvReciboDados.cliente_cpf_cnpj})`}
-                    </p>
-                    {(pdvReciboDados.cliente_telefone || pdvReciboDados.cliente_email) && (
-                      <p className="text-[10px] text-gray-500 font-medium">
-                        {pdvReciboDados.cliente_telefone && `Tel: ${pdvReciboDados.cliente_telefone}`}
-                        {pdvReciboDados.cliente_telefone && pdvReciboDados.cliente_email && ' · '}
-                        {pdvReciboDados.cliente_email && `Email: ${pdvReciboDados.cliente_email}`}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {pdvReciboDados.obs_garantia && (
-                <div className="bg-black/50 border border-[#222222] p-3 rounded-lg text-xs print:bg-white print:border-gray-300 mb-4">
-                  <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1 print:text-gray-600">
-                    Observações de Garantia
-                  </span>
-                  <p className="text-white print:text-black whitespace-pre-wrap">{pdvReciboDados.obs_garantia}</p>
+              {pdvReciboDados.is_trainee && (
+                <div className="border border-dashed border-gray-400 p-2 text-center text-[10px] font-bold uppercase mb-2">
+                  Teve participação de Trainee
                 </div>
               )}
 
-              {/* Itens de Saída (Carrinho) */}
-              <div className="bg-black border border-[#222222] p-4 rounded-lg space-y-2.5 print:bg-white print:border-gray-300">
-                <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider block print:text-purple-650">
-                  Itens de Venda (Saída)
+              <p className="text-[10px] text-gray-500 font-mono mt-2">ID da Venda: {pdvReciboDados.venda_id}</p>
+              <p className="text-[10px] text-gray-550">
+                {new Date(pdvReciboDados.data).toLocaleString('pt-BR')}
+              </p>
+            </div>
+
+
+
+            <hr className="border-[#222222] print:border-gray-300" />
+
+            {/* Informações Básicas */}
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div>
+                <span className="text-gray-500 block uppercase font-bold text-[9px]">Vendedor</span>
+                <span className="text-white print:text-black font-semibold">{pdvReciboDados.vendedor_nome}</span>
+              </div>
+              <div>
+                <span className="text-gray-500 block uppercase font-bold text-[9px]">Filial</span>
+                <span className="text-white print:text-black font-semibold">{pdvReciboDados.filial_nome}</span>
+              </div>
+
+              {/* Cliente Vinculado */}
+              {(pdvReciboDados.cliente_nome || pdvReciboDados.cliente_cpf_cnpj) && (
+                <div className="col-span-2 border-t border-[#222222]/60 pt-2">
+                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Cliente Vinculado</span>
+                  <p className="text-white print:text-black font-semibold">
+                    {pdvReciboDados.cliente_nome || 'Consumidor Final'}
+                    {pdvReciboDados.cliente_cpf_cnpj && ` (CPF/CNPJ: ${pdvReciboDados.cliente_cpf_cnpj})`}
+                  </p>
+                  {(pdvReciboDados.cliente_telefone || pdvReciboDados.cliente_email) && (
+                    <p className="text-[10px] text-gray-500 font-medium">
+                      {pdvReciboDados.cliente_telefone && `Tel: ${pdvReciboDados.cliente_telefone}`}
+                      {pdvReciboDados.cliente_telefone && pdvReciboDados.cliente_email && ' · '}
+                      {pdvReciboDados.cliente_email && `Email: ${pdvReciboDados.cliente_email}`}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {pdvReciboDados.obs_garantia && (
+              <div className="bg-black/50 border border-[#222222] p-3 rounded-lg text-xs print:bg-white print:border-gray-300 mb-4">
+                <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1 print:text-gray-600">
+                  Observações de Garantia
                 </span>
-                <div className="space-y-3 divide-y divide-[#222222]/50 print:divide-gray-200">
-                  {pdvReciboDados.itens && pdvReciboDados.itens.length > 0 ? (
-                    pdvReciboDados.itens.map((item, idx) => (
-                      <div key={idx} className={`flex justify-between items-start ${idx > 0 ? 'pt-2' : ''}`}>
-                        <div>
-                          <h4 className="font-extrabold text-sm text-white print:text-black">{item.nome}</h4>
-                          {item.imei && (
-                            <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {item.imei}</p>
-                          )}
-                          <p className="text-[10px] text-gray-450">Qtd: {item.quantidade} unidade(s)</p>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-mono text-xs font-bold text-white print:text-black">
-                            R$ {item.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex justify-between items-start">
+                <p className="text-white print:text-black whitespace-pre-wrap">{pdvReciboDados.obs_garantia}</p>
+              </div>
+            )}
+
+            {/* Itens de Saída (Carrinho) */}
+            <div className="bg-black border border-[#222222] p-4 rounded-lg space-y-2.5 print:bg-white print:border-gray-300">
+              <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider block print:text-purple-650">
+                Itens de Venda (Saída)
+              </span>
+              <div className="space-y-3 divide-y divide-[#222222]/50 print:divide-gray-200">
+                {pdvReciboDados.itens && pdvReciboDados.itens.length > 0 ? (
+                  pdvReciboDados.itens.map((item, idx) => (
+                    <div key={idx} className={`flex justify-between items-start ${idx > 0 ? 'pt-2' : ''}`}>
                       <div>
-                        <h4 className="font-extrabold text-sm text-white print:text-black">{pdvReciboDados.produto_novo.nome}</h4>
-                        {pdvReciboDados.produto_novo.imei && (
-                          <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {pdvReciboDados.produto_novo.imei}</p>
+                        <h4 className="font-extrabold text-sm text-white print:text-black">{item.nome}</h4>
+                        {item.imei && (
+                          <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {item.imei}</p>
                         )}
-                        <p className="text-[10px] text-gray-450">Qtd: {pdvReciboDados.produto_novo.quantidade} unidade(s)</p>
+                        <p className="text-[10px] text-gray-450">Qtd: {item.quantidade} unidade(s)</p>
                       </div>
                       <div className="text-right">
                         <span className="font-mono text-xs font-bold text-white print:text-black">
-                          R$ {pdvReciboDados.produto_novo.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          R$ {item.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Aparelhos de Entrada (Troca) */}
-              {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                <div className="space-y-3">
-                  <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider block">
-                    Aparelho(s) Recebido(s) na Troca
-                  </span>
-                  {pdvReciboDados.trocas.map((troca, idx) => (
-                    <div key={idx} className="bg-purple-950/5 border border-[#6A0DAD]/30 p-4 rounded-lg flex justify-between items-start print:bg-white print:border-gray-300">
-                      <div className="space-y-1">
-                        <h4 className="font-extrabold text-sm text-white print:text-black">{troca.nome}</h4>
-                        <p className="text-[10px] text-gray-400 font-mono">IMEI: {troca.imei}</p>
-                        <p className="text-[10px] text-gray-450 font-semibold">
-                          Cor: {troca.cor} · Bateria: {troca.bateria}%
-                        </p>
-                        {troca.obs && (
-                          <p className="text-[9px] text-gray-500 italic">Checklist: {troca.obs}</p>
-                        )}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span className="font-mono text-xs font-bold text-[#A78BFA] print:text-black">
-                          - R$ {troca.valor_avaliacao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <hr className="border-[#222222] print:border-gray-300" />
-
-              {/* Resumo Financeiro */}
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between text-gray-400">
-                  <span>Subtotal (Novo):</span>
-                  <span className="font-mono">R$ {pdvReciboDados.financeiro.total_novo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                </div>
-                {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                  <div className="flex justify-between text-[#A78BFA] print:text-black">
-                    <span>Abatimento por Troca:</span>
-                    <span className="font-mono">- R$ {pdvReciboDados.financeiro.desconto_troca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-white print:text-black font-extrabold text-sm border-t border-[#222222] pt-2">
-                  <span>Saldo Pago:</span>
-                  <span className="font-mono">R$ {pdvReciboDados.financeiro.saldo_pagar.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-gray-500 text-[10px] border-t border-[#222222]/50 pt-2">
-                  <span>Método de Pagamento:</span>
-                  <span className="font-bold uppercase text-white print:text-black">
-                    {pdvReciboDados.financeiro.metodo === 'troca' ? (
-                      pdvReciboDados.financeiro.saldo_pagar > 0 ? (
-                        `Troca + ${pdvReciboDados.financeiro.metodo_saldo === 'cartao' ? `Cartão (${pdvReciboDados.financeiro.parcelas}x)` : pdvReciboDados.financeiro.metodo_saldo === 'pix' ? 'Pix' : 'Dinheiro'}`
-                      ) : (
-                        'Troca (Totalmente Abatido)'
-                      )
-                    ) : (
-                      pdvReciboDados.financeiro.metodo === 'cartao'
-                        ? `Cartão (${pdvReciboDados.financeiro.parcelas}x)`
-                        : pdvReciboDados.financeiro.metodo === 'pix'
-                          ? 'Pix'
-                          : 'Dinheiro'
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              {/* Ações */}
-              <div className="flex flex-col gap-2 pt-2 print:hidden">
-                {pdvReciboDados.nfe_status === 'EMITIDA' ? (
-                  <div className="flex gap-2 w-full">
-                    <div className="flex-1 bg-green-950/20 border border-green-800/40 text-green-400 font-bold py-3 rounded text-xs flex items-center justify-center gap-1.5">
-                      <CheckCircle2 size={14} /> NF-e Emitida com Sucesso
-                    </div>
-                    {pdvReciboDados.nfe_pdf_url && (
-                      <a
-                        href={pdvReciboDados.nfe_pdf_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 px-4 rounded transition-all flex items-center justify-center gap-1.5 text-white"
-                      >
-                        <Download size={14} /> Ver PDF da Nota
-                      </a>
-                    )}
-                  </div>
-                ) : ['VENDEDOR', 'GERENTE'].includes(profile?.role) ? (
-                  <div className="w-full bg-[#111111] border border-red-950/30 text-red-400 text-center py-3 px-4 rounded text-[11px] font-semibold">
-                    Apenas administradores ou RH possuem permissão para emitir documentos fiscais
-                  </div>
-                ) : ['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? (
-                  <button
-                    type="button"
-                    onClick={() => handleEmitirNfePdv(pdvReciboDados)}
-                    disabled={isFiscalLoading}
-                    className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-650 text-white font-bold py-3 rounded text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-[#6A0DAD]/20"
-                  >
-                    {isFiscalLoading ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" /> Emitindo Nota Fiscal no SEFAZ...
-                      </>
-                    ) : (
-                      <>
-                        <FileText size={14} /> Emitir Nota Fiscal (NF-e)
-                      </>
-                    )}
-                  </button>
-                ) : null}
-
-                <div className="flex gap-2 w-full">
-                  <button
-                    type="button"
-                    onClick={() => window.print()}
-                    className="flex-1 bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 rounded transition-all flex items-center justify-center gap-1.5"
-                  >
-                    Imprimir Recibo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPdvReciboAtivo(false)}
-                    className="flex-1 bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 rounded transition-all"
-                  >
-                    Fechar e Novo Pedido
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {/* MODAL ESTOQUE GLOBAL */}
-        {estoqueGlobalModalOpen && estoqueGlobalProduto && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] animate-fadeIn">
-              <div className="p-5 border-b border-[#222222] flex justify-between items-center bg-[#111111] rounded-t-xl">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Package size={20} className="text-[#6A0DAD]" />
-                    Estoque Global: <span className="text-purple-400">{estoqueGlobalProduto.nome}</span>
-                  </h2>
-                  <p className="text-xs text-gray-400 mt-1">
-                    Total em Rede: <span className="font-bold text-white">{estoqueGlobalImeis.filter(i => (!i.vendido && i.status !== 'VENDIDO')).length} aparelhos disponíveis no total</span>
-                  </p>
-                </div>
-                <button onClick={() => setEstoqueGlobalModalOpen(false)} className="text-gray-500 hover:text-white transition-colors">
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="p-5 overflow-y-auto flex-1">
-                {loadingEstoqueGlobal ? (
-                  <div className="flex flex-col items-center justify-center py-10 gap-3 text-gray-500">
-                    <Loader2 size={24} className="animate-spin text-[#6A0DAD]" />
-                    <p className="text-sm">Buscando rastreio na rede...</p>
-                  </div>
-                ) : estoqueGlobalImeis.length === 0 ? (
-                  <div className="text-center py-10 text-gray-600">
-                    <p>Nenhum aparelho deste modelo encontrado no estoque da rede.</p>
-                  </div>
+                  ))
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-[#222222] text-xs text-gray-500 uppercase tracking-wider">
-                          <th className="pb-3 px-2 font-semibold">IMEI</th>
-                          <th className="pb-3 px-2 font-semibold">Localização</th>
-                          <th className="pb-3 px-2 font-semibold">Status</th>
-                          <th className="pb-3 px-2 font-semibold">Data de Entrada</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#222222]">
-                        {estoqueGlobalImeis.map((item, idx) => (
-                          <tr key={item.id || idx} className="text-sm hover:bg-[#111111] transition-colors">
-                            <td className="py-3 px-2 font-mono text-gray-300">{item.imei}</td>
-                            <td className="py-3 px-2 text-white font-semibold">{item.filial_nome}</td>
-                            <td className="py-3 px-2">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${item.status === 'EM_TRANSITO' ? 'bg-blue-950/40 text-blue-400 border border-blue-800/40' :
-                                (item.vendido || item.status === 'VENDIDO') ? 'bg-red-950/40 text-red-400 border border-red-800/40' :
-                                  'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
-                                }`}>
-                                {item.status === 'EM_TRANSITO' ? 'Em Trânsito' : (item.vendido || item.status === 'VENDIDO') ? 'Vendido' : 'Disponível'}
-                              </span>
-                            </td>
-                            <td className="py-3 px-2 text-gray-500">
-                              {new Date(item.created_at).toLocaleDateString('pt-BR')}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-white print:text-black">{pdvReciboDados.produto_novo.nome}</h4>
+                      {pdvReciboDados.produto_novo.imei && (
+                        <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {pdvReciboDados.produto_novo.imei}</p>
+                      )}
+                      <p className="text-[10px] text-gray-450">Qtd: {pdvReciboDados.produto_novo.quantidade} unidade(s)</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-mono text-xs font-bold text-white print:text-black">
+                        R$ {pdvReciboDados.produto_novo.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
             </div>
-          </div>
-        )}
 
-        {/* OFFLINE BANNER */}
-        {isOffline && (
-          <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-xs font-bold flex items-center justify-center gap-2 z-[100] shadow-md animate-slideDown">
-            <AlertCircle size={14} />
-            Você está offline. O Zênite operará em Modo de Contingência.
-          </div>
-        )}
-
-        {/* S.O.S BUTTON & MODAL (Para Logados) */}
-        {session && profile?.role !== 'SUPER_ADMIN' && (
-          <>
-            <button
-              onClick={() => setIsSosModalOpen(true)}
-              className="fixed bottom-6 right-6 bg-red-600 hover:bg-red-700 text-white rounded-full p-4 shadow-2xl flex items-center justify-center z-50 transition-transform hover:scale-110"
-              title="S.O.S Suporte"
-            >
-              <AlertCircle size={28} />
-            </button>
-
-            {isSosModalOpen && (
-              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-                <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl shadow-2xl w-full max-w-md flex flex-col p-6 animate-fadeIn">
-                  <div className="flex justify-between items-start mb-4">
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                      <AlertCircle size={20} className="text-red-500" /> S.O.S Suporte
-                    </h2>
-                    <button onClick={() => setIsSosModalOpen(false)} className="text-gray-500 hover:text-white">
-                      <X size={20} />
-                    </button>
+            {/* Aparelhos de Entrada (Troca) */}
+            {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
+              <div className="space-y-3">
+                <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider block">
+                  Aparelho(s) Recebido(s) na Troca
+                </span>
+                {pdvReciboDados.trocas.map((troca, idx) => (
+                  <div key={idx} className="bg-purple-950/5 border border-[#6A0DAD]/30 p-4 rounded-lg flex justify-between items-start print:bg-white print:border-gray-300">
+                    <div className="space-y-1">
+                      <h4 className="font-extrabold text-sm text-white print:text-black">{troca.nome}</h4>
+                      <p className="text-[10px] text-gray-400 font-mono">IMEI: {troca.imei}</p>
+                      <p className="text-[10px] text-gray-450 font-semibold">
+                        Cor: {troca.cor} · Bateria: {troca.bateria}%
+                      </p>
+                      {troca.obs && (
+                        <p className="text-[9px] text-gray-500 italic">Checklist: {troca.obs}</p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="font-mono text-xs font-bold text-[#A78BFA] print:text-black">
+                        - R$ {troca.valor_avaliacao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-sm text-gray-400 mb-4">Descreva o problema que você está enfrentando. Nossa equipe de engenharia receberá o log imediatamente.</p>
-                  <textarea
-                    value={sosMessage}
-                    onChange={(e) => setSosMessage(e.target.value)}
-                    placeholder="Ex: Não consigo finalizar a venda do celular X..."
-                    className="w-full bg-black border border-[#333] text-white p-3 rounded h-28 resize-none mb-4"
-                  />
-                  <button
-                    onClick={handleSosSubmit}
-                    disabled={isSosSubmitting || !sosMessage.trim()}
-                    className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-2 rounded transition-colors flex justify-center items-center gap-2"
-                  >
-                    {isSosSubmitting ? <Loader2 size={16} className="animate-spin" /> : 'Enviar Chamado de Emergência'}
-                  </button>
-                </div>
+                ))}
               </div>
             )}
-          </>
-        )}
 
-        {/* MODAL DE CONFIRMAÇÃO DE FINALIZAÇÃO DE CHAMADO S.O.S */}
-        {confirmingSosId && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl shadow-2xl w-full max-w-sm flex flex-col p-6 animate-fadeIn">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="bg-red-500/10 p-2.5 rounded-full text-red-500 shrink-0">
-                  <AlertCircle size={24} />
+            <hr className="border-[#222222] print:border-gray-300" />
+
+            {/* Resumo Financeiro */}
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between text-gray-400">
+                <span>Subtotal (Novo):</span>
+                <span className="font-mono">R$ {pdvReciboDados.financeiro.total_novo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              </div>
+              {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
+                <div className="flex justify-between text-[#A78BFA] print:text-black">
+                  <span>Abatimento por Troca:</span>
+                  <span className="font-mono">- R$ {pdvReciboDados.financeiro.desconto_troca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 </div>
+              )}
+              <div className="flex justify-between text-white print:text-black font-extrabold text-sm border-t border-[#222222] pt-2">
+                <span>Saldo Pago:</span>
+                <span className="font-mono">R$ {pdvReciboDados.financeiro.saldo_pagar.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              </div>
+              <div className="flex justify-between text-gray-500 text-[10px] border-t border-[#222222]/50 pt-2">
+                <span>Método de Pagamento:</span>
+                <span className="font-bold uppercase text-white print:text-black">
+                  {pdvReciboDados.financeiro.metodo === 'troca' ? (
+                    pdvReciboDados.financeiro.saldo_pagar > 0 ? (
+                      `Troca + ${pdvReciboDados.financeiro.metodo_saldo === 'cartao' ? `Cartão (${pdvReciboDados.financeiro.parcelas}x)` : pdvReciboDados.financeiro.metodo_saldo === 'pix' ? 'Pix' : 'Dinheiro'}`
+                    ) : (
+                      'Troca (Totalmente Abatido)'
+                    )
+                  ) : (
+                    pdvReciboDados.financeiro.metodo === 'cartao'
+                      ? `Cartão (${pdvReciboDados.financeiro.parcelas}x)`
+                      : pdvReciboDados.financeiro.metodo === 'pix'
+                        ? 'Pix'
+                        : 'Dinheiro'
+                  )}
+                </span>
+              </div>
+            </div>
+
+            {/* Ações */}
+            <div className="flex flex-col gap-2 pt-2 print:hidden">
+              {pdvReciboDados.nfe_status === 'EMITIDA' ? (
+                <div className="flex gap-2 w-full">
+                  <div className="flex-1 bg-green-950/20 border border-green-800/40 text-green-400 font-bold py-3 rounded text-xs flex items-center justify-center gap-1.5">
+                    <CheckCircle2 size={14} /> NF-e Emitida com Sucesso
+                  </div>
+                  {pdvReciboDados.nfe_pdf_url && (
+                    <a
+                      href={pdvReciboDados.nfe_pdf_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 px-4 rounded transition-all flex items-center justify-center gap-1.5 text-white"
+                    >
+                      <Download size={14} /> Ver PDF da Nota
+                    </a>
+                  )}
+                </div>
+              ) : ['VENDEDOR', 'GERENTE'].includes(profile?.role) ? (
+                <div className="w-full bg-[#111111] border border-red-950/30 text-red-400 text-center py-3 px-4 rounded text-[11px] font-semibold">
+                  Apenas administradores ou RH possuem permissão para emitir documentos fiscais
+                </div>
+              ) : ['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? (
+                <button
+                  type="button"
+                  onClick={() => handleEmitirNfePdv(pdvReciboDados)}
+                  disabled={isFiscalLoading}
+                  className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-650 text-white font-bold py-3 rounded text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-[#6A0DAD]/20"
+                >
+                  {isFiscalLoading ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> Emitindo Nota Fiscal no SEFAZ...
+                    </>
+                  ) : (
+                    <>
+                      <FileText size={14} /> Emitir Nota Fiscal (NF-e)
+                    </>
+                  )}
+                </button>
+              ) : null}
+
+              <div className="flex gap-2 w-full">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex-1 bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 rounded transition-all flex items-center justify-center gap-1.5"
+                >
+                  Imprimir Recibo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPdvReciboAtivo(false)}
+                  className="flex-1 bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 rounded transition-all"
+                >
+                  Fechar e Novo Pedido
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ESTOQUE GLOBAL */}
+      {estoqueGlobalModalOpen && estoqueGlobalProduto && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] animate-fadeIn">
+            <div className="p-5 border-b border-[#222222] flex justify-between items-center bg-[#111111] rounded-t-xl">
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Package size={20} className="text-[#6A0DAD]" />
+                  Estoque Global: <span className="text-purple-400">{estoqueGlobalProduto.nome}</span>
+                </h2>
+                <p className="text-xs text-gray-400 mt-1">
+                  Total em Rede: <span className="font-bold text-white">{estoqueGlobalImeis.filter(i => (!i.vendido && i.status !== 'VENDIDO')).length} aparelhos disponíveis no total</span>
+                </p>
+              </div>
+              <button onClick={() => setEstoqueGlobalModalOpen(false)} className="text-gray-500 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1">
+              {loadingEstoqueGlobal ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-3 text-gray-500">
+                  <Loader2 size={24} className="animate-spin text-[#6A0DAD]" />
+                  <p className="text-sm">Buscando rastreio na rede...</p>
+                </div>
+              ) : estoqueGlobalImeis.length === 0 ? (
+                <div className="text-center py-10 text-gray-600">
+                  <p>Nenhum aparelho deste modelo encontrado no estoque da rede.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#222222] text-xs text-gray-500 uppercase tracking-wider">
+                        <th className="pb-3 px-2 font-semibold">IMEI</th>
+                        <th className="pb-3 px-2 font-semibold">Localização</th>
+                        <th className="pb-3 px-2 font-semibold">Status</th>
+                        <th className="pb-3 px-2 font-semibold">Data de Entrada</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#222222]">
+                      {estoqueGlobalImeis.map((item, idx) => (
+                        <tr key={item.id || idx} className="text-sm hover:bg-[#111111] transition-colors">
+                          <td className="py-3 px-2 font-mono text-gray-300">{item.imei}</td>
+                          <td className="py-3 px-2 text-white font-semibold">{item.filial_nome}</td>
+                          <td className="py-3 px-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${item.status === 'EM_TRANSITO' ? 'bg-blue-950/40 text-blue-400 border border-blue-800/40' :
+                              (item.vendido || item.status === 'VENDIDO') ? 'bg-red-950/40 text-red-400 border border-red-800/40' :
+                                'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
+                              }`}>
+                              {item.status === 'EM_TRANSITO' ? 'Em Trânsito' : (item.vendido || item.status === 'VENDIDO') ? 'Vendido' : 'Disponível'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-2 text-gray-500">
+                            {new Date(item.created_at).toLocaleDateString('pt-BR')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OFFLINE BANNER */}
+      {isOffline && (
+        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-xs font-bold flex items-center justify-center gap-2 z-[100] shadow-md animate-slideDown">
+          <AlertCircle size={14} />
+          Você está offline. O Zênite operará em Modo de Contingência.
+        </div>
+      )}
+
+      {/* S.O.S BUTTON & MODAL (Para Logados) */}
+      {session && profile?.role !== 'SUPER_ADMIN' && (
+        <>
+          <button
+            onClick={() => setIsSosModalOpen(true)}
+            className="fixed bottom-6 right-6 bg-red-600 hover:bg-red-700 text-white rounded-full p-4 shadow-2xl flex items-center justify-center z-50 transition-transform hover:scale-110"
+            title="S.O.S Suporte"
+          >
+            <AlertCircle size={28} />
+          </button>
+
+          {isSosModalOpen && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+              <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl shadow-2xl w-full max-w-md flex flex-col p-6 animate-fadeIn">
+                <div className="flex justify-between items-start mb-4">
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <AlertCircle size={20} className="text-red-500" /> S.O.S Suporte
+                  </h2>
+                  <button onClick={() => setIsSosModalOpen(false)} className="text-gray-500 hover:text-white">
+                    <X size={20} />
+                  </button>
+                </div>
+                <p className="text-sm text-gray-400 mb-4">Descreva o problema que você está enfrentando. Nossa equipe de engenharia receberá o log imediatamente.</p>
+                <textarea
+                  value={sosMessage}
+                  onChange={(e) => setSosMessage(e.target.value)}
+                  placeholder="Ex: Não consigo finalizar a venda do celular X..."
+                  className="w-full bg-black border border-[#333] text-white p-3 rounded h-28 resize-none mb-4"
+                />
+                <button
+                  onClick={handleSosSubmit}
+                  disabled={isSosSubmitting || !sosMessage.trim()}
+                  className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-2 rounded transition-colors flex justify-center items-center gap-2"
+                >
+                  {isSosSubmitting ? <Loader2 size={16} className="animate-spin" /> : 'Enviar Chamado de Emergência'}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE FINALIZAÇÃO DE CHAMADO S.O.S */}
+      {confirmingSosId && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl shadow-2xl w-full max-w-sm flex flex-col p-6 animate-fadeIn">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-red-500/10 p-2.5 rounded-full text-red-500 shrink-0">
+                <AlertCircle size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Finalizar Chamado</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Visão SUPER_ADMIN</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-350 mb-6 leading-relaxed">
+              Deseja marcar este chamado como <strong>Finalizado</strong>? Esta ação é irreversível e o chamado não será mais editável.
+            </p>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setConfirmingSosId(null)}
+                disabled={loadingFinalizarSos}
+                className="px-4 py-2 text-sm font-semibold rounded bg-gray-900 border border-gray-800 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleFinalizarChamado(confirmingSosId)}
+                disabled={loadingFinalizarSos}
+                className="px-4 py-2 text-sm font-semibold rounded bg-green-600 hover:bg-green-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {loadingFinalizarSos ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  'Confirmar Finalização'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Visualizador de Disponibilidade Multiloja Modal */}
+      {selectedMultilojaProd && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 w-full max-w-md rounded-xl overflow-hidden shadow-2xl shadow-purple-950/20 animate-scaleUp">
+
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <Store className="text-[#6A0DAD]" size={18} />
                 <div>
-                  <h3 className="text-lg font-bold text-white">Finalizar Chamado</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Visão SUPER_ADMIN</p>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Disponibilidade Multiloja</h3>
+                  <p className="text-[10px] text-gray-500 font-mono mt-0.5">{selectedMultilojaProd.nome}</p>
                 </div>
               </div>
+              <button
+                onClick={() => setSelectedMultilojaProd(null)}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-              <p className="text-sm text-gray-350 mb-6 leading-relaxed">
-                Deseja marcar este chamado como <strong>Finalizado</strong>? Esta ação é irreversível e o chamado não será mais editável.
-              </p>
+            {/* Modal Content */}
+            <div className="p-5 space-y-4">
+              {loadingMultilojaStock ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-3">
+                  <Loader2 className="animate-spin text-[#6A0DAD]" size={24} />
+                  <span className="text-xs text-gray-500">Consultando estoque nas filiais...</span>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-gray-600 uppercase border-b border-[#222] pb-2 px-1">
+                    <span>Filial</span>
+                    <span>Qtd em Estoque</span>
+                  </div>
 
-              <div className="flex items-center justify-end gap-3">
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {multilojaStockData.map((item, idx) => {
+                      const temEstoque = item.quantidade > 0;
+                      const isLojaAtual = (item.filialId && String(item.filialId) === String(activeFilialId)) || item.filialNome === activeFilialNome;
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex items-center justify-between rounded-lg px-3 py-2.5 border ${isLojaAtual
+                            ? 'border-[#6A0DAD]/50 bg-[#6A0DAD]/10'
+                            : 'border-[#222222] bg-black/40'
+                            }`}
+                        >
+                          {/* Info da Filial */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-white">
+                              {item.filialNome}
+                            </span>
+                            <span className="text-[9px] bg-[#111] text-gray-400 px-1.5 py-0.5 rounded uppercase font-mono">
+                              {item.filialTipo === 'ESTOQUE' ? 'Depósito' : 'Loja'}
+                            </span>
+                            {isLojaAtual && (
+                              <span className="text-[10px] text-[#9b5de5] font-semibold">(Atual)</span>
+                            )}
+                          </div>
+
+                          {/* Quantidade e Ações */}
+                          <div className="flex items-center gap-3">
+                            <span className={`text-xs font-bold font-mono ${temEstoque ? 'text-green-400' : 'text-red-500'
+                              }`}>
+                              {item.quantidade} un.
+                            </span>
+
+                            <div className="w-36 flex justify-end items-center">
+                              {/* REGRA DE NEGÓCIO: Só exibe botão se tiver estoque E NÃO for a loja atual */}
+                              {!isLojaAtual && temEstoque && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReservarProdutoMultiloja(selectedMultilojaProd, item.filialId, item.filialNome, true)}
+                                  className="bg-[#6A0DAD] hover:bg-[#500885] text-white text-[10px] font-bold py-1.5 px-3 rounded-md flex items-center gap-1.5 shadow-md shadow-[#6A0DAD]/20 transition-all cursor-pointer whitespace-nowrap"
+                                >
+                                  <ShoppingBag size={13} />
+                                  Reservar &amp; Vender
+                                </button>
+                              )}
+
+                              {/* Se não tiver estoque, exibe apenas um aviso (sem botão) */}
+                              {!temEstoque && (
+                                <span className="text-gray-500 text-xs font-medium italic">Indisponível</span>
+                              )}
+
+                              {/* Se for a loja atual E tiver estoque */}
+                              {isLojaAtual && temEstoque && (
+                                <span className="text-[#9b5de5] text-xs font-semibold">Estoque Local</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="text-[10px] text-gray-400 bg-purple-950/20 border border-[#6A0DAD]/30 p-2.5 rounded-lg flex items-start gap-2 mt-2">
+                    <ShoppingBag size={14} className="text-[#6A0DAD] flex-shrink-0 mt-0.5" />
+                    <span>Ao clicar em <strong>Reservar &amp; Vender</strong>, a unidade é alocada para a sua loja de operação atual, <strong>adicionada ao seu carrinho de vendas</strong> e fica <strong>INDISPONÍVEL</strong> para vendas na filial de origem.</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end">
+              <button
+                onClick={() => setSelectedMultilojaProd(null)}
+                className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
+              >
+                Fechar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {isClienteModalOpen && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 w-full max-w-2xl rounded-xl overflow-hidden shadow-2xl animate-scaleUp">
+            <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                {editingCliente ? 'Editar Cliente' : 'Novo Cliente'}
+              </h3>
+              <button
+                onClick={() => setIsClienteModalOpen(false)}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveCliente}>
+              <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto custom-scrollbar">
+
+                {/* DADOS PESSOAIS */}
+                <div>
+                  <h4 className="text-[10px] font-bold text-[#6A0DAD] uppercase tracking-wider mb-3">Dados Pessoais</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Nome Completo
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteNome}
+                        onChange={(e) => setClienteNome(e.target.value)}
+                        placeholder="Nome do cliente..."
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                        CPF / CNPJ
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteCpfCnpj}
+                        onChange={(e) => setClienteCpfCnpj(e.target.value.replace(/\D/g, ''))}
+                        placeholder="Apenas números..."
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                        Telefone
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteTelefone}
+                        onChange={(e) => setClienteTelefone(e.target.value)}
+                        placeholder="Ex: (11) 99999-9999"
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        E-mail
+                      </label>
+                      <input
+                        type="email"
+                        value={clienteEmail}
+                        onChange={(e) => setClienteEmail(e.target.value)}
+                        placeholder="cliente@email.com"
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider font-mono">
+                          Data de Nascimento
+                        </label>
+                        {isMenorDeIdade && (
+                          <span className="text-[9px] font-bold bg-red-950/60 text-red-400 border border-red-800/40 px-2 py-0.5 rounded">
+                            Menor de Idade
+                          </span>
+                        )}
+                        {isDataFutura && (
+                          <span className="text-[9px] font-bold bg-red-950/60 text-red-500 border border-red-800 px-2 py-0.5 rounded animate-pulse">
+                            Data Futura Inválida
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={clienteDataNascimento}
+                        onChange={(e) => handleDataNascimentoChange(e.target.value)}
+                        placeholder="DD/MM/AAAA"
+                        maxLength="10"
+                        required
+                        className={`w-full bg-black border rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all ${isDataFutura ? 'border-red-650 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
+                          }`}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ENDEREÇO */}
+                <div className="border-t border-[#222222]/60 pt-4">
+                  <h4 className="text-[10px] font-bold text-[#6A0DAD] uppercase tracking-wider mb-3">Endereço</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                        <span>CEP</span>
+                        {cepLookupLoading && <Loader2 size={10} className="animate-spin text-[#6A0DAD]" />}
+                        {cepLookupFailed && <span className="text-[9px] text-red-500 font-bold lowercase italic">Não encontrado</span>}
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteCep}
+                        onChange={(e) => handleCepChange(e.target.value)}
+                        placeholder="00000-000"
+                        maxLength="9"
+                        required
+                        className={`w-full bg-black border rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all ${cepLookupFailed ? 'border-red-800 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
+                          }`}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Número
+                      </label>
+                      <input
+                        type="text"
+                        ref={clienteNumeroInputRef}
+                        value={clienteNumero}
+                        onChange={(e) => setClienteNumero(e.target.value)}
+                        placeholder="Ex: 123"
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                        UF (Estado)
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteUf}
+                        onChange={(e) => setClienteUf(e.target.value.toUpperCase())}
+                        placeholder="Ex: SP"
+                        maxLength="2"
+                        required
+                        readOnly={!!clienteUf && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                      />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Logradouro (Rua)
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteLogradouro}
+                        onChange={(e) => setClienteLogradouro(e.target.value)}
+                        placeholder="Rua, Avenida, Travessa..."
+                        required
+                        readOnly={!!clienteLogradouro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Bairro
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteBairro}
+                        onChange={(e) => setClienteBairro(e.target.value)}
+                        placeholder="Bairro..."
+                        required
+                        readOnly={!!clienteBairro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                      />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Cidade
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteCidade}
+                        onChange={(e) => setClienteCidade(e.target.value)}
+                        placeholder="Cidade..."
+                        required
+                        readOnly={!!clienteCidade && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Complemento
+                      </label>
+                      <input
+                        type="text"
+                        value={clienteComplemento}
+                        onChange={(e) => setClienteComplemento(e.target.value)}
+                        placeholder="Ex: Apto 4"
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+              <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end gap-3">
                 <button
-                  onClick={() => setConfirmingSosId(null)}
-                  disabled={loadingFinalizarSos}
-                  className="px-4 py-2 text-sm font-semibold rounded bg-gray-900 border border-gray-800 text-gray-400 hover:text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  type="button"
+                  onClick={() => setIsClienteModalOpen(false)}
+                  className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
                 >
                   Cancelar
                 </button>
                 <button
-                  onClick={() => handleFinalizarChamado(confirmingSosId)}
-                  disabled={loadingFinalizarSos}
-                  className="px-4 py-2 text-sm font-semibold rounded bg-green-600 hover:bg-green-700 text-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                  type="submit"
+                  disabled={isDataFutura}
+                  className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-neutral-800 disabled:text-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
                 >
-                  {loadingFinalizarSos ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      Salvando...
-                    </>
-                  ) : (
-                    'Confirmar Finalização'
-                  )}
+                  Salvar
                 </button>
               </div>
-            </div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Visualizador de Disponibilidade Multiloja Modal */}
-        {selectedMultilojaProd && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 w-full max-w-md rounded-xl overflow-hidden shadow-2xl shadow-purple-950/20 animate-scaleUp">
-
-              {/* Modal Header */}
-              <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
-                <div className="flex items-center gap-2.5">
-                  <Store className="text-[#6A0DAD]" size={18} />
-                  <div>
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Disponibilidade Multiloja</h3>
-                    <p className="text-[10px] text-gray-500 font-mono mt-0.5">{selectedMultilojaProd.nome}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setSelectedMultilojaProd(null)}
-                  className="text-gray-500 hover:text-white transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* Modal Content */}
+      {/* MODAL DE EDIÇÃO DE VENDA CONSOLIDADA COM AUDITORIA */}
+      {isVendaEditModalOpen && editingVenda && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 w-full max-w-md rounded-xl overflow-hidden shadow-2xl animate-scaleUp">
+            <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Edit2 size={16} className="text-[#6A0DAD]" />
+                Corrigir Venda Concluída
+              </h3>
+              <button
+                onClick={() => { setIsVendaEditModalOpen(false); setEditingVenda(null); }}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveVendaEdit}>
               <div className="p-5 space-y-4">
-                {loadingMultilojaStock ? (
-                  <div className="flex flex-col items-center justify-center py-10 gap-3">
-                    <Loader2 className="animate-spin text-[#6A0DAD]" size={24} />
-                    <span className="text-xs text-gray-500">Consultando estoque nas filiais...</span>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-[10px] font-bold text-gray-600 uppercase border-b border-[#222] pb-2 px-1">
-                      <span>Filial</span>
-                      <span>Qtd em Estoque</span>
-                    </div>
-
-                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                      {multilojaStockData.map((item, idx) => {
-                        const temEstoque = item.quantidade > 0;
-                        const isLojaAtual = (item.filialId && String(item.filialId) === String(activeFilialId)) || item.filialNome === activeFilialNome;
-
-                        return (
-                          <div
-                            key={idx}
-                            className={`flex items-center justify-between rounded-lg px-3 py-2.5 border ${isLojaAtual
-                              ? 'border-[#6A0DAD]/50 bg-[#6A0DAD]/10'
-                              : 'border-[#222222] bg-black/40'
-                              }`}
-                          >
-                            {/* Info da Filial */}
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-white">
-                                {item.filialNome}
-                              </span>
-                              <span className="text-[9px] bg-[#111] text-gray-400 px-1.5 py-0.5 rounded uppercase font-mono">
-                                {item.filialTipo === 'ESTOQUE' ? 'Depósito' : 'Loja'}
-                              </span>
-                              {isLojaAtual && (
-                                <span className="text-[10px] text-[#9b5de5] font-semibold">(Atual)</span>
-                              )}
-                            </div>
-
-                            {/* Quantidade e Ações */}
-                            <div className="flex items-center gap-3">
-                              <span className={`text-xs font-bold font-mono ${temEstoque ? 'text-green-400' : 'text-red-500'
-                                }`}>
-                                {item.quantidade} un.
-                              </span>
-
-                              <div className="w-36 flex justify-end items-center">
-                                {/* REGRA DE NEGÓCIO: Só exibe botão se tiver estoque E NÃO for a loja atual */}
-                                {!isLojaAtual && temEstoque && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleReservarProdutoMultiloja(selectedMultilojaProd, item.filialId, item.filialNome, true)}
-                                    className="bg-[#6A0DAD] hover:bg-[#500885] text-white text-[10px] font-bold py-1.5 px-3 rounded-md flex items-center gap-1.5 shadow-md shadow-[#6A0DAD]/20 transition-all cursor-pointer whitespace-nowrap"
-                                  >
-                                    <ShoppingBag size={13} />
-                                    Reservar &amp; Vender
-                                  </button>
-                                )}
-
-                                {/* Se não tiver estoque, exibe apenas um aviso (sem botão) */}
-                                {!temEstoque && (
-                                  <span className="text-gray-500 text-xs font-medium italic">Indisponível</span>
-                                )}
-
-                                {/* Se for a loja atual E tiver estoque */}
-                                {isLojaAtual && temEstoque && (
-                                  <span className="text-[#9b5de5] text-xs font-semibold">Estoque Local</span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="text-[10px] text-gray-400 bg-purple-950/20 border border-[#6A0DAD]/30 p-2.5 rounded-lg flex items-start gap-2 mt-2">
-                      <ShoppingBag size={14} className="text-[#6A0DAD] flex-shrink-0 mt-0.5" />
-                      <span>Ao clicar em <strong>Reservar &amp; Vender</strong>, a unidade é alocada para a sua loja de operação atual, <strong>adicionada ao seu carrinho de vendas</strong> e fica <strong>INDISPONÍVEL</strong> para vendas na filial de origem.</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Modal Footer */}
-              <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end">
-                <button
-                  onClick={() => setSelectedMultilojaProd(null)}
-                  className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
-                >
-                  Fechar
-                </button>
-              </div>
-
-            </div>
-          </div>
-        )}
-
-        {isClienteModalOpen && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 w-full max-w-2xl rounded-xl overflow-hidden shadow-2xl animate-scaleUp">
-              <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  {editingCliente ? 'Editar Cliente' : 'Novo Cliente'}
-                </h3>
-                <button
-                  onClick={() => setIsClienteModalOpen(false)}
-                  className="text-gray-500 hover:text-white transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-              <form onSubmit={handleSaveCliente}>
-                <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto custom-scrollbar">
-
-                  {/* DADOS PESSOAIS */}
-                  <div>
-                    <h4 className="text-[10px] font-bold text-[#6A0DAD] uppercase tracking-wider mb-3">Dados Pessoais</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="md:col-span-2">
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Nome Completo
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteNome}
-                          onChange={(e) => setClienteNome(e.target.value)}
-                          placeholder="Nome do cliente..."
-                          required
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                          CPF / CNPJ
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteCpfCnpj}
-                          onChange={(e) => setClienteCpfCnpj(e.target.value.replace(/\D/g, ''))}
-                          placeholder="Apenas números..."
-                          required
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                          Telefone
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteTelefone}
-                          onChange={(e) => setClienteTelefone(e.target.value)}
-                          placeholder="Ex: (11) 99999-9999"
-                          required
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          E-mail
-                        </label>
-                        <input
-                          type="email"
-                          value={clienteEmail}
-                          onChange={(e) => setClienteEmail(e.target.value)}
-                          placeholder="cliente@email.com"
-                          required
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-1.5">
-                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider font-mono">
-                            Data de Nascimento
-                          </label>
-                          {isMenorDeIdade && (
-                            <span className="text-[9px] font-bold bg-red-950/60 text-red-400 border border-red-800/40 px-2 py-0.5 rounded">
-                              Menor de Idade
-                            </span>
-                          )}
-                          {isDataFutura && (
-                            <span className="text-[9px] font-bold bg-red-950/60 text-red-500 border border-red-800 px-2 py-0.5 rounded animate-pulse">
-                              Data Futura Inválida
-                            </span>
-                          )}
-                        </div>
-                        <input
-                          type="text"
-                          value={clienteDataNascimento}
-                          onChange={(e) => handleDataNascimentoChange(e.target.value)}
-                          placeholder="DD/MM/AAAA"
-                          maxLength="10"
-                          required
-                          className={`w-full bg-black border rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all ${isDataFutura ? 'border-red-650 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
-                            }`}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* ENDEREÇO */}
-                  <div className="border-t border-[#222222]/60 pt-4">
-                    <h4 className="text-[10px] font-bold text-[#6A0DAD] uppercase tracking-wider mb-3">Endereço</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                          <span>CEP</span>
-                          {cepLookupLoading && <Loader2 size={10} className="animate-spin text-[#6A0DAD]" />}
-                          {cepLookupFailed && <span className="text-[9px] text-red-500 font-bold lowercase italic">Não encontrado</span>}
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteCep}
-                          onChange={(e) => handleCepChange(e.target.value)}
-                          placeholder="00000-000"
-                          maxLength="9"
-                          required
-                          className={`w-full bg-black border rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all ${cepLookupFailed ? 'border-red-800 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
-                            }`}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Número
-                        </label>
-                        <input
-                          type="text"
-                          ref={clienteNumeroInputRef}
-                          value={clienteNumero}
-                          onChange={(e) => setClienteNumero(e.target.value)}
-                          placeholder="Ex: 123"
-                          required
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                          UF (Estado)
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteUf}
-                          onChange={(e) => setClienteUf(e.target.value.toUpperCase())}
-                          placeholder="Ex: SP"
-                          maxLength="2"
-                          required
-                          readOnly={!!clienteUf && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
-                        />
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Logradouro (Rua)
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteLogradouro}
-                          onChange={(e) => setClienteLogradouro(e.target.value)}
-                          placeholder="Rua, Avenida, Travessa..."
-                          required
-                          readOnly={!!clienteLogradouro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Bairro
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteBairro}
-                          onChange={(e) => setClienteBairro(e.target.value)}
-                          placeholder="Bairro..."
-                          required
-                          readOnly={!!clienteBairro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
-                        />
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Cidade
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteCidade}
-                          onChange={(e) => setClienteCidade(e.target.value)}
-                          placeholder="Cidade..."
-                          required
-                          readOnly={!!clienteCidade && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Complemento
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteComplemento}
-                          onChange={(e) => setClienteComplemento(e.target.value)}
-                          placeholder="Ex: Apto 4"
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
+                <div className="bg-purple-950/10 border border-purple-900/20 p-3 rounded-lg text-xs">
+                  <p className="text-gray-400 font-semibold mb-1">Produto original:</p>
+                  <p className="text-white font-bold">{editingVenda.produtos?.nome || 'Produto Removido'}</p>
+                  <p className="text-gray-550 font-mono mt-1">ID da Venda: {editingVenda.id}</p>
                 </div>
-                <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsClienteModalOpen(false)}
-                    className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isDataFutura}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-neutral-800 disabled:text-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
-                  >
-                    Salvar
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
 
-        {/* MODAL DE EDIÇÃO DE VENDA CONSOLIDADA COM AUDITORIA */}
-        {isVendaEditModalOpen && editingVenda && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 w-full max-w-md rounded-xl overflow-hidden shadow-2xl animate-scaleUp">
-              <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                  <Edit2 size={16} className="text-[#6A0DAD]" />
-                  Corrigir Venda Concluída
-                </h3>
-                <button
-                  onClick={() => { setIsVendaEditModalOpen(false); setEditingVenda(null); }}
-                  className="text-gray-500 hover:text-white transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-              <form onSubmit={handleSaveVendaEdit}>
-                <div className="p-5 space-y-4">
-                  <div className="bg-purple-950/10 border border-purple-900/20 p-3 rounded-lg text-xs">
-                    <p className="text-gray-400 font-semibold mb-1">Produto original:</p>
-                    <p className="text-white font-bold">{editingVenda.produtos?.nome || 'Produto Removido'}</p>
-                    <p className="text-gray-550 font-mono mt-1">ID da Venda: {editingVenda.id}</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        Quantidade
-                      </label>
-                      <input
-                        type="number"
-                        value={vendaNewQty}
-                        onChange={(e) => setVendaNewQty(e.target.value)}
-                        required
-                        min="1"
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        Valor Total (R$)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={vendaNewValor}
-                        onChange={(e) => setVendaNewValor(e.target.value)}
-                        required
-                        min="0"
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
-                      />
-                    </div>
-                  </div>
-
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                      Comissão do Vendedor (R$)
+                      Quantidade
+                    </label>
+                    <input
+                      type="number"
+                      value={vendaNewQty}
+                      onChange={(e) => setVendaNewQty(e.target.value)}
+                      required
+                      min="1"
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Valor Total (R$)
                     </label>
                     <input
                       type="number"
                       step="0.01"
-                      value={vendaNewComissao}
-                      onChange={(e) => setVendaNewComissao(e.target.value)}
+                      value={vendaNewValor}
+                      onChange={(e) => setVendaNewValor(e.target.value)}
                       required
                       min="0"
                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
                     />
                   </div>
-
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                      Justificativa da Alteração <span className="text-red-500">*</span>
-                    </label>
-                    <textarea
-                      value={vendaJustificativa}
-                      onChange={(e) => setVendaJustificativa(e.target.value)}
-                      placeholder="Descreva detalhadamente o motivo desta correção para auditoria..."
-                      required
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white p-3 text-xs outline-none h-20 resize-none transition-all"
-                    />
-                  </div>
                 </div>
 
-                <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => { setIsVendaEditModalOpen(false); setEditingVenda(null); }}
-                    className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!vendaJustificativa.trim()}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
-                  >
-                    Salvar Correção
-                  </button>
+                <div>
+                  <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Comissão do Vendedor (R$)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={vendaNewComissao}
+                    onChange={(e) => setVendaNewComissao(e.target.value)}
+                    required
+                    min="0"
+                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
+                  />
                 </div>
-              </form>
-            </div>
-          </div>
-        )}
 
-        {/* MODAL DE CADASTRO DE PRIMEIRA FILIAL */}
-        {isCreateFilialModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-xl p-6 max-w-md w-full space-y-6 shadow-2xl animate-fadeIn">
-              <div className="flex items-center justify-between border-b border-[#222] pb-4">
-                <div className="flex items-center gap-2">
-                  <Store size={20} className="text-[#6A0DAD]" />
-                  <h3 className="text-lg font-bold text-white">Cadastrar Filial / Loja</h3>
+                <div>
+                  <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Justificativa da Alteração <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={vendaJustificativa}
+                    onChange={(e) => setVendaJustificativa(e.target.value)}
+                    placeholder="Descreva detalhadamente o motivo desta correção para auditoria..."
+                    required
+                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white p-3 text-xs outline-none h-20 resize-none transition-all"
+                  />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateFilialModalOpen(false)}
-                  className="text-gray-500 hover:text-white transition-colors"
-                >
-                  <X size={18} />
-                </button>
               </div>
 
-              <form onSubmit={handleCreateFirstFilial} className="space-y-4">
+              <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setIsVendaEditModalOpen(false); setEditingVenda(null); }}
+                  className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!vendaJustificativa.trim()}
+                  className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
+                >
+                  Salvar Correção
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CADASTRO DE PRIMEIRA FILIAL */}
+      {isCreateFilialModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-xl p-6 max-w-md w-full space-y-6 shadow-2xl animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-[#222] pb-4">
+              <div className="flex items-center gap-2">
+                <Store size={20} className="text-[#6A0DAD]" />
+                <h3 className="text-lg font-bold text-white">Cadastrar Filial / Loja</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCreateFilialModalOpen(false)}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateFirstFilial} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                  Nome da Filial / Ponto de Venda <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newFilialNome}
+                  onChange={(e) => setNewFilialNome(e.target.value)}
+                  placeholder="Ex: Loja Centro, Filial Norte, Matriz..."
+                  className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none transition-all"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                  Tipo de Unidade
+                </label>
+                <select
+                  value={newFilialTipo}
+                  onChange={(e) => setNewFilialTipo(e.target.value)}
+                  className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none transition-all"
+                >
+                  <option value="LOJA">Ponto de Venda / Loja (Vendas e PDV)</option>
+                  <option value="ESTOQUE">Depósito / Estoque Central</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                    Nome da Filial / Ponto de Venda <span className="text-red-500">*</span>
+                    CNPJ (Opcional)
                   </label>
                   <input
                     type="text"
-                    value={newFilialNome}
-                    onChange={(e) => setNewFilialNome(e.target.value)}
-                    placeholder="Ex: Loja Centro, Filial Norte, Matriz..."
-                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none transition-all"
-                    required
+                    value={newFilialCnpj}
+                    onChange={(e) => setNewFilialCnpj(e.target.value)}
+                    placeholder="00.000.000/0001-00"
+                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none font-mono transition-all"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                    Tipo de Unidade
+                    Cidade / Endereço (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={newFilialCidade}
+                    onChange={(e) => setNewFilialCidade(e.target.value)}
+                    placeholder="Ex: São Paulo - SP"
+                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-[#222]">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateFilialModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingNewFilial || !newFilialNome.trim()}
+                  className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 text-white font-bold px-5 py-2 rounded-lg text-xs flex items-center gap-2 transition-all shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
+                >
+                  {isSavingNewFilial ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Cadastrando...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={14} />
+                      Cadastrar e Liberar Contexto
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CADASTRO DE NOVO COLABORADOR / FUNCIONÁRIO */}
+      {isAddCollaboratorModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-xl p-6 max-w-lg w-full space-y-6 shadow-2xl animate-scaleUp">
+            <div className="flex items-center justify-between border-b border-[#222] pb-4">
+              <div className="flex items-center gap-2.5">
+                <UserPlus size={20} className="text-[#6A0DAD]" />
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Cadastrar Novo Colaborador</h3>
+                  <p className="text-xs text-gray-500">Crie o acesso do usuário e vincule o cargo na sua empresa.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddCollaboratorModalOpen(false)}
+                className="text-gray-500 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddColaborador} className="space-y-4 font-sans">
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                  Nome Completo <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newColabNome}
+                  onChange={(e) => setNewColabNome(e.target.value)}
+                  placeholder="Ex: João da Silva"
+                  className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2.5 text-sm outline-none transition-all"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                  E-mail de Acesso <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={newColabEmail}
+                  onChange={(e) => setNewColabEmail(e.target.value)}
+                  placeholder="exemplo@suaempresa.com"
+                  className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2.5 text-sm outline-none transition-all font-mono"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                  Senha Inicial Provisória <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newColabSenha}
+                  onChange={(e) => setNewColabSenha(e.target.value)}
+                  placeholder="Senha provisória (min. 6 caracteres)"
+                  className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2.5 text-sm outline-none transition-all font-mono"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Cargo / Função <span className="text-red-500">*</span>
                   </label>
                   <select
-                    value={newFilialTipo}
-                    onChange={(e) => setNewFilialTipo(e.target.value)}
-                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none transition-all"
+                    value={newColabRole}
+                    onChange={(e) => setNewColabRole(e.target.value)}
+                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-xs outline-none transition-all cursor-pointer font-semibold"
+                    required
                   >
-                    <option value="LOJA">Ponto de Venda / Loja (Vendas e PDV)</option>
-                    <option value="ESTOQUE">Depósito / Estoque Central</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                      CNPJ (Opcional)
-                    </label>
-                    <input
-                      type="text"
-                      value={newFilialCnpj}
-                      onChange={(e) => setNewFilialCnpj(e.target.value)}
-                      placeholder="00.000.000/0001-00"
-                      className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none font-mono transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                      Cidade / Endereço (Opcional)
-                    </label>
-                    <input
-                      type="text"
-                      value={newFilialCidade}
-                      onChange={(e) => setNewFilialCidade(e.target.value)}
-                      placeholder="Ex: São Paulo - SP"
-                      className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2 text-sm outline-none transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-2 border-t border-[#222]">
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateFilialModalOpen(false)}
-                    className="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingNewFilial || !newFilialNome.trim()}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 text-white font-bold px-5 py-2 rounded-lg text-xs flex items-center gap-2 transition-all shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
-                  >
-                    {isSavingNewFilial ? (
+                    <option value="TRAINEE">TRAINEE (Vendedor Trainee)</option>
+                    <option value="VENDEDOR">VENDEDOR (Operacional PDV)</option>
+                    <option value="ESTOQUISTA">ESTOQUISTA (Estoque)</option>
+                    {profile?.role !== 'GERENTE' && (
                       <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Cadastrando...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={14} />
-                        Cadastrar e Liberar Contexto
+                        <option value="GERENTE">GERENTE (Gerente de Loja)</option>
+                        <option value="ADMIN">ADMINISTRADOR (Acesso Total)</option>
+                        {['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO'].includes(profile?.role) && (
+                          <option value="DONO">DONO (Proprietário / CEO)</option>
+                        )}
                       </>
                     )}
-                  </button>
+                  </select>
+                  {profile?.role === 'GERENTE' && (
+                    <span className="text-[10px] text-purple-400 mt-1.5 block font-medium leading-tight">
+                      🔒 Trava: O perfil Gerente pode cadastrar apenas Vendedores e Estoquistas.
+                    </span>
+                  )}
                 </div>
-              </form>
-            </div>
-          </div>
-        )}
 
-        {/* MODAL DE CADASTRO DE NOVO COLABORADOR / FUNCIONÁRIO */}
-        {isAddCollaboratorModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-xl p-6 max-w-lg w-full space-y-6 shadow-2xl animate-scaleUp">
-              <div className="flex items-center justify-between border-b border-[#222] pb-4">
-                <div className="flex items-center gap-2.5">
-                  <UserPlus size={20} className="text-[#6A0DAD]" />
-                  <div>
-                    <h3 className="text-base font-extrabold text-white">Cadastrar Novo Colaborador</h3>
-                    <p className="text-xs text-gray-500">Crie o acesso do usuário e vincule o cargo na sua empresa.</p>
-                  </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                    Filial de Atuação
+                  </label>
+                  {profile?.role === 'GERENTE' ? (
+                    <div className="bg-[#111111] border border-[#222] p-2.5 rounded-md text-xs font-bold text-gray-300 flex items-center justify-between shadow-inner">
+                      <span className="truncate">
+                        {filiais.find(f => f.id === (profile?.filial_id || activeFilialId))?.nome || 'Filial Atual'}
+                      </span>
+                      <Lock size={12} className="text-purple-400 shrink-0 ml-1" />
+                    </div>
+                  ) : (
+                    <select
+                      value={newColabFilialId}
+                      onChange={(e) => setNewColabFilialId(e.target.value)}
+                      className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-xs outline-none transition-all cursor-pointer font-semibold"
+                    >
+                      <option value="">[ Todas as Filiais / Global ]</option>
+                      {filiais.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.nome}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#222]">
                 <button
                   type="button"
                   onClick={() => setIsAddCollaboratorModalOpen(false)}
-                  className="text-gray-500 hover:text-white transition-colors"
+                  className="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white transition-colors"
                 >
-                  <X size={18} />
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingColaborador || !newColabNome.trim() || !newColabEmail.trim() || !newColabSenha.trim()}
+                  className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 text-white font-bold px-5 py-2.5 rounded-lg text-xs flex items-center gap-2 transition-all shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
+                >
+                  {isSavingColaborador ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      Cadastrando...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={14} />
+                      Salvar Colaborador
+                    </>
+                  )}
                 </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
 
-              <form onSubmit={handleAddColaborador} className="space-y-4 font-sans">
+      {/* MODAL DE EDIÇÃO DE INFORMAÇÕES DO COLABORADOR */}
+      {editingColaborador && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 w-full max-w-lg rounded-xl overflow-hidden shadow-2xl shadow-purple-950/20 animate-scaleUp font-sans">
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <Edit2 className="text-[#6A0DAD]" size={18} />
                 <div>
-                  <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Editar Informações do Colaborador</h3>
+                  <p className="text-[10px] text-gray-400 mt-0.5">{editingColaborador.nome}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingColaborador(null)}
+                className="text-gray-500 hover:text-white transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Form Content */}
+            <form onSubmit={handleSaveEditColaborador}>
+              <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+
+                <div>
+                  <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
                     Nome Completo <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
-                    value={newColabNome}
-                    onChange={(e) => setNewColabNome(e.target.value)}
-                    placeholder="Ex: João da Silva"
-                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2.5 text-sm outline-none transition-all"
+                    value={editColabNome}
+                    onChange={(e) => setEditColabNome(e.target.value)}
                     required
+                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                    placeholder="Ex: João Silva"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                    E-mail de Acesso <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={newColabEmail}
-                    onChange={(e) => setNewColabEmail(e.target.value)}
-                    placeholder="exemplo@suaempresa.com"
-                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2.5 text-sm outline-none transition-all font-mono"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                    Senha Inicial Provisória <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newColabSenha}
-                    onChange={(e) => setNewColabSenha(e.target.value)}
-                    placeholder="Senha provisória (min. 6 caracteres)"
-                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3.5 py-2.5 text-sm outline-none transition-all font-mono"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                      Cargo / Função <span className="text-red-500">*</span>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      E-mail / Login de Acesso <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={editColabEmail}
+                      onChange={(e) => setEditColabEmail(e.target.value)}
+                      required
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                      placeholder="colaborador@email.com"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Telefone / WhatsApp
+                    </label>
+                    <input
+                      type="text"
+                      value={editColabTelefone}
+                      onChange={(e) => setEditColabTelefone(e.target.value)}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                      placeholder="(11) 99999-9999"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      CPF
+                    </label>
+                    <input
+                      type="text"
+                      value={editColabCpf}
+                      onChange={(e) => setEditColabCpf(e.target.value)}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                      placeholder="000.000.000-00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Redefinir Senha (Opcional)
+                    </label>
+                    <input
+                      type="password"
+                      value={editColabSenha}
+                      onChange={(e) => setEditColabSenha(e.target.value)}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                      placeholder="Nova senha (min. 6 dígitos)"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Cargo / Função
                     </label>
                     <select
-                      value={newColabRole}
-                      onChange={(e) => setNewColabRole(e.target.value)}
-                      className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-xs outline-none transition-all cursor-pointer font-semibold"
-                      required
+                      value={editColabRole}
+                      onChange={(e) => setEditColabRole(e.target.value)}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none cursor-pointer transition-all font-semibold"
                     >
                       <option value="TRAINEE">TRAINEE (Vendedor Trainee)</option>
                       <option value="VENDEDOR">VENDEDOR (Operacional PDV)</option>
@@ -20839,738 +21028,551 @@ export default function Dashboard({ session, profileDataProps }) {
                         </>
                       )}
                     </select>
-                    {profile?.role === 'GERENTE' && (
-                      <span className="text-[10px] text-purple-400 mt-1.5 block font-medium leading-tight">
-                        🔒 Trava: O perfil Gerente pode cadastrar apenas Vendedores e Estoquistas.
-                      </span>
-                    )}
                   </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                      Filial de Atuação
-                    </label>
-                    {profile?.role === 'GERENTE' ? (
-                      <div className="bg-[#111111] border border-[#222] p-2.5 rounded-md text-xs font-bold text-gray-300 flex items-center justify-between shadow-inner">
-                        <span className="truncate">
-                          {filiais.find(f => f.id === (profile?.filial_id || activeFilialId))?.nome || 'Filial Atual'}
-                        </span>
-                        <Lock size={12} className="text-purple-400 shrink-0 ml-1" />
-                      </div>
-                    ) : (
-                      <select
-                        value={newColabFilialId}
-                        onChange={(e) => setNewColabFilialId(e.target.value)}
-                        className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-xs outline-none transition-all cursor-pointer font-semibold"
-                      >
-                        <option value="">[ Todas as Filiais / Global ]</option>
-                        {filiais.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.nome}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#222]">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddCollaboratorModalOpen(false)}
-                    className="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingColaborador || !newColabNome.trim() || !newColabEmail.trim() || !newColabSenha.trim()}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 text-white font-bold px-5 py-2.5 rounded-lg text-xs flex items-center gap-2 transition-all shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
-                  >
-                    {isSavingColaborador ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" />
-                        Cadastrando...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={14} />
-                        Salvar Colaborador
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL DE EDIÇÃO DE INFORMAÇÕES DO COLABORADOR */}
-        {editingColaborador && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 w-full max-w-lg rounded-xl overflow-hidden shadow-2xl shadow-purple-950/20 animate-scaleUp font-sans">
-
-              {/* Header */}
-              <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
-                <div className="flex items-center gap-2.5">
-                  <Edit2 className="text-[#6A0DAD]" size={18} />
-                  <div>
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Editar Informações do Colaborador</h3>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{editingColaborador.nome}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setEditingColaborador(null)}
-                  className="text-gray-500 hover:text-white transition-colors cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* Form Content */}
-              <form onSubmit={handleSaveEditColaborador}>
-                <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
 
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                      Nome Completo <span className="text-red-500">*</span>
+                      Filial Alocada
                     </label>
-                    <input
-                      type="text"
-                      value={editColabNome}
-                      onChange={(e) => setEditColabNome(e.target.value)}
-                      required
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                      placeholder="Ex: João Silva"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        E-mail / Login de Acesso <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="email"
-                        value={editColabEmail}
-                        onChange={(e) => setEditColabEmail(e.target.value)}
-                        required
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
-                        placeholder="colaborador@email.com"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        Telefone / WhatsApp
-                      </label>
-                      <input
-                        type="text"
-                        value={editColabTelefone}
-                        onChange={(e) => setEditColabTelefone(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
-                        placeholder="(11) 99999-9999"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        CPF
-                      </label>
-                      <input
-                        type="text"
-                        value={editColabCpf}
-                        onChange={(e) => setEditColabCpf(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
-                        placeholder="000.000.000-00"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        Redefinir Senha (Opcional)
-                      </label>
-                      <input
-                        type="password"
-                        value={editColabSenha}
-                        onChange={(e) => setEditColabSenha(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
-                        placeholder="Nova senha (min. 6 dígitos)"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        Cargo / Função
-                      </label>
-                      <select
-                        value={editColabRole}
-                        onChange={(e) => setEditColabRole(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none cursor-pointer transition-all font-semibold"
-                      >
-                        <option value="TRAINEE">TRAINEE (Vendedor Trainee)</option>
-                        <option value="VENDEDOR">VENDEDOR (Operacional PDV)</option>
-                        <option value="ESTOQUISTA">ESTOQUISTA (Estoque)</option>
-                        {profile?.role !== 'GERENTE' && (
-                          <>
-                            <option value="GERENTE">GERENTE (Gerente de Loja)</option>
-                            <option value="ADMIN">ADMINISTRADOR (Acesso Total)</option>
-                            {['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO'].includes(profile?.role) && (
-                              <option value="DONO">DONO (Proprietário / CEO)</option>
-                            )}
-                          </>
-                        )}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        Filial Alocada
-                      </label>
-                      <select
-                        value={editColabFilialId}
-                        onChange={(e) => setEditColabFilialId(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none cursor-pointer transition-all font-semibold"
-                      >
-                        <option value="">[ Todas as Filiais / Global ]</option>
-                        {filiais.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.nome}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* Footer */}
-                <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setEditingColaborador(null)}
-                    className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingEditColaborador}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-5 py-2 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-[#6A0DAD]/20"
-                  >
-                    {isSavingEditColaborador ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    {isSavingEditColaborador ? 'Salvando...' : 'Salvar Alterações'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL DE CONFIRMAÇÃO DE REMOÇÃO / INATIVAÇÃO DE COLABORADOR */}
-        {colaboradorToDelete && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-red-900/40 w-full max-w-md rounded-xl overflow-hidden shadow-2xl shadow-red-950/20 animate-scaleUp font-sans">
-
-              {/* Header */}
-              <div className="bg-gradient-to-r from-[#1A0000] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 bg-red-950/40 border border-red-800/40 rounded-lg text-red-400">
-                    <Trash2 size={18} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Confirmar Remoção / Inativação</h3>
-                    <p className="text-[11px] text-gray-400 mt-0.5">Gestão de Equipe &amp; Colaboradores</p>
+                    <select
+                      value={editColabFilialId}
+                      onChange={(e) => setEditColabFilialId(e.target.value)}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none cursor-pointer transition-all font-semibold"
+                    >
+                      <option value="">[ Todas as Filiais / Global ]</option>
+                      {filiais.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.nome}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => !isDeletingColaborador && setColaboradorToDelete(null)}
-                  className="text-gray-500 hover:text-white transition-colors cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
-              </div>
 
-              {/* Body */}
-              <div className="p-6 space-y-4">
-                <p className="text-sm text-gray-200">
-                  Deseja realmente remover/inativar o colaborador <span className="font-bold text-purple-300">{colaboradorToDelete.nome}</span>?
-                </p>
-
-                <div className="text-xs text-gray-400 bg-red-950/20 border border-red-900/30 p-3 rounded-lg leading-relaxed">
-                  <strong className="text-red-400 font-semibold">Aviso de Segurança:</strong> Caso este colaborador possua históricos de vendas ou movimentações associadas, seu status será alterado para <span className="text-amber-300 font-bold">INATIVO</span> para preservar a integridade dos relatórios e auditorias.
-                </div>
               </div>
 
               {/* Footer */}
-              <div className="p-4 bg-[#050505] border-t border-[#222222] flex items-center justify-end gap-3">
+              <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => setColaboradorToDelete(null)}
-                  disabled={isDeletingColaborador}
-                  className="px-4 py-2 text-xs font-semibold text-gray-300 hover:text-white bg-[#111111] hover:bg-[#1A1A1A] border border-[#333333] rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                  onClick={() => setEditingColaborador(null)}
+                  className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="button"
-                  onClick={confirmDeleteColaborador}
-                  disabled={isDeletingColaborador}
-                  className="px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-red-700 to-red-900 hover:from-red-600 hover:to-red-800 border border-red-600/50 rounded-lg shadow-lg shadow-red-950/40 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  type="submit"
+                  disabled={isSavingEditColaborador}
+                  className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-5 py-2 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-[#6A0DAD]/20"
                 >
-                  {isDeletingColaborador ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>Removendo...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 size={14} />
-                      <span>Sim, Remover / Inativar</span>
-                    </>
-                  )}
+                  {isSavingEditColaborador ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {isSavingEditColaborador ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </div>
-
-            </div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* MODAL DE AJUSTE MANUAL DE ESTOQUE */}
-        {isAjustarEstoqueModalOpen && ajusteProduto && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 rounded-xl p-6 w-full max-w-md space-y-6">
-              <div className="flex justify-between items-start border-b border-[#222222] pb-3">
-                <div>
-                  <h4 className="text-base font-extrabold text-white flex items-center gap-2 font-sans">
-                    <Database size={18} className="text-[#6A0DAD]" />
-                    Ajustar Estoque Manualmente
-                  </h4>
-                  <p className="text-xs text-gray-500 mt-1">{ajusteProduto.nome}</p>
+      {/* MODAL DE CONFIRMAÇÃO DE REMOÇÃO / INATIVAÇÃO DE COLABORADOR */}
+      {colaboradorToDelete && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0A0A0A] border border-red-900/40 w-full max-w-md rounded-xl overflow-hidden shadow-2xl shadow-red-950/20 animate-scaleUp font-sans">
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-[#1A0000] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-red-950/40 border border-red-800/40 rounded-lg text-red-400">
+                  <Trash2 size={18} />
                 </div>
-                <button
-                  onClick={() => {
-                    setIsAjustarEstoqueModalOpen(false);
-                    setAjusteProduto(null);
-                  }}
-                  className="text-gray-400 hover:text-white transition-colors"
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Confirmar Remoção / Inativação</h3>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Gestão de Equipe &amp; Colaboradores</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isDeletingColaborador && setColaboradorToDelete(null)}
+                className="text-gray-500 hover:text-white transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-200">
+                Deseja realmente remover/inativar o colaborador <span className="font-bold text-purple-300">{colaboradorToDelete.nome}</span>?
+              </p>
+
+              <div className="text-xs text-gray-400 bg-red-950/20 border border-red-900/30 p-3 rounded-lg leading-relaxed">
+                <strong className="text-red-400 font-semibold">Aviso de Segurança:</strong> Caso este colaborador possua históricos de vendas ou movimentações associadas, seu status será alterado para <span className="text-amber-300 font-bold">INATIVO</span> para preservar a integridade dos relatórios e auditorias.
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-[#050505] border-t border-[#222222] flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setColaboradorToDelete(null)}
+                disabled={isDeletingColaborador}
+                className="px-4 py-2 text-xs font-semibold text-gray-300 hover:text-white bg-[#111111] hover:bg-[#1A1A1A] border border-[#333333] rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteColaborador}
+                disabled={isDeletingColaborador}
+                className="px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-red-700 to-red-900 hover:from-red-600 hover:to-red-800 border border-red-600/50 rounded-lg shadow-lg shadow-red-950/40 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingColaborador ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Removendo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    <span>Sim, Remover / Inativar</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE AJUSTE MANUAL DE ESTOQUE */}
+      {isAjustarEstoqueModalOpen && ajusteProduto && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 rounded-xl p-6 w-full max-w-md space-y-6">
+            <div className="flex justify-between items-start border-b border-[#222222] pb-3">
+              <div>
+                <h4 className="text-base font-extrabold text-white flex items-center gap-2 font-sans">
+                  <Database size={18} className="text-[#6A0DAD]" />
+                  Ajustar Estoque Manualmente
+                </h4>
+                <p className="text-xs text-gray-500 mt-1">{ajusteProduto.nome}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsAjustarEstoqueModalOpen(false);
+                  setAjusteProduto(null);
+                }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEstoqueAjuste} className="space-y-4 font-sans text-xs">
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                  Filial Alvo <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={ajusteFilialId}
+                  onChange={(e) => setAjusteFilialId(e.target.value)}
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer"
+                  required
                 >
-                  <X size={18} />
-                </button>
+                  <option value="">Selecione a filial...</option>
+                  {filiais.map(f => (
+                    <option key={f.id} value={f.id}>{f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}</option>
+                  ))}
+                </select>
               </div>
 
-              <form onSubmit={handleSaveEstoqueAjuste} className="space-y-4 font-sans text-xs">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
-                    Filial Alvo <span className="text-red-500">*</span>
+                    Tipo de Ajuste <span className="text-red-500">*</span>
                   </label>
                   <select
-                    value={ajusteFilialId}
-                    onChange={(e) => setAjusteFilialId(e.target.value)}
+                    value={ajusteTipo}
+                    onChange={(e) => setAjusteTipo(e.target.value)}
                     className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer"
                     required
                   >
-                    <option value="">Selecione a filial...</option>
-                    {filiais.map(f => (
-                      <option key={f.id} value={f.id}>{f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}</option>
-                    ))}
+                    <option value="ENTRADA">Entrada (Acrescentar)</option>
+                    <option value="SAIDA">Saída (Remover / Quebra)</option>
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
-                      Tipo de Ajuste <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={ajusteTipo}
-                      onChange={(e) => setAjusteTipo(e.target.value)}
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer"
-                      required
-                    >
-                      <option value="ENTRADA">Entrada (Acrescentar)</option>
-                      <option value="SAIDA">Saída (Remover / Quebra)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
-                      Quantidade <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={ajusteQuantidade}
-                      onChange={(e) => setAjusteQuantidade(e.target.value)}
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {ajusteProduto.tipo === 'CELULAR' && tenantSettings.enable_imei && (
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                      IMEI correspondente (15 dígitos) <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={ajusteImei}
-                      onChange={(e) => setAjusteImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono"
-                      placeholder="Digite ou bipe o IMEI..."
-                      required
-                      maxLength={15}
-                    />
-                  </div>
-                )}
-
                 <div>
                   <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
-                    Motivo / Justificativa do Ajuste <span className="text-red-500">*</span>
+                    Quantidade <span className="text-red-500">*</span>
                   </label>
-                  <textarea
-                    value={estoqueAjusteMotivo}
-                    onChange={(e) => setEstoqueAjusteMotivo(e.target.value)}
-                    className="w-full h-20 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white p-3 text-xs outline-none"
-                    placeholder="Ex: Correção de inventário físico, aparelho com defeito devolvido, etc."
+                  <input
+                    type="number"
+                    min="1"
+                    value={ajusteQuantidade}
+                    onChange={(e) => setAjusteQuantidade(e.target.value)}
+                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono"
                     required
                   />
                 </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t border-[#222222]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsAjustarEstoqueModalOpen(false);
-                      setAjusteProduto(null);
-                    }}
-                    className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-md transition-colors text-xs"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSavingAjuste}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2 px-5 rounded-md transition-all flex items-center gap-1.5 text-xs cursor-pointer"
-                  >
-                    {isSavingAjuste ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                    Confirmar Ajuste
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Modal de Venda Rápida de Acessórios */}
-        <PainelVendaRapida
-          isOpen={isVendaRapidaOpen}
-          onClose={() => setIsVendaRapidaOpen(false)}
-          session={session}
-          produtos={listaProdutosPdvDinamica && listaProdutosPdvDinamica.length > 0 ? listaProdutosPdvDinamica : (produtosFilial && produtosFilial.length > 0 ? produtosFilial : produtos)}
-          onAddToCart={(prod) => handleAddToCart(prod)}
-          cartItemCount={pdvCart.length}
-        />
-
-        {/* Leitor por Câmera Mobile */}
-        <CameraScanner
-          isOpen={isCameraScannerOpen}
-          onClose={() => setIsCameraScannerOpen(false)}
-          onScan={(scannedText) => {
-            if (scannedText) {
-              setPdvScanImei(scannedText);
-              handleBiparPdvNovo(scannedText);
-            }
-          }}
-        />
-
-        {/* Modal Distribuir Estoque Matriz para Múltiplas Filiais */}
-        {distribuirModalOpen && produtoDistribuir && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 shadow-2xl space-y-4 font-sans">
-              <div className="flex items-center justify-between border-b border-[#222222] pb-3">
-                <div className="flex items-center gap-2">
-                  <Share2 className="text-[#6A0DAD]" size={20} />
-                  <div>
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Distribuir Estoque Matriz</h3>
-                    <p className="text-xs text-gray-400 font-semibold">{produtoDistribuir.nome} <span className="text-purple-400">({produtoDistribuir.categoria || 'Geral'})</span></p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    setDistribuirModalOpen(false);
-                    setProdutoDistribuir(null);
-                  }}
-                  className="text-gray-400 hover:text-white transition-colors"
-                >
-                  <X size={18} />
-                </button>
               </div>
 
-              <div className="text-xs text-gray-400 bg-purple-950/20 border border-purple-900/40 p-3 rounded-lg flex items-center justify-between">
+              {ajusteProduto.tipo === 'CELULAR' && tenantSettings.enable_imei && (
                 <div>
-                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Preço de Venda Padrão</span>
-                  <span className="text-emerald-400 font-mono font-bold text-sm">R$ {parseFloat(produtoDistribuir.preco || 0).toFixed(2)}</span>
+                  <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                    IMEI correspondente (15 dígitos) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={ajusteImei}
+                    onChange={(e) => setAjusteImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono"
+                    placeholder="Digite ou bipe o IMEI..."
+                    required
+                    maxLength={15}
+                  />
                 </div>
-                {produtoDistribuir.cor && (
-                  <div className="text-center">
-                    <span className="text-gray-500 block uppercase font-bold text-[9px]">Cor do Aparelho / Item</span>
-                    <span className="inline-block bg-[#1A1A1A] text-purple-300 border border-purple-900/50 text-[10px] font-bold px-2 py-0.5 rounded-full mt-0.5">
-                      🎨 {produtoDistribuir.cor}
-                    </span>
-                  </div>
-                )}
-                {produtoDistribuir.sku && (
-                  <div className="text-right">
-                    <span className="text-gray-500 block uppercase font-bold text-[9px]">Código SKU</span>
-                    <span className="text-gray-300 font-mono text-xs">{produtoDistribuir.sku}</span>
-                  </div>
-                )}
+              )}
+
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                  Motivo / Justificativa do Ajuste <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={estoqueAjusteMotivo}
+                  onChange={(e) => setEstoqueAjusteMotivo(e.target.value)}
+                  className="w-full h-20 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white p-3 text-xs outline-none"
+                  placeholder="Ex: Correção de inventário físico, aparelho com defeito devolvido, etc."
+                  required
+                />
               </div>
 
-              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Alocação de Quantidades por Filial / Empresa</p>
-                {(() => {
-                  const listaEmpresasFiliais = (distribuirEmpresas && distribuirEmpresas.length > 0)
-                    ? distribuirEmpresas
-                    : (filiais && filiais.length > 0 ? filiais : []);
-
-                  if (listaEmpresasFiliais.length === 0) {
-                    return <p className="text-xs text-gray-500 italic py-4 text-center">Nenhuma empresa/filial cadastrada no sistema.</p>;
-                  }
-
-                  return (
-                    <div className="space-y-2">
-                      {listaEmpresasFiliais.map(f => {
-                        const nomeLoja = f.nome || f.nome_fantasia || f.razao_social || 'Filial Sem Nome';
-                        const targetKey = f.id || f.empresa_id || f.filial_id;
-                        const estAtual = distribuirEstoqueAtualMap[targetKey] ?? distribuirEstoqueAtualMap[String(targetKey)] ?? 0;
-                        const qtdAdd = parseInt(distribuirQuantidades[f.id] || distribuirQuantidades[targetKey] || distribuirQuantidades[String(targetKey)], 10) || 0;
-                        const projFinal = estAtual + qtdAdd;
-
-                        return (
-                          <div key={f.id} className="flex items-center justify-between bg-black border border-[#222222] p-3 rounded-lg hover:border-[#333333] transition-all">
-                            <div className="flex items-center gap-2">
-                              <span className="text-base">{f.tipo === 'ESTOQUE' ? '📦' : '🏪'}</span>
-                              <div>
-                                <p className="text-xs font-bold text-white">{nomeLoja}</p>
-                                <p className="text-[10px] text-gray-500">Estoque Atual: <strong className="text-gray-300 font-mono">{estAtual} un.</strong></p>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                              <div className="flex flex-col items-end">
-                                <label className="text-[9px] font-bold text-purple-400 uppercase tracking-wider">Quantidade a Adicionar</label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={distribuirQuantidades[f.id] || distribuirQuantidades[targetKey] || ''}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setDistribuirQuantidades(prev => ({
-                                      ...prev,
-                                      [f.id]: val,
-                                      [targetKey]: val,
-                                      [String(targetKey)]: val,
-                                      [String(f.id)]: val
-                                    }));
-                                  }}
-                                  placeholder="0"
-                                  className="w-24 bg-[#111111] border border-[#333333] focus:border-[#6A0DAD] rounded px-2 py-1 text-xs text-white text-right outline-none font-mono font-bold"
-                                />
-                              </div>
-                              <div className="text-right min-w-[60px]">
-                                <span className="text-[9px] font-bold text-gray-500 uppercase block">Projeção</span>
-                                <span className={`text-xs font-mono font-bold ${qtdAdd > 0 ? 'text-green-400' : 'text-gray-400'}`}>{projFinal} un.</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t border-[#222222]">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#222222]">
                 <button
                   type="button"
                   onClick={() => {
-                    setDistribuirModalOpen(false);
-                    setProdutoDistribuir(null);
+                    setIsAjustarEstoqueModalOpen(false);
+                    setAjusteProduto(null);
                   }}
                   className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-md transition-colors text-xs"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="button"
-                  onClick={handleSalvarDistribuicaoLote}
-                  disabled={loadingDistribuir}
-                  className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:opacity-50 text-white font-bold py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-xs shadow-md"
+                  type="submit"
+                  disabled={isSavingAjuste}
+                  className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2 px-5 rounded-md transition-all flex items-center gap-1.5 text-xs cursor-pointer"
                 >
-                  {loadingDistribuir ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  ) : (
-                    <Share2 size={14} />
-                  )}
-                  <span>Salvar Distribuição em Lote</span>
+                  {isSavingAjuste ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                  Confirmar Ajuste
                 </button>
               </div>
-            </div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Modal de Conferência Física de Estoque (Aceite de Remessa pelo Gerente) */}
-        {conferenciaModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 print:hidden">
-            <div className="bg-[#0A0A0A] border border-amber-500/50 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-scaleIn flex flex-col max-h-[85vh]">
-              {/* Header do Modal */}
-              <div className="bg-gradient-to-r from-amber-950/90 via-[#0A0A0A] to-black p-5 border-b border-amber-500/30 flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-amber-500/20 rounded-xl border border-amber-500/40">
-                    <Package size={22} className="text-amber-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
-                      Conferência Física de Remessas
-                      <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
-                        {transferenciasPendentes.length} Pendente(s)
-                      </span>
-                    </h3>
-                    <p className="text-xs text-amber-200/70">Confirme o recebimento físico para dar entrada automática no estoque virtual da sua loja.</p>
-                  </div>
+      {/* Modal de Venda Rápida de Acessórios */}
+      <PainelVendaRapida
+        isOpen={isVendaRapidaOpen}
+        onClose={() => setIsVendaRapidaOpen(false)}
+        session={session}
+        produtos={listaProdutosPdvDinamica && listaProdutosPdvDinamica.length > 0 ? listaProdutosPdvDinamica : (produtosFilial && produtosFilial.length > 0 ? produtosFilial : produtos)}
+        onAddToCart={(prod) => handleAddToCart(prod)}
+        cartItemCount={pdvCart.length}
+      />
+
+      {/* Leitor por Câmera Mobile */}
+      <CameraScanner
+        isOpen={isCameraScannerOpen}
+        onClose={() => setIsCameraScannerOpen(false)}
+        onScan={(scannedText) => {
+          if (scannedText) {
+            setPdvScanImei(scannedText);
+            handleBiparPdvNovo(scannedText);
+          }
+        }}
+      />
+
+      {/* Modal Distribuir Estoque Matriz para Múltiplas Filiais */}
+      {distribuirModalOpen && produtoDistribuir && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 shadow-2xl space-y-4 font-sans">
+            <div className="flex items-center justify-between border-b border-[#222222] pb-3">
+              <div className="flex items-center gap-2">
+                <Share2 className="text-[#6A0DAD]" size={20} />
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Distribuir Estoque Matriz</h3>
+                  <p className="text-xs text-gray-400 font-semibold">{produtoDistribuir.nome} <span className="text-purple-400">({produtoDistribuir.categoria || 'Geral'})</span></p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setConferenciaModalOpen(false)}
-                  className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
               </div>
-
-              {/* Corpo com Lista de Remessas */}
-              <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1">
-                {transferenciasPendentes.length === 0 ? (
-                  <div className="py-16 text-center text-gray-500">
-                    <CheckCircle2 size={42} className="mx-auto mb-3 text-emerald-400 opacity-60" />
-                    <p className="text-base font-bold text-gray-300">Tudo em dia!</p>
-                    <p className="text-xs text-gray-500 mt-1">Nenhuma remessa pendente de conferência física no momento.</p>
-                  </div>
-                ) : (
-                  transferenciasPendentes.map((item, idx) => {
-                    let prodDetails = {};
-                    if (item.detalhes) {
-                      try { prodDetails = typeof item.detalhes === 'string' ? JSON.parse(item.detalhes) : item.detalhes; } catch (e) { }
-                    }
-                    if (item.detalhes_obj) prodDetails = { ...prodDetails, ...item.detalhes_obj };
-
-                    const nomeProd = item.produto_nome || prodDetails.nome || item.produtos?.nome || 'Produto Transferido';
-                    const qtyEnviada = item.quantidade_enviada || item.quantidade || 0;
-                    const dataStr = item.data_envio ? new Date(item.data_envio).toLocaleString('pt-BR') : new Date().toLocaleDateString('pt-BR');
-
-                    return (
-                      <div key={item.id || idx} className="bg-black border border-[#222222] hover:border-amber-500/40 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all shadow-md">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold uppercase">
-                              Remessa Pendente
-                            </span>
-                            <span className="text-xs text-gray-400 font-mono">Enviado em: {dataStr}</span>
-                          </div>
-                          <h4 className="text-base font-bold text-white">{nomeProd}</h4>
-                          <div className="flex items-center gap-3 text-xs text-gray-400">
-                            <span>Categoria: <strong className="text-gray-200">{prodDetails.categoria || 'Geral'}</strong></span>
-                            {prodDetails.cor && <span>Cor: <strong className="text-purple-300 font-semibold">{prodDetails.cor}</strong></span>}
-                            {prodDetails.sku && <span>SKU: <strong className="font-mono text-gray-300">{prodDetails.sku}</strong></span>}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-[#222222] pt-3 sm:pt-0 shrink-0">
-                          <div className="text-right">
-                            <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-semibold">Qtd Enviada</span>
-                            <span className="text-xl font-black text-amber-400 font-mono">+{qtyEnviada} un.</span>
-                          </div>
-
-                          <button
-                            type="button"
-                            disabled={confirmandoTransferenciaId === item.id}
-                            onClick={() => handleConfirmarEntradaTransferencia(item)}
-                            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer shrink-0 border border-emerald-500/40"
-                          >
-                            {confirmandoTransferenciaId === item.id ? (
-                              <>
-                                <Loader2 size={14} className="animate-spin" />
-                                <span>Confirmando...</span>
-                              </>
-                            ) : (
-                              <>
-                                <CheckCircle2 size={15} />
-                                <span>Confirmar Entrada</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Rodapé */}
-              <div className="p-4 bg-[#050505] border-t border-[#222222] flex justify-between items-center text-xs text-gray-500 shrink-0">
-                <span className="flex items-center gap-1 text-[11px]">
-                  <ShieldCheck size={14} className="text-amber-400" />
-                  Assinatura e auditoria de entrada vinculadas ao seu usuário.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setConferenciaModalOpen(false)}
-                  className="px-4 py-2 bg-[#111111] hover:bg-[#222222] text-white rounded-lg transition-colors font-bold text-xs cursor-pointer"
-                >
-                  Fechar
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  setDistribuirModalOpen(false);
+                  setProdutoDistribuir(null);
+                }}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
             </div>
-          </div>
-        )}
 
-        {/* Toast Notification Container */}
-        {toast && (
-          <div className="fixed top-4 right-4 z-50 animate-fadeIn print:hidden">
-            <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm shadow-xl backdrop-blur-md transition-all duration-300 max-w-sm ${toast.type === 'success'
-              ? 'bg-black/95 border-green-800 text-green-400 shadow-green-950/20'
-              : toast.type === 'error'
-                ? 'bg-black/95 border-red-800 text-red-400 shadow-red-950/20'
-                : 'bg-black/95 border-[#6A0DAD] text-purple-350 shadow-purple-950/20'
-              }`}>
-              {toast.type === 'success' ? (
-                <CheckCircle2 size={18} className="shrink-0 text-green-500" />
-              ) : toast.type === 'error' ? (
-                <AlertCircle size={18} className="shrink-0 text-red-500" />
-              ) : (
-                <Tag size={18} className="shrink-0 text-purple-500" />
+            <div className="text-xs text-gray-400 bg-purple-950/20 border border-purple-900/40 p-3 rounded-lg flex items-center justify-between">
+              <div>
+                <span className="text-gray-500 block uppercase font-bold text-[9px]">Preço de Venda Padrão</span>
+                <span className="text-emerald-400 font-mono font-bold text-sm">R$ {parseFloat(produtoDistribuir.preco || 0).toFixed(2)}</span>
+              </div>
+              {produtoDistribuir.cor && (
+                <div className="text-center">
+                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Cor do Aparelho / Item</span>
+                  <span className="inline-block bg-[#1A1A1A] text-purple-300 border border-purple-900/50 text-[10px] font-bold px-2 py-0.5 rounded-full mt-0.5">
+                    🎨 {produtoDistribuir.cor}
+                  </span>
+                </div>
               )}
-              <div className="flex-1 font-semibold leading-snug">{toast.message}</div>
+              {produtoDistribuir.sku && (
+                <div className="text-right">
+                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Código SKU</span>
+                  <span className="text-gray-300 font-mono text-xs">{produtoDistribuir.sku}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Alocação de Quantidades por Filial / Empresa</p>
+              {(() => {
+                const listaEmpresasFiliais = (distribuirEmpresas && distribuirEmpresas.length > 0)
+                  ? distribuirEmpresas
+                  : (filiais && filiais.length > 0 ? filiais : []);
+
+                if (listaEmpresasFiliais.length === 0) {
+                  return <p className="text-xs text-gray-500 italic py-4 text-center">Nenhuma empresa/filial cadastrada no sistema.</p>;
+                }
+
+                return (
+                  <div className="space-y-2">
+                    {listaEmpresasFiliais.map(f => {
+                      const nomeLoja = f.nome || f.nome_fantasia || f.razao_social || 'Filial Sem Nome';
+                      const targetKey = f.id || f.empresa_id || f.filial_id;
+                      const estAtual = distribuirEstoqueAtualMap[targetKey] ?? distribuirEstoqueAtualMap[String(targetKey)] ?? 0;
+                      const qtdAdd = parseInt(distribuirQuantidades[f.id] || distribuirQuantidades[targetKey] || distribuirQuantidades[String(targetKey)], 10) || 0;
+                      const projFinal = estAtual + qtdAdd;
+
+                      return (
+                        <div key={f.id} className="flex items-center justify-between bg-black border border-[#222222] p-3 rounded-lg hover:border-[#333333] transition-all">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{f.tipo === 'ESTOQUE' ? '📦' : '🏪'}</span>
+                            <div>
+                              <p className="text-xs font-bold text-white">{nomeLoja}</p>
+                              <p className="text-[10px] text-gray-500">Estoque Atual: <strong className="text-gray-300 font-mono">{estAtual} un.</strong></p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <div className="flex flex-col items-end">
+                              <label className="text-[9px] font-bold text-purple-400 uppercase tracking-wider">Quantidade a Adicionar</label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={distribuirQuantidades[f.id] || distribuirQuantidades[targetKey] || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setDistribuirQuantidades(prev => ({
+                                    ...prev,
+                                    [f.id]: val,
+                                    [targetKey]: val,
+                                    [String(targetKey)]: val,
+                                    [String(f.id)]: val
+                                  }));
+                                }}
+                                placeholder="0"
+                                className="w-24 bg-[#111111] border border-[#333333] focus:border-[#6A0DAD] rounded px-2 py-1 text-xs text-white text-right outline-none font-mono font-bold"
+                              />
+                            </div>
+                            <div className="text-right min-w-[60px]">
+                              <span className="text-[9px] font-bold text-gray-500 uppercase block">Projeção</span>
+                              <span className={`text-xs font-mono font-bold ${qtdAdd > 0 ? 'text-green-400' : 'text-gray-400'}`}>{projFinal} un.</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-[#222222]">
               <button
                 type="button"
-                onClick={() => setToast(null)}
-                className="text-gray-500 hover:text-white transition-colors shrink-0 ml-1"
+                onClick={() => {
+                  setDistribuirModalOpen(false);
+                  setProdutoDistribuir(null);
+                }}
+                className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-md transition-colors text-xs"
               >
-                <X size={14} />
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSalvarDistribuicaoLote}
+                disabled={loadingDistribuir}
+                className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:opacity-50 text-white font-bold py-2 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-xs shadow-md"
+              >
+                {loadingDistribuir ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <Share2 size={14} />
+                )}
+                <span>Salvar Distribuição em Lote</span>
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Modal de Conferência Física de Estoque (Aceite de Remessa pelo Gerente) */}
+      {conferenciaModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 print:hidden">
+          <div className="bg-[#0A0A0A] border border-amber-500/50 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-scaleIn flex flex-col max-h-[85vh]">
+            {/* Header do Modal */}
+            <div className="bg-gradient-to-r from-amber-950/90 via-[#0A0A0A] to-black p-5 border-b border-amber-500/30 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/20 rounded-xl border border-amber-500/40">
+                  <Package size={22} className="text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    Conferência Física de Remessas
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
+                      {transferenciasPendentes.length} Pendente(s)
+                    </span>
+                  </h3>
+                  <p className="text-xs text-amber-200/70">Confirme o recebimento físico para dar entrada automática no estoque virtual da sua loja.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConferenciaModalOpen(false)}
+                className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Corpo com Lista de Remessas */}
+            <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1">
+              {transferenciasPendentes.length === 0 ? (
+                <div className="py-16 text-center text-gray-500">
+                  <CheckCircle2 size={42} className="mx-auto mb-3 text-emerald-400 opacity-60" />
+                  <p className="text-base font-bold text-gray-300">Tudo em dia!</p>
+                  <p className="text-xs text-gray-500 mt-1">Nenhuma remessa pendente de conferência física no momento.</p>
+                </div>
+              ) : (
+                transferenciasPendentes.map((item, idx) => {
+                  let prodDetails = {};
+                  if (item.detalhes) {
+                    try { prodDetails = typeof item.detalhes === 'string' ? JSON.parse(item.detalhes) : item.detalhes; } catch (e) { }
+                  }
+                  if (item.detalhes_obj) prodDetails = { ...prodDetails, ...item.detalhes_obj };
+
+                  const nomeProd = item.produto_nome || prodDetails.nome || item.produtos?.nome || 'Produto Transferido';
+                  const qtyEnviada = item.quantidade_enviada || item.quantidade || 0;
+                  const dataStr = item.data_envio ? new Date(item.data_envio).toLocaleString('pt-BR') : new Date().toLocaleDateString('pt-BR');
+
+                  return (
+                    <div key={item.id || idx} className="bg-black border border-[#222222] hover:border-amber-500/40 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all shadow-md">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold uppercase">
+                            Remessa Pendente
+                          </span>
+                          <span className="text-xs text-gray-400 font-mono">Enviado em: {dataStr}</span>
+                        </div>
+                        <h4 className="text-base font-bold text-white">{nomeProd}</h4>
+                        <div className="flex items-center gap-3 text-xs text-gray-400">
+                          <span>Categoria: <strong className="text-gray-200">{prodDetails.categoria || 'Geral'}</strong></span>
+                          {prodDetails.cor && <span>Cor: <strong className="text-purple-300 font-semibold">{prodDetails.cor}</strong></span>}
+                          {prodDetails.sku && <span>SKU: <strong className="font-mono text-gray-300">{prodDetails.sku}</strong></span>}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 border-[#222222] pt-3 sm:pt-0 shrink-0">
+                        <div className="text-right">
+                          <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-semibold">Qtd Enviada</span>
+                          <span className="text-xl font-black text-amber-400 font-mono">+{qtyEnviada} un.</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={confirmandoTransferenciaId === item.id}
+                          onClick={() => handleConfirmarEntradaTransferencia(item)}
+                          className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer shrink-0 border border-emerald-500/40"
+                        >
+                          {confirmandoTransferenciaId === item.id ? (
+                            <>
+                              <Loader2 size={14} className="animate-spin" />
+                              <span>Confirmando...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 size={15} />
+                              <span>Confirmar Entrada</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Rodapé */}
+            <div className="p-4 bg-[#050505] border-t border-[#222222] flex justify-between items-center text-xs text-gray-500 shrink-0">
+              <span className="flex items-center gap-1 text-[11px]">
+                <ShieldCheck size={14} className="text-amber-400" />
+                Assinatura e auditoria de entrada vinculadas ao seu usuário.
+              </span>
+              <button
+                type="button"
+                onClick={() => setConferenciaModalOpen(false)}
+                className="px-4 py-2 bg-[#111111] hover:bg-[#222222] text-white rounded-lg transition-colors font-bold text-xs cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification Container */}
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 animate-fadeIn print:hidden">
+          <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm shadow-xl backdrop-blur-md transition-all duration-300 max-w-sm ${toast.type === 'success'
+            ? 'bg-black/95 border-green-800 text-green-400 shadow-green-950/20'
+            : toast.type === 'error'
+              ? 'bg-black/95 border-red-800 text-red-400 shadow-red-950/20'
+              : 'bg-black/95 border-[#6A0DAD] text-purple-350 shadow-purple-950/20'
+            }`}>
+            {toast.type === 'success' ? (
+              <CheckCircle2 size={18} className="shrink-0 text-green-500" />
+            ) : toast.type === 'error' ? (
+              <AlertCircle size={18} className="shrink-0 text-red-500" />
+            ) : (
+              <Tag size={18} className="shrink-0 text-purple-500" />
+            )}
+            <div className="flex-1 font-semibold leading-snug">{toast.message}</div>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="text-gray-500 hover:text-white transition-colors shrink-0 ml-1"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  </div>
+);
 }
