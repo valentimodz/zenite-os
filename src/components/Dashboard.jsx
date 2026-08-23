@@ -17717,9 +17717,10 @@ export default function Dashboard({ session, profileDataProps }) {
                               }
 
                               return sessoesFiltradas.map((cx) => {
+                                console.log("RAIO-X DO CAIXA:", cx);
                                 const isAberto = cx.status === 'aberto';
                                 const filialNome = cx.filial_nome || cx.filiais?.nome || filiais.find(f => String(f.id) === String(cx.filial_id))?.nome || 'Filial';
-                                const operadorNome = cx.operador_nome || cx.profiles?.nome || 'Operador';
+                                const operadorNome = cx.operador_nome || cx.profiles?.nome || vendedores?.find(c => String(c.id) === String(cx.operador_id))?.nome || 'Operador';
                                 const totalVendasCalc = Number(cx.total_vendas || (Number(cx.total_dinheiro || 0) + Number(cx.total_cartao || 0) + Number(cx.total_pix || 0)) || cx.saldo_final || 0);
 
                                 return (
