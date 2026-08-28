@@ -11778,41 +11778,42 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     const isCelularCard = (prod.tipo && prod.tipo.toUpperCase().includes('CELULAR')) || (prod.categoria && prod.categoria.toUpperCase().includes('CELULAR')) || prod.categoria === 'IOS' || prod.categoria === 'ANDROID';
 
+                    let cardImeis = [];
                     if (isCelularCard) {
-                      let cCount = 0;
-                      // Fallback: usar primeiro os IMEIs atrelados pela nova query, depois os globais
-                      // 2. Extrai de forma segura o array de IMEIs (ignora se for array vazio para permitir fallback)
                       const arrDb = Array.isArray(prod.imeis_db) && prod.imeis_db.length > 0 ? prod.imeis_db : null;
                       const arrGlobal = Array.isArray(disponiveisImeis) && disponiveisImeis.length > 0 ? disponiveisImeis : [];
-                      const baseImeis = arrDb || arrGlobal;
-                      
-                      const isAll = !activeFilialId || String(activeFilialId).toLowerCase() === 'todas' || activeFilialId === 'all';
-                      
-                      const validImeis = baseImeis.filter(im => {
-                         if (im.vendido) return false;
-                         if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
-                         
-                         const mId = String(im.produto_id) === String(prod.id) || String(im.produto_id) === String(prod.catalogo_id);
-                         if (!mId) return false;
-                         
-                         if (isAll) return true;
-                         
-                         return String(im.filial_id) === String(activeFilialId) || String(im.empresa_id) === String(activeFilialId);
+                      const allImeisPool = arrDb || arrGlobal;
+
+                      const matchingImeis = allImeisPool.filter(im => {
+                        if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+                        let imNome = im.produtos?.nome;
+                        if (!imNome) {
+                          const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
+                          if (prodDono) imNome = prodDono.nome;
+                        }
+                        return String(im.produto_id) === String(prod.id) ||
+                          String(im.produto_id) === String(prod.catalogo_id) ||
+                          (imNome && prod.nome && imNome.toLowerCase().trim() === prod.nome.toLowerCase().trim());
                       });
-                      
-                      estoqueLocal = validImeis.length; // Força a sobreposição com a contagem real e precisa
-                      
-                      // Fallback EXTREMO: Se o usuário apenas informou a quantidade em alguma tela de cadastro mas não bipou os IMEIs
+
+                      const localImeis = matchingImeis.filter(im => {
+                        const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
+                        return !activeFilialId || 
+                          String(im.filial_id) === String(activeFilialId) || 
+                          String(im.empresa_id) === String(activeFilialId) ||
+                          (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
+                      });
+
+                      cardImeis = localImeis.length > 0 ? localImeis : matchingImeis;
+                      estoqueLocal = cardImeis.length;
+
                       if (estoqueLocal === 0) {
-                         let rawQ = Number(prod.quantidade || prod.estoque_atual || prod.estoque_local || prod.estoque || 0);
-                         
-                         // Se a quantidade não estiver no registro base, busca na tabela relacional de estoques
-                         if (rawQ === 0 && prod.estoques && Array.isArray(prod.estoques)) {
-                            const fallbackEst = prod.estoques.find(e => Number(e.quantidade) > 0);
-                            if (fallbackEst) rawQ = Number(fallbackEst.quantidade);
-                         }
-                         
-                         if (rawQ > 0) estoqueLocal = rawQ;
+                        let rawQ = Number(prod.quantidade || prod.estoque_atual || prod.estoque_local || prod.estoque || 0);
+                        if (rawQ === 0 && prod.estoques && Array.isArray(prod.estoques)) {
+                          const fallbackEst = prod.estoques.find(e => Number(e.quantidade) > 0);
+                          if (fallbackEst) rawQ = Number(fallbackEst.quantidade);
+                        }
+                        if (rawQ > 0) estoqueLocal = rawQ;
                       }
                     } else if (prod.estoques && Array.isArray(prod.estoques)) {
                       const est = prod.estoques.find(e =>
@@ -11826,14 +11827,15 @@ export default function Dashboard({ session, profileDataProps }) {
                       if (est && est.quantidade !== undefined && est.quantidade !== null) {
                         estoqueLocal = Number(est.quantidade);
                       } else if (estoqueLocal <= 0) {
-                        // PLANO B EXTREMO: O acessório tem estoque na rede, mas o ID do banco veio nulo/errado.
-                        // Puxa o saldo positivo para destravar a sua venda imediata.
                         const estAlternativo = prod.estoques.find(e => Number(e.quantidade) > 0);
                         if (estAlternativo) {
                           estoqueLocal = Number(estAlternativo.quantidade);
                         }
                       }
                     }
+
+                    const displayImei = cardImeis[0]?.imei || prod.imei || (prod.imeis_db && prod.imeis_db[0]?.imei) || null;
+                    const displayCor = cardImeis.find(i => i.cor)?.cor || prod.cor || prod.color || (prod.imeis_db && prod.imeis_db[0]?.cor) || null;
 
                     // 4. Aplica a trava matemática rigorosa
                     const isSemEstoque = prod.categoria !== 'SERVICO' && estoqueLocal <= 0;
@@ -11850,7 +11852,12 @@ export default function Dashboard({ session, profileDataProps }) {
                           if (isSemEstoque) {
                             handleVerMultiloja(prod);
                           } else {
-                            handleAddToCart(prod);
+                            handleAddToCart({
+                              ...prod,
+                              imei: displayImei,
+                              cor: displayCor,
+                              imeis_db: cardImeis
+                            }, displayImei);
                           }
                         }}
                         className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${isPdvBloqueadoParaUsuario
@@ -11872,18 +11879,18 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <Store size={10} className="text-[#6A0DAD]" />
                                 {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
                               </span>
-                              {(prod.cor || prod.color || (prod.imeis_db && prod.imeis_db[0]?.cor)) && (
+                              {displayCor && (
                                 <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#e9d5ff] bg-purple-950/60 border border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
                                   <Tag size={9} className="text-purple-300" />
-                                  {prod.cor || prod.color || (prod.imeis_db && prod.imeis_db[0]?.cor)}
+                                  {displayCor}
                                 </span>
                               )}
-                              {isCelularCard && (prod.imei || (prod.imeis_db && prod.imeis_db.length > 0)) && (
+                              {isCelularCard && (displayImei || cardImeis.length > 0) && (
                                 <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold text-amber-300 bg-amber-950/40 border border-amber-500/30 px-1.5 py-0.5 rounded w-fit shadow-sm">
                                   <Smartphone size={9} className="text-amber-400" />
-                                  {prod.imeis_db && prod.imeis_db.length > 1 
-                                    ? `${prod.imeis_db.length} IMEIs` 
-                                    : `IMEI: ${prod.imei || prod.imeis_db?.[0]?.imei}`}
+                                  {cardImeis.length > 1 
+                                    ? `${cardImeis.length} IMEIs` 
+                                    : `IMEI: ${displayImei}`}
                                 </span>
                               )}
                             </div>
