@@ -1357,16 +1357,16 @@ export default function Dashboard({ session, profileDataProps }) {
         const pIds = celProds.map(p => p.id);
         const { data } = await supabase
           .from('imeis')
-          .select('produto_id, filial_id, empresa_id, status, vendido, imei')
+          .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
           .in('produto_id', pIds)
           .eq('empresa_id', targetEmp)
           .eq('vendido', false);
 
         if (data && data.length > 0) {
            setDisponiveisImeis(prev => {
-              // Só atualiza se houver diferença real para não causar loop
-              if (prev.length !== data.length) return data;
-              return prev;
+              const mapPrev = new Map((prev || []).map(i => [i.id || i.imei, i]));
+              data.forEach(i => mapPrev.set(i.id || i.imei, i));
+              return Array.from(mapPrev.values());
            });
         }
       } catch (err) {
@@ -8917,62 +8917,71 @@ export default function Dashboard({ session, profileDataProps }) {
     const rawInput = stringToScan.replace(/[\r\n]/g, '').trim();
     if (!rawInput) return;
 
-    // 1. Tentar busca por IMEI (se for exatamente 15 dígitos numéricos)
-    if (/^\d{15}$/.test(rawInput)) {
-      if (!validateLuhn(rawInput)) {
-        playBeepErro();
-        alert('IMEI inválido: falhou na verificação de checksum (Luhn).');
-        return;
-      }
+    // 1. Tentar busca direta por IMEI em disponiveisImeis ou na tabela imeis
+    const cleanDigits = rawInput.replace(/\D/g, '');
+    let imeiObj = null;
 
-      if (pdvCart.some(item => item.imei === rawInput)) {
+    if (disponiveisImeis && disponiveisImeis.length > 0) {
+      imeiObj = disponiveisImeis.find(im => 
+        !im.vendido && 
+        (im.imei === rawInput || (cleanDigits.length >= 8 && im.imei && im.imei.replace(/\D/g, '') === cleanDigits))
+      );
+    }
+
+    if (!imeiObj) {
+      try {
+        let query = supabase
+          .from('imeis')
+          .select('*, produtos(*)')
+          .eq('vendido', false);
+
+        if (cleanDigits.length >= 8) {
+          query = query.or(`imei.eq.${rawInput},imei.ilike.%${cleanDigits}%`);
+        } else {
+          query = query.eq('imei', rawInput);
+        }
+
+        const { data: dbImeis } = await query;
+        if (dbImeis && dbImeis.length > 0) {
+          imeiObj = dbImeis[0];
+        }
+      } catch (err) {
+        console.warn('Busca direta por IMEI:', err);
+      }
+    }
+
+    if (imeiObj) {
+      if (pdvCart.some(item => item.imei === imeiObj.imei)) {
         playBeepErro();
         alert('Este IMEI já está no carrinho.');
         return;
       }
 
-      try {
-        const { data: imeiObj, error: imeiErr } = await supabase
-          .from('imeis')
-          .select('*, produtos(*)')
-          .eq('empresa_id', profile?.empresa_id || activeEmpresaId)
-          .eq('imei', rawInput)
-          .eq('vendido', false)
-          .maybeSingle();
+      playBeepSucesso();
+      const prod = imeiObj.produtos || 
+        listaProdutosPdvDinamica.find(p => String(p.id) === String(imeiObj.produto_id) || String(p.catalogo_id) === String(imeiObj.produto_id)) ||
+        listaProdutosConsolidada.find(p => String(p.id) === String(imeiObj.produto_id) || String(p.catalogo_id) === String(imeiObj.produto_id)) ||
+        (produtos || []).find(p => String(p.id) === String(imeiObj.produto_id)) ||
+        (catalogoProdutos || []).find(c => String(c.id) === String(imeiObj.produto_id));
 
-        if (!imeiErr && imeiObj) {
-          if (imeiObj.filial_id && activeFilialId && imeiObj.filial_id !== activeFilialId) {
-            playBeepErro();
-            alert('Este IMEI pertence a outra filial.');
-            return;
-          }
+      const prodName = prod?.nome || 'Aparelho Celular';
+      const prodPreco = parseFloat(prod?.preco || 0);
 
-          playBeepSucesso();
-          const prod = imeiObj.produtos;
-          const { data: listData } = await supabase
-            .from('imeis')
-            .select('*')
-            .eq('produto_id', prod?.id || imeiObj.produto_id)
-            .eq('vendido', false);
+      const novoItem = {
+        cartId: crypto.randomUUID(),
+        produto: prod ? { ...prod, cor: imeiObj.cor || prod.cor } : { id: imeiObj.produto_id, nome: prodName, preco: prodPreco, cor: imeiObj.cor },
+        quantidade: 1,
+        imei: imeiObj.imei,
+        cor: imeiObj.cor || prod?.cor || null,
+        availableImeis: [imeiObj],
+        valorUnitario: prodPreco,
+        vendaTrainee: pdvVendaTrainee
+      };
 
-          const novoItem = {
-            cartId: crypto.randomUUID(),
-            produto: prod || { id: imeiObj.produto_id, nome: 'Aparelho Celular', preco: 0 },
-            quantidade: 1,
-            imei: rawInput,
-            availableImeis: listData || [imeiObj],
-            valorUnitario: parseFloat(prod?.preco || 0),
-            vendaTrainee: pdvVendaTrainee
-          };
-
-          setPdvCart(prev => [...prev, novoItem]);
-          setPdvScanImei('');
-          showToast(`${prod?.nome || 'Aparelho'} adicionado por IMEI!`, 'success');
-          return;
-        }
-      } catch (err) {
-        console.warn('Busca por IMEI não retornou resultados, tentando por código de barras...', err);
-      }
+      setPdvCart(prev => [...prev, novoItem]);
+      setPdvScanImei('');
+      showToast(`🛒 ${prodName} adicionado pelo IMEI ${imeiObj.imei}!`, 'success');
+      return;
     }
 
     // 2. Busca por Código de Barras (EAN / Barcode), SKU ou Nome no estoque do PDV / catálogo
