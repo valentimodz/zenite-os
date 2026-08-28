@@ -52,16 +52,31 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
   }, [estoqueFisicoLocal]);
 
   // Filtrar produtos genéricos e acessórios
+  // Filtrar produtos genéricos e acessórios e CORRIGIR ESTOQUE MULTILOJA
   const produtosFiltrados = useMemo(() => {
-    return produtos.map((p) => {
-      // Cruzar dados com o estoque físico local de produtos
-      const itemFisico = mapEstoqueFisico.get(p.id) ||
-                         (p.codigo_barras ? mapEstoqueFisico.get(p.codigo_barras.trim()) : null) ||
-                         (p.nome ? mapEstoqueFisico.get(p.nome.toLowerCase().trim()) : null);
+    const activeEmpresaId = session?.user?.user_metadata?.empresa_id;
 
-      const qtdFisica = (itemFisico && itemFisico.quantidade !== undefined && itemFisico.quantidade !== null)
-        ? itemFisico.quantidade
-        : (p.quantidade ?? p.estoque_atual ?? 0);
+    return produtos.map((p) => {
+      // 1. Busca o estoque real da filial ativa (estrutura multiloja)
+      let estoqueLocal = null;
+      if (p.estoques && Array.isArray(p.estoques)) {
+        const est = p.estoques.find(e => String(e.filial_id) === String(activeEmpresaId) || String(e.empresa_id) === String(activeEmpresaId));
+        if (est && est.quantidade !== undefined) {
+          estoqueLocal = est.quantidade;
+        }
+      }
+
+      // 2. Fallback para o mapeamento local/antigo
+      const itemFisico = mapEstoqueFisico.get(p.id) ||
+        (p.codigo_barras ? mapEstoqueFisico.get(p.codigo_barras.trim()) : null) ||
+        (p.nome ? mapEstoqueFisico.get(p.nome.toLowerCase().trim()) : null);
+
+      // 3. Define a quantidade final correta
+      const qtdFisica = estoqueLocal !== null
+        ? estoqueLocal
+        : ((itemFisico && itemFisico.quantidade !== undefined && itemFisico.quantidade !== null)
+          ? itemFisico.quantidade
+          : (p.quantidade ?? p.estoque_atual ?? 0));
 
       return {
         ...p,
@@ -73,18 +88,18 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
       };
     }).filter((p) => {
       // Priorizar Acessórios, Películas, Capas, Serviços ou produtos por Quantidade / SKU Interno
-      const isAcessorioOuGenerico = 
-        p.tipo === 'ACESSORIO' || 
-        p.tipo === 'Acessório' || 
-        (p.categoria !== 'IOS' && p.categoria !== 'ANDROID') || 
+      const isAcessorioOuGenerico =
+        p.tipo === 'ACESSORIO' ||
+        p.tipo === 'Acessório' ||
+        (p.categoria !== 'IOS' && p.categoria !== 'ANDROID') ||
         (p.codigo_barras && (p.codigo_barras.includes('-') || p.codigo_barras.startsWith('SKU') || p.codigo_barras.startsWith('PEL') || p.codigo_barras.startsWith('CAP')));
 
       if (!isAcessorioOuGenerico && p.tipo === 'CELULAR') return false;
 
       const q = busca.toLowerCase().trim();
-      const bateBusca = !q || 
-        (p.nome && p.nome.toLowerCase().includes(q)) || 
-        (p.categoria && p.categoria.toLowerCase().includes(q)) || 
+      const bateBusca = !q ||
+        (p.nome && p.nome.toLowerCase().includes(q)) ||
+        (p.categoria && p.categoria.toLowerCase().includes(q)) ||
         (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q)) ||
         (p.sku && p.sku.toLowerCase().includes(q));
 
@@ -104,7 +119,7 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
 
       return bateBusca && bateCategoria;
     });
-  }, [produtos, mapEstoqueFisico, busca, categoriaAtiva]);
+  }, [produtos, mapEstoqueFisico, busca, categoriaAtiva, session]);
 
   if (!isOpen) return null;
 
@@ -120,7 +135,7 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
       <div className="bg-neutral-900 border border-neutral-800 w-full max-w-full sm:max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl max-h-[94vh] sm:max-h-[90vh] rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden text-neutral-100 font-sans">
-        
+
         {/* Header do Modal */}
         <div className="px-3.5 sm:px-6 py-2.5 sm:py-4 border-b border-neutral-800 bg-neutral-950/80 flex items-center justify-between gap-2 sm:gap-4">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -184,11 +199,10 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
               <button
                 key={cat.id}
                 onClick={() => setCategoriaAtiva(cat.id)}
-                className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold whitespace-nowrap transition-all border ${
-                  categoriaAtiva === cat.id
+                className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl font-bold whitespace-nowrap transition-all border ${categoriaAtiva === cat.id
                     ? 'bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] text-white border-[#6A0DAD] shadow-md shadow-purple-900/30'
                     : 'bg-black text-neutral-400 border-neutral-800 hover:text-white hover:border-neutral-700'
-                }`}
+                  }`}
               >
                 {cat.label}
               </button>

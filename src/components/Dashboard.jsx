@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { supabase, supabaseAdmin, supabaseRegister } from '../supabaseClient';
 import {
   LogOut, User, Building, Shield, ShieldCheck, Plus, Users, ShoppingBag, UserPlus,
@@ -703,6 +704,27 @@ export default function Dashboard({ session, profileDataProps }) {
   const [catalogoProdutos, setCatalogoProdutos] = useState([]); // Produtos_Catalogo
   const [buscaCatalogoMestre, setBuscaCatalogoMestre] = useState('');
   const [buscaCatalogoMestreDebounced, setBuscaCatalogoMestreDebounced] = useState('');
+  const [eanImeiSearch, setEanImeiSearch] = useState('');
+  const [debouncedEanImeiSearch, setDebouncedEanImeiSearch] = useState('');
+  const [catalogoTotalCount, setCatalogoTotalCount] = useState(0);
+  const [catalogoPage, setCatalogoPage] = useState(0);
+  const parentRef = useRef(null);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedEanImeiSearch(eanImeiSearch);
+      setCatalogoPage(0); // Reseta a paginação ao buscar
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [eanImeiSearch]);
+
+  const virtualizer = useVirtualizer({
+    count: catalogoProdutos.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 75,
+    overscan: 5,
+  });
+
   const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
   const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
@@ -1288,7 +1310,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   useEffect(() => {
     if (profile) {
-      const tenantId = profile.empresa_id || company?.id;
+      const tenantId = profile.empresa_id || company?.id || activeEmpresaId;
       fetchFiliais(tenantId);
       fetchTeamMembers(tenantId);
       fetchVendedores(tenantId);
@@ -1320,7 +1342,39 @@ export default function Dashboard({ session, profileDataProps }) {
         if (activeFilialId) fetchTransferencias(activeFilialId, tenantId);
       }
     }
-  }, [profile, activeFilialId]);
+  }, [profile, activeFilialId, company?.id, activeEmpresaId]);
+
+  // Efeito blindado para garantir que IMEIs de celulares NUNCA fiquem vazios por dessincronização
+  useEffect(() => {
+    const fetchImeisSeguranca = async () => {
+      try {
+        const celProds = (produtos || []).filter(p => (p.tipo && p.tipo.toUpperCase().includes('CELULAR')) || (p.categoria && p.categoria.toUpperCase().includes('CELULAR')) || p.categoria === 'IOS' || p.categoria === 'ANDROID');
+        if (celProds.length === 0) return;
+        
+        const targetEmp = profile?.empresa_id || company?.id || activeEmpresaId;
+        if (!targetEmp) return;
+
+        const pIds = celProds.map(p => p.id);
+        const { data } = await supabase
+          .from('imeis')
+          .select('produto_id, filial_id, empresa_id, status, vendido, imei')
+          .in('produto_id', pIds)
+          .eq('empresa_id', targetEmp)
+          .eq('vendido', false);
+
+        if (data && data.length > 0) {
+           setDisponiveisImeis(prev => {
+              // Só atualiza se houver diferença real para não causar loop
+              if (prev.length !== data.length) return data;
+              return prev;
+           });
+        }
+      } catch (err) {
+        console.warn('Falha no fetch de segurança dos IMEIs:', err);
+      }
+    };
+    if (produtos && produtos.length > 0) fetchImeisSeguranca();
+  }, [produtos, company?.id, activeEmpresaId]);
 
   useEffect(() => {
     if (profile) {
@@ -3001,15 +3055,31 @@ export default function Dashboard({ session, profileDataProps }) {
           .order('created_at', { ascending: false })
           .limit(10),
         supabase.from('imeis')
-          .select('id, produto_id, filial_id, status, vendido, imei, produtos(nome)')
+          .select('id, produto_id, filial_id, status, vendido, imei, created_at, produtos(nome)')
           .eq('empresa_id', empresaId)
           .eq('vendido', false)
+          .order('created_at', { ascending: false })
+          .limit(5000)
       ]);
 
       if (prodsRes.error) throw prodsRes.error;
       if (fechRes.error) throw fechRes.error;
 
-      setProdutos(prodsRes.data || []);
+      const baseProdutos = prodsRes.data || [];
+      const baseImeis = allImeisRes.data || [];
+      
+      let imeisMapGlobal = {};
+      baseImeis.forEach(im => {
+        if (!imeisMapGlobal[im.produto_id]) imeisMapGlobal[im.produto_id] = [];
+        imeisMapGlobal[im.produto_id].push(im);
+      });
+      
+      const prodsMapeados = baseProdutos.map(p => ({
+        ...p,
+        imeis_db: imeisMapGlobal[p.id] || []
+      }));
+
+      setProdutos(prodsMapeados);
       setVendas(salesData);
       setFechamentos(fechRes.data || []);
       setUltimosRecebidos(imeisRes.data || []);
@@ -3219,12 +3289,29 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
 
+      // Buscar IMEIs atrelados a esses produtos diretamente para evitar limites globais
+      let imeisMap = {};
+      const prodsIds = (produtosLoja || []).map(p => p.id);
+      if (prodsIds.length > 0) {
+        const { data: imeisLoja } = await supabase
+          .from('imeis')
+          .select('produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
+          .in('produto_id', prodsIds)
+          .eq('vendido', false);
+          
+        (imeisLoja || []).forEach(im => {
+           if (!imeisMap[im.produto_id]) imeisMap[im.produto_id] = [];
+           imeisMap[im.produto_id].push(im);
+        });
+      }
+
       // Mapeamento forçado: clona o valor de 'quantidade' para os nomes prováveis que o componente do Card (UI) utiliza
       const produtosMapeados = (produtosLoja || []).map(item => ({
         ...item,
         estoque: item.quantidade || 0,
         estoque_local: item.quantidade || 0,
-        quantidade_local: item.quantidade || 0
+        quantidade_local: item.quantidade || 0,
+        imeis_db: imeisMap[item.id] || []
       }));
 
       // Define o estado com os dados já mastigados para a UI
@@ -3296,7 +3383,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setLoadingDados(true);
     try {
-      const empId = forceEmpresaId || profile?.empresa_id;
+      const empId = forceEmpresaId || profile?.empresa_id || company?.id || activeEmpresaId;
       if (!empId) {
         setLoadingDados(false);
         return;
@@ -3339,7 +3426,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let allProds = [];
       try {
-        const prodsRes = await supabase.from('produtos').select('*').eq('empresa_id', empId).order('nome', { ascending: true });
+        const prodsRes = await supabase.from('produtos').select('*, estoques(*)').eq('empresa_id', empId).order('nome', { ascending: true });
         if (prodsRes.data) allProds = prodsRes.data;
       } catch (pErr) {
         console.warn('Aviso: Erro ao buscar produtos:', pErr);
@@ -3349,11 +3436,13 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const imeisRes = await supabase
           .from('imeis')
-          .select('id, produto_id, filial_id, status, vendido, imei, cor, produtos(nome)')
-          .eq('filial_id', filialId)
-          .eq('vendido', false);
+          .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, created_at, produtos(nome)')
+          .eq('empresa_id', empId)
+          .eq('vendido', false)
+          .order('created_at', { ascending: false })
+          .limit(5000);
         if (imeisRes.data) {
-          branchImeis = imeisRes.data;
+          branchImeis = imeisRes.data.filter(im => String(im.filial_id) === String(filialId));
           setDisponiveisImeis(imeisRes.data);
         }
       } catch (iErr) {
@@ -5056,7 +5145,7 @@ export default function Dashboard({ session, profileDataProps }) {
   // --- FUNÇÕES POKA-YOKE: ENTRADA DE ESTOQUE AVANÇADA ---
 
   // Buscar catálogo de produtos (produtos_catalogo com suporte a busca server-side ilike, categoria e fallback)
-  const fetchCatalogoProdutos = async (empIdParam = null, searchParam = '', categoryParam = 'TODAS') => {
+  const fetchCatalogoProdutos = async (empIdParam = null, searchParam = '', categoryParam = 'TODAS', page = 0, isEanImeiSearch = '') => {
     const empresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
     if (!empresaId) {
       console.warn("fetchCatalogoProdutos: ID da empresa não encontrado.");
@@ -5088,7 +5177,48 @@ export default function Dashboard({ session, profileDataProps }) {
         query = query.eq('categoria', categoryParam);
       }
 
-      const { data, error } = await query.order('nome', { ascending: true });
+      // EAN/IMEI Search Server-side
+      if (isEanImeiSearch && isEanImeiSearch.trim() !== '') {
+        const termo = isEanImeiSearch.trim();
+        const { data: imeisMatch } = await supabase
+          .from('imeis')
+          .select('produto_id')
+          .ilike('imei', `%${termo}%`);
+
+        const matchedIds = (imeisMatch || []).map(i => i.produto_id).filter(Boolean);
+        if (matchedIds.length > 0) {
+          query = query.or(`codigo_barras.ilike.*${termo}*,sku.ilike.*${termo}*,id.in.(${matchedIds.join(',')})`);
+        } else {
+          query = query.or(`codigo_barras.ilike.*${termo}*,sku.ilike.*${termo}*`);
+        }
+      }
+
+      // Pagination
+      const limit = 50;
+      const from = page * limit;
+      const to = from + limit - 1;
+      query = query.range(from, to).order('nome', { ascending: true });
+
+      // Override original select to get count
+      const countQuery = supabase
+        .from('produtos_catalogo')
+        .select('id', { count: 'exact', head: true })
+        .eq('empresa_id', empresaId);
+
+      if (isEanImeiSearch && isEanImeiSearch.trim() !== '') {
+        const termo = isEanImeiSearch.trim();
+        const { data: imeisMatch } = await supabase.from('imeis').select('produto_id').ilike('imei', `%${termo}%`);
+        const matchedIds = (imeisMatch || []).map(i => i.produto_id).filter(Boolean);
+        if (matchedIds.length > 0) {
+          countQuery.or(`codigo_barras.ilike.*${termo}*,sku.ilike.*${termo}*,id.in.(${matchedIds.join(',')})`);
+        } else {
+          countQuery.or(`codigo_barras.ilike.*${termo}*,sku.ilike.*${termo}*`);
+        }
+      }
+      const { count: exactCount } = await countQuery;
+      if (exactCount !== null) setCatalogoTotalCount(exactCount);
+
+      const { data, error } = await query;
 
       let baseCatalogo = data;
       let imeisDiretos = [];
@@ -6081,7 +6211,7 @@ export default function Dashboard({ session, profileDataProps }) {
     setMultilojaStockData([]);
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      const isCelular = produto.tipo === 'CELULAR' || produto.tipo === 'Celular';
+      const isCelular = (produto.tipo && produto.tipo.toUpperCase().includes('CELULAR')) || (produto.categoria && produto.categoria.toUpperCase().includes('CELULAR')) || produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
       // 1. Buscar todos os registros físicos por nome na tabela produtos
       const { data: prods } = await supabase
@@ -10513,13 +10643,24 @@ export default function Dashboard({ session, profileDataProps }) {
       : (produtos && produtos.length > 0 ? produtos : produtosFilial);
 
     return Array.from(uniqueMap.values()).map(p => {
-      const isCelular = p.tipo === 'CELULAR' || p.tipo === 'Celular';
+      const isCelular = (p.tipo && p.tipo.toUpperCase().includes('CELULAR')) || (p.categoria && p.categoria.toUpperCase().includes('CELULAR')) || p.categoria === 'IOS' || p.categoria === 'ANDROID';
       let localQty = 0;
 
       if (isCelular) {
         const localImeis = (disponiveisImeis || []).filter(im => {
-          const matchesProd = (im.produto_id === p.id) || (im.produto_id === p.catalogo_id) || (im.produtos?.nome && p.nome && im.produtos.nome.toLowerCase().trim() === p.nome.toLowerCase().trim());
-          const matchesFilial = !activeFilialId || String(im.filial_id) === String(activeFilialId) || String(im.empresa_id) === String(activeFilialId);
+          let imNome = im.produtos?.nome;
+          if (!imNome) {
+            const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
+            if (prodDono) imNome = prodDono.nome;
+          }
+          const matchesProd = (im.produto_id === p.id) || (im.produto_id === p.catalogo_id) || (imNome && p.nome && imNome.toLowerCase().trim() === p.nome.toLowerCase().trim());
+          const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
+          const matchesFilial = !activeFilialId || 
+            String(im.filial_id) === String(activeFilialId) || 
+            String(im.empresa_id) === String(activeFilialId) ||
+            (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
+          
+          // O status também deve considerar se foi escrito de forma diferente, já que o multiloja aceita variações de DISPONÍVEL
           const isNotSold = !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO';
           return matchesProd && matchesFilial && isNotSold;
         });
@@ -11463,7 +11604,73 @@ export default function Dashboard({ session, profileDataProps }) {
               ) : (
                 <div className={`${!pdvBusca.trim() && pdvCategoria === 'TUDO' ? 'hidden lg:grid' : 'grid'} grid-cols-1 sm:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1`}>
                   {filteredProdutosPdv.map((prod) => {
-                    const isSemEstoque = prod.categoria !== 'SERVICO' && prod.quantidade <= 0;
+                    console.log(`[DEBUG PRODUTO] ${prod.nome}:`, prod);
+                    // 1. Mapeia todos os IDs possíveis do seu perfil para não deixar escapar nada
+                    const idEmpresa = String(activeEmpresaId);
+                    const idFilial = typeof profile !== 'undefined' && profile?.filial_id ? String(profile.filial_id) : idEmpresa;
+
+                    let estoqueLocal = Number(prod.quantidade || prod.estoque_atual || prod.estoque || 0);
+
+                    const isCelularCard = (prod.tipo && prod.tipo.toUpperCase().includes('CELULAR')) || (prod.categoria && prod.categoria.toUpperCase().includes('CELULAR')) || prod.categoria === 'IOS' || prod.categoria === 'ANDROID';
+
+                    if (isCelularCard) {
+                      let cCount = 0;
+                      // Fallback: usar primeiro os IMEIs atrelados pela nova query, depois os globais
+                      const baseImeis = prod.imeis_db || disponiveisImeis || [];
+                      baseImeis.forEach(im => {
+                         if (im.vendido) return;
+                         if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return;
+
+                         let imNome = im.produtos?.nome || '';
+                         if (!imNome) {
+                            const found = (produtos || []).find(x => String(x.id) === String(im.produto_id));
+                            if (found) imNome = found.nome;
+                         }
+                         const matchesName = imNome.toLowerCase().trim() === (prod.nome || '').toLowerCase().trim();
+                         const matchesId = String(im.produto_id) === String(prod.id) || String(im.produto_id) === String(prod.catalogo_id);
+                         if (!matchesId && !matchesName) return;
+
+                         const imFilialId = String(im.filial_id);
+                         const activeId = String(activeFilialId).toLowerCase();
+                         
+                         const isAll = !activeId || activeId === 'todas' || activeId === 'all' || activeId === 'undefined' || activeId === 'null';
+                         if (isAll || imFilialId === activeId || String(im.empresa_id) === activeId) {
+                            cCount++;
+                            return;
+                         }
+                         
+                         const fObj = (filiais || []).find(f => String(f.id) === imFilialId);
+                         if (fObj && activeFilialNome && fObj.nome === activeFilialNome) {
+                            cCount++;
+                            return;
+                         }
+                      });
+                      
+                      estoqueLocal = cCount; // Força a sobreposição com a contagem real
+                    } else if (prod.estoques && Array.isArray(prod.estoques)) {
+                      const est = prod.estoques.find(e =>
+                        String(e.filial_id) === idFilial ||
+                        String(e.empresa_id) === idFilial ||
+                        String(e.loja_id) === idFilial ||
+                        String(e.filial_id) === idEmpresa ||
+                        String(e.empresa_id) === idEmpresa
+                      );
+
+                      if (est && est.quantidade !== undefined && est.quantidade !== null) {
+                        estoqueLocal = Number(est.quantidade);
+                      } else if (estoqueLocal <= 0) {
+                        // PLANO B EXTREMO: O acessório tem estoque na rede, mas o ID do banco veio nulo/errado.
+                        // Puxa o saldo positivo para destravar a sua venda imediata.
+                        const estAlternativo = prod.estoques.find(e => Number(e.quantidade) > 0);
+                        if (estAlternativo) {
+                          estoqueLocal = Number(estAlternativo.quantidade);
+                        }
+                      }
+                    }
+
+                    // 4. Aplica a trava matemática rigorosa
+                    const isSemEstoque = prod.categoria !== 'SERVICO' && estoqueLocal <= 0;
+                    prod.quantidade = estoqueLocal;
                     return (
                       <div
                         key={prod.id}
@@ -11540,7 +11747,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               Rede
                             </button>
                             <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
-                              {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${prod.quantidade} un.`}
+                              {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${estoqueLocal} un.`}
                             </span>
                           </div>
                         </div>
@@ -15865,7 +16072,19 @@ export default function Dashboard({ session, profileDataProps }) {
 
                                 {/* Lista do catálogo atual */}
                                 <div>
-                                  <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Modelos Cadastrados ({catalogoProdutos.length})</p>
+                                  <div className="mb-3 flex flex-col gap-2">
+                                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Modelos Cadastrados ({catalogoTotalCount > 0 ? catalogoTotalCount : catalogoProdutos.length})</p>
+                                    <div className="relative">
+                                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                                      <input
+                                        type="text"
+                                        placeholder="Buscar por EAN ou IMEI (Server-Side)..."
+                                        className="w-full bg-[#111111] border border-[#222222] rounded-md py-1.5 pl-8 pr-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#6A0DAD]"
+                                        value={eanImeiSearch}
+                                        onChange={(e) => setEanImeiSearch(e.target.value)}
+                                      />
+                                    </div>
+                                  </div>
                                   {loadingCatalogo ? (
                                     <div className="flex items-center justify-center py-8">
                                       <div className="w-6 h-6 border-2 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
@@ -15876,86 +16095,106 @@ export default function Dashboard({ session, profileDataProps }) {
                                       <p className="text-xs italic">Nenhum modelo cadastrado ainda.</p>
                                     </div>
                                   ) : (
-                                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                                      {catalogoProdutos.map(p => (
-                                        <div key={p.id} className="flex items-center justify-between bg-black border border-[#222222] px-3 py-2 rounded-lg">
-                                          <div className="flex items-center gap-2">
-                                            {p.tipo === 'CELULAR' ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
-                                            <div className="flex flex-col gap-1">
-                                              <p className="text-xs font-semibold text-white flex items-center gap-2">
-                                                {p.nome} {p.cor && <span className="text-[#6A0DAD] font-normal">({p.cor})</span>}
-                                                {p.estoque_minimo > 0 && p.estoque_atual <= p.estoque_minimo && (
-                                                  <AlertTriangle size={12} className="text-yellow-500 animate-pulse" title={`Estoque Crítico: ${p.estoque_atual} un. (Mínimo: ${p.estoque_minimo})`} />
-                                                )}
-                                              </p>
-                                              <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                                                <span>{p.categoria}</span>
-                                                <span>·</span>
-                                                <span className="text-emerald-400 font-mono font-bold">Venda: R$ {parseFloat(p.preco || 0).toFixed(2)}</span>
-                                                {parseFloat(p.preco_custo || 0) > 0 && (
-                                                  <>
-                                                    <span>·</span>
-                                                    <span className="text-amber-400 font-mono">Custo: R$ {parseFloat(p.preco_custo).toFixed(2)}</span>
-                                                    <span>·</span>
-                                                    <span className="text-emerald-300 font-mono font-bold">
-                                                      Lucro: R$ {(parseFloat(p.preco || 0) - parseFloat(p.preco_custo)).toFixed(2)}
+
+
+                                    <div ref={parentRef} className="h-52 overflow-y-auto pr-1">
+                                      <div
+                                        style={{
+                                          height: `${virtualizer.getTotalSize()}px`,
+                                          width: '100%',
+                                          position: 'relative',
+                                        }}
+                                      >
+                                        {virtualizer.getVirtualItems().map((virtualRow) => {
+                                          const p = catalogoProdutos[virtualRow.index];
+                                          if (!p) return null;
+                                          return (
+                                            <div
+                                              key={virtualRow.index}
+                                              style={{
+                                                position: 'absolute',
+                                                top: 0,
+                                                left: 0,
+                                                width: '100%',
+                                                height: `${virtualRow.size}px`,
+                                                transform: `translateY(${virtualRow.start}px)`,
+                                                paddingBottom: '8px'
+                                              }}
+                                            >
+                                              <div className="flex items-center justify-between bg-black border border-[#222222] px-3 py-2 rounded-lg h-full">
+                                                <div className="flex items-center gap-2">
+                                                  {p.tipo === 'CELULAR' ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
+                                                  <div className="flex flex-col gap-1">
+                                                    <p className="text-xs font-semibold text-white flex items-center gap-2">
+                                                      {p.nome} {p.cor && <span className="text-[#6A0DAD] font-normal">({p.cor})</span>}
+                                                      {p.estoque_minimo > 0 && p.estoque_atual <= p.estoque_minimo && (
+                                                        <AlertTriangle size={12} className="text-yellow-500 animate-pulse" title={`Estoque Crítico: ${p.estoque_atual} un. (Mínimo: ${p.estoque_minimo})`} />
+                                                      )}
+                                                    </p>
+                                                    <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                                                      <span>{p.categoria}</span>
+                                                      <span>·</span>
+                                                      <span className="text-emerald-400 font-mono font-bold">Venda: R$ {parseFloat(p.preco || 0).toFixed(2)}</span>
+                                                      {parseFloat(p.preco_custo || 0) > 0 && (
+                                                        <>
+                                                          <span>·</span>
+                                                          <span className="text-amber-400 font-mono">Custo: R$ {parseFloat(p.preco_custo).toFixed(2)}</span>
+                                                          <span>·</span>
+                                                          <span className="text-emerald-300 font-mono font-bold">
+                                                            Lucro: R$ {(parseFloat(p.preco || 0) - parseFloat(p.preco_custo)).toFixed(2)}
+                                                          </span>
+                                                        </>
+                                                      )}
+                                                      {p.sku && (
+                                                        <>
+                                                          <span>·</span>
+                                                          <span className="font-mono text-gray-400">SKU: {p.sku}</span>
+                                                        </>
+                                                      )}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 mt-0.5">
+                                                      {p.condicao && (
+                                                        <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-[#222222] text-gray-300 border border-[#333333]">
+                                                          {p.condicao.replace('_', ' ')}
+                                                        </span>
+                                                      )}
+                                                      {p.estoque_minimo > 0 && (
+                                                        <span className="text-[9px] text-gray-500 italic">Mínimo ideal: {p.estoque_minimo} un.</span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                  <div className="flex flex-col items-end">
+                                                    <span className="text-xs font-bold text-white bg-[#111111] px-2 py-1 rounded-md border border-[#333333]">
+                                                      {p.estoque_atual || 0}
                                                     </span>
-                                                  </>
-                                                )}
-                                                {p.sku && (
-                                                  <>
-                                                    <span>·</span>
-                                                    <span className="font-mono text-gray-400">SKU: {p.sku}</span>
-                                                  </>
-                                                )}
-                                              </div>
-                                              <div className="flex items-center gap-2 mt-0.5">
-                                                {p.condicao && (
-                                                  <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider bg-[#222222] text-gray-300 border border-[#333333]">
-                                                    {p.condicao.replace('_', ' ')}
-                                                  </span>
-                                                )}
-                                                {p.estoque_minimo > 0 && (
-                                                  <span className="text-[9px] text-gray-500 italic">Mínimo ideal: {p.estoque_minimo} un.</span>
-                                                )}
+                                                    <span className="text-[8px] text-gray-500 mt-0.5 uppercase tracking-wider">Unidades</span>
+                                                  </div>
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      setBuscaCatalogoMestre(p.nome);
+                                                      setBuscaCatalogoMestreDebounced(p.nome);
+                                                      setCategoriaCatalogoMestre('TODAS');
+                                                      const prodsDaMatriz = Object.values(distribuirEstoqueAtualMap).map(m => m.produtos || []);
+                                                      let prodMatrix = prodsDaMatriz.flat().find(pm => pm.id === p.id || pm.nome === p.nome);
+
+                                                      setProdutoDistribuir(prodMatrix || p);
+                                                      setDistribuirModalOpen(true);
+                                                    }}
+                                                    className="p-1.5 bg-[#111111] border border-[#222222] text-gray-400 rounded-md hover:bg-[#6A0DAD] hover:text-white hover:border-[#6A0DAD] transition-colors ml-2"
+                                                    title="Distribuir Estoque"
+                                                  >
+                                                    <Share2 size={14} />
+                                                  </button>
+                                                </div>
                                               </div>
                                             </div>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <button
-                                              onClick={() => openEstoqueGlobal(p)}
-                                              title="Localizar Aparelhos na Rede"
-                                              className="text-gray-700 hover:text-blue-400 transition-colors"
-                                            >
-                                              <Eye size={12} />
-                                            </button>
-                                            {['ADMINISTRADOR', 'ADMIN', 'GERENTE', 'ESTOQUISTA', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) && (
-                                              <button
-                                                onClick={() => handleStartEditCatalogo(p)}
-                                                title="Editar Produto"
-                                                className="text-gray-700 hover:text-yellow-500 transition-colors"
-                                              >
-                                                <Edit2 size={12} />
-                                              </button>
-                                            )}
-                                            <button
-                                              onClick={async () => {
-                                                if (!window.confirm(`Remover "${p.nome}" do catálogo?`)) return;
-                                                try {
-                                                  const { error } = await supabase.from('produtos_catalogo').delete().eq('id', p.id);
-                                                  if (error) throw error;
-                                                  fetchCatalogoProdutos(company.id);
-                                                } catch (err) {
-                                                  alert('Erro ao remover: ' + err.message);
-                                                }
-                                              }}
-                                              className="text-gray-700 hover:text-red-400 transition-colors"
-                                            >
-                                              <Trash2 size={12} />
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ))}
+                                          );
+                                        })}
+                                      </div>
+
                                     </div>
                                   )}
                                 </div>
