@@ -3291,12 +3291,15 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // Buscar IMEIs atrelados a esses produtos diretamente para evitar limites globais
       let imeisMap = {};
-      const prodsIds = (produtosLoja || []).map(p => p.id);
-      if (prodsIds.length > 0) {
+      const prodsIds = (produtosLoja || []).map(p => p.id).filter(Boolean);
+      const catIds = (produtosLoja || []).map(p => p.catalogo_id).filter(Boolean);
+      const allIds = [...new Set([...prodsIds, ...catIds])];
+
+      if (allIds.length > 0) {
         const { data: imeisLoja } = await supabase
           .from('imeis')
           .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
-          .in('produto_id', prodsIds)
+          .in('produto_id', allIds)
           .eq('vendido', false);
           
         (imeisLoja || []).forEach(im => {
@@ -8579,7 +8582,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       if (availableImeis.length === 0 && disponiveisImeis && disponiveisImeis.length > 0) {
-        availableImeis = disponiveisImeis.filter(im => {
+        const allMatching = disponiveisImeis.filter(im => {
           if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
           let imNome = im.produtos?.nome;
           if (!imNome) {
@@ -8589,9 +8592,14 @@ export default function Dashboard({ session, profileDataProps }) {
           const matchesProd = (String(im.produto_id) === String(produto.id)) || 
             (String(im.produto_id) === String(produto.catalogo_id)) || 
             (imNome && produto.nome && imNome.toLowerCase().trim() === produto.nome.toLowerCase().trim());
-          const matchesFilial = !activeFilialId || String(im.filial_id) === String(activeFilialId) || String(im.empresa_id) === String(activeFilialId);
-          return matchesProd && matchesFilial;
+          return matchesProd;
         });
+
+        const localMatching = allMatching.filter(im => 
+          !activeFilialId || String(im.filial_id) === String(activeFilialId) || String(im.empresa_id) === String(activeFilialId)
+        );
+
+        availableImeis = localMatching.length > 0 ? localMatching : allMatching;
       }
 
       // 2. Se ainda não achou, faz uma consulta direta tolerante no Supabase por produto_id
@@ -8600,17 +8608,18 @@ export default function Dashboard({ session, profileDataProps }) {
           const pIds = [produto.id, produto.catalogo_id].filter(Boolean);
           let query = supabase
             .from('imeis')
-            .select('*')
-            .in('produto_id', pIds)
+            .select('id, imei, cor, status, vendido, filial_id, empresa_id, produto_id')
             .eq('vendido', false);
+
+          if (pIds.length > 0) {
+            query = query.in('produto_id', pIds);
+          }
 
           const { data, error } = await query;
           if (!error && data && data.length > 0) {
-            availableImeis = data.filter(im => {
-              if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
-              if (im.filial_id && activeFilialId) return String(im.filial_id) === String(activeFilialId);
-              return true;
-            });
+            const valid = data.filter(im => im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO');
+            const loc = valid.filter(im => !activeFilialId || String(im.filial_id) === String(activeFilialId));
+            availableImeis = loc.length > 0 ? loc : valid;
           }
         } catch (err) {
           console.warn('Aviso ao carregar IMEIs para carrinho:', err);
@@ -10785,7 +10794,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // Resolução ultra tolerante de IMEIs e Cor do aparelho / produto
-      const prodImeis = (disponiveisImeis || []).filter(im => {
+      const allProdImeis = (disponiveisImeis || []).filter(im => {
         if (im.vendido) return false;
         if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
 
@@ -10794,17 +10803,25 @@ export default function Dashboard({ session, profileDataProps }) {
           const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
           if (prodDono) imNome = prodDono.nome;
         }
-        const matchesProd = (String(im.produto_id) === String(p.id)) || (String(im.produto_id) === String(p.catalogo_id)) || (imNome && p.nome && imNome.toLowerCase().trim() === p.nome.toLowerCase().trim());
+        const matchesProd = (String(im.produto_id) === String(p.id)) || 
+          (String(im.produto_id) === String(p.catalogo_id)) || 
+          (imNome && p.nome && imNome.toLowerCase().trim() === p.nome.toLowerCase().trim());
+
+        return matchesProd;
+      });
+
+      const localProdImeis = allProdImeis.filter(im => {
         const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
-        const matchesFilial = !activeFilialId || 
+        return !activeFilialId || 
           String(im.filial_id) === String(activeFilialId) || 
           String(im.empresa_id) === String(activeFilialId) ||
           (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
-
-        return matchesProd && matchesFilial;
       });
 
-      const dbImeisArray = (p.imeis_db && Array.isArray(p.imeis_db) && p.imeis_db.length > 0) ? p.imeis_db : prodImeis;
+      const dbImeisArray = (p.imeis_db && Array.isArray(p.imeis_db) && p.imeis_db.length > 0) 
+        ? p.imeis_db 
+        : (localProdImeis.length > 0 ? localProdImeis : allProdImeis);
+
       const imeiPrincipal = dbImeisArray[0]?.imei || p.imei || null;
       const corDoImei = dbImeisArray.find(i => i.cor && String(i.cor).trim())?.cor || null;
 
