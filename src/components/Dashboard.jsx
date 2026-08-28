@@ -3295,15 +3295,22 @@ export default function Dashboard({ session, profileDataProps }) {
       if (prodsIds.length > 0) {
         const { data: imeisLoja } = await supabase
           .from('imeis')
-          .select('produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
+          .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
           .in('produto_id', prodsIds)
-          .or(`empresa_id.eq.${targetFilialId},filial_id.eq.${targetFilialId}`)
           .eq('vendido', false);
           
         (imeisLoja || []).forEach(im => {
            if (!imeisMap[im.produto_id]) imeisMap[im.produto_id] = [];
            imeisMap[im.produto_id].push(im);
         });
+
+        if (imeisLoja && imeisLoja.length > 0) {
+          setDisponiveisImeis(prev => {
+            const mapPrev = new Map((prev || []).map(i => [i.id || i.imei, i]));
+            imeisLoja.forEach(i => mapPrev.set(i.id || i.imei, i));
+            return Array.from(mapPrev.values());
+          });
+        }
       }
 
       // Mapeamento forçado: clona o valor de 'quantidade' para os nomes prováveis que o componente do Card (UI) utiliza
@@ -10739,8 +10746,31 @@ export default function Dashboard({ session, profileDataProps }) {
         localQty = localProds.reduce((sum, item) => sum + (item.quantidade || item.estoque || item.estoque_local || item.quantidade_local || 0), 0);
       }
 
-      // Resolução ultra tolerante da cor do aparelho / produto
-      let corFinal = (p.cor && String(p.cor).trim()) || null;
+      // Resolução ultra tolerante de IMEIs e Cor do aparelho / produto
+      const prodImeis = (disponiveisImeis || []).filter(im => {
+        if (im.vendido) return false;
+        if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+
+        let imNome = im.produtos?.nome;
+        if (!imNome) {
+          const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
+          if (prodDono) imNome = prodDono.nome;
+        }
+        const matchesProd = (String(im.produto_id) === String(p.id)) || (String(im.produto_id) === String(p.catalogo_id)) || (imNome && p.nome && imNome.toLowerCase().trim() === p.nome.toLowerCase().trim());
+        const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
+        const matchesFilial = !activeFilialId || 
+          String(im.filial_id) === String(activeFilialId) || 
+          String(im.empresa_id) === String(activeFilialId) ||
+          (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
+
+        return matchesProd && matchesFilial;
+      });
+
+      const dbImeisArray = (p.imeis_db && Array.isArray(p.imeis_db) && p.imeis_db.length > 0) ? p.imeis_db : prodImeis;
+      const imeiPrincipal = dbImeisArray[0]?.imei || p.imei || null;
+      const corDoImei = dbImeisArray.find(i => i.cor && String(i.cor).trim())?.cor || null;
+
+      let corFinal = (p.cor && String(p.cor).trim()) || corDoImei || null;
       if (!corFinal) {
         const matchPhy = (fonteBaseProds || []).find(pr => 
           (pr.id && p.id && String(pr.id) === String(p.id)) ||
@@ -10749,12 +10779,6 @@ export default function Dashboard({ session, profileDataProps }) {
           (pr.nome && p.nome && pr.nome.toLowerCase().trim() === p.nome.toLowerCase().trim())
         );
         if (matchPhy && matchPhy.cor) corFinal = String(matchPhy.cor).trim();
-      }
-      if (!corFinal && isCelular) {
-        const imeiComCor = (disponiveisImeis || []).find(im => 
-          (String(im.produto_id) === String(p.id) || String(im.produto_id) === String(p.catalogo_id)) && im.cor
-        ) || (p.imeis_db || []).find(im => im.cor);
-        if (imeiComCor && imeiComCor.cor) corFinal = String(imeiComCor.cor).trim();
       }
       if (!corFinal && catalogoProdutos && catalogoProdutos.length > 0) {
         const catObj = catalogoProdutos.find(c => 
@@ -10767,6 +10791,8 @@ export default function Dashboard({ session, profileDataProps }) {
       return {
         ...p,
         cor: corFinal,
+        imei: imeiPrincipal,
+        imeis_db: dbImeisArray,
         filial_id: activeFilialId,
         filial_nome: activeFilialNome,
         quantidade: localQty,
@@ -11786,6 +11812,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#e9d5ff] bg-purple-950/60 border border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
                                   <Tag size={9} className="text-purple-300" />
                                   {prod.cor || prod.color || (prod.imeis_db && prod.imeis_db[0]?.cor)}
+                                </span>
+                              )}
+                              {isCelularCard && (prod.imei || (prod.imeis_db && prod.imeis_db.length > 0)) && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold text-amber-300 bg-amber-950/40 border border-amber-500/30 px-1.5 py-0.5 rounded w-fit shadow-sm">
+                                  <Smartphone size={9} className="text-amber-400" />
+                                  {prod.imeis_db && prod.imeis_db.length > 1 
+                                    ? `${prod.imeis_db.length} IMEIs` 
+                                    : `IMEI: ${prod.imei || prod.imeis_db?.[0]?.imei}`}
                                 </span>
                               )}
                             </div>
