@@ -10739,8 +10739,34 @@ export default function Dashboard({ session, profileDataProps }) {
         localQty = localProds.reduce((sum, item) => sum + (item.quantidade || item.estoque || item.estoque_local || item.quantidade_local || 0), 0);
       }
 
+      // Resolução ultra tolerante da cor do aparelho / produto
+      let corFinal = (p.cor && String(p.cor).trim()) || null;
+      if (!corFinal) {
+        const matchPhy = (fonteBaseProds || []).find(pr => 
+          (pr.id && p.id && String(pr.id) === String(p.id)) ||
+          (pr.catalogo_id && p.id && String(pr.catalogo_id) === String(p.id)) ||
+          (pr.id && p.catalogo_id && String(pr.id) === String(p.catalogo_id)) ||
+          (pr.nome && p.nome && pr.nome.toLowerCase().trim() === p.nome.toLowerCase().trim())
+        );
+        if (matchPhy && matchPhy.cor) corFinal = String(matchPhy.cor).trim();
+      }
+      if (!corFinal && isCelular) {
+        const imeiComCor = (disponiveisImeis || []).find(im => 
+          (String(im.produto_id) === String(p.id) || String(im.produto_id) === String(p.catalogo_id)) && im.cor
+        ) || (p.imeis_db || []).find(im => im.cor);
+        if (imeiComCor && imeiComCor.cor) corFinal = String(imeiComCor.cor).trim();
+      }
+      if (!corFinal && catalogoProdutos && catalogoProdutos.length > 0) {
+        const catObj = catalogoProdutos.find(c => 
+          String(c.id) === String(p.catalogo_id || p.id) ||
+          (c.nome && p.nome && c.nome.toLowerCase().trim() === p.nome.toLowerCase().trim())
+        );
+        if (catObj && catObj.cor) corFinal = String(catObj.cor).trim();
+      }
+
       return {
         ...p,
+        cor: corFinal,
         filial_id: activeFilialId,
         filial_nome: activeFilialNome,
         quantidade: localQty,
@@ -11756,10 +11782,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <Store size={10} className="text-[#6A0DAD]" />
                                 {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
                               </span>
-                              {prod.cor && (
+                              {(prod.cor || prod.color || (prod.imeis_db && prod.imeis_db[0]?.cor)) && (
                                 <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#e9d5ff] bg-purple-950/60 border border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
                                   <Tag size={9} className="text-purple-300" />
-                                  {prod.cor}
+                                  {prod.cor || prod.color || (prod.imeis_db && prod.imeis_db[0]?.cor)}
                                 </span>
                               )}
                             </div>
