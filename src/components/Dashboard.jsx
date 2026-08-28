@@ -8564,30 +8564,65 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
+    const isCelular = (produto.tipo && produto.tipo.toUpperCase().includes('CELULAR')) || 
+      (produto.categoria && produto.categoria.toUpperCase().includes('CELULAR')) || 
+      produto.categoria === 'IOS' || 
+      produto.categoria === 'ANDROID';
+
     let availableImeis = [];
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-    if (produto.tipo === 'CELULAR') {
-      try {
-        const { data, error } = await supabase
-          .from('imeis')
-          .select('*')
-          .eq('empresa_id', targetEmpresaId)
-          .or(`produto_id.eq.${produto.id},produtos.nome.ilike.${produto.nome}`)
-          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel', 'RESERVADO'])
-          .eq('vendido', false);
 
-        if (!error && data) {
-          availableImeis = data.filter(im => {
-            if (im.filial_id) return String(im.filial_id) === String(activeFilialId);
-            return true;
-          });
-        }
+    if (isCelular) {
+      // 1. Usar primeiro os IMEIs já embutidos no produto ou disponíveis no estado global
+      if (produto.imeis_db && Array.isArray(produto.imeis_db) && produto.imeis_db.length > 0) {
+        availableImeis = produto.imeis_db.filter(im => !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO');
+      }
 
-        if (!imei && availableImeis.length > 0) {
-          imei = availableImeis[0].imei;
+      if (availableImeis.length === 0 && disponiveisImeis && disponiveisImeis.length > 0) {
+        availableImeis = disponiveisImeis.filter(im => {
+          if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+          let imNome = im.produtos?.nome;
+          if (!imNome) {
+            const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
+            if (prodDono) imNome = prodDono.nome;
+          }
+          const matchesProd = (String(im.produto_id) === String(produto.id)) || 
+            (String(im.produto_id) === String(produto.catalogo_id)) || 
+            (imNome && produto.nome && imNome.toLowerCase().trim() === produto.nome.toLowerCase().trim());
+          const matchesFilial = !activeFilialId || String(im.filial_id) === String(activeFilialId) || String(im.empresa_id) === String(activeFilialId);
+          return matchesProd && matchesFilial;
+        });
+      }
+
+      // 2. Se ainda não achou, faz uma consulta direta tolerante no Supabase por produto_id
+      if (availableImeis.length === 0) {
+        try {
+          const pIds = [produto.id, produto.catalogo_id].filter(Boolean);
+          let query = supabase
+            .from('imeis')
+            .select('*')
+            .in('produto_id', pIds)
+            .eq('vendido', false);
+
+          const { data, error } = await query;
+          if (!error && data && data.length > 0) {
+            availableImeis = data.filter(im => {
+              if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+              if (im.filial_id && activeFilialId) return String(im.filial_id) === String(activeFilialId);
+              return true;
+            });
+          }
+        } catch (err) {
+          console.warn('Aviso ao carregar IMEIs para carrinho:', err);
         }
-      } catch (err) {
-        console.warn('Aviso ao carregar IMEIs para carrinho:', err);
+      }
+
+      // 3. Se selecionou ou recebeu um IMEI específico ou pega o primeiro disponível
+      if (!imei && availableImeis.length > 0) {
+        imei = availableImeis[0].imei;
+      }
+      if (!imei && produto.imei) {
+        imei = produto.imei;
       }
     } else {
       if (!forceAdd && produto.categoria !== 'SERVICO') {
@@ -8604,7 +8639,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
-    if (produto.tipo !== 'CELULAR' && pdvCart.some(item => item.produto.id === produto.id)) {
+    if (!isCelular && pdvCart.some(item => item.produto.id === produto.id)) {
       setPdvCart(prev => prev.map(item => {
         if (item.produto.id === produto.id) {
           return { ...item, quantidade: item.quantidade + 1, origenFilialNome: origenFilialNome || item.origenFilialNome };
@@ -8615,16 +8650,19 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    if (produto.tipo === 'CELULAR' && imei && pdvCart.some(item => item.imei === imei)) {
+    if (isCelular && imei && pdvCart.some(item => item.imei === imei)) {
       showToast(`O IMEI ${imei} do aparelho ${produto.nome} já está no carrinho.`, 'error');
       return;
     }
 
+    const corDoItem = produto.cor || produto.color || availableImeis.find(i => i.cor)?.cor || null;
+
     const novoItem = {
       cartId: crypto.randomUUID(),
-      produto: produto,
+      produto: { ...produto, cor: corDoItem || produto.cor },
       quantidade: 1,
       imei: imei,
+      cor: corDoItem,
       availableImeis: availableImeis,
       valorUnitario: parseFloat(produto.preco) || 0,
       vendaTrainee: pdvVendaTrainee,
@@ -12057,9 +12095,9 @@ export default function Dashboard({ session, profileDataProps }) {
                         <span className="text-[8px] bg-[#1a1a1a] text-purple-400 border border-purple-900/30 px-1.5 py-0.5 rounded font-bold uppercase inline-block">
                           {item.produto.categoria}
                         </span>
-                        {item.produto.cor && (
+                        {(item.produto.cor || item.cor || item.produto.color) && (
                           <span className="text-[8px] bg-purple-950/50 text-[#e9d5ff] border border-purple-700/40 px-1.5 py-0.5 rounded font-bold inline-block">
-                            {item.produto.cor}
+                            {item.produto.cor || item.cor || item.produto.color}
                           </span>
                         )}
                       </div>
@@ -12068,23 +12106,41 @@ export default function Dashboard({ session, profileDataProps }) {
                     {/* Linha de IMEI/Quantidade e Preço */}
                     <div className="flex justify-between items-end gap-3 border-t border-[#111] pt-2 mt-1">
                       <div className="flex-1">
-                        {item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei ? (
+                        {((item.produto.tipo && item.produto.tipo.toUpperCase().includes('CELULAR')) ||
+                          (item.produto.categoria && item.produto.categoria.toUpperCase().includes('CELULAR')) ||
+                          item.produto.categoria === 'IOS' ||
+                          item.produto.categoria === 'ANDROID' ||
+                          (item.availableImeis && item.availableImeis.length > 0) ||
+                          item.imei) ? (
                           <div className="space-y-1">
                             <label className="block text-[8px] font-bold text-gray-500 uppercase tracking-wide">IMEI Selecionado</label>
                             {item.availableImeis && item.availableImeis.length > 0 ? (
                               <select
-                                value={item.imei}
+                                value={item.imei || item.availableImeis[0]?.imei}
                                 onChange={(e) => handleUpdateCartImei(item.cartId, e.target.value)}
-                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-1 text-[10px] text-white outline-none font-mono tracking-wider"
+                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-1 text-[10px] text-white outline-none font-mono tracking-wider cursor-pointer"
                               >
                                 {item.availableImeis.map((im) => (
-                                  <option key={im.id} value={im.imei}>
-                                    {im.imei}
+                                  <option key={im.id || im.imei} value={im.imei}>
+                                    {im.imei} {im.cor ? `(${im.cor})` : ''}
                                   </option>
                                 ))}
                               </select>
+                            ) : item.imei ? (
+                              <input
+                                type="text"
+                                value={item.imei}
+                                onChange={(e) => handleUpdateCartImei(item.cartId, e.target.value)}
+                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-1 text-[10px] text-amber-400 font-mono font-bold tracking-wider outline-none"
+                              />
                             ) : (
-                              <span className="text-[10px] text-red-500 font-bold block">{item.imei || 'Nenhum'}</span>
+                              <input
+                                type="text"
+                                placeholder="Bipe ou digite o IMEI..."
+                                value={item.imei || ''}
+                                onChange={(e) => handleUpdateCartImei(item.cartId, e.target.value)}
+                                className="w-full bg-black border border-amber-500/50 focus:border-[#6A0DAD] rounded px-2 py-1 text-[10px] text-amber-300 font-mono tracking-wider outline-none"
+                              />
                             )}
                           </div>
                         ) : (
