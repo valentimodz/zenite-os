@@ -56,6 +56,7 @@ export default function GabaritoImpressao({ session, onBack }) {
         tratarEFormatarProdutos(prodsData || []);
       }
     } catch (err) {
+      console.log('Motivo do alerta vermelho:', err);
       console.error('Erro ao carregar catálogo para impressão:', err);
       setErro('Não foi possível carregar o catálogo de produtos.');
     } finally {

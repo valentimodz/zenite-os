@@ -416,6 +416,9 @@ export default function Dashboard({ session, profileDataProps }) {
   const [toast, setToast] = useState(null); // { message: '', type: 'success' | 'error' | 'info' }
 
   const showToast = (message, type = 'success') => {
+    if (type === 'error') {
+      console.log('Motivo do alerta vermelho:', message);
+    }
     setToast({ message, type });
     // auto close after 4 seconds
     setTimeout(() => {
@@ -428,7 +431,7 @@ export default function Dashboard({ session, profileDataProps }) {
     const originalAlert = window.alert;
     window.alert = (msg) => {
       let type = 'info';
-      const lowercaseMsg = msg.toLowerCase();
+      const lowercaseMsg = String(msg || '').toLowerCase();
       if (
         lowercaseMsg.includes('erro') ||
         lowercaseMsg.includes('falha') ||
@@ -440,6 +443,7 @@ export default function Dashboard({ session, profileDataProps }) {
         lowercaseMsg.includes('indisponível')
       ) {
         type = 'error';
+        console.log('Motivo do alerta vermelho:', msg);
       } else if (
         lowercaseMsg.includes('sucesso') ||
         lowercaseMsg.includes('cadastrado') ||
@@ -9791,6 +9795,7 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchVendedorData(activeFilialId, session.user.id);
       fetchClientes(company?.id || profile?.empresa_id);
     } catch (err) {
+      console.log('Motivo do alerta vermelho:', err);
       console.error('Erro ao registrar venda:', err);
       alert('Falha ao concluir venda: ' + (err.message || JSON.stringify(err)));
     } finally {
@@ -20536,7 +20541,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         {/* OFFLINE BANNER */}
         {isOffline && (
-          <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-xs font-bold flex items-center justify-center gap-2 z-[100] shadow-md animate-slideDown">
+          <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-xs font-bold flex items-center justify-center gap-2 z-[100] shadow-md animate-slideDown print:hidden">
             <AlertCircle size={14} />
             Você está offline. O Zênite operará em Modo de Contingência.
           </div>
@@ -20547,14 +20552,14 @@ export default function Dashboard({ session, profileDataProps }) {
           <>
             <button
               onClick={() => setIsSosModalOpen(true)}
-              className="fixed bottom-6 right-6 bg-red-600 hover:bg-red-700 text-white rounded-full p-4 shadow-2xl flex items-center justify-center z-50 transition-transform hover:scale-110"
+              className="fixed bottom-6 right-6 bg-red-600 hover:bg-red-700 text-white rounded-full p-4 shadow-2xl flex items-center justify-center z-50 transition-transform hover:scale-110 print:hidden"
               title="S.O.S Suporte"
             >
               <AlertCircle size={28} />
             </button>
 
             {isSosModalOpen && (
-              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4 print:hidden">
                 <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl shadow-2xl w-full max-w-md flex flex-col p-6 animate-fadeIn">
                   <div className="flex justify-between items-start mb-4">
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
