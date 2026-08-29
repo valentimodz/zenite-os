@@ -859,6 +859,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Estados para Abertura e Fechamento de Caixa Multi-filiais (PDV Lock)
   const [caixaAtual, setCaixaAtual] = useState(null);
+  const [isCaixaAberto, setIsCaixaAberto] = useState(false);
   const [isLoadingCaixa, setIsLoadingCaixa] = useState(false);
   const [isModalAbrirCaixaOpen, setIsModalAbrirCaixaOpen] = useState(false);
   const [fundoTrocoInput, setFundoTrocoInput] = useState('');
@@ -2003,7 +2004,8 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchProdutosPDV(targetFilialId);
       fetchStatusCaixa(targetFilialId).then((cx) => {
         // O modal de abertura obrigatória de caixa SÓ abre automaticamente para usuários com cargo de Vendedor
-        if (isVendedor && (!cx || cx.status !== 'aberto') && (activeTab === 'pdv' || currentView === 'pdv')) {
+        const isAberto = !!cx && String(cx.status || '').toLowerCase() === 'aberto' && !cx.data_fechamento;
+        if (isVendedor && !isAberto && (activeTab === 'pdv' || currentView === 'pdv')) {
           setIsModalAbrirCaixaOpen(true);
         }
       });
@@ -3179,30 +3181,38 @@ export default function Dashboard({ session, profileDataProps }) {
   // Buscar status do Caixa Aberto da Filial Ativa (Bloqueio PDV)
   const fetchStatusCaixa = async (filialId) => {
     const targetFilialId = filialId || activeFilialId || profile?.filial_id;
-    if (!targetFilialId) return null;
+    if (!targetFilialId) {
+      setCaixaAtual(null);
+      setIsCaixaAberto(false);
+      return null;
+    }
     setIsLoadingCaixa(true);
     try {
+      // Validação Estrita: buscar caixa que ainda não foi fechado (data_fechamento é nulo e status é ABERTO/aberto)
       const { data, error } = await supabase
         .from('caixas')
         .select('*')
         .eq('filial_id', targetFilialId)
+        .is('data_fechamento', null)
+        .or('status.eq.ABERTO,status.eq.aberto')
         .order('data_abertura', { ascending: false })
         .limit(1);
 
       if (!error && Array.isArray(data) && data.length > 0) {
-        const ultimoCaixa = data[0];
-        if (ultimoCaixa.status === 'aberto') {
-          setCaixaAtual(ultimoCaixa);
-          setIsModalAbrirCaixaOpen(false);
-          return ultimoCaixa;
-        }
+        const caixaAberto = data[0];
+        setCaixaAtual(caixaAberto);
+        setIsCaixaAberto(true);
+        setIsModalAbrirCaixaOpen(false);
+        return caixaAberto;
       }
 
       setCaixaAtual(null);
+      setIsCaixaAberto(false);
       return null;
     } catch (err) {
       console.warn('[Dashboard] Aviso ao verificar status do caixa:', err);
       setCaixaAtual(null);
+      setIsCaixaAberto(false);
       return null;
     } finally {
       setIsLoadingCaixa(false);
@@ -3237,8 +3247,9 @@ export default function Dashboard({ session, profileDataProps }) {
         operador_id: operadorId,
         operador_nome: profile?.nome || session?.user?.email || 'Operador PDV',
         saldo_inicial: saldoInicialNum,
-        status: 'aberto',
+        status: 'ABERTO',
         data_abertura: new Date().toISOString(),
+        data_fechamento: null,
         observacoes_abertura: obsAberturaInput.trim() || null
       };
 
@@ -3255,8 +3266,9 @@ export default function Dashboard({ session, profileDataProps }) {
           operador_id: operadorId,
           saldo_inicial: saldoInicialNum,
           observacoes_abertura: obsAberturaInput.trim() || null,
-          status: 'aberto',
-          data_abertura: new Date().toISOString()
+          status: 'ABERTO',
+          data_abertura: new Date().toISOString(),
+          data_fechamento: null
         };
         const resFallback = await supabase.from('caixas').insert(fallbackPayload).select().single();
         if (resFallback.error) throw resFallback.error;
@@ -3265,6 +3277,7 @@ export default function Dashboard({ session, profileDataProps }) {
         setCaixaAtual(data);
       }
 
+      setIsCaixaAberto(true);
       setIsModalAbrirCaixaOpen(false);
       setFundoTrocoInput('');
       setObsAberturaInput('');
@@ -8569,7 +8582,8 @@ export default function Dashboard({ session, profileDataProps }) {
     const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
     const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
 
-    if (isVendedor && (!caixaAtual || caixaAtual.status !== 'aberto')) {
+    const isCaixaAtivo = isCaixaAberto && !!caixaAtual && String(caixaAtual.status || '').toLowerCase() === 'aberto' && !caixaAtual.data_fechamento;
+    if (isVendedor && !isCaixaAtivo) {
       showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
       setIsModalAbrirCaixaOpen(true);
       return;
@@ -8917,7 +8931,8 @@ export default function Dashboard({ session, profileDataProps }) {
     const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
     const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
 
-    if (isVendedor && (!caixaAtual || caixaAtual.status !== 'aberto')) {
+    const isCaixaAtivo = isCaixaAberto && !!caixaAtual && String(caixaAtual.status || '').toLowerCase() === 'aberto' && !caixaAtual.data_fechamento;
+    if (isVendedor && !isCaixaAtivo) {
       showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
       setIsModalAbrirCaixaOpen(true);
       return;
@@ -9407,7 +9422,8 @@ export default function Dashboard({ session, profileDataProps }) {
       // GUARD CLAUSE 0: O PDV exige um Caixa Aberto para processar a venda (se for Vendedor)
       const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
       const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
-      if (isVendedor && (!caixaAtual || caixaAtual.status !== 'aberto')) {
+      const isCaixaAtivo = isCaixaAberto && !!caixaAtual && String(caixaAtual.status || '').toLowerCase() === 'aberto' && !caixaAtual.data_fechamento;
+      if (isVendedor && !isCaixaAtivo) {
         const msgErrCaixa = "Caixa Fechado: É obrigatório abrir o caixa antes de finalizar vendas nesta filial.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCaixa);
         showToast(msgErrCaixa, "error");
@@ -10204,7 +10220,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setLoadingFechamento(true);
     try {
+      const dataFechamentoISO = new Date().toISOString();
 
+      // 1. Inserir registro detalhado na tabela fechamentos
       const { error } = await supabase
         .from('fechamentos')
         .insert({
@@ -10224,7 +10242,40 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (error) throw error;
 
-      alert('Fechamento de caixa enviado com sucesso para a gerência!');
+      // 2. Atualizar registro na tabela caixas para FECHADO e preencher data_fechamento
+      if (caixaAtual?.id) {
+        const { error: updateCaixaErr } = await supabase
+          .from('caixas')
+          .update({
+            status: 'FECHADO',
+            data_fechamento: dataFechamentoISO,
+            saldo_final_dinheiro: dinero,
+            saldo_final_cartao: cartao,
+            saldo_final_pix: pix,
+            saldo_final_boleto: boleto,
+            saldo_final_troca: troca,
+            observacoes_fechamento: fechamentoObs || null
+          })
+          .eq('id', caixaAtual.id);
+
+        if (updateCaixaErr) {
+          console.warn('[Dashboard] Aviso ao atualizar status na tabela caixas:', updateCaixaErr);
+        }
+      } else {
+        // Fallback: se caixaAtual não tiver id no state, encerra caixas abertos desta filial
+        await supabase
+          .from('caixas')
+          .update({
+            status: 'FECHADO',
+            data_fechamento: dataFechamentoISO
+          })
+          .eq('filial_id', activeFilialId)
+          .is('data_fechamento', null);
+      }
+
+      // 3. No Frontend (State): Forçar limpeza e reset instantâneo dos estados
+      setIsCaixaAberto(false);
+      setCaixaAtual(null);
       setFechamentoDinheiro('');
       setFechamentoCartao('');
       setFechamentoPix('');
@@ -10234,7 +10285,13 @@ export default function Dashboard({ session, profileDataProps }) {
       setFechamentoObs('');
       setActiveSellerTab('pdv');
 
+      showToast('Caixa fechado com sucesso!', 'success');
+      alert('Fechamento de caixa enviado com sucesso para a gerência!');
+
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       fetchVendedorData(activeFilialId, session.user.id);
+      fetchStatusCaixa(activeFilialId);
+      fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
     } catch (err) {
       console.error('Erro ao enviar fechamento:', err);
       alert('Erro ao enviar fechamento de caixa: ' + err.message);
@@ -11554,7 +11611,7 @@ export default function Dashboard({ session, profileDataProps }) {
     const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_');
     const isManagementRole = ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE', 'RH', 'RH_ADMIN', 'ESTOQUISTA', 'DIRETOR'].includes(userRoleUpper);
 
-    const isCaixaFechado = !caixaAtual || caixaAtual.status !== 'aberto';
+    const isCaixaFechado = !isCaixaAberto || !caixaAtual || String(caixaAtual.status || '').toLowerCase() !== 'aberto' || !!caixaAtual.data_fechamento;
     // O bloqueio do catálogo e dos inputs SÓ se aplica para usuários com cargo de Vendedor
     const isPdvBloqueadoParaUsuario = isVendedor && isCaixaFechado;
 
