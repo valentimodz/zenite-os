@@ -6576,6 +6576,7 @@ export default function Dashboard({ session, profileDataProps }) {
       setSelectedMultilojaProd(null);
 
       // Inserção direta e incondicional no carrinho do PDV!
+      const precoOriginalMultiloja = parseFloat(prodParaCarrinho.preco || produto.preco || 0);
       const novoCartItem = {
         cartId: crypto.randomUUID(),
         produto: {
@@ -6585,7 +6586,8 @@ export default function Dashboard({ session, profileDataProps }) {
         },
         quantidade: 1,
         imei: imeiParaCarrinho || null,
-        valorUnitario: parseFloat(prodParaCarrinho.preco || produto.preco || 0),
+        preco_original: precoOriginalMultiloja,
+        valorUnitario: precoOriginalMultiloja,
         vendaTrainee: pdvVendaTrainee,
         origenFilialNome: origenFilialNome,
         isReservadoDeOutraFilial: true
@@ -8665,6 +8667,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     const corDoItem = produto.cor || produto.color || availableImeis.find(i => i.cor)?.cor || null;
+    const precoOriginalItem = parseFloat(produto.preco) || 0;
 
     const novoItem = {
       cartId: crypto.randomUUID(),
@@ -8673,7 +8676,8 @@ export default function Dashboard({ session, profileDataProps }) {
       imei: imei,
       cor: corDoItem,
       availableImeis: availableImeis,
-      valorUnitario: parseFloat(produto.preco) || 0,
+      preco_original: precoOriginalItem,
+      valorUnitario: precoOriginalItem,
       vendaTrainee: pdvVendaTrainee,
       origenFilialNome: origenFilialNome || null
     };
@@ -8974,6 +8978,7 @@ export default function Dashboard({ session, profileDataProps }) {
         imei: imeiObj.imei,
         cor: imeiObj.cor || prod?.cor || null,
         availableImeis: [imeiObj],
+        preco_original: prodPreco,
         valorUnitario: prodPreco,
         vendaTrainee: pdvVendaTrainee
       };
@@ -9041,13 +9046,15 @@ export default function Dashboard({ session, profileDataProps }) {
             : item
         ));
       } else {
+        const precoOriginalBarcode = parseFloat(matchProd.preco || 0);
         const novoItem = {
           cartId: crypto.randomUUID(),
           produto: matchProd,
           quantidade: 1,
           imei: null,
           availableImeis: [],
-          valorUnitario: parseFloat(matchProd.preco || 0),
+          preco_original: precoOriginalBarcode,
+          valorUnitario: precoOriginalBarcode,
           vendaTrainee: pdvVendaTrainee
         };
         setPdvCart(prev => [...prev, novoItem]);
@@ -9667,11 +9674,16 @@ export default function Dashboard({ session, profileDataProps }) {
           }).eq('id', rpcRes.venda_id);
         }
 
+        const itemPrecoOriginal = Number(item.preco_original ?? item.produto?.preco ?? item.valorUnitario ?? 0);
+        const valorTotalOriginal = itemPrecoOriginal * Number(item.quantidade || 1);
+
         itemsForRecibo.push({
           nome: item.produto.nome,
           quantidade: item.quantidade,
           valor_unitario: item.valorUnitario * feeFactor,
           valor_total: valorTotalNovo,
+          preco_original: itemPrecoOriginal,
+          valor_total_original: valorTotalOriginal,
           imei: item.imei
         });
       }
@@ -9680,6 +9692,9 @@ export default function Dashboard({ session, profileDataProps }) {
       const filialDados = filiais.find(f => f.id === activeFilialId) || {};
       const totalNovoAjustado = subtotalCart * feeFactor;
       const finalSaldoPagar = Math.max(0, totalNovoAjustado - valorUsadoTotal);
+
+      const totalOriginalNovo = itemsForRecibo.reduce((sum, it) => sum + (Number(it.valor_total_original ?? it.valor_total ?? 0)), 0);
+      const finalSaldoPagarOriginal = Math.max(0, totalOriginalNovo - valorUsadoTotal);
 
       const dadosRecibo = {
         venda_id: createdVendaIds[0],
@@ -9699,8 +9714,10 @@ export default function Dashboard({ session, profileDataProps }) {
         itens: itemsForRecibo,
         financeiro: {
           total_novo: totalNovoAjustado,
+          total_novo_original: totalOriginalNovo,
           desconto_troca: valorUsadoTotal,
           saldo_pagar: finalSaldoPagar,
+          saldo_pagar_original: finalSaldoPagarOriginal,
           metodo: isTrocaAtiva ? 'troca' : pdvMetodoPagamento,
           metodo_saldo: pdvMetodoRestante,
           parcelas: parcelas
@@ -20281,22 +20298,28 @@ export default function Dashboard({ session, profileDataProps }) {
                 </span>
                 <div className="space-y-3 divide-y divide-[#222222]/50 print:divide-gray-200">
                   {pdvReciboDados.itens && pdvReciboDados.itens.length > 0 ? (
-                    pdvReciboDados.itens.map((item, idx) => (
-                      <div key={idx} className={`flex justify-between items-start ${idx > 0 ? 'pt-2' : ''}`}>
-                        <div>
-                          <h4 className="font-extrabold text-sm text-white print:text-black">{item.nome}</h4>
-                          {item.imei && (
-                            <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {item.imei}</p>
-                          )}
-                          <p className="text-[10px] text-gray-450">Qtd: {item.quantidade} unidade(s)</p>
+                    pdvReciboDados.itens.map((item, idx) => {
+                      const itemPrecoUnitario = Number(item.preco_original ?? item.valor_unitario ?? 0);
+                      const itemSubtotal = Number(item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1)));
+                      return (
+                        <div key={idx} className={`flex justify-between items-start ${idx > 0 ? 'pt-2' : ''}`}>
+                          <div>
+                            <h4 className="font-extrabold text-sm text-white print:text-black">{item.nome}</h4>
+                            {item.imei && (
+                              <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {item.imei}</p>
+                            )}
+                            <p className="text-[10px] text-gray-450">
+                              Qtd: {item.quantidade} un.{itemPrecoUnitario > 0 ? ` · R$ ${itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} un.` : ''}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <span className="font-mono text-xs font-bold text-white print:text-black">
+                              R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="font-mono text-xs font-bold text-white print:text-black">
-                            R$ {item.valor_total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="flex justify-between items-start">
                       <div>
@@ -20308,7 +20331,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       </div>
                       <div className="text-right">
                         <span className="font-mono text-xs font-bold text-white print:text-black">
-                          R$ {pdvReciboDados.produto_novo.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          R$ {Number(pdvReciboDados.produto_novo.valor_total_original ?? pdvReciboDados.produto_novo.preco_original ?? pdvReciboDados.produto_novo.preco).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
                     </div>
@@ -20350,7 +20373,7 @@ export default function Dashboard({ session, profileDataProps }) {
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between text-gray-400">
                   <span>Subtotal (Novo):</span>
-                  <span className="font-mono">R$ {pdvReciboDados.financeiro.total_novo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span className="font-mono">R$ {Number(pdvReciboDados.financeiro.total_novo_original ?? pdvReciboDados.financeiro.total_novo).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 </div>
                 {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
                   <div className="flex justify-between text-[#A78BFA] print:text-black">
@@ -20359,8 +20382,8 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 )}
                 <div className="flex justify-between text-white print:text-black font-extrabold text-sm border-t border-[#222222] pt-2">
-                  <span>Saldo Pago:</span>
-                  <span className="font-mono">R$ {pdvReciboDados.financeiro.saldo_pagar.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span>Total a Pagar:</span>
+                  <span className="font-mono">R$ {Number(pdvReciboDados.financeiro.saldo_pagar_original ?? pdvReciboDados.financeiro.saldo_pagar).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-between text-gray-500 text-[10px] border-t border-[#222222]/50 pt-2">
                   <span>Método de Pagamento:</span>
