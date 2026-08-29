@@ -12139,12 +12139,7 @@ export default function Dashboard({ session, profileDataProps }) {
                     {/* Linha de IMEI/Quantidade e Preço */}
                     <div className="flex justify-between items-end gap-3 border-t border-[#111] pt-2 mt-1">
                       <div className="flex-1">
-                        {((item.produto.tipo && item.produto.tipo.toUpperCase().includes('CELULAR')) ||
-                          (item.produto.categoria && item.produto.categoria.toUpperCase().includes('CELULAR')) ||
-                          item.produto.categoria === 'IOS' ||
-                          item.produto.categoria === 'ANDROID' ||
-                          (item.availableImeis && item.availableImeis.length > 0) ||
-                          item.imei) ? (
+                        {((item.availableImeis && item.availableImeis.length > 0) || item.imei) ? (
                           <div className="space-y-1">
                             <label className="block text-[8px] font-bold text-gray-500 uppercase tracking-wide">IMEI Selecionado</label>
                             {item.availableImeis && item.availableImeis.length > 0 ? (
@@ -12159,21 +12154,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </option>
                                 ))}
                               </select>
-                            ) : item.imei ? (
-                              <input
-                                type="text"
-                                value={item.imei}
-                                onChange={(e) => handleUpdateCartImei(item.cartId, e.target.value)}
-                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-1 text-[10px] text-amber-400 font-mono font-bold tracking-wider outline-none"
-                              />
                             ) : (
-                              <input
-                                type="text"
-                                placeholder="Bipe ou digite o IMEI..."
-                                value={item.imei || ''}
-                                onChange={(e) => handleUpdateCartImei(item.cartId, e.target.value)}
-                                className="w-full bg-black border border-amber-500/50 focus:border-[#6A0DAD] rounded px-2 py-1 text-[10px] text-amber-300 font-mono tracking-wider outline-none"
-                              />
+                              <div className="w-full bg-black border border-[#222222] rounded px-2 py-1 text-[10px] text-purple-300 font-mono font-bold tracking-wider truncate">
+                                {item.imei}
+                              </div>
                             )}
                           </div>
                         ) : (
