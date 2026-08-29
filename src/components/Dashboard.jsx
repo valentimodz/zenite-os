@@ -19,6 +19,7 @@ import SaasSettings from '../pages/SaaS/SaasSettings';
 import PainelVendaRapida from './PainelVendaRapida';
 import CameraScanner from './CameraScanner';
 import ImportadorVendasCSV from './ImportadorVendasCSV';
+import ModalAuditoriaCega from './ModalAuditoriaCega';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
 import RankingVendedores from './RankingVendedores';
 const FISCAL_MAP = {
@@ -939,6 +940,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [filtroDescontoFilial, setFiltroDescontoFilial] = useState('');
   const [buscaDesconto, setBuscaDesconto] = useState('');
   const [isLoadingDescontos, setIsLoadingDescontos] = useState(false);
+  const [isModalAuditoriaCegaOpen, setIsModalAuditoriaCegaOpen] = useState(false);
 
   // Estados para Edição de Informações do Colaborador (Nome, E-mail, Telefone, CPF, Senha, Role, Filial)
   const [editingColaborador, setEditingColaborador] = useState(null);
@@ -20588,6 +20590,18 @@ export default function Dashboard({ session, profileDataProps }) {
             )}
           </>
         )}
+
+        {/* MODAL DE AUDITORIA MATINAL CEGA (GERENTE) */}
+        <ModalAuditoriaCega
+          isOpen={isModalAuditoriaCegaOpen}
+          activeEmpresaId={activeFilialId || company?.id || profile?.empresa_id}
+          session={session}
+          profile={profile}
+          onSuccess={() => {
+            setIsModalAuditoriaCegaOpen(false);
+            showToast('Auditoria matinal cega registrada com sucesso!', 'success');
+          }}
+        />
 
         {/* MODAL DE CONFIRMAÇÃO DE FINALIZAÇÃO DE CHAMADO S.O.S */}
         {confirmingSosId && (
