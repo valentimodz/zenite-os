@@ -7,8 +7,10 @@ import {
   Smartphone, Tag, FileText as LucideFileText, Search, Upload, Award, DollarSign,
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
-  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter, Clock, Image as ImageIcon
+  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter, Clock, Image as ImageIcon,
+  Sun, Moon
 } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 import { emitirNfseStub } from '../services/fiscal';
 import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
 import { hasFeature } from '../utils/featureFlags';
@@ -407,6 +409,7 @@ function ProductTableRow({
 }
 
 export default function Dashboard({ session, profileDataProps }) {
+  const { theme, toggleTheme, isDark } = useTheme();
   const [vendaDetalheSelecionada, setVendaDetalheSelecionada] = useState(null);
   const [profile, setProfile] = useState(profileDataProps || null);
   const [company, setCompany] = useState(null);
@@ -13521,16 +13524,16 @@ export default function Dashboard({ session, profileDataProps }) {
     const itemClass = (view) => {
       const active = currentView === view;
       return `flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-all w-full text-left ${active
-        ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/10'
-        : 'text-gray-400 hover:text-white hover:bg-white/5'
+        ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/20'
+        : 'text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
         }`;
     };
 
     const iconOnlyClass = (view) => {
       const active = currentView === view;
       return `flex items-center justify-center p-3 rounded-lg transition-all w-full ${active
-        ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/10'
-        : 'text-gray-400 hover:text-white hover:bg-white/5'
+        ? 'bg-[#6A0DAD] text-white shadow-lg shadow-[#6A0DAD]/20'
+        : 'text-foreground-muted hover:text-foreground hover:bg-surface-elevated'
         }`;
     };
 
@@ -13691,26 +13694,26 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   return (
-    <div className="h-screen w-full bg-black text-white font-sans flex overflow-hidden selection:bg-[#6A0DAD] selection:text-white">
+    <div className="h-screen w-full bg-background text-foreground font-sans flex overflow-hidden selection:bg-[#6A0DAD] selection:text-white transition-colors duration-200">
       {/* DRAWER MOBILE SIDEBAR OVERLAY */}
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 flex md:hidden print:hidden animate-fadeIn">
           {/* Backdrop Escuro com clique para fechar */}
           <div
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
             onClick={() => setIsMobileMenuOpen(false)}
           />
 
           {/* Painel Lateral Mobile Drawer */}
-          <aside className="relative w-72 max-w-[85vw] bg-[#0A0A0A] border-r border-[#222222] h-full flex flex-col shadow-2xl z-50 animate-slideRight">
+          <aside className="relative w-72 max-w-[85vw] bg-surface border-r border-border h-full flex flex-col shadow-2xl z-50 animate-slideRight text-foreground">
             {/* HEADER DO DRAWER MOBILE */}
-            <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
-              <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-1.5">
+            <div className="p-4 border-b border-border flex items-center justify-between h-14">
+              <h1 className="text-lg font-extrabold tracking-tight text-foreground flex items-center gap-1.5">
                 Zênite<span className="text-[#6A0DAD]">.</span>
               </h1>
               <button
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="p-1.5 text-gray-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                className="p-1.5 text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-colors"
                 title="Fechar Menu"
               >
                 <X size={18} />
@@ -13730,9 +13733,9 @@ export default function Dashboard({ session, profileDataProps }) {
               const gerenteFilialNome = activeFilialNome || filiais.find(f => f.id === profile?.filial_id)?.nome || 'Filial Vinculada';
 
               return (
-                <div className="px-3 py-3 border-b border-[#222222] bg-[#050505]">
+                <div className="px-3 py-3 border-b border-border bg-surface-elevated/50">
                   <div className="flex items-center justify-between mb-1.5 px-0.5">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-foreground-muted flex items-center gap-1.5">
                       <Store size={12} className="text-[#6A0DAD]" />
                       Filial de Operação
                     </span>
@@ -13760,7 +13763,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         }
                         setIsMobileMenuOpen(false);
                       }}
-                      className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer"
+                      className="w-full bg-surface border border-border focus:border-[#6A0DAD] text-foreground pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer"
                     >
                       <option value="">[ Todas as Filiais ]</option>
                       {filiais.map((f) => (
@@ -13769,7 +13772,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         </option>
                       ))}
                     </select>
-                    <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
                   </div>
                 </div>
               );
@@ -13781,7 +13784,7 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
 
             {/* FOOTER DO DRAWER MOBILE */}
-            <div className="p-4 border-t border-[#222222] flex items-center justify-between text-xs text-gray-500 font-mono">
+            <div className="p-4 border-t border-border flex items-center justify-between text-xs text-foreground-muted font-mono">
               <span>Zênite OS Mobile</span>
               <span className="text-[10px]">v1.2</span>
             </div>
@@ -13790,11 +13793,11 @@ export default function Dashboard({ session, profileDataProps }) {
       )}
 
       {/* MENU LATERAL DESKTOP (SIDEBAR - ESCONDIDO NO MOBILE) */}
-      <aside className={`hidden md:flex bg-[#0A0A0A] border-r border-[#222222] h-full flex-col shrink-0 overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} z-30 print:hidden scrollbar-hide`}>
+      <aside className={`hidden md:flex bg-surface border-r border-border h-full flex-col shrink-0 overflow-y-auto transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-20'} z-30 print:hidden scrollbar-hide text-foreground`}>
         {/* LOGO */}
-        <div className="p-4 border-b border-[#222222] flex items-center justify-between h-14">
+        <div className="p-4 border-b border-border flex items-center justify-between h-14">
           {sidebarOpen ? (
-            <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-1.5 animate-fadeIn">
+            <h1 className="text-lg font-extrabold tracking-tight text-foreground flex items-center gap-1.5 animate-fadeIn">
               Zênite<span className="text-[#6A0DAD]">.</span>
             </h1>
           ) : (
@@ -13803,7 +13806,7 @@ export default function Dashboard({ session, profileDataProps }) {
           {sidebarOpen && (
             <button
               onClick={() => { setSidebarOpen(false); localStorage.setItem('zenite_sidebar_open', 'false'); }}
-              className="text-gray-500 hover:text-white transition-colors"
+              className="text-foreground-muted hover:text-foreground transition-colors"
             >
               <ChevronLeft size={16} />
             </button>
@@ -13831,7 +13834,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
           if (!sidebarOpen) {
             return (
-              <div className="p-3 border-b border-[#222222] flex justify-center" title={`Filial Ativa: ${activeFilialNome || 'Todas as Filiais'}`}>
+              <div className="p-3 border-b border-border flex justify-center" title={`Filial Ativa: ${activeFilialNome || 'Todas as Filiais'}`}>
                 <div className="w-9 h-9 rounded-lg bg-[#6A0DAD]/10 border border-[#6A0DAD]/30 flex items-center justify-center text-[#6A0DAD]">
                   <Store size={18} />
                 </div>
@@ -13840,9 +13843,9 @@ export default function Dashboard({ session, profileDataProps }) {
           }
 
           return (
-            <div className="px-3 py-3 border-b border-[#222222] bg-[#050505]">
+            <div className="px-3 py-3 border-b border-border bg-surface-elevated/50">
               <div className="flex items-center justify-between mb-1.5 px-0.5">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-foreground-muted flex items-center gap-1.5">
                   <Store size={12} className="text-[#6A0DAD]" />
                   Filial de Operação
                 </span>
@@ -13854,9 +13857,9 @@ export default function Dashboard({ session, profileDataProps }) {
               </div>
 
               {isRodrigoGerenteLocked ? (
-                <div className="bg-[#111111] border border-[#222222] text-gray-300 px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-between opacity-90 shadow-inner" title="Filial fixa associada ao perfil de Gerente">
+                <div className="bg-surface border border-border text-foreground px-3 py-2 rounded-lg text-xs font-bold flex items-center justify-between opacity-90 shadow-inner" title="Filial fixa associada ao perfil de Gerente">
                   <span className="truncate">{gerenteFilialNome}</span>
-                  <Lock size={12} className="text-gray-500 shrink-0 ml-1" />
+                  <Lock size={12} className="text-foreground-muted shrink-0 ml-1" />
                 </div>
               ) : (
                 <div className="relative">
@@ -13881,7 +13884,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         }
                       }
                     }}
-                    className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] text-white pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer transition-all hover:bg-[#161616] appearance-none"
+                    className="w-full bg-surface border border-border focus:border-[#6A0DAD] text-foreground pl-2.5 pr-7 py-2 rounded-lg text-xs font-bold outline-none cursor-pointer transition-all hover:bg-surface-elevated appearance-none"
                   >
                     <option value="">[ Todas as Filiais ]</option>
                     {filiais.map((f) => (
@@ -13890,7 +13893,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       </option>
                     ))}
                   </select>
-                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-foreground-muted pointer-events-none" />
                 </div>
               )}
             </div>
@@ -13902,7 +13905,7 @@ export default function Dashboard({ session, profileDataProps }) {
           {!sidebarOpen && (
             <button
               onClick={() => { setSidebarOpen(true); localStorage.setItem('zenite_sidebar_open', 'true'); }}
-              className="w-full flex items-center justify-center p-3 text-gray-500 hover:text-white hover:bg-white/5 rounded-lg transition-all mb-4"
+              className="w-full flex items-center justify-center p-3 text-foreground-muted hover:text-foreground hover:bg-surface-elevated rounded-lg transition-all mb-4"
               title="Expandir Menu"
             >
               <Menu size={20} />
@@ -13912,20 +13915,20 @@ export default function Dashboard({ session, profileDataProps }) {
         </div>
 
         {/* SIDEBAR FOOTER */}
-        <div className="p-4 border-t border-[#222222] flex items-center justify-center">
-          <span className="text-[10px] text-gray-600 font-mono">{sidebarOpen ? 'Rede Cred v1.2' : 'v1.2'}</span>
+        <div className="p-4 border-t border-border flex items-center justify-center">
+          <span className="text-[10px] text-foreground-muted font-mono">{sidebarOpen ? 'Rede Cred v1.2' : 'v1.2'}</span>
         </div>
       </aside>
 
       {/* MAIN CONTAINER (100% LARGURA EM MOBILE, SCROLL INTERNO ISOLADO) */}
-      <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden">
+      <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden bg-background">
         {/* SLENDER FIXED NAVBAR */}
-        <header className="border-b border-[#222222] bg-[#0A0A0A] py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden">
+        <header className="border-b border-border bg-surface py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden transition-colors">
           <div className="flex items-center gap-2">
             {/* ÍCONE HAMBÚRGUER MOBILE */}
             <button
               onClick={() => setIsMobileMenuOpen(true)}
-              className="p-1.5 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-1 md:hidden"
+              className="p-1.5 rounded-lg border border-border text-foreground-muted hover:text-foreground bg-surface hover:bg-surface-elevated transition-all mr-1 md:hidden"
               title="Abrir Menu Principal"
             >
               <Menu size={18} />
@@ -13935,7 +13938,7 @@ export default function Dashboard({ session, profileDataProps }) {
             {!sidebarOpen && (
               <button
                 onClick={() => { setSidebarOpen(true); localStorage.setItem('zenite_sidebar_open', 'true'); }}
-                className="hidden md:block p-1 rounded-lg border border-[#222222] text-gray-400 hover:text-white bg-black hover:bg-[#111] transition-all mr-2"
+                className="hidden md:block p-1 rounded-lg border border-border text-foreground-muted hover:text-foreground bg-surface hover:bg-surface-elevated transition-all mr-2"
                 title="Expandir Menu"
               >
                 <Menu size={16} />
@@ -13977,14 +13980,29 @@ export default function Dashboard({ session, profileDataProps }) {
               </div>
             )}
             <div className="flex flex-col text-right">
-              <span className="text-xs font-bold text-white leading-tight">{getTopRightHeaderName()}</span>
-              <span className="text-[10px] text-gray-500 font-medium">
+              <span className="text-xs font-bold text-foreground leading-tight">{getTopRightHeaderName()}</span>
+              <span className="text-[10px] text-foreground-muted font-medium">
                 {profile?.nome} | {profile?.role}
               </span>
             </div>
+
+            {/* BOTÃO DE ALTERNÂNCIA DE TEMA (LIGHT / DARK MODE) */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg border border-border bg-surface text-foreground-muted hover:text-foreground hover:border-[#6A0DAD] transition-all cursor-pointer shadow-sm flex items-center justify-center"
+              title={isDark ? "Ativar Modo Claro" : "Ativar Modo Escuro"}
+            >
+              {isDark ? (
+                <Sun size={15} className="text-amber-400 hover:rotate-45 transition-transform" />
+              ) : (
+                <Moon size={15} className="text-purple-600 hover:-rotate-12 transition-transform" />
+              )}
+            </button>
+
             <button
               onClick={handleSignOut}
-              className="flex items-center gap-1.5 border border-[#222222] hover:border-red-800/60 hover:text-red-400 bg-black px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+              className="flex items-center gap-1.5 border border-border hover:border-red-800/60 hover:text-red-400 bg-surface px-3 py-1.5 rounded-md text-xs font-semibold text-foreground transition-all cursor-pointer"
             >
               <LogOut size={12} />
               <span>Sair</span>
