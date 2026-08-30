@@ -19409,15 +19409,15 @@ export default function Dashboard({ session, profileDataProps }) {
           {/* MODAL DE HISTÓRICO DE VENDAS & PROMOÇÕES INTELIGENTES DO CLIENTE */}
           {clienteHistoricoModalOpen && clienteHistoricoSelecionado && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn overflow-y-auto">
-              <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 max-w-4xl w-full space-y-6 relative shadow-2xl my-8">
-                <div className="flex justify-between items-start border-b border-[#222222] pb-4">
+              <div className="bg-card text-card-foreground border border-border rounded-2xl p-6 max-w-4xl w-full space-y-6 relative shadow-2xl my-8">
+                <div className="flex justify-between items-start border-b border-border pb-4">
                   <div>
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                      <ShoppingBag size={20} className="text-[#6A0DAD]" />
+                    <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+                      <ShoppingBag size={20} className="text-primary" />
                       Perfil do Cliente &amp; Histórico de Compras
                     </h3>
-                    <p className="text-xs text-gray-400 mt-0.5 font-sans">
-                      <strong>{clienteHistoricoSelecionado.nome}</strong> · CPF/CNPJ: {clienteHistoricoSelecionado.cpf_cnpj || 'Não informado'} · Tel: {clienteHistoricoSelecionado.telefone || 'Não informado'}
+                    <p className="text-xs text-muted-foreground mt-0.5 font-sans">
+                      <strong className="text-foreground">{clienteHistoricoSelecionado.nome}</strong> · CPF/CNPJ: {clienteHistoricoSelecionado.cpf_cnpj || 'Não informado'} · Tel: {clienteHistoricoSelecionado.telefone || 'Não informado'}
                     </p>
                   </div>
                   <button
@@ -19425,7 +19425,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       setClienteHistoricoModalOpen(false);
                       setClienteHistoricoSelecionado(null);
                     }}
-                    className="text-gray-500 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors"
+                    className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-surface-elevated transition-colors cursor-pointer"
                   >
                     <X size={18} />
                   </button>
@@ -19759,44 +19759,44 @@ export default function Dashboard({ session, profileDataProps }) {
 
         {/* MODAL DE DETALHES DA SESSÃO DE CAIXA */}
         {modalDetalheCaixa && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl max-w-lg w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-lg w-full p-6 space-y-5 flex flex-col relative shadow-2xl font-sans">
               {/* Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-[#222]">
+              <div className="flex items-center justify-between pb-3 border-b border-border">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
+                  <div className="p-2.5 rounded-xl bg-primary/15 border border-primary/30 text-primary">
                     <Store size={22} />
                   </div>
                   <div>
-                    <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
                       Sessão de Caixa
                       {modalDetalheCaixa.status === 'aberto' ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-green-950/60 text-green-400 border border-green-700/50">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                           ABERTO
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#161616] text-gray-400 border border-gray-800">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border">
                           FECHADO
                         </span>
                       )}
                     </h3>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-muted-foreground">
                       {modalDetalheCaixa.filiais?.nome || modalDetalheCaixa.filial_nome || filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome || 'Filial'}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => setModalDetalheCaixa(null)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground bg-surface hover:bg-surface-elevated transition-colors cursor-pointer"
                 >
                   <X size={16} />
                 </button>
               </div>
 
               {/* Informações da Abertura */}
-              <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
-                <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
+              <div className="space-y-3 bg-surface-elevated border border-border p-4 rounded-xl">
+                <span className="text-[11px] font-black text-primary uppercase tracking-wider block">
                   Informações de Abertura
                 </span>
                 <div className="grid grid-cols-2 gap-3 text-xs">
@@ -20297,19 +20297,19 @@ export default function Dashboard({ session, profileDataProps }) {
               <h3 className="text-xl font-bold text-white text-center mb-2">
                 Venda em Andamento Encontrada
               </h3>
-              <p className="text-sm text-gray-400 text-center mb-6">
-                Detectamos que você não finalizou a última venda (produto: <span className="text-purple-400 font-bold">{draftDataToRestore?.pdvProdutoSelecionado?.nome}</span>). Deseja restaurar os dados preenchidos no carrinho ou iniciar um novo atendimento limpo?
+              <p className="text-sm text-muted-foreground text-center mb-6">
+                Detectamos que você não finalizou a última venda (produto: <span className="text-primary font-bold">{draftDataToRestore?.pdvProdutoSelecionado?.nome}</span>). Deseja restaurar os dados preenchidos no carrinho ou iniciar um novo atendimento limpo?
               </p>
               <div className="flex gap-4">
                 <button
                   onClick={discardDraft}
-                  className="flex-1 bg-transparent hover:bg-white/5 border border-[#333] text-white font-bold py-3 rounded transition-colors"
+                  className="flex-1 bg-surface hover:bg-surface-elevated border border-border text-foreground font-bold py-3 rounded-lg transition-colors cursor-pointer"
                 >
                   Descartar Rascunho
                 </button>
                 <button
                   onClick={restoreDraft}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded transition-colors shadow-lg shadow-purple-900/50"
+                  className="flex-1 bg-primary hover:bg-[#500885] text-primary-foreground font-bold py-3 rounded-lg transition-colors shadow-md cursor-pointer"
                 >
                   Restaurar Venda
                 </button>
@@ -20321,17 +20321,17 @@ export default function Dashboard({ session, profileDataProps }) {
         {/* MODAL DE ROMANEIO DE TRANSFERÊNCIA */}
         {transfRomaneioAtivo && transfRomaneioDados && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-6 relative print:border-none print:bg-white print:text-black">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-xl w-full p-6 space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black">
 
               <button
                 onClick={() => setTransfRomaneioAtivo(false)}
-                className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors print:hidden"
+                className="absolute right-4 top-4 p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors print:hidden cursor-pointer"
               >
                 <X size={16} />
               </button>
 
               <div className="text-center space-y-2">
-                <span className="text-[10px] bg-blue-950/40 text-blue-400 border border-blue-800/40 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
+                <span className="text-[10px] bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
                   Romaneio de Transferência
                 </span>
                 {transfRomaneioDados.filial_logo && transfRomaneioDados.filial_logo.trim() !== '' ? (
@@ -20352,32 +20352,32 @@ export default function Dashboard({ session, profileDataProps }) {
                     />
                   </div>
                 ) : (
-                  <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2">
+                  <h2 className="text-xl font-bold text-foreground print:text-black tracking-tight flex justify-center items-center gap-2">
                     <Truck className="text-blue-500" size={20} /> ZÊNITE TRANSFER
                   </h2>
                 )}
-                <p className="text-[10px] text-gray-500 font-mono">ID: {transfRomaneioDados.id}</p>
-                <p className="text-[10px] text-gray-550">
+                <p className="text-[10px] text-muted-foreground font-mono">ID: {transfRomaneioDados.id}</p>
+                <p className="text-[10px] text-muted-foreground">
                   {new Date(transfRomaneioDados.data).toLocaleString('pt-BR')}
                 </p>
               </div>
 
-              <hr className="border-[#222222] print:border-gray-300" />
+              <hr className="border-border print:border-gray-300" />
 
               <div className="grid grid-cols-2 gap-4 text-xs font-mono">
                 <div>
-                  <span className="block text-gray-500 uppercase tracking-wider mb-1 font-bold">Origem</span>
-                  <span className="text-white print:text-black font-black">{transfRomaneioDados.origem}</span>
+                  <span className="block text-muted-foreground uppercase tracking-wider mb-1 font-bold">Origem</span>
+                  <span className="text-foreground print:text-black font-black">{transfRomaneioDados.origem}</span>
                 </div>
                 <div className="text-right">
-                  <span className="block text-gray-500 uppercase tracking-wider mb-1 font-bold">Destino</span>
-                  <span className="text-white print:text-black font-black">{transfRomaneioDados.destino}</span>
+                  <span className="block text-muted-foreground uppercase tracking-wider mb-1 font-bold">Destino</span>
+                  <span className="text-foreground print:text-black font-black">{transfRomaneioDados.destino}</span>
                 </div>
               </div>
 
               {transfRomaneioDados.observacoes && (
-                <div className="bg-black/50 border border-[#222222] p-3 rounded-lg text-xs print:bg-white print:border-gray-300">
-                  <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1">
+                <div className="bg-surface-elevated border border-border p-3 rounded-lg text-xs print:bg-white print:border-gray-300">
+                  <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">
                     Observações
                   </span>
                   <p className="text-white print:text-black">{transfRomaneioDados.observacoes}</p>
@@ -20427,19 +20427,19 @@ export default function Dashboard({ session, profileDataProps }) {
         {/* MODAL DE RECIBO DE VENDA CONSOLIDADO */}
         {pdvReciboAtivo && pdvReciboDados && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl max-w-xl w-full p-6 space-y-6 relative print:border-none print:bg-white print:text-black">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-xl w-full p-6 space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black">
 
               {/* Botão de Fechar no topo */}
               <button
                 onClick={() => setPdvReciboAtivo(false)}
-                className="absolute right-4 top-4 p-1 rounded-md bg-black border border-[#222222] hover:border-red-950 text-gray-400 hover:text-red-400 transition-colors print:hidden"
+                className="absolute right-4 top-4 p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors print:hidden cursor-pointer"
               >
                 <X size={16} />
               </button>
 
               {/* Cabeçalho */}
               <div className="text-center space-y-1">
-                <span className="text-[10px] bg-purple-950/40 text-purple-400 border border-purple-800/40 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
+                <span className="text-[10px] bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
                   Recibo de Venda Consolidado
                 </span>
                 {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
@@ -20519,17 +20519,17 @@ export default function Dashboard({ session, profileDataProps }) {
               </div>
 
               {pdvReciboDados.obs_garantia && (
-                <div className="bg-black/50 border border-[#222222] p-3 rounded-lg text-xs print:bg-white print:border-gray-300 mb-4">
-                  <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1 print:text-gray-600">
+                <div className="bg-surface-elevated border border-border p-3.5 rounded-xl text-xs print:bg-white print:border-gray-300 mb-4">
+                  <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1 print:text-gray-600">
                     Observações de Garantia
                   </span>
-                  <p className="text-white print:text-black whitespace-pre-wrap">{pdvReciboDados.obs_garantia}</p>
+                  <p className="text-foreground print:text-black whitespace-pre-wrap">{pdvReciboDados.obs_garantia}</p>
                 </div>
               )}
 
               {/* Itens de Saída (Carrinho) */}
-              <div className="bg-black border border-[#222222] p-4 rounded-lg space-y-2.5 print:bg-white print:border-gray-300">
-                <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider block print:text-purple-650">
+              <div className="bg-surface border border-border p-4 rounded-xl space-y-2.5 print:bg-white print:border-gray-300">
+                <span className="text-[9px] text-primary font-bold uppercase tracking-wider block print:text-purple-650">
                   Itens de Venda (Saída)
                 </span>
                 <div className="space-y-3 divide-y divide-[#222222]/50 print:divide-gray-200">
@@ -20578,23 +20578,23 @@ export default function Dashboard({ session, profileDataProps }) {
               {/* Aparelhos de Entrada (Troca) */}
               {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
                 <div className="space-y-3">
-                  <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider block">
+                  <span className="text-[9px] text-primary font-bold uppercase tracking-wider block">
                     Aparelho(s) Recebido(s) na Troca
                   </span>
                   {pdvReciboDados.trocas.map((troca, idx) => (
-                    <div key={idx} className="bg-purple-950/5 border border-[#6A0DAD]/30 p-4 rounded-lg flex justify-between items-start print:bg-white print:border-gray-300">
+                    <div key={idx} className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex justify-between items-start print:bg-white print:border-gray-300">
                       <div className="space-y-1">
-                        <h4 className="font-extrabold text-sm text-white print:text-black">{troca.nome}</h4>
-                        <p className="text-[10px] text-gray-400 font-mono">IMEI: {troca.imei}</p>
-                        <p className="text-[10px] text-gray-450 font-semibold">
+                        <h4 className="font-extrabold text-sm text-foreground print:text-black">{troca.nome}</h4>
+                        <p className="text-[10px] text-muted-foreground font-mono">IMEI: {troca.imei}</p>
+                        <p className="text-[10px] text-muted-foreground font-semibold">
                           Cor: {troca.cor} · Bateria: {troca.bateria}%
                         </p>
                         {troca.obs && (
-                          <p className="text-[9px] text-gray-500 italic">Checklist: {troca.obs}</p>
+                          <p className="text-[9px] text-muted-foreground italic">Checklist: {troca.obs}</p>
                         )}
                       </div>
                       <div className="text-right shrink-0">
-                        <span className="font-mono text-xs font-bold text-[#A78BFA] print:text-black">
+                        <span className="font-mono text-xs font-bold text-primary print:text-black">
                           - R$ {troca.valor_avaliacao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
@@ -20603,21 +20603,21 @@ export default function Dashboard({ session, profileDataProps }) {
                 </div>
               )}
 
-              <hr className="border-[#222222] print:border-gray-300" />
+              <hr className="border-border print:border-gray-300" />
 
               {/* Resumo Financeiro */}
               <div className="space-y-2 text-xs">
-                <div className="flex justify-between text-gray-400">
+                <div className="flex justify-between text-muted-foreground">
                   <span>Subtotal (Novo):</span>
-                  <span className="font-mono">R$ {Number(pdvReciboDados.financeiro.total_novo_original ?? pdvReciboDados.financeiro.total_novo).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span className="font-mono text-foreground font-bold">R$ {Number(pdvReciboDados.financeiro.total_novo_original ?? pdvReciboDados.financeiro.total_novo).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 </div>
                 {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                  <div className="flex justify-between text-[#A78BFA] print:text-black">
+                  <div className="flex justify-between text-primary print:text-black font-bold">
                     <span>Abatimento por Troca:</span>
                     <span className="font-mono">- R$ {pdvReciboDados.financeiro.desconto_troca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-white print:text-black font-extrabold text-sm border-t border-[#222222] pt-2">
+                <div className="flex justify-between text-foreground print:text-black font-extrabold text-sm border-t border-border pt-2">
                   <span>Total a Pagar:</span>
                   <span className="font-mono">R$ {Number(pdvReciboDados.financeiro.saldo_pagar_original ?? pdvReciboDados.financeiro.saldo_pagar).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                 </div>
@@ -20999,17 +20999,17 @@ export default function Dashboard({ session, profileDataProps }) {
 
         {/* Modal de Interceptação e Validação Física de IMEI (PDV) */}
         {imeiValidationModalProd && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-purple-800/40 w-full max-w-md rounded-2xl overflow-hidden shadow-2xl shadow-purple-950/40 animate-scaleUp">
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-card text-card-foreground border border-border w-full max-w-md rounded-2xl overflow-hidden shadow-2xl animate-scaleUp">
               {/* Header */}
-              <div className="bg-gradient-to-r from-purple-950/80 via-[#0A0A0A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+              <div className="bg-surface-elevated p-5 border-b border-border flex justify-between items-center">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 flex items-center justify-center text-purple-300">
+                  <div className="w-9 h-9 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center text-primary">
                     <Smartphone size={20} />
                   </div>
                   <div>
-                    <h3 className="text-sm font-extrabold text-white tracking-wide">Validar Aparelho Físico</h3>
-                    <p className="text-[11px] text-purple-300/80 font-medium">Segurança de Venda Serializada</p>
+                    <h3 className="text-sm font-extrabold text-foreground tracking-wide">Validar Aparelho Físico</h3>
+                    <p className="text-[11px] text-muted-foreground font-medium">Segurança de Venda Serializada</p>
                   </div>
                 </div>
                 <button
@@ -21019,7 +21019,7 @@ export default function Dashboard({ session, profileDataProps }) {
                     setImeiValidationDigits('');
                     setImeiValidationError('');
                   }}
-                  className="text-gray-500 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                  className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-surface transition-colors cursor-pointer"
                 >
                   <X size={18} />
                 </button>
@@ -22288,28 +22288,28 @@ export default function Dashboard({ session, profileDataProps }) {
 
         {/* Modal de Conferência Física de Estoque (Aceite de Remessa pelo Gerente) */}
         {conferenciaModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 print:hidden">
-            <div className="bg-[#0A0A0A] border border-amber-500/50 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-scaleIn flex flex-col max-h-[85vh]">
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 print:hidden">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-scaleIn flex flex-col max-h-[85vh]">
               {/* Header do Modal */}
-              <div className="bg-gradient-to-r from-amber-950/90 via-[#0A0A0A] to-black p-5 border-b border-amber-500/30 flex justify-between items-center shrink-0">
+              <div className="bg-surface-elevated p-5 border-b border-border flex justify-between items-center shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-amber-500/20 rounded-xl border border-amber-500/40">
-                    <Package size={22} className="text-amber-400" />
+                  <div className="p-2.5 bg-amber-500/15 rounded-xl border border-amber-500/30">
+                    <Package size={22} className="text-amber-500 dark:text-amber-400" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                    <h3 className="text-lg font-extrabold text-foreground flex items-center gap-2">
                       Conferência Física de Remessas
-                      <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
+                      <span className="text-[10px] bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
                         {transferenciasPendentes.length} Pendente(s)
                       </span>
                     </h3>
-                    <p className="text-xs text-amber-200/70">Confirme o recebimento físico para dar entrada automática no estoque virtual da sua loja.</p>
+                    <p className="text-xs text-muted-foreground">Confirme o recebimento físico para dar entrada automática no estoque virtual da sua loja.</p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setConferenciaModalOpen(false)}
-                  className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                  className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-surface transition-colors cursor-pointer"
                 >
                   <X size={20} />
                 </button>
@@ -22318,10 +22318,10 @@ export default function Dashboard({ session, profileDataProps }) {
               {/* Corpo com Lista de Remessas */}
               <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1">
                 {transferenciasPendentes.length === 0 ? (
-                  <div className="py-16 text-center text-gray-500">
-                    <CheckCircle2 size={42} className="mx-auto mb-3 text-emerald-400 opacity-60" />
-                    <p className="text-base font-bold text-gray-300">Tudo em dia!</p>
-                    <p className="text-xs text-gray-500 mt-1">Nenhuma remessa pendente de conferência física no momento.</p>
+                  <div className="py-16 text-center text-muted-foreground">
+                    <CheckCircle2 size={42} className="mx-auto mb-3 text-emerald-500 opacity-80" />
+                    <p className="text-base font-bold text-foreground">Tudo em dia!</p>
+                    <p className="text-xs text-muted-foreground mt-1">Nenhuma remessa pendente de conferência física no momento.</p>
                   </div>
                 ) : (
                   transferenciasPendentes.map((item, idx) => {
@@ -22336,18 +22336,18 @@ export default function Dashboard({ session, profileDataProps }) {
                     const dataStr = item.data_envio ? new Date(item.data_envio).toLocaleString('pt-BR') : new Date().toLocaleDateString('pt-BR');
 
                     return (
-                      <div key={item.id || idx} className="bg-black border border-[#222222] hover:border-amber-500/40 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all shadow-md">
+                      <div key={item.id || idx} className="bg-surface border border-border hover:border-amber-500/40 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all shadow-sm">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold uppercase">
+                            <span className="px-2 py-0.5 bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold uppercase">
                               Remessa Pendente
                             </span>
-                            <span className="text-xs text-gray-400 font-mono">Enviado em: {dataStr}</span>
+                            <span className="text-xs text-muted-foreground font-mono">Enviado em: {dataStr}</span>
                           </div>
-                          <h4 className="text-base font-bold text-white">{nomeProd}</h4>
-                          <div className="flex items-center gap-3 text-xs text-gray-400">
-                            <span>Categoria: <strong className="text-gray-200">{prodDetails.categoria || 'Geral'}</strong></span>
-                            {prodDetails.cor && <span>Cor: <strong className="text-purple-300 font-semibold">{prodDetails.cor}</strong></span>}
+                          <h4 className="text-base font-bold text-foreground">{nomeProd}</h4>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                            <span>Categoria: <strong className="text-foreground">{prodDetails.categoria || 'Geral'}</strong></span>
+                            {prodDetails.cor && <span>Cor: <strong className="text-primary font-semibold">{prodDetails.cor}</strong></span>}
                             {prodDetails.sku && <span>SKU: <strong className="font-mono text-gray-300">{prodDetails.sku}</strong></span>}
                           </div>
                         </div>
