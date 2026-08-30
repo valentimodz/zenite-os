@@ -10768,57 +10768,63 @@ export default function Dashboard({ session, profileDataProps }) {
     return matchesFilial && matchesCategoria && matchesStatus && matchesSearch;
   });
 
-  // Consolidar produtos para o PDV: Agrupamento rigoroso de modelos e acessórios por produto_id/nome base com array de variants
-  const listaProdutosPdvDinamica = React.useMemo(() => {
+  // Utilidade de Agrupamento por Modelo utilizando .reduce() com chave única pelo nome principal do produto
+  const agruparPorModelo = React.useCallback((produtosArray) => {
+    if (!Array.isArray(produtosArray) || produtosArray.length === 0) return [];
+
     const fonteBaseProds = (produtosDisponiveisPDV && produtosDisponiveisPDV.length > 0)
       ? produtosDisponiveisPDV
       : (produtos && produtos.length > 0 ? produtos : produtosFilial);
 
-    // Dicionário de agrupamento pelo produto_id / catalogo_id / nome base normalizado
-    const groupedMap = new Map();
-
-    // 1. Processar itens de listaProdutosConsolidada
-    listaProdutosConsolidada.forEach(p => {
-      const nameNorm = (p.nome || '').toLowerCase().trim();
-      if (!nameNorm) return;
+    // .reduce() acumulador agrupando pelo nome principal do produto
+    const accModelos = (produtosArray || []).reduce((acc, p) => {
+      if (!p || !p.nome) return acc;
+      const nomeBase = String(p.nome).trim();
+      const nomeKey = nomeBase.toLowerCase();
 
       const isCelular = (p.tipo && String(p.tipo).toUpperCase().includes('CELULAR')) ||
                         (p.categoria && String(p.categoria).toUpperCase().includes('CELULAR')) ||
                         p.categoria === 'IOS' || p.categoria === 'ANDROID';
 
-      // Chave base unificada: ID do catálogo mestre ou nome normalizado
-      const groupKey = String(p.catalogo_id || p.id || nameNorm);
-
-      if (!groupedMap.has(groupKey)) {
-        groupedMap.set(groupKey, {
+      // Chave única do acumulador (acc) baseada no nome principal do produto
+      if (!acc[nomeKey]) {
+        acc[nomeKey] = {
           ...p,
-          id: p.catalogo_id || p.id || groupKey,
+          id: p.catalogo_id || p.id || `mod_${nomeKey}`,
           catalogo_id: p.catalogo_id || p.id,
-          nome: p.nome,
+          nome: nomeBase,
+          tipo: p.tipo || (isCelular ? 'CELULAR' : 'ACESSORIO'),
+          categoria: p.categoria || 'GERAL',
+          preco: parseFloat(p.preco || 0),
           isModelBase: isCelular,
-          rawItems: [p]
-        });
-      } else {
-        const parent = groupedMap.get(groupKey);
-        parent.rawItems.push(p);
+          estoqueTotal: 0,
+          total_estoque: 0,
+          estoque_local: 0,
+          quantidade_local: 0,
+          estoque: 0,
+          quantidade: 0,
+          variacoesDisponiveis: [],
+          variants: [],
+          uniqueCores: [],
+          rawItems: []
+        };
       }
-    });
 
-    // 2. Mapear cada produto pai consolidando estoque e construindo o array de variants
-    return Array.from(groupedMap.values()).map(parentProd => {
-      const isCelular = (parentProd.tipo && String(parentProd.tipo).toUpperCase().includes('CELULAR')) ||
-                        (parentProd.categoria && String(parentProd.categoria).toUpperCase().includes('CELULAR')) ||
-                        parentProd.categoria === 'IOS' || parentProd.categoria === 'ANDROID';
+      acc[nomeKey].rawItems.push(p);
+      return acc;
+    }, {});
 
-      const pId = String(parentProd.id || '');
-      const pCatId = String(parentProd.catalogo_id || '');
-      const pNome = (parentProd.nome || '').toLowerCase().trim();
+    // Converter objeto reduzido de volta para array com Object.values()
+    return Object.values(accModelos).map(modeloPai => {
+      const isCelular = modeloPai.isModelBase;
+      const pId = String(modeloPai.id || '');
+      const pCatId = String(modeloPai.catalogo_id || '');
+      const pNome = modeloPai.nome.toLowerCase().trim();
 
       if (isCelular) {
-        // Coletar todos os IMEIs não vendidos vinculados a este modelo pai
+        // Coletar todos os IMEIs correspondentes da filial
         const allProdImeis = (disponiveisImeis || []).filter(im => {
-          if (im.vendido) return false;
-          if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+          if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
 
           let imNome = im.produtos?.nome || im.produtos_catalogo?.nome;
           if (!imNome) {
@@ -10826,16 +10832,13 @@ export default function Dashboard({ session, profileDataProps }) {
             if (prodDono) imNome = prodDono.nome;
           }
 
-          const matchRef = (String(im.produto_id) === pId) || 
-                           (String(im.produto_id) === pCatId) || 
-                           (String(im.produto_catalogo_id) === pId) ||
-                           (String(im.produto_catalogo_id) === pCatId) ||
-                           (imNome && pNome && imNome.toLowerCase().trim() === pNome);
-
-          return matchRef;
+          return (String(im.produto_id) === pId) || 
+                 (String(im.produto_id) === pCatId) || 
+                 (String(im.produto_catalogo_id) === pId) ||
+                 (String(im.produto_catalogo_id) === pCatId) ||
+                 (imNome && pNome && imNome.toLowerCase().trim() === pNome);
         });
 
-        // Filtrar pela filial ativa
         const localProdImeis = allProdImeis.filter(im => {
           const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
           return !activeFilialId || 
@@ -10846,129 +10849,131 @@ export default function Dashboard({ session, profileDataProps }) {
 
         const poolImeis = localProdImeis.length > 0 ? localProdImeis : (activeFilialId ? [] : allProdImeis);
 
-        // Agrupar variantes por Cor
-        const variantsByColor = new Map();
-
-        poolImeis.forEach(im => {
-          const corKey = (im.cor || 'Padrão').trim();
-          if (!variantsByColor.has(corKey)) {
-            variantsByColor.set(corKey, {
-              id: `${pId}_${corKey}`,
-              nome: parentProd.nome,
-              cor: corKey,
-              sku: parentProd.sku || null,
-              codigo_barras: parentProd.codigo_barras || null,
-              preco: parentProd.preco,
+        // Agrupar variações de cores usando reduce
+        const corMap = poolImeis.reduce((map, im) => {
+          const cor = (im.cor || 'Padrão').trim();
+          if (!map[cor]) {
+            map[cor] = {
+              id: `${pId}_${cor}`,
+              nome: modeloPai.nome,
+              cor: cor,
+              sku: modeloPai.sku || null,
+              codigo_barras: modeloPai.codigo_barras || null,
+              preco: modeloPai.preco,
               estoque: 0,
               quantidade: 0,
               imeis: []
-            });
+            };
           }
-          const v = variantsByColor.get(corKey);
-          v.estoque += 1;
-          v.quantidade += 1;
-          v.imeis.push(im);
-        });
+          map[cor].estoque += 1;
+          map[cor].quantidade += 1;
+          map[cor].imeis.push(im);
+          return map;
+        }, {});
 
-        // Se nenhum IMEI no banco mas há itens físicos cadastrados
-        if (variantsByColor.size === 0 && parentProd.rawItems.length > 0) {
-          parentProd.rawItems.forEach(raw => {
-            const corKey = (raw.cor || 'Única').trim();
+        // Se não houver IMEIs físicos mas há itens cadastrados nos rawItems
+        if (Object.keys(corMap).length === 0 && modeloPai.rawItems.length > 0) {
+          modeloPai.rawItems.forEach(raw => {
+            const cor = (raw.cor || 'Única').trim();
             const est = calcularEstoqueProdutoFilial(raw, activeFilialId, fonteBaseProds, disponiveisImeis);
-            if (!variantsByColor.has(corKey)) {
-              variantsByColor.set(corKey, {
-                id: raw.id || `${pId}_${corKey}`,
-                nome: raw.nome || parentProd.nome,
-                cor: corKey,
-                sku: raw.sku || parentProd.sku || null,
-                codigo_barras: raw.codigo_barras || parentProd.codigo_barras || null,
-                preco: raw.preco || parentProd.preco,
+            if (!corMap[cor]) {
+              corMap[cor] = {
+                id: raw.id || `${pId}_${cor}`,
+                nome: raw.nome || modeloPai.nome,
+                cor: cor,
+                sku: raw.sku || modeloPai.sku || null,
+                codigo_barras: raw.codigo_barras || modeloPai.codigo_barras || null,
+                preco: raw.preco || modeloPai.preco,
                 estoque: est,
                 quantidade: est,
                 imeis: []
-              });
+              };
             } else {
-              variantsByColor.get(corKey).estoque += est;
-              variantsByColor.get(corKey).quantidade += est;
+              corMap[cor].estoque += est;
+              corMap[cor].quantidade += est;
             }
           });
         }
 
-        const variants = Array.from(variantsByColor.values());
-        const totalEstoque = variants.reduce((sum, v) => sum + (v.estoque || 0), 0) || poolImeis.length;
-
-        // Cores disponíveis únicas
-        const uniqueCores = Array.from(new Set(variants.map(v => v.cor).filter(Boolean)));
+        const variacoesDisponiveis = Object.values(corMap);
+        const estoqueTotal = variacoesDisponiveis.reduce((acc, v) => acc + (v.estoque || 0), 0) || poolImeis.length;
+        const uniqueCores = Array.from(new Set(variacoesDisponiveis.map(v => v.cor).filter(Boolean)));
 
         return {
-          ...parentProd,
-          variants: variants,
+          ...modeloPai,
+          variacoesDisponiveis: variacoesDisponiveis,
+          variants: variacoesDisponiveis,
+          estoqueTotal: estoqueTotal,
+          total_estoque: estoqueTotal,
+          estoque_local: estoqueTotal,
+          quantidade_local: estoqueTotal,
+          estoque: estoqueTotal,
+          quantidade: estoqueTotal,
           uniqueCores: uniqueCores,
-          hasMultipleVariants: variants.length > 1,
+          hasMultipleVariants: variacoesDisponiveis.length > 1,
           cor: uniqueCores.length === 1 ? uniqueCores[0] : null,
-          imei: poolImeis[0]?.imei || parentProd.imei || null,
+          imei: poolImeis[0]?.imei || modeloPai.imei || null,
           imeis_db: poolImeis,
           filial_id: activeFilialId,
-          filial_nome: activeFilialNome,
-          total_estoque: totalEstoque,
-          estoque_local: totalEstoque,
-          quantidade_local: totalEstoque,
-          estoque_atual: totalEstoque,
-          estoque: totalEstoque,
-          quantidade: totalEstoque
+          filial_nome: activeFilialNome
         };
       }
 
-      // Para Acessórios e Produtos Gerais:
-      const variantsByVariantKey = new Map();
-      parentProd.rawItems.forEach(raw => {
-        const corKey = (raw.cor || raw.color || '').trim();
-        const skuKey = (raw.sku || raw.codigo_barras || '').trim();
-        const vKey = `${corKey}_${skuKey}`;
+      // Para Acessórios / Produtos por Quantidade:
+      const varMap = (modeloPai.rawItems || []).reduce((map, raw) => {
+        const cor = (raw.cor || raw.color || '').trim();
+        const sku = (raw.sku || raw.codigo_barras || '').trim();
+        const key = `${cor}_${sku}`;
         const est = calcularEstoqueProdutoFilial(raw, activeFilialId, fonteBaseProds, disponiveisImeis);
 
-        if (!variantsByVariantKey.has(vKey)) {
-          variantsByVariantKey.set(vKey, {
-            id: raw.id || `${pId}_${vKey}`,
-            nome: raw.nome || parentProd.nome,
-            cor: corKey || null,
-            sku: raw.sku || parentProd.sku || null,
-            codigo_barras: raw.codigo_barras || parentProd.codigo_barras || null,
-            preco: raw.preco || parentProd.preco,
+        if (!map[key]) {
+          map[key] = {
+            id: raw.id || `${pId}_${key}`,
+            nome: raw.nome || modeloPai.nome,
+            cor: cor || null,
+            sku: raw.sku || modeloPai.sku || null,
+            codigo_barras: raw.codigo_barras || modeloPai.codigo_barras || null,
+            preco: raw.preco || modeloPai.preco,
             estoque: est,
             quantidade: est,
-            tipo: raw.tipo || parentProd.tipo,
-            categoria: raw.categoria || parentProd.categoria,
+            tipo: raw.tipo || modeloPai.tipo,
+            categoria: raw.categoria || modeloPai.categoria,
             imeis: []
-          });
+          };
         } else {
-          const v = variantsByVariantKey.get(vKey);
-          v.estoque += est;
-          v.quantidade += est;
+          map[key].estoque += est;
+          map[key].quantidade += est;
         }
-      });
+        return map;
+      }, {});
 
-      const variants = Array.from(variantsByVariantKey.values());
-      const totalEstoque = variants.reduce((sum, v) => sum + (v.estoque || 0), 0);
-      const uniqueCores = Array.from(new Set(variants.map(v => v.cor).filter(Boolean)));
+      const variacoesDisponiveis = Object.values(varMap);
+      const estoqueTotal = variacoesDisponiveis.reduce((acc, v) => acc + (v.estoque || 0), 0);
+      const uniqueCores = Array.from(new Set(variacoesDisponiveis.map(v => v.cor).filter(Boolean)));
 
       return {
-        ...parentProd,
-        variants: variants,
+        ...modeloPai,
+        variacoesDisponiveis: variacoesDisponiveis,
+        variants: variacoesDisponiveis,
+        estoqueTotal: estoqueTotal,
+        total_estoque: estoqueTotal,
+        estoque_local: estoqueTotal,
+        quantidade_local: estoqueTotal,
+        estoque: estoqueTotal,
+        quantidade: estoqueTotal,
         uniqueCores: uniqueCores,
-        hasMultipleVariants: variants.length > 1,
+        hasMultipleVariants: variacoesDisponiveis.length > 1,
         cor: uniqueCores.length === 1 ? uniqueCores[0] : (uniqueCores.length > 1 ? uniqueCores.join(', ') : null),
         filial_id: activeFilialId,
-        filial_nome: activeFilialNome,
-        total_estoque: totalEstoque,
-        estoque_local: totalEstoque,
-        quantidade_local: totalEstoque,
-        estoque_atual: totalEstoque,
-        estoque: totalEstoque,
-        quantidade: totalEstoque
+        filial_nome: activeFilialNome
       };
     });
-  }, [listaProdutosConsolidada, disponiveisImeis, produtos, produtosFilial, produtosDisponiveisPDV, activeFilialId, activeFilialNome]);
+  }, [produtosDisponiveisPDV, produtos, produtosFilial, activeFilialId, activeFilialNome, disponiveisImeis, filiais, listaProdutosConsolidada]);
+
+  // Consolidar produtos para o PDV através da utilidade agruparPorModelo
+  const listaProdutosPdvDinamica = React.useMemo(() => {
+    return agruparPorModelo(listaProdutosConsolidada);
+  }, [agruparPorModelo, listaProdutosConsolidada]);
 
   const filteredProdutosPdv = listaProdutosPdvDinamica.filter(p => {
     const searchLower = pdvBusca.toLowerCase().trim();
@@ -11877,12 +11882,11 @@ export default function Dashboard({ session, profileDataProps }) {
                     const isCelularCard = (prod.tipo && prod.tipo.toUpperCase().includes('CELULAR')) || (prod.categoria && prod.categoria.toUpperCase().includes('CELULAR')) || prod.categoria === 'IOS' || prod.categoria === 'ANDROID';
 
                     // Extração robusta de contagem consolidada
-                    let estoqueLocal = Number(prod.total_estoque ?? prod.estoque_local ?? prod.quantidade_local ?? prod.estoque ?? prod.quantidade ?? 0);
+                    const estoqueLocal = Number(prod.estoqueTotal ?? prod.total_estoque ?? prod.estoque_local ?? prod.quantidade_local ?? prod.estoque ?? prod.quantidade ?? 0);
 
-                    // Variants disponíveis
-                    const variantsList = prod.variants || [];
-                    const hasMultipleVariants = prod.hasMultipleVariants || variantsList.length > 1;
-                    const coresList = prod.uniqueCores || (prod.cor ? [prod.cor] : []);
+                    // Variações disponíveis
+                    const variacoes = prod.variacoesDisponiveis || prod.variants || [];
+                    const temMultiplasVariacoes = variacoes.length > 1;
                     const isSemEstoque = prod.categoria !== 'SERVICO' && estoqueLocal <= 0;
                     const itemUniqueKey = String(prod.id || prod.catalogo_id || `${prod.nome}_${idx}`);
 
@@ -11895,22 +11899,22 @@ export default function Dashboard({ session, profileDataProps }) {
                             setIsModalAbrirCaixaOpen(true);
                             return;
                           }
-                          // Guard Clause estrito: Se estoque for 0, abre multiloja
+                          // Se estoque for 0, abre multiloja
                           if (isSemEstoque) {
                             handleVerMultiloja(prod);
                             return;
                           }
 
                           // FLUXO DE VENDA SEGURA (OBRIGATÓRIO):
-                          // Se tiver mais de 1 variante ou se for celular com múltiplas opções, abre o modal de seleção de variações
-                          if (hasMultipleVariants || variantsList.length > 1) {
+                          // Se variacoesDisponiveis.length > 1, abre o modal de seleção de variações
+                          if (temMultiplasVariacoes) {
                             setSelectedVariantModalProd(prod);
                             return;
                           }
 
                           // Se for celular com variante única
                           if (isCelularCard) {
-                            const singleVariant = variantsList[0] || prod;
+                            const singleVariant = variacoes[0] || prod;
                             const targetImeis = (singleVariant.imeis && singleVariant.imeis.length > 0) ? singleVariant.imeis : (prod.imeis_db || []);
                             const targetImei = targetImeis[0]?.imei || prod.imei || null;
                             const targetCor = singleVariant.cor || prod.cor || null;
@@ -11929,7 +11933,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             setImeiValidationError('');
                           } else {
                             // Produto simples (acessório com 1 variação)
-                            const singleVariant = variantsList[0] || prod;
+                            const singleVariant = variacoes[0] || prod;
                             handleAddToCart({
                               ...prod,
                               ...singleVariant,
@@ -11960,20 +11964,25 @@ export default function Dashboard({ session, profileDataProps }) {
                                 {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
                               </span>
 
-                              {/* UI do Card de Variações: Se tiver múltiplas opções exibe tag "Várias Opções" com esferas de cores */}
-                              {hasMultipleVariants ? (
-                                <span className="inline-flex items-center gap-1.5 text-[9px] font-extrabold text-purple-700 dark:text-purple-200 bg-purple-100 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-600/40 px-2 py-0.5 rounded-full w-fit shadow-sm">
-                                  <span className="flex items-center gap-0.5">
-                                    {coresList.slice(0, 3).map((c, cIdx) => (
-                                      <span
-                                        key={cIdx}
-                                        className="w-2 h-2 rounded-full border border-purple-400 bg-purple-500 shadow-xs"
-                                        title={`Cor: ${c}`}
-                                      />
-                                    ))}
-                                  </span>
-                                  <span>{coresList.length > 0 ? `${coresList.length} Opções` : 'Várias Opções'}</span>
-                                </span>
+                              {/* UI do Card: se variacoesDisponiveis.length > 1, exibe botão/badge 'Ver Opções' */}
+                              {temMultiplasVariacoes ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    if (isPdvBloqueadoParaUsuario) {
+                                      showToast('Caixa Fechado: É necessário realizar a abertura do caixa.', 'error');
+                                      setIsModalAbrirCaixaOpen(true);
+                                      return;
+                                    }
+                                    setSelectedVariantModalProd(prod);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[9px] font-extrabold text-primary bg-primary/10 hover:bg-primary hover:text-primary-foreground border border-primary/30 px-2 py-0.5 rounded-full transition-all cursor-pointer shadow-xs"
+                                >
+                                  <Layers size={10} />
+                                  <span>Ver Opções ({variacoes.length})</span>
+                                </button>
                               ) : prod.cor ? (
                                 <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-700 dark:text-purple-200 bg-purple-100 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
                                   <Tag size={9} className="text-primary" />
@@ -12007,10 +12016,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                   setIsModalAbrirCaixaOpen(true);
                                   return;
                                 }
-                                handleVerMultiloja(prod);
+                                if (temMultiplasVariacoes) {
+                                  setSelectedVariantModalProd(prod);
+                                } else {
+                                  handleVerMultiloja(prod);
+                                }
                               }}
                               className="px-2.5 py-1 bg-primary/15 hover:bg-primary text-primary hover:text-primary-foreground disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-extrabold rounded-lg border border-primary/30 hover:border-primary transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-                              title="Ver estoque e reservar de outras lojas da rede"
+                              title={temMultiplasVariacoes ? "Ver cores e opções disponíveis" : "Ver estoque e reservar de outras lojas da rede"}
                             >
                               <Store size={11} />
                               Rede
