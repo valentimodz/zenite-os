@@ -19619,7 +19619,17 @@ export default function Dashboard({ session, profileDataProps }) {
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <span className="text-gray-500 text-[10px] block">Operador Responsável</span>
-                    <strong className="text-white text-xs">{modalDetalheCaixa.operador_nome || modalDetalheCaixa.profiles?.nome || 'Operador'}</strong>
+                    <strong className="text-white text-xs">
+                      {modalDetalheCaixa.operador_nome || 
+                       modalDetalheCaixa.profiles?.nome || 
+                       modalDetalheCaixa.usuarios?.nome || 
+                       modalDetalheCaixa.profiles?.nome_completo ||
+                       modalDetalheCaixa.usuarios?.nome_completo ||
+                       vendedores?.find(c => String(c.id) === String(modalDetalheCaixa.operador_id))?.nome ||
+                       teamMembers?.find(t => String(t.id) === String(modalDetalheCaixa.operador_id))?.nome ||
+                       (modalDetalheCaixa.operador_id === session?.user?.id ? (profile?.nome || session?.user?.email?.split('@')[0]) : null) ||
+                       'Operador'}
+                    </strong>
                   </div>
                   <div>
                     <span className="text-gray-500 text-[10px] block">Data / Hora Abertura</span>
@@ -19721,6 +19731,51 @@ export default function Dashboard({ session, profileDataProps }) {
                   }
                 }
 
+                const handleDownloadComprovante = async (e, urlOrPath, idx) => {
+                  e.stopPropagation();
+                  try {
+                    let blob = null;
+                    let filename = `comprovante_fechamento_${modalDetalheCaixa.id || 'caixa'}_${idx + 1}.jpg`;
+
+                    if (urlOrPath.startsWith('data:')) {
+                      // Base64 data URL
+                      const parts = urlOrPath.split(';base64,');
+                      const contentType = parts[0].split(':')[1] || 'image/jpeg';
+                      const raw = window.atob(parts[1]);
+                      const rawLength = raw.length;
+                      const uInt8Array = new Uint8Array(rawLength);
+                      for (let i = 0; i < rawLength; ++i) {
+                        uInt8Array[i] = raw.charCodeAt(i);
+                      }
+                      blob = new Blob([uInt8Array], { type: contentType });
+                    } else if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
+                      // URL pública externa ou do Supabase
+                      const res = await fetch(urlOrPath);
+                      blob = await res.blob();
+                    } else {
+                      // Path no bucket de comprovantes do Supabase Storage
+                      const { data, error } = await supabase.storage.from('comprovantes').download(urlOrPath);
+                      if (error) throw error;
+                      blob = data;
+                    }
+
+                    if (blob) {
+                      const tempUrl = window.URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = tempUrl;
+                      link.download = filename;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      window.URL.revokeObjectURL(tempUrl);
+                      showToast('Comprovante baixado com sucesso!', 'success');
+                    }
+                  } catch (err) {
+                    console.error('Erro ao baixar comprovante:', err);
+                    showToast('Erro ao realizar download do comprovante.', 'error');
+                  }
+                };
+
                 return (
                   <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
                     <div className="flex items-center justify-between">
@@ -19747,9 +19802,8 @@ export default function Dashboard({ session, profileDataProps }) {
                             : supabase.storage.from('comprovantes').getPublicUrl(urlOrPath)?.data?.publicUrl || urlOrPath;
 
                           return (
-                            <button
+                            <div
                               key={idx}
-                              type="button"
                               onClick={() => setModalComprovante(src)}
                               className="group relative aspect-square bg-black border border-[#222] hover:border-[#6A0DAD] rounded-lg overflow-hidden transition-all cursor-pointer flex items-center justify-center shadow-sm"
                               title="Clique para ampliar o comprovante"
@@ -19769,10 +19823,20 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <FileText size={16} className="text-gray-600 mb-1" />
                                 <span>Ver Anexo {idx + 1}</span>
                               </div>
-                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                <Eye size={16} className="text-white drop-shadow" />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                <span className="p-1.5 rounded-md bg-white/20 hover:bg-white/30 text-white transition-all shadow-sm" title="Ampliar">
+                                  <Eye size={15} />
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDownloadComprovante(e, urlOrPath, idx)}
+                                  className="p-1.5 rounded-md bg-[#6A0DAD] hover:bg-[#500885] text-white transition-all shadow-sm cursor-pointer"
+                                  title="Baixar comprovante"
+                                >
+                                  <Download size={15} />
+                                </button>
                               </div>
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
