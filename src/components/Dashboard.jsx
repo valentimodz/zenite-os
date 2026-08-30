@@ -3136,10 +3136,10 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // Busca direta na tabela caixas com ordenação
+      // Busca direta na tabela caixas com join da filial e ordenação
       let query = supabase
         .from('caixas')
-        .select('*')
+        .select('*, filiais(nome)')
         .order('data_abertura', { ascending: false });
 
       // Filtro de filial apenas se houver uma filial específica selecionada
@@ -3160,7 +3160,7 @@ export default function Dashboard({ session, profileDataProps }) {
         console.error('[Caixas] ⚠️ Erro na query filtrada:', error);
         const { data: fallbackData, error: fallbackErr } = await supabase
           .from('caixas')
-          .select('*')
+          .select('*, filiais(nome)')
           .order('data_abertura', { ascending: false });
 
         console.log('[Caixas] 📦 Resposta Fallback:', fallbackData, fallbackErr);
@@ -19599,7 +19599,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       )}
                     </h3>
                     <p className="text-xs text-gray-400">
-                      {modalDetalheCaixa.filial_nome || modalDetalheCaixa.filiais?.nome || 'Filial'}
+                      {modalDetalheCaixa.filiais?.nome || modalDetalheCaixa.filial_nome || filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome || 'Filial'}
                     </p>
                   </div>
                 </div>
@@ -19687,6 +19687,99 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 )}
               </div>
+
+              {/* Seção de Comprovantes Anexados */}
+              {(() => {
+                // Obter comprovantes a partir de comprovante_url, comprovantes ou buscando no array de fechamentos
+                let comprovantesList = [];
+                if (modalDetalheCaixa.comprovantes && Array.isArray(modalDetalheCaixa.comprovantes)) {
+                  comprovantesList = modalDetalheCaixa.comprovantes.filter(Boolean);
+                } else if (modalDetalheCaixa.comprovante_url) {
+                  if (Array.isArray(modalDetalheCaixa.comprovante_url)) {
+                    comprovantesList = modalDetalheCaixa.comprovante_url.filter(Boolean);
+                  } else if (typeof modalDetalheCaixa.comprovante_url === 'string' && modalDetalheCaixa.comprovante_url.trim()) {
+                    comprovantesList = [modalDetalheCaixa.comprovante_url.trim()];
+                  }
+                }
+
+                // Fallback: se não estiver direto no objeto do caixa, buscar na lista de fechamentos correspondente
+                if (comprovantesList.length === 0 && fechamentos && fechamentos.length > 0) {
+                  const fechRelacionado = fechamentos.find(f => 
+                    (modalDetalheCaixa.id && f.caixa_id && String(f.caixa_id) === String(modalDetalheCaixa.id)) ||
+                    (String(f.filial_id) === String(modalDetalheCaixa.filial_id) && 
+                     modalDetalheCaixa.data_fechamento && 
+                     Math.abs(new Date(f.created_at || f.data_fechamento).getTime() - new Date(modalDetalheCaixa.data_fechamento).getTime()) < 3600000)
+                  );
+                  if (fechRelacionado) {
+                    if (Array.isArray(fechRelacionado.comprovante_url)) {
+                      comprovantesList = fechRelacionado.comprovante_url.filter(Boolean);
+                    } else if (typeof fechRelacionado.comprovante_url === 'string' && fechRelacionado.comprovante_url.trim()) {
+                      comprovantesList = [fechRelacionado.comprovante_url.trim()];
+                    } else if (Array.isArray(fechRelacionado.comprovantes)) {
+                      comprovantesList = fechRelacionado.comprovantes.filter(Boolean);
+                    }
+                  }
+                }
+
+                return (
+                  <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
+                        Comprovantes Anexados
+                      </span>
+                      {comprovantesList.length > 0 && (
+                        <span className="text-[10px] bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-purple-300 font-bold px-2 py-0.5 rounded-full">
+                          {comprovantesList.length} {comprovantesList.length === 1 ? 'anexo' : 'anexos'}
+                        </span>
+                      )}
+                    </div>
+
+                    {comprovantesList.length === 0 ? (
+                      <div className="text-center py-5 px-3 bg-black/40 border border-dashed border-[#222] rounded-xl text-gray-500 text-xs italic flex flex-col items-center gap-1.5">
+                        <ImageIcon size={20} className="text-gray-600 opacity-60" />
+                        <span>Nenhum comprovante anexado a este fechamento</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5 max-h-48 overflow-y-auto pr-1">
+                        {comprovantesList.map((urlOrPath, idx) => {
+                          const src = urlOrPath.startsWith('http') || urlOrPath.startsWith('data:') 
+                            ? urlOrPath 
+                            : supabase.storage.from('comprovantes').getPublicUrl(urlOrPath)?.data?.publicUrl || urlOrPath;
+
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setModalComprovante(src)}
+                              className="group relative aspect-square bg-black border border-[#222] hover:border-[#6A0DAD] rounded-lg overflow-hidden transition-all cursor-pointer flex items-center justify-center shadow-sm"
+                              title="Clique para ampliar o comprovante"
+                            >
+                              <img
+                                src={src}
+                                alt={`Comprovante ${idx + 1}`}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                  if (e.currentTarget.nextSibling) {
+                                    e.currentTarget.nextSibling.style.display = 'flex';
+                                  }
+                                }}
+                              />
+                              <div className="hidden absolute inset-0 bg-[#161616] text-[10px] text-gray-500 flex-col items-center justify-center p-1 text-center">
+                                <FileText size={16} className="text-gray-600 mb-1" />
+                                <span>Ver Anexo {idx + 1}</span>
+                              </div>
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <Eye size={16} className="text-white drop-shadow" />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Botão Fechar */}
               <button
