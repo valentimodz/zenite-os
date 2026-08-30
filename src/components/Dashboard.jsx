@@ -10399,7 +10399,6 @@ export default function Dashboard({ session, profileDataProps }) {
             tipo: p.tipo || cat.tipo || 'ACESSORIO',
             preco: parseFloat(p.preco || cat.preco || 0),
             quantidade: p.quantidade || cat.quantidade || 0,
-            estoques: p.estoque_movimentacoes || p.estoques || cat.estoque_movimentacoes || cat.estoques || [],
             imeis_db: p.imeis_db || []
           });
         });
@@ -10417,7 +10416,6 @@ export default function Dashboard({ session, profileDataProps }) {
           quantidade: cat.quantidade || 0,
           sku: cat.sku || null,
           codigo_barras: cat.codigo_barras || null,
-          estoques: cat.estoque_movimentacoes || cat.estoques || [],
           imeis_db: []
         });
       }
@@ -10672,7 +10670,7 @@ export default function Dashboard({ session, profileDataProps }) {
         });
         localQty = localImeis.length;
 
-        // Se não houver IMEIs físicos bipados, buscar a quantidade informada no cadastro ou no estoque
+        // Se não houver IMEIs físicos bipados, buscar a quantidade informada na coluna quantidade
         if (localQty === 0) {
           const matchPhysical = (fonteBaseProds || []).find(pr => 
             (pr.id && p.id && String(pr.id) === String(p.id)) ||
@@ -10681,24 +10679,10 @@ export default function Dashboard({ session, profileDataProps }) {
             (pr.nome && p.nome && pr.nome.toLowerCase().trim() === p.nome.toLowerCase().trim())
           );
           if (matchPhysical) {
-            localQty = Number(matchPhysical.quantidade || matchPhysical.estoque || matchPhysical.estoque_local || matchPhysical.quantidade_local || 0);
-            const estArrMatch = matchPhysical.estoque_movimentacoes || matchPhysical.estoques;
-            if (localQty === 0 && estArrMatch && Array.isArray(estArrMatch)) {
-              const estMatch = estArrMatch.find(e => 
-                !activeFilialId || String(e.filial_id) === String(activeFilialId) || String(e.empresa_id) === String(activeFilialId)
-              ) || estArrMatch.find(e => Number(e.quantidade) > 0);
-              if (estMatch) localQty = Number(estMatch.quantidade || 0);
-            }
+            localQty = Number(matchPhysical.quantidade ?? matchPhysical.estoque ?? 0);
           }
           if (localQty === 0) {
-            localQty = Number(p.quantidade || p.estoque || p.estoque_local || p.quantidade_local || 0);
-            const estArrP = p.estoque_movimentacoes || p.estoques;
-            if (localQty === 0 && estArrP && Array.isArray(estArrP)) {
-              const estP = estArrP.find(e => 
-                !activeFilialId || String(e.filial_id) === String(activeFilialId) || String(e.empresa_id) === String(activeFilialId)
-              ) || estArrP.find(e => Number(e.quantidade) > 0);
-              if (estP) localQty = Number(estP.quantidade || 0);
-            }
+            localQty = Number(p.quantidade ?? p.estoque ?? 0);
           }
         }
       } else if (p.categoria === 'SERVICO') {
@@ -11729,35 +11713,11 @@ export default function Dashboard({ session, profileDataProps }) {
                       });
 
                       cardImeis = localImeis.length > 0 ? localImeis : matchingImeis;
-                      estoqueLocal = cardImeis.length;
-
-                      const prodEstList = prod.estoque_movimentacoes || prod.estoques;
                       if (estoqueLocal === 0) {
-                        let rawQ = Number(prod.quantidade || prod.estoque_atual || prod.estoque_local || prod.estoque || 0);
-                        if (rawQ === 0 && prodEstList && Array.isArray(prodEstList)) {
-                          const fallbackEst = prodEstList.find(e => Number(e.quantidade) > 0);
-                          if (fallbackEst) rawQ = Number(fallbackEst.quantidade);
-                        }
-                        if (rawQ > 0) estoqueLocal = rawQ;
+                        estoqueLocal = Number(prod.quantidade ?? prod.estoque ?? 0);
                       }
-                    } else if ((prod.estoque_movimentacoes || prod.estoques) && Array.isArray(prod.estoque_movimentacoes || prod.estoques)) {
-                      const prodEstList = prod.estoque_movimentacoes || prod.estoques;
-                      const est = prodEstList.find(e =>
-                        String(e.filial_id) === idFilial ||
-                        String(e.empresa_id) === idFilial ||
-                        String(e.loja_id) === idFilial ||
-                        String(e.filial_id) === idEmpresa ||
-                        String(e.empresa_id) === idEmpresa
-                      );
-
-                      if (est && est.quantidade !== undefined && est.quantidade !== null) {
-                        estoqueLocal = Number(est.quantidade);
-                      } else if (estoqueLocal <= 0) {
-                        const estAlternativo = prodEstList.find(e => Number(e.quantidade) > 0);
-                        if (estAlternativo) {
-                          estoqueLocal = Number(estAlternativo.quantidade);
-                        }
-                      }
+                    } else {
+                      estoqueLocal = Number(prod.quantidade ?? prod.estoque ?? 0);
                     }
 
                     const displayImei = cardImeis[0]?.imei || prod.imei || (prod.imeis_db && prod.imeis_db[0]?.imei) || null;

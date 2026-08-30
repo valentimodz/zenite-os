@@ -57,27 +57,14 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
     const activeEmpresaId = session?.user?.user_metadata?.empresa_id;
 
     return produtos.map((p) => {
-      // 1. Busca o estoque real da filial ativa (estrutura multiloja)
-      let estoqueLocal = null;
-      const estList = p.estoque_movimentacoes || p.estoques;
-      if (estList && Array.isArray(estList)) {
-        const est = estList.find(e => String(e.filial_id) === String(activeEmpresaId) || String(e.empresa_id) === String(activeEmpresaId));
-        if (est && est.quantidade !== undefined) {
-          estoqueLocal = est.quantidade;
-        }
-      }
-
-      // 2. Fallback para o mapeamento local/antigo
+      // Define a quantidade final diretamente de p.quantidade
       const itemFisico = mapEstoqueFisico.get(p.id) ||
         (p.codigo_barras ? mapEstoqueFisico.get(p.codigo_barras.trim()) : null) ||
         (p.nome ? mapEstoqueFisico.get(p.nome.toLowerCase().trim()) : null);
 
-      // 3. Define a quantidade final correta
-      const qtdFisica = estoqueLocal !== null
-        ? estoqueLocal
-        : ((itemFisico && itemFisico.quantidade !== undefined && itemFisico.quantidade !== null)
-          ? itemFisico.quantidade
-          : (p.quantidade ?? p.estoque_atual ?? 0));
+      const qtdFisica = (itemFisico && itemFisico.quantidade !== undefined && itemFisico.quantidade !== null)
+        ? Number(itemFisico.quantidade)
+        : Number(p.quantidade ?? p.estoque_atual ?? 0);
 
       return {
         ...p,
