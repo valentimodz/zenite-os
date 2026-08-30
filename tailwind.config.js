@@ -12,15 +12,42 @@ export default {
           purple: '#6A0DAD',
           purpleHover: '#500885',
         },
-        background: 'var(--bg-background)',
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)',
+        },
+        popover: {
+          DEFAULT: 'var(--popover)',
+          foreground: 'var(--popover-foreground)',
+        },
+        primary: {
+          DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)',
+        },
+        secondary: {
+          DEFAULT: 'var(--secondary)',
+          foreground: 'var(--secondary-foreground)',
+        },
+        muted: {
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent)',
+          foreground: 'var(--accent-foreground)',
+        },
+        destructive: {
+          DEFAULT: 'var(--destructive)',
+          foreground: 'var(--destructive-foreground)',
+        },
+        border: 'var(--border)',
+        input: 'var(--input)',
+        ring: 'var(--ring)',
         surface: 'var(--bg-surface)',
         'surface-elevated': 'var(--bg-surface-elevated)',
         'surface-muted': 'var(--bg-surface-muted)',
-        border: 'var(--border-color)',
-        'border-subtle': 'var(--border-subtle)',
-        foreground: 'var(--text-foreground)',
-        'foreground-muted': 'var(--text-muted)',
-        'foreground-subtle': 'var(--text-subtle)',
       }
     },
   },

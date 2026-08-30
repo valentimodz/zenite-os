@@ -11556,16 +11556,16 @@ export default function Dashboard({ session, profileDataProps }) {
         {/* BANNER DE STATUS DO CAIXA (ABERTO / FECHADO) */}
         {isCaixaFechado ? (
           isVendedor ? (
-            <div className="bg-amber-950/40 border border-amber-600/50 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-200 text-xs shadow-lg animate-fadeIn">
+            <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-foreground text-xs shadow-sm animate-fadeIn">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/40 text-amber-300 shrink-0">
+                <div className="p-2 bg-amber-500/20 rounded-lg border border-amber-500/40 text-amber-500 dark:text-amber-400 shrink-0">
                   <AlertTriangle size={20} />
                 </div>
                 <div>
-                  <span className="font-extrabold text-amber-300 text-sm block flex items-center gap-1.5">
+                  <span className="font-extrabold text-amber-600 dark:text-amber-300 text-sm block flex items-center gap-1.5">
                     <Lock size={14} /> Caixa Fechado nesta Filial ({activeFilialNome || 'Filial'})
                   </span>
-                  <span className="text-[11px] text-amber-200/80">
+                  <span className="text-[11px] text-foreground-muted">
                     O PDV está bloqueado para emissão de vendas. É necessário abrir o caixa e informar o fundo de troco para operar.
                   </span>
                 </div>
@@ -11573,23 +11573,23 @@ export default function Dashboard({ session, profileDataProps }) {
               <button
                 type="button"
                 onClick={() => setIsModalAbrirCaixaOpen(true)}
-                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-amber-950/50 cursor-pointer"
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 shadow-md cursor-pointer"
               >
                 <Store size={14} />
                 Abrir Caixa Agora
               </button>
             </div>
           ) : (
-            <div className="bg-purple-950/25 border border-purple-800/40 p-3.5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-purple-200 text-xs shadow-lg animate-fadeIn">
+            <div className="bg-accent/40 border border-primary/20 p-3.5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-foreground text-xs shadow-sm animate-fadeIn">
               <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-500/20 rounded-lg border border-purple-500/40 text-purple-300 shrink-0">
+                <div className="p-2 bg-primary/10 rounded-lg border border-primary/20 text-primary shrink-0">
                   <ShieldCheck size={20} />
                 </div>
                 <div>
-                  <span className="font-extrabold text-white text-sm block flex items-center gap-1.5">
+                  <span className="font-extrabold text-foreground text-sm block flex items-center gap-1.5">
                     Visualização Administrativa / Gerencial ({activeFilialNome || 'Filial'})
                   </span>
-                  <span className="text-[11px] text-purple-300/80">
+                  <span className="text-[11px] text-foreground-muted">
                     O caixa desta filial está fechado. Como Administrador/Gerente, seu acesso ao catálogo e ao PDV está livre para consulta e testes.
                   </span>
                 </div>
@@ -11597,7 +11597,7 @@ export default function Dashboard({ session, profileDataProps }) {
               <button
                 type="button"
                 onClick={() => setIsModalAbrirCaixaOpen(true)}
-                className="px-3.5 py-1.5 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-md shadow-purple-950/50"
+                className="px-3.5 py-1.5 bg-primary hover:bg-[#500885] text-primary-foreground font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-md"
               >
                 <Store size={14} />
                 Abrir Caixa Manualmente
@@ -11605,17 +11605,17 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           )
         ) : (
-          <div className="bg-green-950/20 border border-green-800/40 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-green-300 animate-fadeIn">
+          <div className="bg-emerald-500/10 border border-emerald-500/25 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-foreground animate-fadeIn shadow-sm">
             <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shrink-0"></span>
-              <span className="font-bold text-white">Caixa Aberto</span>
-              <span className="text-gray-400">• Operador: <strong className="text-gray-200">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
-              <span className="text-gray-400">• Fundo Inicial: <strong className="text-green-400 font-mono">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
-              <span className="text-gray-500 font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+              <span className="font-bold text-foreground">Caixa Aberto</span>
+              <span className="text-foreground-muted">• Operador: <strong className="text-foreground">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
+              <span className="text-foreground-muted">• Fundo Inicial: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+              <span className="text-foreground-subtle font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
             </div>
-            <div className="text-[11px] text-gray-400 bg-black/60 border border-[#222] px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5">
-              <span className="text-gray-500">Gaveta (Dinheiro) =</span>
-              <span className="text-green-400 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
+            <div className="text-[11px] text-foreground-muted bg-surface border border-border px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5 shadow-sm">
+              <span className="text-foreground-subtle">Gaveta (Dinheiro) =</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
             </div>
           </div>
         )}
@@ -11885,44 +11885,44 @@ export default function Dashboard({ session, profileDataProps }) {
                           }
                         }}
                         aria-disabled={isSemEstoque}
-                        className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${isPdvBloqueadoParaUsuario
-                          ? 'opacity-40 cursor-not-allowed border-[#222]'
+                        className={`group bg-card text-card-foreground border p-4 rounded-xl text-left flex flex-col gap-2 transition-all ${isPdvBloqueadoParaUsuario
+                          ? 'opacity-40 cursor-not-allowed border-border'
                           : isSemEstoque
-                            ? 'opacity-60 border-[#222222] bg-[#0A0A0A] cursor-not-allowed select-none'
+                            ? 'opacity-60 border-border bg-muted/40 cursor-not-allowed select-none'
                             : pdvCart.some(i => i.produto.id === prod.id && (displayCor ? (i.cor === displayCor || i.produto.cor === displayCor) : true))
-                              ? 'border-[#6A0DAD] bg-[#6A0DAD]/5 cursor-pointer hover:border-[#6A0DAD]'
-                              : 'border-[#222222] hover:border-[#6A0DAD]/40 cursor-pointer'
+                              ? 'border-primary bg-primary/5 cursor-pointer shadow-md'
+                              : 'border-border hover:border-primary/50 cursor-pointer shadow-sm hover:shadow-md'
                           }`}
                       >
                         <div className="flex justify-between items-start w-full">
                           <div className="flex flex-col gap-1.5 max-w-[70%]">
-                            <span className="font-extrabold text-sm text-white group-hover:text-purple-400 transition-colors">
+                            <span className="font-extrabold text-sm text-foreground group-hover:text-primary transition-colors">
                               {prod.nome}
                             </span>
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-300 bg-[#160926] border border-[#6A0DAD]/30 px-1.5 py-0.5 rounded w-fit">
-                                <Store size={10} className="text-[#6A0DAD]" />
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-600 dark:text-purple-300 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded w-fit">
+                                <Store size={10} className="text-primary" />
                                 {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
                               </span>
                               {!isCelularCard && displayCor && (
-                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-[#e9d5ff] bg-purple-950/60 border border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
-                                  <Tag size={9} className="text-purple-300" />
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-700 dark:text-purple-200 bg-purple-100 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
+                                  <Tag size={9} className="text-primary" />
                                   {displayCor}
                                 </span>
                               )}
                             </div>
                           </div>
-                          <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${prod.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
-                            prod.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
-                              prod.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
-                                'bg-purple-950/20 text-purple-400 border border-purple-800/20'
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${prod.categoria === 'IOS' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20' :
+                            prod.categoria === 'ANDROID' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' :
+                              prod.categoria === 'SERVICO' ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border border-pink-500/20' :
+                                'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
                             }`}>
                             {prod.categoria}
                           </span>
                         </div>
 
                         <div className="flex justify-between items-center w-full mt-2">
-                          <span className="font-mono font-bold text-xs text-white">
+                          <span className="font-mono font-bold text-xs text-foreground">
                             R$ {Number(prod.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </span>
                           <div className="flex items-center gap-2">
@@ -11939,13 +11939,13 @@ export default function Dashboard({ session, profileDataProps }) {
                                 }
                                 handleVerMultiloja(prod);
                               }}
-                              className="px-2.5 py-1 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD] disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-extrabold text-purple-300 hover:text-white rounded border border-[#6A0DAD]/50 hover:border-[#6A0DAD] transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                              className="px-2.5 py-1 bg-primary/15 hover:bg-primary text-primary hover:text-primary-foreground disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-extrabold rounded-lg border border-primary/30 hover:border-primary transition-all flex items-center gap-1 cursor-pointer shadow-sm"
                               title="Ver estoque e reservar de outras lojas da rede"
                             >
                               <Store size={11} />
                               Rede
                             </button>
-                            <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-red-400 font-bold' : 'text-gray-500'}`}>
+                            <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-destructive font-bold' : 'text-foreground-muted'}`}>
                               {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${estoqueLocal} un.`}
                             </span>
                           </div>
@@ -11969,17 +11969,17 @@ export default function Dashboard({ session, profileDataProps }) {
           </div>
 
           {/* COLUNA DIREITA: CART/CHECKOUT (ORDER 1 NO MOBILE, ORDER 2 NO DESKTOP) */}
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 sm:p-6 flex flex-col gap-6 lg:col-span-1 w-full order-1 lg:order-2">
-            <div className="flex justify-between items-center pb-2 border-b border-[#222222]">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <ShoppingBag size={18} className="text-[#6A0DAD]" />
+          <div className="bg-card text-card-foreground border border-border rounded-xl p-4 sm:p-6 flex flex-col gap-6 lg:col-span-1 w-full order-1 lg:order-2 shadow-sm">
+            <div className="flex justify-between items-center pb-2 border-b border-border">
+              <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                <ShoppingBag size={18} className="text-primary" />
                 Carrinho de Venda
               </h3>
               {pdvCart.length > 0 && (
                 <button
                   type="button"
                   onClick={handleClearCart}
-                  className="text-[10px] text-gray-500 hover:text-red-400 transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                  className="text-[10px] text-foreground-muted hover:text-destructive transition-colors font-medium flex items-center gap-1 cursor-pointer"
                 >
                   <Trash2 size={12} />
                   Limpar
@@ -11988,12 +11988,12 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
 
             {/* Scanner de IMEI ou Código de Barras (EAN/Barcode) */}
-            <div className={`space-y-2 bg-[#111111]/60 border rounded-lg p-3 transition-all ${isPdvBloqueadoParaUsuario ? 'border-amber-900/30 opacity-70' : 'border-[#222222]'
+            <div className={`space-y-2 bg-surface-elevated/60 border rounded-xl p-3 transition-all ${isPdvBloqueadoParaUsuario ? 'border-amber-500/30 opacity-70' : 'border-border'
               }`}>
-              <label className="block text-[10px] font-black text-purple-400 uppercase tracking-wider flex items-center justify-between">
+              <label className="block text-[10px] font-black text-primary uppercase tracking-wider flex items-center justify-between">
                 <span>⚡ Bipar IMEI ou Código de Barras (EAN)</span>
                 {isPdvBloqueadoParaUsuario && (
-                  <span className="text-amber-400 text-[9px] font-bold lowercase flex items-center gap-1">
+                  <span className="text-amber-500 text-[9px] font-bold lowercase flex items-center gap-1">
                     <Lock size={10} /> bloqueado
                   </span>
                 )}
@@ -12085,28 +12085,28 @@ export default function Dashboard({ session, profileDataProps }) {
 
             {/* Lista do Carrinho */}
             {pdvCart.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-600 text-center gap-2 border border-dashed border-[#222222] rounded-lg">
-                <ShoppingBag size={24} className="text-gray-800" />
+              <div className="flex flex-col items-center justify-center py-16 text-foreground-muted text-center gap-2 border border-dashed border-border rounded-xl">
+                <ShoppingBag size={24} className="text-foreground-subtle opacity-40" />
                 <p className="text-xs italic leading-relaxed px-4">
                   Adicione produtos do catálogo ou bipe um IMEI de celular para começar.
                 </p>
               </div>
             ) : (
-              <div className="space-y-4 max-h-[320px] overflow-y-auto pr-1">
+              <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
                 {pdvCart.map((item) => (
-                  <div key={item.cartId} className="bg-black border border-[#222222] p-3 rounded-lg flex flex-col gap-2 relative">
+                  <div key={item.cartId} className="bg-surface border border-border p-3.5 rounded-xl flex flex-col gap-2 relative shadow-sm">
                     {/* ALERTA POKA-YOKE DE ADIMPLÊNCIA / INADIMPLÊNCIA NO PDV */}
                     {(() => {
                       const cCheck = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
                       if (cCheck?.status_credito === 'INADIMPLENTE') {
                         return (
-                          <div className="bg-red-950/40 border border-red-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs animate-pulse shadow-lg shadow-red-950/50">
-                            <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={18} />
+                          <div className="bg-destructive/10 border border-destructive/40 p-3 rounded-xl flex items-start gap-2.5 my-1 text-xs animate-pulse shadow-sm">
+                            <AlertCircle className="text-destructive shrink-0 mt-0.5" size={18} />
                             <div>
-                              <h4 className="text-red-400 font-extrabold uppercase tracking-wide text-[11px]">
+                              <h4 className="text-destructive font-extrabold uppercase tracking-wide text-[11px]">
                                 ⚠️ CLIENTE BLOQUEADO / INADIMPLENTE
                               </h4>
-                              <p className="text-red-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                              <p className="text-destructive/80 text-[10px] mt-0.5 font-medium leading-tight">
                                 Este cliente possui registro de inadimplência no sistema. As vendas estão suspensas para este cadastro.
                               </p>
                             </div>
@@ -12114,13 +12114,13 @@ export default function Dashboard({ session, profileDataProps }) {
                         );
                       } else if (cCheck?.status_credito === 'ATRASO') {
                         return (
-                          <div className="bg-yellow-950/40 border border-yellow-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs shadow-lg shadow-yellow-950/50">
-                            <AlertTriangle className="text-yellow-500 shrink-0 mt-0.5" size={18} />
+                          <div className="bg-yellow-500/10 border border-yellow-500/40 p-3 rounded-xl flex items-start gap-2.5 my-1 text-xs shadow-sm">
+                            <AlertTriangle className="text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" size={18} />
                             <div>
-                              <h4 className="text-yellow-400 font-extrabold uppercase tracking-wide text-[11px]">
+                              <h4 className="text-yellow-600 dark:text-yellow-400 font-extrabold uppercase tracking-wide text-[11px]">
                                 🟡 ALERTA: CLIENTE COM ATRASO LEVE
                               </h4>
-                              <p className="text-yellow-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                              <p className="text-yellow-700/80 dark:text-yellow-300/80 text-[10px] mt-0.5 font-medium leading-tight">
                                 Este cliente possui pendências recentes ou parcelas em atraso leve. Atenção no parcelamento.
                               </p>
                             </div>
@@ -12134,19 +12134,19 @@ export default function Dashboard({ session, profileDataProps }) {
                     <button
                       type="button"
                       onClick={() => handleRemoveFromCart(item.cartId)}
-                      className="absolute right-3 top-3 text-gray-500 hover:text-red-500 transition-colors"
+                      className="absolute right-3 top-3 text-foreground-muted hover:text-destructive transition-colors cursor-pointer"
                     >
                       <Trash2 size={13} />
                     </button>
 
                     <div className="pr-6">
-                      <h4 className="font-extrabold text-xs text-white truncate">{item.produto.nome}</h4>
+                      <h4 className="font-extrabold text-xs text-foreground truncate">{item.produto.nome}</h4>
                       <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                        <span className="text-[8px] bg-[#1a1a1a] text-purple-400 border border-purple-900/30 px-1.5 py-0.5 rounded font-bold uppercase inline-block">
+                        <span className="text-[8px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded font-bold uppercase inline-block">
                           {item.produto.categoria}
                         </span>
                         {(item.produto.cor || item.cor || item.produto.color) && (
-                          <span className="text-[8px] bg-purple-950/50 text-[#e9d5ff] border border-purple-700/40 px-1.5 py-0.5 rounded font-bold inline-block">
+                          <span className="text-[8px] bg-purple-500/15 text-purple-700 dark:text-purple-200 border border-purple-500/30 px-1.5 py-0.5 rounded font-bold inline-block">
                             {item.produto.cor || item.cor || item.produto.color}
                           </span>
                         )}
@@ -12154,13 +12154,13 @@ export default function Dashboard({ session, profileDataProps }) {
                     </div>
 
                     {/* Linha de IMEI/Quantidade e Preço */}
-                    <div className="flex justify-between items-end gap-3 border-t border-[#111] pt-2 mt-1">
+                    <div className="flex justify-between items-end gap-3 border-t border-border pt-2 mt-1">
                       <div className="flex-1">
                         {((item.availableImeis && item.availableImeis.length > 0) || item.imei) ? (
                           <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                              <label className="block text-[8px] font-bold text-gray-500 uppercase tracking-wide">IMEI Selecionado</label>
-                              <span className="text-[8px] font-mono font-extrabold text-purple-400 bg-purple-950/40 border border-purple-800/30 px-1 rounded">
+                              <label className="block text-[8px] font-bold text-foreground-muted uppercase tracking-wide">IMEI Selecionado</label>
+                              <span className="text-[8px] font-mono font-extrabold text-primary bg-primary/10 border border-primary/20 px-1 rounded">
                                 Qtd: 1 (Fixo)
                               </span>
                             </div>
@@ -12168,7 +12168,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               <select
                                 value={item.imei || item.availableImeis[0]?.imei}
                                 onChange={(e) => handleUpdateCartImei(item.cartId, e.target.value)}
-                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-1 text-[10px] text-white outline-none font-mono tracking-wider cursor-pointer"
+                                className="w-full bg-surface border border-border focus:border-primary rounded px-2 py-1 text-[10px] text-foreground outline-none font-mono tracking-wider cursor-pointer"
                               >
                                 {item.availableImeis.map((im) => (
                                   <option key={im.id || im.imei} value={im.imei}>
@@ -12177,27 +12177,27 @@ export default function Dashboard({ session, profileDataProps }) {
                                 ))}
                               </select>
                             ) : (
-                              <div className="w-full bg-black border border-[#222222] rounded px-2 py-1 text-[10px] text-purple-300 font-mono font-bold tracking-wider truncate">
+                              <div className="w-full bg-surface border border-border rounded px-2 py-1 text-[10px] text-primary font-mono font-bold tracking-wider truncate">
                                 {item.imei}
                               </div>
                             )}
                           </div>
                         ) : (
                           <div className="space-y-1">
-                            <label className="block text-[8px] font-bold text-gray-500 uppercase tracking-wide">Qtd</label>
+                            <label className="block text-[8px] font-bold text-foreground-muted uppercase tracking-wide">Qtd</label>
                             <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleUpdateCartQty(item.cartId, item.quantidade - 1)}
-                                className="w-5 h-5 border border-[#222] bg-[#111] rounded flex items-center justify-center text-[10px] text-white hover:bg-[#222] cursor-pointer"
+                                className="w-5 h-5 border border-border bg-surface-elevated rounded flex items-center justify-center text-[10px] text-foreground hover:bg-surface transition-colors cursor-pointer"
                               >
                                 -
                               </button>
-                              <span className="text-xs font-mono font-bold text-white min-w-[12px] text-center">{item.quantidade}</span>
+                              <span className="text-xs font-mono font-bold text-foreground min-w-[12px] text-center">{item.quantidade}</span>
                               <button
                                 type="button"
                                 onClick={() => handleUpdateCartQty(item.cartId, item.quantidade + 1)}
-                                className="w-5 h-5 border border-[#222] bg-[#111] rounded flex items-center justify-center text-[10px] text-white hover:bg-[#222] cursor-pointer"
+                                className="w-5 h-5 border border-border bg-surface-elevated rounded flex items-center justify-center text-[10px] text-foreground hover:bg-surface transition-colors cursor-pointer"
                               >
                                 +
                               </button>
@@ -12208,9 +12208,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       {/* Ajuste de Preço */}
                       <div className="flex flex-col items-end gap-1">
-                        <label className="text-[8px] font-bold text-gray-500 uppercase tracking-wide">Valor Unitário</label>
+                        <label className="text-[8px] font-bold text-foreground-muted uppercase tracking-wide">Valor Unitário</label>
                         <div className="relative">
-                          <span className="absolute left-1.5 top-1 text-[10px] text-gray-500 font-bold font-mono">R$</span>
+                          <span className="absolute left-1.5 top-1 text-[10px] text-foreground-muted font-bold font-mono">R$</span>
                           <input
                             type="number"
                             step="0.01"
@@ -12514,46 +12514,46 @@ export default function Dashboard({ session, profileDataProps }) {
                   };
 
                   return (
-                    <div className="border-t border-[#222222] pt-4 space-y-4">
+                    <div className="border-t border-border pt-4 space-y-4">
                       {/* COTEJO DO SALDO EM TEMPO REAL */}
-                      <div className="flex items-center justify-between bg-[#111111]/80 border border-[#222222] p-3 rounded-lg">
+                      <div className="flex items-center justify-between bg-surface-elevated border border-border p-3.5 rounded-xl shadow-sm">
                         <div>
-                          <span className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                          <span className="block text-[10px] font-bold text-foreground-muted uppercase tracking-wider">
                             Resumo de Pagamento
                           </span>
-                          <p className="text-xs font-bold text-white mt-0.5">
-                            Total: R$ {totalCarrinhoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Pago: <span className="text-green-400 font-mono font-bold">R$ {totalJaPago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                          <p className="text-xs font-bold text-foreground mt-0.5">
+                            Total: R$ {totalCarrinhoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Pago: <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">R$ {totalJaPago.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                           </p>
                         </div>
-                        <span className={`text-xs font-mono font-extrabold px-2.5 py-1 rounded border shadow-sm ${faltaPagar <= 0.01 ? 'bg-green-950/80 text-green-400 border-green-700/60' : 'bg-amber-950/80 text-amber-300 border-amber-700/60'}`}>
+                        <span className={`text-xs font-mono font-extrabold px-2.5 py-1 rounded-lg border shadow-sm ${faltaPagar <= 0.01 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-600 dark:text-amber-300 border-amber-500/30'}`}>
                           {faltaPagar <= 0.01 ? '✓ Quitado' : `Restante: R$ ${faltaPagar.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
                         </span>
                       </div>
 
                       {/* LISTA DOS PAGAMENTOS REGISTRADOS */}
                       {pdvListaPagamentos.length > 0 && (
-                        <div className="space-y-2 bg-black border border-[#222222] p-3 rounded-lg">
-                          <span className="block text-[10px] font-extrabold text-purple-400 uppercase tracking-wider mb-1">
+                        <div className="space-y-2 bg-surface border border-border p-3.5 rounded-xl shadow-sm">
+                          <span className="block text-[10px] font-extrabold text-primary uppercase tracking-wider mb-1">
                             Pagamentos Adicionados ({pdvListaPagamentos.length}):
                           </span>
                           {pdvListaPagamentos.map((pag) => (
-                            <div key={pag.id} className="flex items-center justify-between bg-[#111111] border border-[#222222] px-3 py-2 rounded text-xs">
+                            <div key={pag.id} className="flex items-center justify-between bg-surface-elevated border border-border px-3 py-2 rounded-lg text-xs">
                               <div className="flex items-center gap-2">
-                                <span className="font-bold text-white">{pag.label}</span>
+                                <span className="font-bold text-foreground">{pag.label}</span>
                                 {pag.parcelas > 1 && (
-                                  <span className="text-[9px] text-purple-300 bg-purple-950/50 px-1.5 py-0.5 rounded font-mono border border-purple-800/40">
+                                  <span className="text-[9px] text-primary bg-primary/10 px-1.5 py-0.5 rounded font-mono border border-primary/20">
                                     {pag.parcelas}x
                                   </span>
                                 )}
                               </div>
                               <div className="flex items-center gap-2.5">
-                                <span className="font-mono font-black text-green-400">
+                                <span className="font-mono font-black text-emerald-600 dark:text-emerald-400">
                                   R$ {pag.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => handleRemoverPagamentoPdv(pag.id)}
-                                  className="text-gray-500 hover:text-red-400 p-1 rounded transition-colors"
+                                  className="text-foreground-muted hover:text-destructive p-1 rounded transition-colors cursor-pointer"
                                   title="Remover este pagamento"
                                 >
                                   <Trash2 size={13} />
@@ -12566,8 +12566,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       {/* FORMULÁRIO DE ADICIONAR NOVO PAGAMENTO */}
                       {faltaPagar > 0.01 ? (
-                        <div className="bg-[#111111]/60 border border-[#222222] p-3.5 rounded-lg space-y-3 animate-fadeIn">
-                          <label className="block text-[10px] font-bold text-purple-300 uppercase tracking-wider">
+                        <div className="bg-surface border border-border p-3.5 rounded-xl space-y-3 animate-fadeIn shadow-sm">
+                          <label className="block text-[10px] font-bold text-primary uppercase tracking-wider">
                             + Adicionar Forma de Pagamento
                           </label>
 
@@ -12593,9 +12593,9 @@ export default function Dashboard({ session, profileDataProps }) {
                                         setPdvNovoParcelas(1);
                                       }
                                     }}
-                                    className={`py-2 px-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
-                                      ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-md shadow-purple-900/30'
-                                      : 'bg-black text-gray-400 border-[#222222] hover:text-white'
+                                    className={`py-2 px-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
+                                      ? 'bg-primary text-primary-foreground border-primary shadow-md'
+                                      : 'bg-surface text-foreground-muted border-border hover:text-foreground hover:bg-surface-elevated'
                                       }`}
                                   >
                                     {m.label}
@@ -12747,40 +12747,40 @@ export default function Dashboard({ session, profileDataProps }) {
                       </div>
 
                       {/* RESUMO FINANCEIRO FINAL */}
-                      <div className="border-t border-[#222222] pt-4 space-y-2 bg-[#111111]/40 p-3 rounded-lg border border-[#222222]/85">
+                      <div className="border-t border-border pt-4 space-y-2 bg-surface-elevated p-3.5 rounded-xl border shadow-sm">
                         <div className="flex justify-between items-center text-xs">
-                          <span className="text-gray-400">Subtotal Carrinho:</span>
-                          <span className="text-white font-mono">
+                          <span className="text-foreground-muted">Subtotal Carrinho:</span>
+                          <span className="text-foreground font-mono font-bold">
                             R$ {subtotalCart.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </span>
                         </div>
 
                         {abatimentoTroca > 0 && (
                           <div className="flex justify-between items-center text-xs">
-                            <span className="text-purple-400">Abatimento por Troca:</span>
-                            <span className="text-purple-400 font-mono font-bold">
+                            <span className="text-primary font-bold">Abatimento por Troca:</span>
+                            <span className="text-primary font-mono font-bold">
                               - R$ {abatimentoTroca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
                           </div>
                         )}
 
-                        <div className="flex justify-between items-center border-t border-[#222222] pt-2">
-                          <span className="text-xs font-black text-white uppercase tracking-wider">Total da Venda:</span>
-                          <span className="text-lg font-mono font-black text-white">
+                        <div className="flex justify-between items-center border-t border-border pt-2">
+                          <span className="text-xs font-black text-foreground uppercase tracking-wider">Total da Venda:</span>
+                          <span className="text-lg font-mono font-black text-foreground">
                             R$ {totalCarrinhoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </span>
                         </div>
                       </div>
 
                       {/* AÇÕES DE CHECKOUT COM TRAVA DE SALDO RESTANTE (faltaPagar > 0.01) */}
-                      <div className="flex gap-2 border-t border-[#222222] pt-4">
+                      <div className="flex gap-2 border-t border-border pt-4">
                         <button
                           type="button"
                           onClick={() => {
                             setPdvCart([]);
                             setPdvListaPagamentos([]);
                           }}
-                          className="flex-1 border border-[#222222] hover:border-red-950 hover:text-red-400 bg-black text-xs font-bold py-3 rounded transition-all"
+                          className="flex-1 border border-border hover:border-destructive hover:text-destructive bg-surface text-foreground-muted text-xs font-bold py-3 rounded-lg transition-all cursor-pointer"
                         >
                           Cancelar
                         </button>
@@ -12794,7 +12794,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             pdvListaPagamentos.length === 0 ||
                             !pdvClienteNome.trim()
                           }
-                          className="flex-1 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-xs font-bold py-3 rounded transition-all flex items-center justify-center gap-1 shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
+                          className="flex-1 bg-primary hover:bg-[#500885] disabled:bg-surface-elevated disabled:text-foreground-subtle disabled:cursor-not-allowed text-primary-foreground text-xs font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-1 shadow-md cursor-pointer"
                         >
                           {loadingPdvVenda ? 'Processando...' : (faltaPagar > 0.01 ? `Falta R$ ${faltaPagar.toFixed(2)}` : 'Finalizar Venda [F10]')}
                         </button>
