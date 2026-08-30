@@ -10772,10 +10772,6 @@ export default function Dashboard({ session, profileDataProps }) {
   const agruparPorModelo = React.useCallback((produtosArray) => {
     if (!Array.isArray(produtosArray) || produtosArray.length === 0) return [];
 
-    const fonteBaseProds = (produtosDisponiveisPDV && produtosDisponiveisPDV.length > 0)
-      ? produtosDisponiveisPDV
-      : (produtos && produtos.length > 0 ? produtos : produtosFilial);
-
     // .reduce() acumulador agrupando pelo nome principal do produto
     const accModelos = (produtosArray || []).reduce((acc, p) => {
       if (!p || !p.nome) return acc;
@@ -10810,7 +10806,11 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       }
 
-      acc[nomeKey].rawItems.push(p);
+      // Evita duplicar o mesmo registro bruto se ele tiver o mesmo ID
+      const jaExisteRaw = acc[nomeKey].rawItems.some(r => r.id && p.id && String(r.id) === String(p.id));
+      if (!jaExisteRaw) {
+        acc[nomeKey].rawItems.push(p);
+      }
       return acc;
     }, {});
 
@@ -10828,7 +10828,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
           let imNome = im.produtos?.nome || im.produtos_catalogo?.nome;
           if (!imNome) {
-            const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id) || String(pr.catalogo_id) === String(im.produto_id));
+            const prodDono = (produtos || []).find(pr => String(pr.id) === String(im.produto_id) || String(pr.catalogo_id) === String(im.produto_id));
             if (prodDono) imNome = prodDono.nome;
           }
 
@@ -10849,7 +10849,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         const poolImeis = localProdImeis.length > 0 ? localProdImeis : (activeFilialId ? [] : allProdImeis);
 
-        // Agrupar variações de cores usando reduce
+        // Agrupar variações de cores usando reduce (1 IMEI = 1 unidade real)
         const corMap = poolImeis.reduce((map, im) => {
           const cor = (im.cor || 'Padrão').trim();
           if (!map[cor]) {
@@ -10871,11 +10871,17 @@ export default function Dashboard({ session, profileDataProps }) {
           return map;
         }, {});
 
-        // Se não houver IMEIs físicos mas há itens cadastrados nos rawItems
+        // Fallback: se não há rastreio de IMEI na tabela imeis, ler a quantidade física da filial na tabela produtos
         if (Object.keys(corMap).length === 0 && modeloPai.rawItems.length > 0) {
-          modeloPai.rawItems.forEach(raw => {
+          // Filtrar itens da filial ativa
+          const filialRawItems = modeloPai.rawItems.filter(r => 
+            !activeFilialId || !r.filial_id || String(r.filial_id) === String(activeFilialId)
+          );
+          const targetItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
+
+          targetItems.forEach(raw => {
             const cor = (raw.cor || 'Única').trim();
-            const est = calcularEstoqueProdutoFilial(raw, activeFilialId, fonteBaseProds, disponiveisImeis);
+            const est = Number(raw.quantidade || raw.estoque || raw.quantidade_local || raw.estoque_local || 0);
             if (!corMap[cor]) {
               corMap[cor] = {
                 id: raw.id || `${pId}_${cor}`,
@@ -10889,14 +10895,15 @@ export default function Dashboard({ session, profileDataProps }) {
                 imeis: []
               };
             } else {
-              corMap[cor].estoque += est;
-              corMap[cor].quantidade += est;
+              // Se já temos a cor cadastrada, pega o saldo real ou o máximo para evitar duplicação por JOIN
+              corMap[cor].estoque = Math.max(corMap[cor].estoque, est);
+              corMap[cor].quantidade = Math.max(corMap[cor].quantidade, est);
             }
           });
         }
 
         const variacoesDisponiveis = Object.values(corMap);
-        const estoqueTotal = variacoesDisponiveis.reduce((acc, v) => acc + (v.estoque || 0), 0) || poolImeis.length;
+        const estoqueTotal = variacoesDisponiveis.reduce((acc, v) => acc + (v.estoque || 0), 0);
         const uniqueCores = Array.from(new Set(variacoesDisponiveis.map(v => v.cor).filter(Boolean)));
 
         return {
@@ -10920,11 +10927,17 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // Para Acessórios / Produtos por Quantidade:
-      const varMap = (modeloPai.rawItems || []).reduce((map, raw) => {
+      // Filtrar produtos específicos da filial ativa para evitar somar estoques de outras lojas ou do catálogo mestre duplicado
+      const filialRawItems = (modeloPai.rawItems || []).filter(r => 
+        !activeFilialId || !r.filial_id || String(r.filial_id) === String(activeFilialId)
+      );
+      const targetRawItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
+
+      const varMap = targetRawItems.reduce((map, raw) => {
         const cor = (raw.cor || raw.color || '').trim();
         const sku = (raw.sku || raw.codigo_barras || '').trim();
         const key = `${cor}_${sku}`;
-        const est = calcularEstoqueProdutoFilial(raw, activeFilialId, fonteBaseProds, disponiveisImeis);
+        const est = Number(raw.quantidade || raw.estoque || raw.quantidade_local || raw.estoque_local || 0);
 
         if (!map[key]) {
           map[key] = {
@@ -10941,8 +10954,9 @@ export default function Dashboard({ session, profileDataProps }) {
             imeis: []
           };
         } else {
-          map[key].estoque += est;
-          map[key].quantidade += est;
+          // Se for a mesma variação (mesmo SKU/Cor) duplicada pelo catálogo e tabela produtos, utiliza Math.max em vez de somar repetido
+          map[key].estoque = Math.max(map[key].estoque, est);
+          map[key].quantidade = Math.max(map[key].quantidade, est);
         }
         return map;
       }, {});
@@ -10968,7 +10982,7 @@ export default function Dashboard({ session, profileDataProps }) {
         filial_nome: activeFilialNome
       };
     });
-  }, [produtosDisponiveisPDV, produtos, produtosFilial, activeFilialId, activeFilialNome, disponiveisImeis, filiais, listaProdutosConsolidada]);
+  }, [produtos, activeFilialId, activeFilialNome, disponiveisImeis, filiais]);
 
   // Consolidar produtos para o PDV através da utilidade agruparPorModelo
   const listaProdutosPdvDinamica = React.useMemo(() => {
