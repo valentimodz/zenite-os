@@ -8548,54 +8548,88 @@ export default function Dashboard({ session, profileDataProps }) {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
     if (isCelular) {
-      // 1. Usar primeiro os IMEIs já embutidos no produto ou disponíveis no estado global
-      if (produto.imeis_db && Array.isArray(produto.imeis_db) && produto.imeis_db.length > 0) {
-        availableImeis = produto.imeis_db.filter(im => !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO');
-      }
+      // 1. Coletar todos os IMEIs correspondentes da memória / estado global
+      const prodIds = [produto.id, produto.catalogo_id].filter(Boolean).map(String);
+      const prodNome = (produto.nome || '').toLowerCase().trim();
 
-      if (availableImeis.length === 0 && disponiveisImeis && disponiveisImeis.length > 0) {
-        const allMatching = disponiveisImeis.filter(im => {
-          if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
-          let imNome = im.produtos?.nome;
-          if (!imNome) {
-            const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
-            if (prodDono) imNome = prodDono.nome;
-          }
-          const matchesProd = (String(im.produto_id) === String(produto.id)) || 
-            (String(im.produto_id) === String(produto.catalogo_id)) || 
-            (imNome && produto.nome && imNome.toLowerCase().trim() === produto.nome.toLowerCase().trim());
-          return matchesProd;
-        });
-
-        const localMatching = allMatching.filter(im => 
-          !activeFilialId || String(im.filial_id) === String(activeFilialId) || String(im.empresa_id) === String(activeFilialId)
-        );
-
-        availableImeis = localMatching.length > 0 ? localMatching : allMatching;
-      }
-
-      // 2. Se ainda não achou, faz uma consulta direta tolerante no Supabase por produto_id
-      if (availableImeis.length === 0) {
-        try {
-          const pIds = [produto.id, produto.catalogo_id].filter(Boolean);
-          let query = supabase
-            .from('imeis')
-            .select('id, imei, cor, status, vendido, filial_id, empresa_id, produto_id')
-            .eq('vendido', false);
-
-          if (pIds.length > 0) {
-            query = query.in('produto_id', pIds);
-          }
-
-          const { data, error } = await query;
-          if (!error && data && data.length > 0) {
-            const valid = data.filter(im => im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO');
-            const loc = valid.filter(im => !activeFilialId || String(im.filial_id) === String(activeFilialId));
-            availableImeis = loc.length > 0 ? loc : valid;
-          }
-        } catch (err) {
-          console.warn('Aviso ao carregar IMEIs para carrinho:', err);
+      const allMatching = (disponiveisImeis || []).filter(im => {
+        if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+        
+        let imNome = im.produtos?.nome;
+        if (!imNome) {
+          const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
+          if (prodDono) imNome = prodDono.nome;
         }
+
+        return prodIds.includes(String(im.produto_id)) ||
+               (imNome && prodNome && imNome.toLowerCase().trim() === prodNome);
+      });
+
+      const localMatching = allMatching.filter(im => {
+        const imFid = String(im.filial_id || '');
+        const imeiFilialObj = filiais.find(f => String(f.id) === imFid);
+        const targetFilialObj = filiais.find(f => String(f.id) === String(activeFilialId));
+
+        return !activeFilialId || 
+               imFid === String(activeFilialId) || 
+               String(im.empresa_id) === String(activeFilialId) ||
+               (imeiFilialObj && targetFilialObj && imeiFilialObj.nome && targetFilialObj.nome && 
+                imeiFilialObj.nome.toLowerCase().trim() === targetFilialObj.nome.toLowerCase().trim());
+      });
+
+      availableImeis = localMatching.length > 0 ? localMatching : allMatching;
+
+      // Se produto.imeis_db possuir mais itens ou itens não presentes em availableImeis, mesclar
+      if (Array.isArray(produto.imeis_db) && produto.imeis_db.length > 0) {
+        const mapImeis = new Map(availableImeis.map(i => [i.imei, i]));
+        produto.imeis_db.forEach(im => {
+          if (!im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO') {
+            if (!mapImeis.has(im.imei)) {
+              mapImeis.set(im.imei, im);
+            }
+          }
+        });
+        availableImeis = Array.from(mapImeis.values());
+      }
+
+      // 2. Consulta direta completa ao Supabase para garantir que TODOS os IMEIs da filial venham do banco (sem .limit(1))
+      try {
+        let query = supabase
+          .from('imeis')
+          .select('id, imei, cor, status, vendido, filial_id, empresa_id, produto_id, produtos(nome)')
+          .eq('vendido', false)
+          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
+
+        if (prodIds.length > 0) {
+          query = query.in('produto_id', prodIds);
+        }
+
+        const targetFid = activeFilialId || profile?.filial_id;
+        if (targetFid && targetFid !== 'todas' && targetFid !== 'ALL') {
+          query = query.or(`filial_id.eq.${targetFid},empresa_id.eq.${targetEmpresaId}`);
+        } else if (targetEmpresaId) {
+          query = query.eq('empresa_id', targetEmpresaId);
+        }
+
+        const { data: dbImeis, error: dbImeisErr } = await query;
+        if (!dbImeisErr && Array.isArray(dbImeis) && dbImeis.length > 0) {
+          const mapImeis = new Map(availableImeis.map(i => [i.imei, i]));
+          dbImeis.forEach(im => {
+            if (!im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO') {
+              mapImeis.set(im.imei, im);
+            }
+          });
+          availableImeis = Array.from(mapImeis.values());
+
+          // Atualizar o pool global para sincronizar a aplicação
+          setDisponiveisImeis(prev => {
+            const mapPrev = new Map((prev || []).map(i => [i.id || i.imei, i]));
+            dbImeis.forEach(i => mapPrev.set(i.id || i.imei, i));
+            return Array.from(mapPrev.values());
+          });
+        }
+      } catch (err) {
+        console.warn('Aviso ao carregar lista completa de IMEIs para o carrinho:', err);
       }
 
       // 3. Se selecionou ou recebeu um IMEI específico ou pega o primeiro disponível
