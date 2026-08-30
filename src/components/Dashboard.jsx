@@ -11605,17 +11605,17 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           )
         ) : (
-          <div className="bg-emerald-500/15 border border-emerald-600/30 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-950 dark:text-emerald-100 animate-fadeIn shadow-sm">
+          <div className="bg-[#051a0e]/90 border border-emerald-900/60 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-400 animate-fadeIn shadow-lg">
             <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 animate-pulse shrink-0"></span>
-              <span className="font-extrabold text-emerald-900 dark:text-emerald-100">Caixa Aberto</span>
-              <span className="text-emerald-800 dark:text-emerald-200/80">• Operador: <strong className="text-emerald-950 dark:text-emerald-50 font-bold">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
-              <span className="text-emerald-800 dark:text-emerald-200/80">• Fundo Inicial: <strong className="text-emerald-900 dark:text-emerald-300 font-mono font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
-              <span className="text-emerald-700 dark:text-emerald-300/70 font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+              <span className="font-extrabold text-white">Caixa Aberto</span>
+              <span className="text-gray-300">• Operador: <strong className="text-white font-bold">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
+              <span className="text-gray-300">• Fundo Inicial: <strong className="text-emerald-400 font-mono font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+              <span className="text-gray-400 font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
             </div>
-            <div className="text-[11px] text-emerald-900 dark:text-emerald-200 bg-card border border-emerald-600/20 px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5 shadow-sm">
-              <span className="text-muted-foreground">Gaveta (Dinheiro) =</span>
-              <span className="text-emerald-800 dark:text-emerald-300 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
+            <div className="text-[11px] text-emerald-300 bg-black/60 border border-emerald-900/40 px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5 shadow-inner">
+              <span className="text-gray-400">Gaveta (Dinheiro) =</span>
+              <span className="text-emerald-400 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
             </div>
           </div>
         )}
@@ -18954,17 +18954,16 @@ export default function Dashboard({ session, profileDataProps }) {
                   /* DASHBOARD DE VENDEDOR COM FILIAL ESCOLHIDA */
                   <div className="space-y-8 animate-fadeIn">
                     {/* Cabeçalho da Filial Ativa */}
-                    <div className="bg-gradient-to-r from-[#0A0A0A] to-[#120520]/20 border border-[#222222] p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-[#6A0DAD]/20 text-[#6A0DAD] rounded-lg flex items-center justify-center">
+                    <div className="bg-[#0A0A0A] border border-[#222222] p-4 sm:p-5 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-10 h-10 bg-[#6A0DAD]/15 text-[#6A0DAD] rounded-lg border border-[#6A0DAD]/30 flex items-center justify-center">
                           <Store size={20} />
                         </div>
                         <div>
-                          <span className="block text-[10px] text-gray-500 uppercase tracking-widest">Ponto de Venda Ativo</span>
-                          <span className="text-base font-extrabold text-white">{activeFilialNome}</span>
+                          <span className="block text-[9px] text-gray-500 font-bold uppercase tracking-widest">Ponto de Venda Ativo</span>
+                          <span className="text-base font-extrabold text-white tracking-wide">{activeFilialNome}</span>
                         </div>
                       </div>
-
                     </div>
 
                     {activeSellerTab === 'pdv' && renderPdvContent()}
