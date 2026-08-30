@@ -779,6 +779,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [fechamentos, setFechamentos] = useState([]);
   const [sessoesCaixas, setSessoesCaixas] = useState([]);
   const [loadingSessoesCaixas, setLoadingSessoesCaixas] = useState(false);
+  const [errorSessoesCaixas, setErrorSessoesCaixas] = useState(null);
   const [filtroFilialCaixa, setFiltroFilialCaixa] = useState('todas');
   const [filtroStatusCaixa, setFiltroStatusCaixa] = useState('TODOS');
   const [modalDetalheCaixa, setModalDetalheCaixa] = useState(null);
@@ -3132,14 +3133,15 @@ export default function Dashboard({ session, profileDataProps }) {
   // Buscar Sessões de Caixa (Aberturas e Fechamentos) para o Relatório Gerencial
   const fetchSessoesCaixas = async (empresaId, filialId, mesStr) => {
     setLoadingSessoesCaixas(true);
+    setErrorSessoesCaixas(null);
 
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // Busca direta na tabela caixas com join da filial e ordenação
+      // Busca os caixas de forma resiliente
       let query = supabase
         .from('caixas')
-        .select('*, filiais(nome)')
+        .select('*')
         .order('data_abertura', { ascending: false });
 
       // Filtro de filial apenas se houver uma filial específica selecionada
@@ -3155,23 +3157,36 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const { data, error } = await query;
 
-      console.log('[Caixas] 📦 Resposta do Supabase:', data);
       if (error) {
-        console.error('[Caixas] ⚠️ Erro na query filtrada:', error);
-        const { data: fallbackData, error: fallbackErr } = await supabase
-          .from('caixas')
-          .select('*, filiais(nome)')
-          .order('data_abertura', { ascending: false });
+        console.error('[Caixas] ⚠️ Erro na consulta do Supabase:', error);
+        setErrorSessoesCaixas(error.message || 'Erro ao carregar sessões de caixa.');
+        return;
+      }
 
-        console.log('[Caixas] 📦 Resposta Fallback:', fallbackData, fallbackErr);
-        if (fallbackData) {
-          setSessoesCaixas(fallbackData);
-        }
-      } else if (Array.isArray(data)) {
-        setSessoesCaixas(data);
+      if (Array.isArray(data)) {
+        // Enriquecer dados de forma defensiva mapeando nomes de filiais e operadores disponíveis em memória
+        const sessoesMapeadas = data.map(cx => {
+          const filialEncontrada = filiais.find(f => String(f.id) === String(cx.filial_id));
+          const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(cx.operador_id)) ||
+                                     (teamMembers || []).find(t => String(t.id) === String(cx.operador_id));
+
+          return {
+            ...cx,
+            filial_nome: cx.filial_nome || filialEncontrada?.nome || 'Filial',
+            filiais: cx.filiais || (filialEncontrada ? { nome: filialEncontrada.nome } : null),
+            operador_nome: cx.operador_nome || vendedorEncontrado?.nome || 'Operador PDV',
+            profiles: cx.profiles || (vendedorEncontrado ? { nome: vendedorEncontrado.nome } : null)
+          };
+        });
+
+        setSessoesCaixas(sessoesMapeadas);
+        setErrorSessoesCaixas(null);
+      } else {
+        setSessoesCaixas([]);
       }
     } catch (err) {
       console.error('[Caixas] ❌ Falha crítica ao carregar sessões de caixa:', err);
+      setErrorSessoesCaixas(err.message || 'Erro ao carregar sessões de caixa. Verifique a conexão ou contate o suporte.');
     } finally {
       setLoadingSessoesCaixas(false);
     }
@@ -18008,6 +18023,37 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <td colSpan="6" className="py-12 text-center text-gray-500">
                                       <Loader2 size={20} className="animate-spin text-[#6A0DAD] mx-auto mb-2" />
                                       <span>Carregando sessões de caixa...</span>
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              if (errorSessoesCaixas) {
+                                return (
+                                  <tr>
+                                    <td colSpan="6" className="py-8 px-4 text-center">
+                                      <div className="bg-red-950/20 border border-red-800/40 rounded-xl p-4 max-w-md mx-auto flex flex-col items-center gap-2">
+                                        <AlertTriangle size={24} className="text-red-400" />
+                                        <div className="space-y-1">
+                                          <p className="text-red-300 font-bold text-xs">
+                                            Erro ao carregar sessões de caixa. Verifique a conexão ou contate o suporte.
+                                          </p>
+                                          <p className="text-gray-400 text-[10px] font-mono">
+                                            {errorSessoesCaixas}
+                                          </p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+                                            fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+                                          }}
+                                          className="mt-1 px-3 py-1.5 bg-red-900/30 hover:bg-red-900/50 border border-red-700/40 text-red-200 text-xs font-semibold rounded-lg transition-all cursor-pointer inline-flex items-center gap-1.5"
+                                        >
+                                          <RefreshCw size={12} />
+                                          Tentar Novamente
+                                        </button>
+                                      </div>
                                     </td>
                                   </tr>
                                 );
