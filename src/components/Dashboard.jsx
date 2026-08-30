@@ -6226,6 +6226,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
     const pNome = (produto.nome || '').toLowerCase().trim();
+    const pCor = (produto.cor || produto.color || '').toLowerCase().trim();
     const pId = String(produto.id || '');
     const pCatId = String(produto.catalogo_id || '');
 
@@ -6233,7 +6234,7 @@ export default function Dashboard({ session, profileDataProps }) {
     const prodsPool = todosProds || produtosDisponiveisPDV || produtos || [];
 
     if (isCelular) {
-      // Contagem estrita de IMEIs físicos disponíveis vinculados a esta filial específica
+      // Contagem estrita de IMEIs físicos disponíveis vinculados a esta filial específica e à VARIAÇÃO/COR EXATA
       const imeisFilial = imeisPool.filter(im => {
         if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
 
@@ -6254,9 +6255,19 @@ export default function Dashboard({ session, profileDataProps }) {
           if (prodDono) imNome = prodDono.nome;
         }
 
-        return String(im.produto_id) === pId ||
-               String(im.produto_id) === pCatId ||
-               (imNome && pNome && imNome.toLowerCase().trim() === pNome);
+        const matchProdRef = String(im.produto_id) === pId ||
+                             String(im.produto_id) === pCatId ||
+                             (imNome && pNome && imNome.toLowerCase().trim() === pNome);
+
+        if (!matchProdRef) return false;
+
+        // Se o card/produto possui cor especificada, o IMEI DEVE corresponder a esta mesma cor
+        if (pCor) {
+          const imCor = (im.cor || '').toLowerCase().trim();
+          if (imCor && imCor !== pCor) return false;
+        }
+
+        return true;
       });
 
       if (imeisFilial.length > 0) {
@@ -10770,7 +10781,8 @@ export default function Dashboard({ session, profileDataProps }) {
       // Cálculo do saldo rigoroso utilizando a função unificada (mesma regra do Modal Multiloja)
       const localQty = calcularEstoqueProdutoFilial(p, activeFilialId, fonteBaseProds, disponiveisImeis);
 
-      // Resolução ultra tolerante de IMEIs e Cor do aparelho / produto
+      // Resolução ultra tolerante e estrita de IMEIs respeitando a COR e VARIAÇÃO específica do produto
+      const pCorNorm = (p.cor && String(p.cor).trim().toLowerCase()) || null;
       const allProdImeis = (disponiveisImeis || []).filter(im => {
         if (im.vendido) return false;
         if (im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
@@ -10784,7 +10796,15 @@ export default function Dashboard({ session, profileDataProps }) {
           (String(im.produto_id) === String(p.catalogo_id)) || 
           (imNome && p.nome && imNome.toLowerCase().trim() === p.nome.toLowerCase().trim());
 
-        return matchesProd;
+        if (!matchesProd) return false;
+
+        // Se o card possui cor específica, filtrar estritamente pela cor correspondente do IMEI
+        if (pCorNorm) {
+          const imCorNorm = (im.cor && String(im.cor).trim().toLowerCase()) || '';
+          if (imCorNorm && imCorNorm !== pCorNorm) return false;
+        }
+
+        return true;
       });
 
       const localProdImeis = allProdImeis.filter(im => {
@@ -10795,10 +10815,7 @@ export default function Dashboard({ session, profileDataProps }) {
           (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
       });
 
-      const dbImeisArray = (p.imeis_db && Array.isArray(p.imeis_db) && p.imeis_db.length > 0) 
-        ? p.imeis_db 
-        : (localProdImeis.length > 0 ? localProdImeis : allProdImeis);
-
+      const dbImeisArray = localProdImeis.length > 0 ? localProdImeis : allProdImeis;
       const imeiPrincipal = dbImeisArray[0]?.imei || p.imei || null;
       const corDoImei = dbImeisArray.find(i => i.cor && String(i.cor).trim())?.cor || null;
 
@@ -11742,26 +11759,33 @@ export default function Dashboard({ session, profileDataProps }) {
                     const idEmpresa = String(activeEmpresaId);
                     const idFilial = typeof profile !== 'undefined' && profile?.filial_id ? String(profile.filial_id) : idEmpresa;
 
-                    let estoqueLocal = Number(prod.quantidade || prod.estoque_atual || prod.estoque || 0);
+                    let estoqueLocal = Number(prod.estoque_local ?? prod.quantidade_local ?? prod.estoque ?? prod.quantidade ?? 0);
 
                     const isCelularCard = (prod.tipo && prod.tipo.toUpperCase().includes('CELULAR')) || (prod.categoria && prod.categoria.toUpperCase().includes('CELULAR')) || prod.categoria === 'IOS' || prod.categoria === 'ANDROID';
 
-                    let cardImeis = [];
-                    if (isCelularCard) {
-                      const arrDb = Array.isArray(prod.imeis_db) && prod.imeis_db.length > 0 ? prod.imeis_db : null;
+                    let cardImeis = Array.isArray(prod.imeis_db) ? prod.imeis_db : [];
+                    if (isCelularCard && cardImeis.length === 0) {
                       const arrGlobal = Array.isArray(disponiveisImeis) && disponiveisImeis.length > 0 ? disponiveisImeis : [];
-                      const allImeisPool = arrDb || arrGlobal;
+                      const prodCorNorm = (prod.cor && String(prod.cor).trim().toLowerCase()) || null;
 
-                      const matchingImeis = allImeisPool.filter(im => {
+                      const matchingImeis = arrGlobal.filter(im => {
                         if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
                         let imNome = im.produtos?.nome;
                         if (!imNome) {
                           const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
                           if (prodDono) imNome = prodDono.nome;
                         }
-                        return String(im.produto_id) === String(prod.id) ||
+                        const matchProdRef = String(im.produto_id) === String(prod.id) ||
                           String(im.produto_id) === String(prod.catalogo_id) ||
                           (imNome && prod.nome && imNome.toLowerCase().trim() === prod.nome.toLowerCase().trim());
+
+                        if (!matchProdRef) return false;
+
+                        if (prodCorNorm) {
+                          const imCorNorm = (im.cor && String(im.cor).trim().toLowerCase()) || '';
+                          if (imCorNorm && imCorNorm !== prodCorNorm) return false;
+                        }
+                        return true;
                       });
 
                       const localImeis = matchingImeis.filter(im => {
@@ -11773,15 +11797,10 @@ export default function Dashboard({ session, profileDataProps }) {
                       });
 
                       cardImeis = localImeis.length > 0 ? localImeis : matchingImeis;
-                      if (estoqueLocal === 0) {
-                        estoqueLocal = Number(prod.quantidade ?? prod.estoque ?? 0);
-                      }
-                    } else {
-                      estoqueLocal = Number(prod.quantidade ?? prod.estoque ?? 0);
                     }
 
-                    const displayImei = cardImeis[0]?.imei || prod.imei || (prod.imeis_db && prod.imeis_db[0]?.imei) || null;
-                    const displayCor = cardImeis.find(i => i.cor)?.cor || prod.cor || prod.color || (prod.imeis_db && prod.imeis_db[0]?.cor) || null;
+                    const displayImei = cardImeis[0]?.imei || prod.imei || null;
+                    const displayCor = prod.cor || prod.color || cardImeis.find(i => i.cor)?.cor || null;
 
                     // 4. Aplica a trava matemática rigorosa
                     const isSemEstoque = prod.categoria !== 'SERVICO' && estoqueLocal <= 0;
