@@ -305,15 +305,53 @@ function ProductTableRow({
 
         {/* Célula: Quantidade */}
         <td className="py-2.5 font-mono text-xs">
-          {isCelular ? (
-            <button
-              type="button"
-              onClick={e => { e.stopPropagation(); toggleVerImeis(p.id); }}
-              className="text-[#6A0DAD] underline font-bold hover:text-purple-300 transition-colors cursor-pointer"
-            >
-              {disponiveisImeis.filter(im => im.produto_id === p.id && im.filial_id === p.filial_id && (im.status === 'DISPONÍVEL' || im.status === 'Disponível')).length} (IMEIs)
-            </button>
-          ) : editingField === 'quantidade' ? (
+          {isCelular ? (() => {
+            // Contagem precisa de IMEIs disponíveis associados ao produto/modelo na filial
+            const pIdStr = String(p.id || '');
+            const pCatIdStr = String(p.catalogo_id || '');
+            const pNomeStr = (p.nome || '').toLowerCase().trim();
+            const pFilialIdStr = p.filial_id ? String(p.filial_id) : '';
+
+            const imeisValidos = (disponiveisImeis || []).filter(im => {
+              if (!im) return false;
+              if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+
+              // Validação de Filial
+              if (pFilialIdStr) {
+                const imFilialIdStr = im.filial_id ? String(im.filial_id) : '';
+                if (imFilialIdStr && imFilialIdStr !== pFilialIdStr) return false;
+              }
+
+              // Validação de Vinculação com o Produto
+              const imProdId = String(im.produto_id || '');
+              const imCatId = String(im.produto_catalogo_id || '');
+              const imNome = (im.produtos?.nome || im.produtos_catalogo?.nome || '').toLowerCase().trim();
+
+              const bateId = (pIdStr && imProdId === pIdStr) || (pCatIdStr && imProdId === pCatIdStr) || (pCatIdStr && imCatId === pCatIdStr) || (pIdStr && imCatId === pIdStr);
+              const bateNome = Boolean(pNomeStr && imNome && imNome === pNomeStr);
+
+              return bateId || bateNome;
+            });
+
+            // Se p.imeis_count ou p.quantidade_real vierem agregados direto da query, prioriza
+            let qtdReal = typeof p.quantidade_real === 'number' ? p.quantidade_real : (typeof p.imeis_count === 'number' ? p.imeis_count : imeisValidos.length);
+            if (qtdReal === 0 && Array.isArray(p.imeis_db) && p.imeis_db.length > 0) {
+              qtdReal = p.imeis_db.filter(i => !i.vendido && i.status !== 'VENDIDO').length;
+            }
+
+            p.quantidade_real = qtdReal;
+
+            return (
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); toggleVerImeis(p.id); }}
+                className="text-[#6A0DAD] underline font-bold hover:text-purple-300 transition-colors cursor-pointer"
+                title="Clique para ver os IMEIs deste aparelho"
+              >
+                {qtdReal} (IMEIs)
+              </button>
+            );
+          })() : editingField === 'quantidade' ? (
             <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
               <input
                 type="number"
@@ -347,7 +385,7 @@ function ProductTableRow({
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <span className="text-gray-300 font-bold">{isServico ? '∞' : (p.quantidade || 0)}</span>
+              <span className="text-gray-300 font-bold">{isServico ? '∞' : (p.quantidade_real ?? p.quantidade ?? 0)}</span>
               {!isServico && (
                 <button
                   type="button"
@@ -1366,33 +1404,53 @@ export default function Dashboard({ session, profileDataProps }) {
   useEffect(() => {
     const fetchImeisSeguranca = async () => {
       try {
-        const celProds = (produtos || []).filter(p => (p.tipo && p.tipo.toUpperCase().includes('CELULAR')) || (p.categoria && p.categoria.toUpperCase().includes('CELULAR')) || p.categoria === 'IOS' || p.categoria === 'ANDROID');
-        if (celProds.length === 0) return;
-        
         const targetEmp = profile?.empresa_id || company?.id || activeEmpresaId;
         if (!targetEmp) return;
 
-        const pIds = celProds.map(p => p.id);
-        const { data } = await supabase
+        // Buscar todos os IMEIs disponíveis e em estoque da empresa com JOIN completo
+        const { data, error } = await supabase
           .from('imeis')
-          .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
-          .in('produto_id', pIds)
+          .select(`
+            id,
+            produto_id,
+            produto_catalogo_id,
+            filial_id,
+            empresa_id,
+            status,
+            vendido,
+            imei,
+            cor,
+            preco_compra,
+            is_seminovo,
+            produtos (
+              id,
+              nome,
+              tipo,
+              categoria,
+              cor,
+              preco
+            ),
+            produtos_catalogo (
+              id,
+              nome,
+              tipo,
+              categoria,
+              cor,
+              preco
+            )
+          `)
           .eq('empresa_id', targetEmp)
           .eq('vendido', false);
 
-        if (data && data.length > 0) {
-           setDisponiveisImeis(prev => {
-              const mapPrev = new Map((prev || []).map(i => [i.id || i.imei, i]));
-              data.forEach(i => mapPrev.set(i.id || i.imei, i));
-              return Array.from(mapPrev.values());
-           });
+        if (!error && data && data.length > 0) {
+          setDisponiveisImeis(data);
         }
       } catch (err) {
         console.warn('Falha no fetch de segurança dos IMEIs:', err);
       }
     };
-    if (produtos && produtos.length > 0) fetchImeisSeguranca();
-  }, [produtos, company?.id, activeEmpresaId]);
+    if (activeEmpresaId || profile?.empresa_id || company?.id) fetchImeisSeguranca();
+  }, [profile?.empresa_id, company?.id, activeEmpresaId, produtos?.length]);
 
   useEffect(() => {
     if (profile) {
