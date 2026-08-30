@@ -75,39 +75,39 @@ html.dark, :root.dark {
 }
 
 html.light, :root.light {
-  /* LIGHT MODE - PREMIUM SLATE/ZINC CLEAN */
-  --background: #F8FAFC;
-  --foreground: #0F172A;
+  /* LIGHT MODE - CLEAN PREMIUM POS THEME */
+  --background: #F8F9FA;
+  --foreground: #111827;
 
   --card: #FFFFFF;
-  --card-foreground: #0F172A;
+  --card-foreground: #111827;
 
   --popover: #FFFFFF;
-  --popover-foreground: #0F172A;
+  --popover-foreground: #111827;
 
-  --primary: #7C3AED;
+  --primary: #7E3AF2;
   --primary-foreground: #FFFFFF;
 
-  --secondary: #F1F5F9;
-  --secondary-foreground: #1E293B;
+  --secondary: #F3F4F6;
+  --secondary-foreground: #1F2937;
 
-  --muted: #F1F5F9;
-  --muted-foreground: #64748B;
+  --muted: #F3F4F6;
+  --muted-foreground: #6B7280;
 
-  --accent: #F5F3FF;
-  --accent-foreground: #7C3AED;
+  --accent: #F3E8FF;
+  --accent-foreground: #7E3AF2;
 
   --destructive: #EF4444;
   --destructive-foreground: #FFFFFF;
 
-  --border: #E2E8F0;
-  --input: #E2E8F0;
-  --ring: #7C3AED;
+  --border: #E5E7EB;
+  --input: #E5E7EB;
+  --ring: #7E3AF2;
 
   /* Aliases de superfície */
   --bg-surface: #FFFFFF;
-  --bg-surface-elevated: #F8FAFC;
-  --bg-surface-muted: #F1F5F9;
+  --bg-surface-elevated: #F9FAFB;
+  --bg-surface-muted: #F3F4F6;
 }
 
 body {
@@ -159,6 +159,7 @@ html.light textarea:focus {
     -webkit-filter: none !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    color-adjust: exact !important;
   }
 }
 
@@ -174,28 +175,44 @@ html.light textarea:focus {
   scrollbar-width: none;
 }
 
-/* Custom Dark Scrollbar Global */
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
-::-webkit-scrollbar-track {
+html.dark ::-webkit-scrollbar-track {
   background: #000000;
 }
 
-::-webkit-scrollbar-thumb {
+html.dark ::-webkit-scrollbar-thumb {
   background: #222222;
   border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+html.dark ::-webkit-scrollbar-thumb:hover {
   background: #333333;
 }
 
-* {
+html.light ::-webkit-scrollbar-track {
+  background: #F8F9FA;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #D1D5DB;
+  border-radius: 4px;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #9CA3AF;
+}
+
+html.dark * {
   scrollbar-color: #222222 #000000;
   scrollbar-width: thin;
 }
 
-
+html.light * {
+  scrollbar-color: #D1D5DB #F8F9FA;
+  scrollbar-width: thin;
+}
