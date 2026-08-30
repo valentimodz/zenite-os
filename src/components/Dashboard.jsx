@@ -11676,7 +11676,7 @@ export default function Dashboard({ session, profileDataProps }) {
                 </div>
               ) : (
                 <div className={`${!pdvBusca.trim() && pdvCategoria === 'TUDO' ? 'hidden lg:grid' : 'grid'} grid-cols-1 sm:grid-cols-2 gap-4 max-h-[500px] overflow-y-auto pr-1`}>
-                  {filteredProdutosPdv.map((prod) => {
+                  {filteredProdutosPdv.map((prod, idx) => {
                     console.log(`[DEBUG PRODUTO] ${prod.nome}:`, prod);
                     // 1. Mapeia todos os IDs possíveis do seu perfil para não deixar escapar nada
                     const idEmpresa = String(activeEmpresaId);
@@ -11725,10 +11725,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     // 4. Aplica a trava matemática rigorosa
                     const isSemEstoque = prod.categoria !== 'SERVICO' && estoqueLocal <= 0;
-                    prod.quantidade = estoqueLocal;
+                    const itemUniqueKey = String(prod.id || prod.catalogo_id || `${prod.nome}_${displayCor || prod.cor || ''}_${displayImei || ''}_${idx}`);
                     return (
                       <div
-                        key={prod.id}
+                        key={itemUniqueKey}
                         onClick={() => {
                           if (isPdvBloqueadoParaUsuario) {
                             showToast('Caixa Fechado: É necessário realizar a abertura do caixa com o fundo de troco para iniciar vendas.', 'error');
