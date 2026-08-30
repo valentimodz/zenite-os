@@ -11605,17 +11605,17 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           )
         ) : (
-          <div className="bg-emerald-500/10 border border-emerald-500/25 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-foreground animate-fadeIn shadow-sm">
-            <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-              <span className="font-bold text-foreground">Caixa Aberto</span>
-              <span className="text-foreground-muted">• Operador: <strong className="text-foreground">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
-              <span className="text-foreground-muted">• Fundo Inicial: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
-              <span className="text-foreground-subtle font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
+          <div className="bg-emerald-500/15 border border-emerald-600/30 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-950 dark:text-emerald-100 animate-fadeIn shadow-sm">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 animate-pulse shrink-0"></span>
+              <span className="font-extrabold text-emerald-900 dark:text-emerald-100">Caixa Aberto</span>
+              <span className="text-emerald-800 dark:text-emerald-200/80">• Operador: <strong className="text-emerald-950 dark:text-emerald-50 font-bold">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
+              <span className="text-emerald-800 dark:text-emerald-200/80">• Fundo Inicial: <strong className="text-emerald-900 dark:text-emerald-300 font-mono font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+              <span className="text-emerald-700 dark:text-emerald-300/70 font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
             </div>
-            <div className="text-[11px] text-foreground-muted bg-surface border border-border px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5 shadow-sm">
-              <span className="text-foreground-subtle">Gaveta (Dinheiro) =</span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
+            <div className="text-[11px] text-emerald-900 dark:text-emerald-200 bg-card border border-emerald-600/20 px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5 shadow-sm">
+              <span className="text-muted-foreground">Gaveta (Dinheiro) =</span>
+              <span className="text-emerald-800 dark:text-emerald-300 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
             </div>
           </div>
         )}
@@ -11623,15 +11623,15 @@ export default function Dashboard({ session, profileDataProps }) {
         <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3 lg:gap-8 items-start animate-fadeIn">
 
           {/* COLUNA ESQUERDA: CATALOGO (ORDER 2 NO MOBILE, ORDER 1 NO DESKTOP) */}
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 sm:p-6 lg:col-span-2 flex flex-col gap-4 sm:gap-6 w-full order-2 lg:order-1">
+          <div className="bg-card text-card-foreground border border-border rounded-xl p-4 sm:p-6 lg:col-span-2 flex flex-col gap-4 sm:gap-6 w-full order-2 lg:order-1 shadow-sm">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Package size={18} className="text-[#6A0DAD]" />
+              <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                <Package size={18} className="text-primary" />
                 Produtos Disponíveis nesta Filial
               </h3>
 
               <form onSubmit={handlePdvSearchSubmit} className="relative w-full sm:w-64">
-                <Search size={14} className="absolute left-3 top-3 text-gray-500" />
+                <Search size={14} className="absolute left-3 top-3 text-muted-foreground" />
                 <input
                   type="text"
                   id="pdv-busca-input"
@@ -11639,24 +11639,24 @@ export default function Dashboard({ session, profileDataProps }) {
                   value={pdvBusca}
                   onChange={(e) => setPdvBusca(e.target.value)}
                   placeholder={isPdvBloqueadoParaUsuario ? "Caixa Fechado - Abra o caixa para operar [F2]" : "Busca, SKU ou Código... [F2]"}
-                  className={`w-full bg-black border rounded-md text-white pl-9 pr-4 py-2 text-xs outline-none transition-all font-sans ${isPdvBloqueadoParaUsuario
-                    ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
-                    : 'border-[#222222] focus:border-[#6A0DAD]'
+                  className={`w-full bg-surface border rounded-lg text-foreground pl-9 pr-4 py-2 text-xs outline-none transition-all font-sans ${isPdvBloqueadoParaUsuario
+                    ? 'border-amber-500/40 text-muted-foreground opacity-60 cursor-not-allowed'
+                    : 'border-border focus:border-primary'
                     }`}
                 />
               </form>
             </div>
 
             {/* Filtros de Categoria Dinâmicos (com Navegação por Setas e Scroll Horizontal Oculto) */}
-            <div className="relative group/catbar border-b border-[#161616] pb-3 pt-1">
+            <div className="relative group/catbar border-b border-border pb-3 pt-1">
               {/* Seta de Rolagem Esquerda (Desktop) */}
               {canScrollLeft && (
-                <div className="absolute left-0 top-1 bottom-3 z-10 flex items-center pr-4 bg-gradient-to-r from-black via-black/90 to-transparent">
+                <div className="absolute left-0 top-1 bottom-3 z-10 flex items-center pr-4 bg-gradient-to-r from-card via-card/90 to-transparent">
                   <button
                     type="button"
                     onClick={() => handleScrollCategory('left')}
                     aria-label="Rolar categorias para esquerda"
-                    className="w-7 h-7 rounded-full bg-[#181818] border border-[#333] hover:border-[#6A0DAD] text-gray-300 hover:text-white flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95 cursor-pointer"
+                    className="w-7 h-7 rounded-full bg-surface-elevated border border-border hover:border-primary text-muted-foreground hover:text-foreground flex items-center justify-center shadow-md transition-all hover:scale-110 active:scale-95 cursor-pointer"
                   >
                     <ChevronLeft size={16} />
                   </button>
@@ -11674,8 +11674,8 @@ export default function Dashboard({ session, profileDataProps }) {
                   type="button"
                   onClick={() => setPdvCategoria('TUDO')}
                   className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-extrabold uppercase tracking-wider transition-all border cursor-pointer ${!pdvCategoria || pdvCategoria === 'TUDO'
-                    ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
-                    : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
+                    ? 'bg-primary text-primary-foreground border-primary shadow-md scale-[1.02]'
+                    : 'bg-surface text-muted-foreground border-border hover:text-foreground hover:bg-surface-elevated'
                     }`}
                 >
                   TUDO
@@ -11699,8 +11699,8 @@ export default function Dashboard({ session, profileDataProps }) {
                       type="button"
                       onClick={() => setPdvCategoria(catNome)}
                       className={`shrink-0 px-3.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${isSelected
-                        ? 'bg-[#6A0DAD] text-white border-[#6A0DAD] shadow-lg shadow-[#6A0DAD]/30 scale-[1.02]'
-                        : 'bg-black/60 text-gray-400 border-[#222222] hover:text-white hover:border-gray-700'
+                        ? 'bg-primary text-primary-foreground border-primary shadow-md scale-[1.02]'
+                        : 'bg-surface text-muted-foreground border-border hover:text-foreground hover:bg-surface-elevated'
                         }`}
                     >
                       {catNome}
@@ -11711,12 +11711,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* Seta de Rolagem Direita (Desktop) */}
               {canScrollRight && (
-                <div className="absolute right-0 top-1 bottom-3 z-10 flex items-center pl-4 bg-gradient-to-l from-black via-black/90 to-transparent">
+                <div className="absolute right-0 top-1 bottom-3 z-10 flex items-center pl-4 bg-gradient-to-l from-card via-card/90 to-transparent">
                   <button
                     type="button"
                     onClick={() => handleScrollCategory('right')}
                     aria-label="Rolar categorias para direita"
-                    className="w-7 h-7 rounded-full bg-[#181818] border border-[#333] hover:border-[#6A0DAD] text-gray-300 hover:text-white flex items-center justify-center shadow-lg transition-all hover:scale-110 active:scale-95 cursor-pointer"
+                    className="w-7 h-7 rounded-full bg-surface-elevated border border-border hover:border-primary text-muted-foreground hover:text-foreground flex items-center justify-center shadow-md transition-all hover:scale-110 active:scale-95 cursor-pointer"
                   >
                     <ChevronRight size={16} />
                   </button>
@@ -11726,14 +11726,14 @@ export default function Dashboard({ session, profileDataProps }) {
 
             {/* Dica para busca mobile quando catálogo oculto */}
             {!pdvBusca.trim() && pdvCategoria === 'TUDO' && (
-              <div className="lg:hidden text-center py-3.5 px-3 bg-[#111111]/60 border border-[#222222] rounded-lg text-xs text-gray-400 flex items-center justify-center gap-2">
+              <div className="lg:hidden text-center py-3.5 px-3 bg-surface border border-border rounded-lg text-xs text-muted-foreground flex items-center justify-center gap-2">
                 <span>💡 Use a busca acima ou clique em</span>
                 <button
                   type="button"
                   onClick={() => setIsVendaRapidaOpen(true)}
-                  className="text-purple-300 hover:text-purple-200 font-bold underline flex items-center gap-1"
+                  className="text-primary hover:underline font-bold flex items-center gap-1"
                 >
-                  <Zap size={12} className="text-amber-300 fill-amber-300" />
+                  <Zap size={12} className="text-amber-400 fill-amber-400" />
                   ⚡ Venda Rápida
                 </button>
               </div>
@@ -11958,13 +11958,13 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
 
             {/* Dicas de Atalhos (Visível apenas no Desktop) */}
-            <div className="hidden lg:flex bg-[#111111]/45 border border-[#222222] p-4 rounded-lg flex-wrap gap-4 text-[10px] text-gray-500 font-medium">
-              <span className="font-bold text-gray-400 uppercase tracking-wider block w-full mb-1">Teclas de Atalho [PDV]:</span>
-              <span><kbd className="bg-black border border-[#333] px-1.5 py-0.5 rounded text-white mr-1.5 font-bold font-mono">F2</kbd> Buscar Produto</span>
-              <span><kbd className="bg-black border border-[#333] px-1.5 py-0.5 rounded text-white mr-1.5 font-bold font-mono">F8</kbd> Cadastro de Cliente</span>
-              <span><kbd className="bg-black border border-[#333] px-1.5 py-0.5 rounded text-white mr-1.5 font-bold font-mono">F9</kbd> Participação Trainee</span>
-              <span><kbd className="bg-black border border-[#333] px-1.5 py-0.5 rounded text-white mr-1.5 font-bold font-mono">F10</kbd> Finalizar Venda</span>
-              <span><kbd className="bg-black border border-[#333] px-1.5 py-0.5 rounded text-white mr-1.5 font-bold font-mono">Esc</kbd> Limpar Carrinho</span>
+            <div className="hidden lg:flex bg-surface-elevated border border-border p-4 rounded-xl flex-wrap gap-4 text-[10px] text-muted-foreground font-medium shadow-sm">
+              <span className="font-bold text-foreground uppercase tracking-wider block w-full mb-1">Teclas de Atalho [PDV]:</span>
+              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F2</kbd> Buscar Produto</span>
+              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F8</kbd> Cadastro de Cliente</span>
+              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F9</kbd> Participação Trainee</span>
+              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F10</kbd> Finalizar Venda</span>
+              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">Esc</kbd> Limpar Carrinho</span>
             </div>
           </div>
 
@@ -12007,9 +12007,9 @@ export default function Dashboard({ session, profileDataProps }) {
                     value={pdvScanImei}
                     onChange={(e) => setPdvScanImei(e.target.value)}
                     placeholder={isPdvBloqueadoParaUsuario ? "Caixa Fechado - Leitor desabilitado..." : "Bipe o IMEI, EAN/barcode ou SKU..."}
-                    className={`flex-1 min-w-[180px] bg-black border rounded px-3 py-2 text-xs text-white outline-none font-mono tracking-wider transition-all ${isPdvBloqueadoParaUsuario
-                      ? 'border-amber-900/40 text-gray-500 opacity-60 cursor-not-allowed'
-                      : 'border-[#222222] focus:border-[#6A0DAD]'
+                    className={`flex-1 min-w-[180px] bg-surface border rounded-lg px-3 py-2 text-xs text-foreground outline-none font-mono tracking-wider transition-all ${isPdvBloqueadoParaUsuario
+                      ? 'border-amber-500/40 text-muted-foreground opacity-60 cursor-not-allowed'
+                      : 'border-border focus:border-primary'
                       }`}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -12036,7 +12036,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       }
                       setIsCameraScannerOpen(true);
                     }}
-                    className="lg:hidden bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 disabled:opacity-30 disabled:cursor-not-allowed border border-[#6A0DAD]/50 text-purple-300 p-2 rounded transition-all shrink-0 flex items-center justify-center cursor-pointer"
+                    className="lg:hidden bg-primary/15 hover:bg-primary/25 disabled:opacity-30 disabled:cursor-not-allowed border border-primary/30 text-primary p-2 rounded-lg transition-all shrink-0 flex items-center justify-center cursor-pointer"
                     title="Usar Câmera do Celular para Leitura"
                   >
                     <Camera size={16} />
@@ -12053,7 +12053,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       }
                       handleBiparPdvNovo();
                     }}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed px-3.5 py-2 rounded text-xs font-bold text-white transition-all shrink-0 whitespace-nowrap"
+                    className="bg-primary hover:bg-[#500885] disabled:bg-surface-elevated disabled:text-muted-foreground disabled:cursor-not-allowed px-3.5 py-2 rounded-lg text-xs font-bold text-primary-foreground transition-all shrink-0 whitespace-nowrap cursor-pointer shadow-sm"
                   >
                     Bipar
                   </button>
@@ -12071,13 +12071,13 @@ export default function Dashboard({ session, profileDataProps }) {
                     }
                     setIsVendaRapidaOpen(true);
                   }}
-                  className={`w-full px-3.5 py-2 rounded text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 ${isPdvBloqueadoParaUsuario
-                    ? 'bg-gray-800/60 text-gray-500 border border-gray-700/30 opacity-60 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-[#6A0DAD] to-[#9333EA] hover:from-[#7e12ca] hover:to-[#a855f7] text-white shadow-md shadow-purple-900/30 hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
+                  className={`w-full px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 ${isPdvBloqueadoParaUsuario
+                    ? 'bg-surface-elevated text-muted-foreground border border-border opacity-60 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-primary-foreground shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
                     }`}
                   title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
                 >
-                  <Zap size={14} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-gray-500' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
+                  <Zap size={14} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-muted-foreground' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
                   <span>⚡ Venda Rápida</span>
                 </button>
               </div>
@@ -12222,7 +12222,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 e.target.blur();
                               }
                             }}
-                            className="w-20 bg-black border border-[#222] focus:border-[#6A0DAD] rounded pl-6 pr-1.5 py-0.5 text-xs text-white text-right outline-none font-mono font-semibold"
+                            className="w-20 bg-surface-elevated border border-border focus:border-primary rounded-lg pl-6 pr-1.5 py-0.5 text-xs text-foreground text-right outline-none font-mono font-semibold"
                           />
                         </div>
                       </div>
@@ -12235,17 +12235,17 @@ export default function Dashboard({ session, profileDataProps }) {
             {pdvCart.length > 0 && (
               <div className="space-y-4">
                 {/* CADASTRO RÁPIDO DE CLIENTE */}
-                <div className="border-t border-[#222222] pt-4">
-                  <div className="flex justify-between items-center w-full text-xs font-bold text-gray-400">
-                    <span className="flex items-center gap-1.5">
-                      <User size={14} className="text-[#6A0DAD]" />
+                <div className="border-t border-border pt-4">
+                  <div className="flex justify-between items-center w-full text-xs font-bold text-muted-foreground">
+                    <span className="flex items-center gap-1.5 text-foreground">
+                      <User size={14} className="text-primary" />
                       Vincular Cliente (Obrigatório)
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 mt-3 bg-[#111111]/40 border border-[#222222] p-4 rounded-lg">
+                  <div className="grid grid-cols-2 gap-3 mt-3 bg-surface border border-border p-4 rounded-xl shadow-sm">
                     <div className="col-span-2 relative">
-                      <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Nome Completo <span className="text-red-500">*</span></label>
+                      <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Nome Completo <span className="text-destructive">*</span></label>
                       <input
                         type="text"
                         id="pdv-cliente-busca-input"
@@ -12266,22 +12266,22 @@ export default function Dashboard({ session, profileDataProps }) {
                             setIsPdvClienteDropdownOpen(false);
                           }, 200);
                         }}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded text-white px-2.5 py-1.5 text-xs outline-none"
+                        className="w-full bg-surface-elevated border border-border focus:border-primary rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none"
                         placeholder="Ex: João da Silva (digite para buscar...)"
                       />
 
                       {/* Dropdown do Autocomplete */}
                       {isPdvClienteDropdownOpen && (pdvClienteSearchInput.trim() || pdvClienteSearchResults.length > 0) && (
-                        <div className="absolute left-0 right-0 mt-1 bg-neutral-950 border border-neutral-800 rounded-md shadow-2xl max-h-60 overflow-y-auto z-50 custom-scrollbar text-xs">
+                        <div className="absolute left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-2xl max-h-60 overflow-y-auto z-50 custom-scrollbar text-xs">
                           {pdvClienteSearchLoading && (
-                            <div className="p-3 text-gray-500 text-center flex items-center justify-center gap-2">
-                              <Loader2 size={12} className="animate-spin text-[#6A0DAD]" />
+                            <div className="p-3 text-muted-foreground text-center flex items-center justify-center gap-2">
+                              <Loader2 size={12} className="animate-spin text-primary" />
                               <span>Buscando clientes...</span>
                             </div>
                           )}
 
                           {!pdvClienteSearchLoading && pdvClienteSearchResults.length === 0 && (
-                            <div className="p-3 text-gray-400 text-center">
+                            <div className="p-3 text-muted-foreground text-center">
                               Nenhum cliente encontrado.
                             </div>
                           )}
@@ -12294,10 +12294,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                 e.preventDefault();
                                 handleSelectPdvCliente(client);
                               }}
-                              className="w-full text-left px-3 py-2 hover:bg-[#6A0DAD]/10 border-b border-neutral-900 flex flex-col gap-0.5 text-white transition-colors"
+                              className="w-full text-left px-3 py-2 hover:bg-primary/10 border-b border-border/40 flex flex-col gap-0.5 text-foreground transition-colors cursor-pointer"
                             >
                               <span className="font-bold">{client.nome}</span>
-                              <span className="text-[10px] text-gray-400 font-mono">
+                              <span className="text-[10px] text-muted-foreground font-mono">
                                 CPF/CNPJ: {client.cpf_cnpj || 'Não informado'} | Tel: {client.telefone || 'Não informado'}
                               </span>
                             </button>
@@ -12310,7 +12310,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 setIsPdvClienteDropdownOpen(false);
                                 handleOpenNewClienteModal(pdvClienteSearchInput);
                               }}
-                              className="w-full text-left px-3 py-2.5 bg-[#6A0DAD]/5 hover:bg-[#6A0DAD]/15 text-[#9b5de5] hover:text-[#b587eb] font-bold border-t border-neutral-900 transition-colors flex items-center gap-1.5"
+                              className="w-full text-left px-3 py-2.5 bg-primary/5 hover:bg-primary/15 text-primary font-bold border-t border-border/40 transition-colors flex items-center gap-1.5 cursor-pointer"
                             >
                               <span>+</span>
                               <span>Cliente não encontrado. Clique aqui para cadastrar "{pdvClienteSearchInput}"</span>
@@ -12322,12 +12322,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider font-mono">CPF / CNPJ <span className="text-red-500">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider font-mono">CPF / CNPJ <span className="text-destructive">*</span></label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
                             onClick={() => setIsPdvClienteFieldsEditable(true)}
-                            className="text-[9px] text-[#9b5de5] hover:text-[#b587eb] font-bold transition-colors underline"
+                            className="text-[9px] text-primary hover:underline font-bold transition-colors cursor-pointer"
                           >
                             Editar
                           </button>
@@ -12339,19 +12339,19 @@ export default function Dashboard({ session, profileDataProps }) {
                         value={pdvClienteCpfCnpj}
                         disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                         onChange={(e) => setPdvClienteCpfCnpj(e.target.value.replace(/[^\d]/g, ''))}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] disabled:bg-neutral-900 disabled:text-gray-500 rounded text-white px-2.5 py-1.5 text-xs outline-none font-mono"
+                        className="w-full bg-surface-elevated border border-border focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none font-mono"
                         placeholder="000.000.000-00"
                       />
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">Telefone <span className="text-red-500">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Telefone <span className="text-destructive">*</span></label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
                             onClick={() => setIsPdvClienteFieldsEditable(true)}
-                            className="text-[9px] text-[#9b5de5] hover:text-[#b587eb] font-bold transition-colors underline"
+                            className="text-[9px] text-primary hover:underline font-bold transition-colors cursor-pointer"
                           >
                             Editar
                           </button>
@@ -12363,19 +12363,19 @@ export default function Dashboard({ session, profileDataProps }) {
                         required
                         disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                         onChange={(e) => setPdvClienteTelefone(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] disabled:bg-neutral-900 disabled:text-gray-500 rounded text-white px-2.5 py-1.5 text-xs outline-none font-sans"
+                        className="w-full bg-surface-elevated border border-border focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none font-sans"
                         placeholder="(11) 99999-9999"
                       />
                     </div>
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">Data de Nascimento <span className="text-red-500">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Data de Nascimento <span className="text-destructive">*</span></label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
                             onClick={() => setIsPdvClienteFieldsEditable(true)}
-                            className="text-[9px] text-[#9b5de5] hover:text-[#b587eb] font-bold transition-colors underline"
+                            className="text-[9px] text-primary hover:underline font-bold transition-colors cursor-pointer"
                           >
                             Editar
                           </button>
@@ -12387,18 +12387,18 @@ export default function Dashboard({ session, profileDataProps }) {
                         required
                         disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                         onChange={(e) => setPdvClienteDataNascimento(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] disabled:bg-neutral-900 disabled:text-gray-500 rounded text-white px-2.5 py-1.5 text-xs outline-none font-sans"
+                        className="w-full bg-surface-elevated border border-border focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none font-sans"
                       />
                     </div>
 
                     <div className="col-span-1">
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-gray-500 uppercase tracking-wider">E-mail <span className="text-red-500">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">E-mail <span className="text-destructive">*</span></label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
                             onClick={() => setIsPdvClienteFieldsEditable(true)}
-                            className="text-[9px] text-[#9b5de5] hover:text-[#b587eb] font-bold transition-colors underline"
+                            className="text-[9px] text-primary hover:underline font-bold transition-colors cursor-pointer"
                           >
                             Editar
                           </button>
@@ -12410,7 +12410,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         required
                         disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                         onChange={(e) => setPdvClienteEmail(e.target.value)}
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] disabled:bg-neutral-900 disabled:text-gray-500 rounded text-white px-2.5 py-1.5 text-xs outline-none"
+                        className="w-full bg-surface-elevated border border-border focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none"
                         placeholder="cliente@email.com"
                       />
                     </div>
@@ -12422,13 +12422,13 @@ export default function Dashboard({ session, profileDataProps }) {
                   const cCheck = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
                   if (cCheck?.status_credito === 'INADIMPLENTE') {
                     return (
-                      <div className="bg-red-950/40 border border-red-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs animate-pulse shadow-lg shadow-red-950/50">
-                        <AlertCircle className="text-red-500 shrink-0 mt-0.5" size={18} />
+                      <div className="bg-destructive/10 border border-destructive/40 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs animate-pulse shadow-sm">
+                        <AlertCircle className="text-destructive shrink-0 mt-0.5" size={18} />
                         <div>
-                          <h4 className="text-red-400 font-extrabold uppercase tracking-wide text-[11px]">
+                          <h4 className="text-destructive font-extrabold uppercase tracking-wide text-[11px]">
                             ⚠️ CLIENTE BLOQUEADO / INADIMPLENTE
                           </h4>
-                          <p className="text-red-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                          <p className="text-destructive/80 text-[10px] mt-0.5 font-medium leading-tight">
                             Este cliente possui registro de inadimplência no sistema. As vendas estão suspensas para este cadastro.
                           </p>
                         </div>
@@ -12436,13 +12436,13 @@ export default function Dashboard({ session, profileDataProps }) {
                     );
                   } else if (cCheck?.status_credito === 'ATRASO') {
                     return (
-                      <div className="bg-yellow-950/40 border border-yellow-500/80 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs shadow-lg shadow-yellow-950/50">
-                        <AlertTriangle className="text-yellow-500 shrink-0 mt-0.5" size={18} />
+                      <div className="bg-yellow-500/10 border border-yellow-500/40 p-3 rounded-xl flex items-start gap-2.5 my-2 text-xs shadow-sm">
+                        <AlertTriangle className="text-yellow-600 dark:text-yellow-400 shrink-0 mt-0.5" size={18} />
                         <div>
-                          <h4 className="text-yellow-400 font-extrabold uppercase tracking-wide text-[11px]">
+                          <h4 className="text-yellow-600 dark:text-yellow-400 font-extrabold uppercase tracking-wide text-[11px]">
                             🟡 ALERTA: CLIENTE COM ATRASO LEVE
                           </h4>
-                          <p className="text-yellow-300/90 text-[10px] mt-0.5 font-medium leading-tight">
+                          <p className="text-yellow-700/80 dark:text-yellow-300/80 text-[10px] mt-0.5 font-medium leading-tight">
                             Este cliente possui pendências recentes ou parcelas em atraso leve. Atenção no parcelamento.
                           </p>
                         </div>
@@ -12643,7 +12643,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           {/* Se for Boleto: Financeira */}
                           {pdvNovoMetodo === 'boleto' && (
                             <div className="space-y-1 animate-fadeIn">
-                              <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                              <label className="block text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
                                 Financeira do Boleto
                               </label>
                               <div className="grid grid-cols-4 gap-1">
@@ -12652,9 +12652,9 @@ export default function Dashboard({ session, profileDataProps }) {
                                     key={fin}
                                     type="button"
                                     onClick={() => setPdvNovoFinanceira(fin)}
-                                    className={`py-1.5 text-[9px] font-bold rounded border transition-all ${pdvNovoFinanceira === fin
-                                      ? 'bg-[#6A0DAD] text-white border-[#6A0DAD]'
-                                      : 'bg-black text-gray-400 border-[#222222]'
+                                    className={`py-1.5 text-[9px] font-bold rounded-lg border transition-all cursor-pointer ${pdvNovoFinanceira === fin
+                                      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                                      : 'bg-surface text-muted-foreground border-border hover:text-foreground'
                                       }`}
                                   >
                                     {fin}
@@ -12666,26 +12666,26 @@ export default function Dashboard({ session, profileDataProps }) {
 
                           {/* Campo de Valor e Botão Adicionar */}
                           <div className="space-y-1">
-                            <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
+                            <label className="block text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
                               Valor a Pagar nesta Forma (R$)
                             </label>
                             <div className="flex gap-2">
                               <div className="relative flex-1">
-                                <span className="absolute left-3 top-2 text-xs text-gray-500 font-mono font-bold">R$</span>
+                                <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono font-bold">R$</span>
                                 <input
                                   type="number"
                                   step="0.01"
                                   min="0.01"
                                   value={pdvNovoValor !== '' ? pdvNovoValor : faltaPagar.toFixed(2)}
                                   onChange={(e) => setPdvNovoValor(e.target.value)}
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded pl-9 pr-3 py-1.5 text-xs text-white font-mono font-bold outline-none"
+                                  className="w-full bg-surface-elevated border border-border focus:border-primary rounded-lg pl-9 pr-3 py-1.5 text-xs text-foreground font-mono font-bold outline-none"
                                   placeholder={faltaPagar.toFixed(2)}
                                 />
                               </div>
                               <button
                                 type="button"
                                 onClick={handleAdicionarPagamentoPdv}
-                                className="bg-[#6A0DAD] hover:bg-[#500885] text-white px-3.5 py-1.5 rounded text-xs font-bold transition-all shrink-0 flex items-center gap-1 shadow-md shadow-[#6A0DAD]/30 cursor-pointer"
+                                className="bg-primary hover:bg-[#500885] text-primary-foreground px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1 shadow-md cursor-pointer"
                               >
                                 <Plus size={14} />
                                 <span>Adicionar</span>
@@ -12694,8 +12694,8 @@ export default function Dashboard({ session, profileDataProps }) {
                           </div>
                         </div>
                       ) : (
-                        <div className="bg-green-950/30 border border-green-700/40 p-3 rounded-lg text-center text-xs text-green-400 font-bold flex items-center justify-center gap-2">
-                          <Check size={16} />
+                        <div className="bg-emerald-500/15 border border-emerald-600/30 p-3 rounded-xl text-center text-xs text-emerald-900 dark:text-emerald-200 font-bold flex items-center justify-center gap-2 shadow-sm">
+                          <Check size={16} className="text-emerald-700 dark:text-emerald-300" />
                           <span>Valor total do carrinho pago! Pronto para finalizar.</span>
                         </div>
                       )}
@@ -12703,13 +12703,13 @@ export default function Dashboard({ session, profileDataProps }) {
                       {/* CONDICAO COMERCIAL / OBSERVACOES DE GARANTIA E TREENER */}
                       <div className="space-y-3 pt-2">
                         <div>
-                          <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">
-                            Observações de Garantia <span className="text-red-500">*</span>
+                          <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wide mb-1">
+                            Observações de Garantia <span className="text-destructive">*</span>
                           </label>
                           <textarea
                             value={pdvObsGarantia}
                             onChange={(e) => setPdvObsGarantia(e.target.value)}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[50px]"
+                            className="w-full bg-surface border border-border focus:border-primary rounded-lg px-3 py-2 text-xs text-foreground outline-none min-h-[50px]"
                             placeholder="Detalhes sobre a garantia..."
                             required
                           ></textarea>
@@ -12717,10 +12717,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
                         {permiteParticipacaoTreener(pdvCart) && (
                           <div>
-                            <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-purple-300 uppercase tracking-wide flex items-center justify-between mb-1">
+                            <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-primary uppercase tracking-wide flex items-center justify-between mb-1">
                               <span>Treener Responsável (Participação em Celulares)</span>
                               {selectedTreenerId && (
-                                <span className="text-[10px] text-purple-400 bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-800/40 font-mono">
+                                <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded-lg border border-primary/20 font-mono">
                                   Selecionado
                                 </span>
                               )}
@@ -12733,7 +12733,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 setSelectedTreenerId(val);
                                 setPdvVendaTrainee(!!val);
                               }}
-                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none cursor-pointer font-bold"
+                              className="w-full bg-surface border border-border focus:border-primary rounded-lg px-3 py-2 text-xs text-foreground outline-none cursor-pointer font-bold"
                             >
                               <option value="">Sem participação de Treener</option>
                               {treenersFilial.map((t) => (
@@ -13945,7 +13945,7 @@ export default function Dashboard({ session, profileDataProps }) {
               </button>
             )}
 
-            <span className="text-xs bg-[#6A0DAD]/10 text-purple-400 border border-[#6A0DAD]/30 px-2.5 py-1 rounded font-bold uppercase tracking-wider">
+            <span className="text-xs bg-muted text-muted-foreground border border-border px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider">
               {getViewLabel()}
             </span>
           </div>
