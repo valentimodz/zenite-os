@@ -10851,12 +10851,19 @@ export default function Dashboard({ session, profileDataProps }) {
 
         // Agrupar variações de cores usando reduce (1 IMEI = 1 unidade real)
         const corMap = poolImeis.reduce((map, im) => {
-          const cor = (im.cor || 'Padrão').trim();
-          if (!map[cor]) {
-            map[cor] = {
-              id: `${pId}_${cor}`,
+          // Extração rigorosa e fiel da cor real cadastrada no banco de dados (tabela imeis, produtos ou catálogo)
+          const imProd = (produtos || []).find(pr => String(pr.id) === String(im.produto_id) || String(pr.catalogo_id) === String(im.produto_id));
+          const imCat = (catalogoProdutos || []).find(c => String(c.id) === String(im.produto_id) || String(c.id) === String(im.produto_catalogo_id));
+          const corReal = (im.cor || im.nome_cor || im.corReal || imProd?.cor || imProd?.nome_cor || imCat?.cor || '').trim();
+          const corKey = corReal || null;
+          const mapKey = corKey || 'Sem Cor Definida';
+
+          if (!map[mapKey]) {
+            map[mapKey] = {
+              id: `${pId}_${mapKey}`,
               nome: modeloPai.nome,
-              cor: cor,
+              cor: corKey,
+              corReal: corKey,
               sku: modeloPai.sku || null,
               codigo_barras: modeloPai.codigo_barras || null,
               preco: modeloPai.preco,
@@ -10865,9 +10872,9 @@ export default function Dashboard({ session, profileDataProps }) {
               imeis: []
             };
           }
-          map[cor].estoque += 1;
-          map[cor].quantidade += 1;
-          map[cor].imeis.push(im);
+          map[mapKey].estoque += 1;
+          map[mapKey].quantidade += 1;
+          map[mapKey].imeis.push(im);
           return map;
         }, {});
 
@@ -10880,13 +10887,18 @@ export default function Dashboard({ session, profileDataProps }) {
           const targetItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
 
           targetItems.forEach(raw => {
-            const cor = (raw.cor || 'Única').trim();
+            // Extração fiel da cor real cadastrada no banco sem máscara ou substituição
+            const corReal = (raw.cor || raw.nome_cor || raw.corReal || raw.color || '').trim();
+            const corKey = corReal || null;
+            const mapKey = corKey || 'Sem Cor Definida';
             const est = Number(raw.quantidade || raw.estoque || raw.quantidade_local || raw.estoque_local || 0);
-            if (!corMap[cor]) {
-              corMap[cor] = {
-                id: raw.id || `${pId}_${cor}`,
+
+            if (!corMap[mapKey]) {
+              corMap[mapKey] = {
+                id: raw.id || `${pId}_${mapKey}`,
                 nome: raw.nome || modeloPai.nome,
-                cor: cor,
+                cor: corKey,
+                corReal: corKey,
                 sku: raw.sku || modeloPai.sku || null,
                 codigo_barras: raw.codigo_barras || modeloPai.codigo_barras || null,
                 preco: raw.preco || modeloPai.preco,
@@ -10896,8 +10908,8 @@ export default function Dashboard({ session, profileDataProps }) {
               };
             } else {
               // Se já temos a cor cadastrada, pega o saldo real ou o máximo para evitar duplicação por JOIN
-              corMap[cor].estoque = Math.max(corMap[cor].estoque, est);
-              corMap[cor].quantidade = Math.max(corMap[cor].quantidade, est);
+              corMap[mapKey].estoque = Math.max(corMap[mapKey].estoque, est);
+              corMap[mapKey].quantidade = Math.max(corMap[mapKey].quantidade, est);
             }
           });
         }
@@ -10934,16 +10946,18 @@ export default function Dashboard({ session, profileDataProps }) {
       const targetRawItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
 
       const varMap = targetRawItems.reduce((map, raw) => {
-        const cor = (raw.cor || raw.color || '').trim();
+        const corReal = (raw.cor || raw.nome_cor || raw.corReal || raw.color || '').trim();
         const sku = (raw.sku || raw.codigo_barras || '').trim();
-        const key = `${cor}_${sku}`;
+        const corKey = corReal || null;
+        const key = `${corReal}_${sku}`;
         const est = Number(raw.quantidade || raw.estoque || raw.quantidade_local || raw.estoque_local || 0);
 
         if (!map[key]) {
           map[key] = {
             id: raw.id || `${pId}_${key}`,
             nome: raw.nome || modeloPai.nome,
-            cor: cor || null,
+            cor: corKey,
+            corReal: corKey,
             sku: raw.sku || modeloPai.sku || null,
             codigo_barras: raw.codigo_barras || modeloPai.codigo_barras || null,
             preco: raw.preco || modeloPai.preco,
@@ -22580,14 +22594,14 @@ export default function Dashboard({ session, profileDataProps }) {
                           }`}
                       >
                         <div className="flex items-center gap-3">
-                          {v.cor ? (
+                          {(v.corReal || v.cor || v.nome_cor) ? (
                             <span className="w-3.5 h-3.5 rounded-full border border-primary/40 bg-primary/20 shrink-0" />
                           ) : (
                             <Tag size={14} className="text-primary shrink-0" />
                           )}
                           <div>
                             <span className="text-xs font-bold text-foreground block">
-                              {v.cor ? `Cor: ${v.cor}` : (v.sku ? `SKU: ${v.sku}` : 'Opção Padrão')}
+                              {(v.corReal || v.cor || v.nome_cor) ? `Cor: ${v.corReal || v.cor || v.nome_cor}` : (v.sku ? `SKU: ${v.sku}` : (v.nome || 'Opção Padrão'))}
                             </span>
                             {v.sku && (
                               <span className="text-[10px] text-muted-foreground font-mono">
