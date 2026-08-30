@@ -615,6 +615,11 @@ export default function Dashboard({ session, profileDataProps }) {
   const [multilojaStockData, setMultilojaStockData] = useState([]);
   const [loadingMultilojaStock, setLoadingMultilojaStock] = useState(false);
 
+  // Estados para Modal de Validação Física de IMEI no PDV
+  const [imeiValidationModalProd, setImeiValidationModalProd] = useState(null);
+  const [imeiValidationDigits, setImeiValidationDigits] = useState('');
+  const [imeiValidationError, setImeiValidationError] = useState('');
+
   // Estados para Gestão de Clientes
   const [clientes, setClientes] = useState([]);
   const [loadingClientes, setLoadingClientes] = useState(false);
@@ -11816,6 +11821,16 @@ export default function Dashboard({ session, profileDataProps }) {
                           }
                           if (isSemEstoque) {
                             handleVerMultiloja(prod);
+                          } else if (isCelularCard) {
+                            // Interceptação de Segurança: Exige validação dos 4 dígitos do IMEI impresso na caixa física
+                            setImeiValidationModalProd({
+                              ...prod,
+                              imei: displayImei,
+                              cor: displayCor,
+                              imeis_db: cardImeis
+                            });
+                            setImeiValidationDigits('');
+                            setImeiValidationError('');
                           } else {
                             handleAddToCart({
                               ...prod,
@@ -12106,7 +12121,12 @@ export default function Dashboard({ session, profileDataProps }) {
                       <div className="flex-1">
                         {((item.availableImeis && item.availableImeis.length > 0) || item.imei) ? (
                           <div className="space-y-1">
-                            <label className="block text-[8px] font-bold text-gray-500 uppercase tracking-wide">IMEI Selecionado</label>
+                            <div className="flex items-center justify-between">
+                              <label className="block text-[8px] font-bold text-gray-500 uppercase tracking-wide">IMEI Selecionado</label>
+                              <span className="text-[8px] font-mono font-extrabold text-purple-400 bg-purple-950/40 border border-purple-800/30 px-1 rounded">
+                                Qtd: 1 (Fixo)
+                              </span>
+                            </div>
                             {item.availableImeis && item.availableImeis.length > 0 ? (
                               <select
                                 value={item.imei || item.availableImeis[0]?.imei}
@@ -12132,7 +12152,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               <button
                                 type="button"
                                 onClick={() => handleUpdateCartQty(item.cartId, item.quantidade - 1)}
-                                className="w-5 h-5 border border-[#222] bg-[#111] rounded flex items-center justify-center text-[10px] text-white hover:bg-[#222]"
+                                className="w-5 h-5 border border-[#222] bg-[#111] rounded flex items-center justify-center text-[10px] text-white hover:bg-[#222] cursor-pointer"
                               >
                                 -
                               </button>
@@ -12140,7 +12160,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               <button
                                 type="button"
                                 onClick={() => handleUpdateCartQty(item.cartId, item.quantidade + 1)}
-                                className="w-5 h-5 border border-[#222] bg-[#111] rounded flex items-center justify-center text-[10px] text-white hover:bg-[#222]"
+                                className="w-5 h-5 border border-[#222] bg-[#111] rounded flex items-center justify-center text-[10px] text-white hover:bg-[#222] cursor-pointer"
                               >
                                 +
                               </button>
@@ -20921,6 +20941,163 @@ export default function Dashboard({ session, profileDataProps }) {
                 </button>
               </div>
 
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Interceptação e Validação Física de IMEI (PDV) */}
+        {imeiValidationModalProd && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-[#0A0A0A] border border-purple-800/40 w-full max-w-md rounded-2xl overflow-hidden shadow-2xl shadow-purple-950/40 animate-scaleUp">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-purple-950/80 via-[#0A0A0A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 flex items-center justify-center text-purple-300">
+                    <Smartphone size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-white tracking-wide">Validar Aparelho Físico</h3>
+                    <p className="text-[11px] text-purple-300/80 font-medium">Segurança de Venda Serializada</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImeiValidationModalProd(null);
+                    setImeiValidationDigits('');
+                    setImeiValidationError('');
+                  }}
+                  className="text-gray-500 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const digits = imeiValidationDigits.trim();
+                  if (!digits) {
+                    setImeiValidationError('Por favor, informe os 4 dígitos finais do IMEI.');
+                    return;
+                  }
+
+                  const pool = Array.isArray(imeiValidationModalProd.imeis_db) && imeiValidationModalProd.imeis_db.length > 0
+                    ? imeiValidationModalProd.imeis_db
+                    : (disponiveisImeis || []).filter(im => {
+                        if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+                        const matchProd = String(im.produto_id) === String(imeiValidationModalProd.id) ||
+                                          String(im.produto_id) === String(imeiValidationModalProd.catalogo_id);
+                        if (!matchProd) return false;
+                        if (imeiValidationModalProd.cor) {
+                          const imCor = (im.cor || '').toLowerCase().trim();
+                          const prodCor = String(imeiValidationModalProd.cor).toLowerCase().trim();
+                          if (imCor && imCor !== prodCor) return false;
+                        }
+                        return true;
+                      });
+
+                  // Busca por correspondência exata nos 4 últimos dígitos (ou IMEI completo caso digitado)
+                  const matchedImeiObj = pool.find(im => {
+                    const cleanImei = String(im.imei || '').trim();
+                    return cleanImei.endsWith(digits) || cleanImei === digits;
+                  });
+
+                  if (!matchedImeiObj) {
+                    setImeiValidationError('IMEI não encontrado para esta cor/modelo no estoque local.');
+                    return;
+                  }
+
+                  // Adicionar o item ao carrinho com o IMEI validado
+                  handleAddToCart({
+                    ...imeiValidationModalProd,
+                    imei: matchedImeiObj.imei,
+                    cor: matchedImeiObj.cor || imeiValidationModalProd.cor,
+                    imeis_db: [matchedImeiObj]
+                  }, matchedImeiObj.imei);
+
+                  // Fechar modal e limpar campos
+                  setImeiValidationModalProd(null);
+                  setImeiValidationDigits('');
+                  setImeiValidationError('');
+                }}
+                className="p-6 space-y-4"
+              >
+                {/* Detalhes do Produto */}
+                <div className="bg-[#111111] border border-[#222222] rounded-xl p-3.5 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-white leading-tight">{imeiValidationModalProd.nome}</h4>
+                    <div className="flex items-center gap-2">
+                      {imeiValidationModalProd.cor && (
+                        <span className="text-[10px] font-bold text-purple-300 bg-purple-950/60 border border-purple-700/40 px-2 py-0.5 rounded">
+                          {imeiValidationModalProd.cor}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-gray-400">
+                        {Array.isArray(imeiValidationModalProd.imeis_db) ? `${imeiValidationModalProd.imeis_db.length} em estoque` : ''}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="font-mono font-bold text-xs text-white">
+                    R$ {Number(imeiValidationModalProd.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+
+                {/* Input 4 Dígitos */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-gray-300">
+                    Digite os últimos 4 dígitos do IMEI impresso na caixa:
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      autoFocus
+                      maxLength={15}
+                      value={imeiValidationDigits}
+                      onChange={(e) => {
+                        setImeiValidationDigits(e.target.value.replace(/\D/g, ''));
+                        if (imeiValidationError) setImeiValidationError('');
+                      }}
+                      placeholder="Ex: 8942"
+                      className="w-full bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-xl px-4 py-3 text-lg font-mono font-bold text-center tracking-[0.25em] text-white outline-none placeholder:text-gray-700 placeholder:tracking-normal transition-all"
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-500">
+                    💡 Dica: Verifique a etiqueta física da caixa do aparelho antes de confirmar a inclusão no pedido.
+                  </p>
+                </div>
+
+                {/* Erro */}
+                {imeiValidationError && (
+                  <div className="p-3 bg-red-950/30 border border-red-800/50 rounded-xl flex items-center gap-2 text-red-300 text-xs animate-shake">
+                    <AlertTriangle size={16} className="text-red-400 shrink-0" />
+                    <span>{imeiValidationError}</span>
+                  </div>
+                )}
+
+                {/* Botões */}
+                <div className="pt-2 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImeiValidationModalProd(null);
+                      setImeiValidationDigits('');
+                      setImeiValidationError('');
+                    }}
+                    className="px-4 py-2.5 text-xs font-semibold rounded-xl bg-gray-900 border border-gray-800 text-gray-400 hover:text-white hover:bg-gray-800 transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] hover:from-[#5A0B9D] hover:to-[#7A1BD2] text-white transition-all shadow-lg shadow-purple-950/50 flex items-center gap-1.5 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <Check size={14} />
+                    Validar e Inserir
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
