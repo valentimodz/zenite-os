@@ -3246,7 +3246,7 @@ export default function Dashboard({ session, profileDataProps }) {
         operador_id: operadorId,
         operador_nome: profile?.nome || session?.user?.email || 'Operador PDV',
         saldo_inicial: saldoInicialNum,
-        status: 'ABERTO',
+        status: 'aberto',
         data_abertura: new Date().toISOString(),
         data_fechamento: null,
         observacoes_abertura: obsAberturaInput.trim() || null
@@ -3265,7 +3265,7 @@ export default function Dashboard({ session, profileDataProps }) {
           operador_id: operadorId,
           saldo_inicial: saldoInicialNum,
           observacoes_abertura: obsAberturaInput.trim() || null,
-          status: 'ABERTO',
+          status: 'aberto',
           data_abertura: new Date().toISOString(),
           data_fechamento: null
         };
@@ -3427,12 +3427,11 @@ export default function Dashboard({ session, profileDataProps }) {
       let salesData = [];
       try {
         if (token) {
-          const res = await fetch(`/api/vendas?vendedor_id=${sellerId}`, {
+          const res = await safeFetchJson(`/api/vendas?vendedor_id=${sellerId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
-          if (res.ok) {
-            const resData = await res.json();
-            salesData = resData.data || [];
+          if (res.ok && res.data) {
+            salesData = res.data.data || res.data || [];
           }
         }
       } catch (sErr) {
@@ -3918,24 +3917,24 @@ export default function Dashboard({ session, profileDataProps }) {
         const { data: { session: currentSession } } = await supabase.auth.getSession();
         const token = currentSession?.access_token;
         if (token) {
-          fetch('/api/webhooks/faturas-saas', {
+          safeFetchJson('/api/webhooks/faturas-saas', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({ fatura_id: faturaId })
-          }).then(res => res.json())
-            .then(data => {
-              if (data.success) {
-                showToast('NFS-e de mensalidade emitida via webhook com sucesso!', 'success');
-                setCompanyFaturas(prev =>
-                  prev.map(f => f.id === faturaId ? { ...f, status: 'PAGO', nfse_id: data.nfse_id, nfse_pdf_url: data.nfse_pdf_url } : f)
-                );
-              } else {
-                console.error('Erro no webhook de fatura SaaS:', data.error);
-              }
-            }).catch(e => console.error('Erro na chamada do webhook de fatura SaaS:', e));
+          }).then(res => {
+            if (res.ok && res.data?.success) {
+              const data = res.data;
+              showToast('NFS-e de mensalidade emitida via webhook com sucesso!', 'success');
+              setCompanyFaturas(prev =>
+                prev.map(f => f.id === faturaId ? { ...f, status: 'PAGO', nfse_id: data.nfse_id, nfse_pdf_url: data.nfse_pdf_url } : f)
+              );
+            } else if (res.data?.error) {
+              console.error('Erro no webhook de fatura SaaS:', res.data.error);
+            }
+          }).catch(e => console.error('Erro na chamada do webhook de fatura SaaS:', e));
         }
       } catch (webhookErr) {
         console.error('Falha ao acionar webhook:', webhookErr);
@@ -3996,20 +3995,20 @@ export default function Dashboard({ session, profileDataProps }) {
       const token = currentSession?.access_token;
       if (!token) return;
 
-      const response = await fetch(`/api/fiscal/configuracoes?tenant_id=${tenantId}`, {
+      const res = await safeFetchJson(`/api/fiscal/configuracoes?tenant_id=${tenantId}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
-      const data = await response.json();
-      if (response.ok && data.success && data.config) {
-        setFiscalCnpj(data.config.cnpj || '');
-        setFiscalInscricaoEstadual(data.config.inscricao_estadual || '');
-        setFiscalInscricaoMunicipal(data.config.inscricao_municipal || '');
-        setFiscalRegimeTributario(data.config.regime_tributario || 'Simples Nacional');
-        setFiscalCertificadoA1Url(data.config.certificado_a1_url || '');
-        setFiscalCertificadoSenha(data.config.certificado_senha ? '••••••••' : '');
+      if (res.ok && res.data?.success && res.data?.config) {
+        const config = res.data.config;
+        setFiscalCnpj(config.cnpj || '');
+        setFiscalInscricaoEstadual(config.inscricao_estadual || '');
+        setFiscalInscricaoMunicipal(config.inscricao_municipal || '');
+        setFiscalRegimeTributario(config.regime_tributario || 'Simples Nacional');
+        setFiscalCertificadoA1Url(config.certificado_a1_url || '');
+        setFiscalCertificadoSenha(config.certificado_senha ? '••••••••' : '');
       } else {
         setFiscalCnpj('');
         setFiscalInscricaoEstadual('');
@@ -10083,12 +10082,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (error) throw error;
 
-      // 2. Atualizar registro na tabela caixas para FECHADO e preencher data_fechamento
+      // 2. Atualizar registro na tabela caixas para fechado e preencher data_fechamento
       if (caixaAtual?.id) {
         const { error: updateCaixaErr } = await supabase
           .from('caixas')
           .update({
-            status: 'FECHADO',
+            status: 'fechado',
             data_fechamento: dataFechamentoISO,
             saldo_final_dinheiro: dinero,
             saldo_final_cartao: cartao,
@@ -10107,7 +10106,7 @@ export default function Dashboard({ session, profileDataProps }) {
         await supabase
           .from('caixas')
           .update({
-            status: 'FECHADO',
+            status: 'fechado',
             data_fechamento: dataFechamentoISO
           })
           .eq('filial_id', activeFilialId)
