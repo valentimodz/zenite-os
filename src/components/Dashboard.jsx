@@ -3305,51 +3305,65 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar produtos disponíveis para venda no PDV filtrando pela filial ativa
+  // Buscar produtos disponíveis para venda no PDV filtrando estritamente pela filial ativa
   const fetchProdutosPDV = async (filialIdAtiva) => {
-    const targetFilialId = filialIdAtiva || activeFilialId || profile?.filial_id || profile?.empresa_id || company?.id;
-    if (!targetFilialId) return;
+    const targetFilialId = filialIdAtiva || activeFilialId || profile?.filial_id;
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    if (!targetFilialId && !targetEmpresaId) return;
 
     try {
-      // Busca os produtos físicos permitindo que targetFilialId seja tanto da empresa quanto da filial logada
-      const { data: produtosLoja, error } = await supabase
+      // 1. Busca os produtos cadastrados para a empresa/filial
+      let query = supabase
         .from('produtos')
-        .select('*')
-        .or(`empresa_id.eq.${targetFilialId},filial_id.eq.${targetFilialId}`);
+        .select('*');
+
+      if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
+        query = query.or(`filial_id.eq.${targetFilialId},empresa_id.eq.${targetEmpresaId}`);
+      } else if (targetEmpresaId) {
+        query = query.eq('empresa_id', targetEmpresaId);
+      }
+
+      const { data: produtosLoja, error } = await query;
 
       if (error) {
         console.error("Erro ao carregar produtos na vitrine do PDV:", error);
         return;
       }
 
-      // Buscar IMEIs atrelados a esses produtos diretamente para evitar limites globais
+      // 2. Buscar IMEIs físicos disponíveis estritamente não vendidos desta filial/empresa
       let imeisMap = {};
       const prodsIds = (produtosLoja || []).map(p => p.id).filter(Boolean);
       const catIds = (produtosLoja || []).map(p => p.catalogo_id).filter(Boolean);
       const allIds = [...new Set([...prodsIds, ...catIds])];
 
-      if (allIds.length > 0) {
-        const { data: imeisLoja } = await supabase
-          .from('imeis')
-          .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
-          .in('produto_id', allIds)
-          .eq('vendido', false);
-          
-        (imeisLoja || []).forEach(im => {
-           if (!imeisMap[im.produto_id]) imeisMap[im.produto_id] = [];
-           imeisMap[im.produto_id].push(im);
-        });
+      let imeisQuery = supabase
+        .from('imeis')
+        .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
+        .eq('vendido', false)
+        .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
 
-        if (imeisLoja && imeisLoja.length > 0) {
-          setDisponiveisImeis(prev => {
-            const mapPrev = new Map((prev || []).map(i => [i.id || i.imei, i]));
-            imeisLoja.forEach(i => mapPrev.set(i.id || i.imei, i));
-            return Array.from(mapPrev.values());
-          });
-        }
+      if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
+        imeisQuery = imeisQuery.or(`filial_id.eq.${targetFilialId},empresa_id.eq.${targetEmpresaId}`);
+      } else if (targetEmpresaId) {
+        imeisQuery = imeisQuery.eq('empresa_id', targetEmpresaId);
       }
 
-      // Mapeamento forçado: clona o valor de 'quantidade' para os nomes prováveis que o componente do Card (UI) utiliza
+      const { data: imeisLoja } = await imeisQuery;
+          
+      (imeisLoja || []).forEach(im => {
+        if (!imeisMap[im.produto_id]) imeisMap[im.produto_id] = [];
+        imeisMap[im.produto_id].push(im);
+      });
+
+      if (imeisLoja && imeisLoja.length > 0) {
+        setDisponiveisImeis(prev => {
+          const mapPrev = new Map((prev || []).map(i => [i.id || i.imei, i]));
+          imeisLoja.forEach(i => mapPrev.set(i.id || i.imei, i));
+          return Array.from(mapPrev.values());
+        });
+      }
+
+      // Mapeamento forçado: preserva dados consistentes
       const produtosMapeados = (produtosLoja || []).map(item => ({
         ...item,
         estoque: item.quantidade || 0,
@@ -3358,7 +3372,6 @@ export default function Dashboard({ session, profileDataProps }) {
         imeis_db: imeisMap[item.id] || []
       }));
 
-      // Define o estado com os dados já mastigados para a UI
       setProdutosDisponiveisPDV(produtosMapeados);
     } catch (err) {
       console.error("Erro ao executar fetchProdutosPDV:", err);
@@ -6202,6 +6215,99 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // Função Utilitária Unificada para Cálculo de Estoque por Filial (Fonte Única da Verdade para PDV e Modal Multiloja)
+  const calcularEstoqueProdutoFilial = (produto, targetFilialIdParam, todosProds = null, todosImeis = null) => {
+    if (!produto) return 0;
+    if (produto.categoria === 'SERVICO') return 999;
+
+    const fId = String(targetFilialIdParam || activeFilialId || profile?.filial_id || '');
+    const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) ||
+                      (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
+                      produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
+
+    const pNome = (produto.nome || '').toLowerCase().trim();
+    const pId = String(produto.id || '');
+    const pCatId = String(produto.catalogo_id || '');
+
+    const imeisPool = todosImeis || disponiveisImeis || [];
+    const prodsPool = todosProds || produtosDisponiveisPDV || produtos || [];
+
+    if (isCelular) {
+      // Contagem estrita de IMEIs físicos disponíveis vinculados a esta filial específica
+      const imeisFilial = imeisPool.filter(im => {
+        if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+
+        const imFid = String(im.filial_id || '');
+        const imeiFilialObj = filiais.find(f => String(f.id) === imFid);
+        const targetFilialObj = filiais.find(f => String(f.id) === fId);
+
+        const matchFilial = !fId || 
+                            imFid === fId || 
+                            String(im.empresa_id) === fId ||
+                            (imeiFilialObj && targetFilialObj && imeiFilialObj.nome && targetFilialObj.nome && imeiFilialObj.nome.toLowerCase().trim() === targetFilialObj.nome.toLowerCase().trim());
+
+        if (!matchFilial) return false;
+
+        let imNome = im.produtos?.nome;
+        if (!imNome) {
+          const prodDono = prodsPool.find(pr => String(pr.id) === String(im.produto_id));
+          if (prodDono) imNome = prodDono.nome;
+        }
+
+        return String(im.produto_id) === pId ||
+               String(im.produto_id) === pCatId ||
+               (imNome && pNome && imNome.toLowerCase().trim() === pNome);
+      });
+
+      if (imeisFilial.length > 0) {
+        return imeisFilial.length;
+      }
+
+      // Fallback: se nenhum IMEI individual foi cadastrado ainda, verificar registro físico direto na tabela produtos para esta filial
+      const matchedProds = prodsPool.filter(pr => {
+        const prFid = String(pr.filial_id || '');
+        const matchFilial = !fId || prFid === fId || String(pr.empresa_id) === fId;
+        if (!matchFilial) return false;
+
+        const prNome = (pr.nome || '').toLowerCase().trim();
+        return (pr.id && pId && String(pr.id) === pId) ||
+               (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) ||
+               (pr.id && pCatId && String(pr.id) === pCatId) ||
+               (prNome && pNome && prNome === pNome);
+      });
+
+      if (matchedProds.length > 0) {
+        return matchedProds.reduce((sum, p) => sum + Number(p.quantidade || p.estoque || p.estoque_local || 0), 0);
+      }
+
+      return 0;
+    }
+
+    // Para Acessórios e demais produtos: Somar quantidade de todos os registros da filial ativa
+    const matchedProds = prodsPool.filter(pr => {
+      const prFid = String(pr.filial_id || '');
+      const matchFilial = !fId || prFid === fId || String(pr.empresa_id) === fId;
+      if (!matchFilial) return false;
+
+      const prNome = (pr.nome || '').toLowerCase().trim();
+      const prCor = (pr.cor || '').toLowerCase().trim();
+      const pCor = (produto.cor || '').toLowerCase().trim();
+      const prEan = (pr.codigo_barras || '').toLowerCase().trim();
+      const pEan = (produto.codigo_barras || '').toLowerCase().trim();
+
+      if (pr.id && pId && String(pr.id) === pId) return true;
+      if (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) return true;
+      if (pr.id && pCatId && String(pr.id) === pCatId) return true;
+
+      if (prNome !== pNome) return false;
+      if (prCor && pCor && prCor !== pCor) return false;
+      if (prEan && pEan && prEan !== pEan) return false;
+      return true;
+    });
+
+    return matchedProds.reduce((sum, p) => sum + Number(p.quantidade || p.estoque || p.estoque_local || p.quantidade_local || 0), 0);
+  };
+
   // Visualizador de Disponibilidade Multiloja
   const handleVerMultiloja = async (produto) => {
     setSelectedMultilojaProd(produto);
@@ -6209,76 +6315,42 @@ export default function Dashboard({ session, profileDataProps }) {
     setMultilojaStockData([]);
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      const isCelular = (produto.tipo && produto.tipo.toUpperCase().includes('CELULAR')) || (produto.categoria && produto.categoria.toUpperCase().includes('CELULAR')) || produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
-      // 1. Buscar todos os registros físicos por nome na tabela produtos
+      // 1. Buscar todos os registros físicos por nome na tabela produtos da empresa
       const { data: prods } = await supabase
         .from('produtos')
-        .select('id, nome, quantidade, tipo, categoria, filial_id')
+        .select('id, nome, quantidade, tipo, categoria, filial_id, empresa_id, catalogo_id, cor, codigo_barras')
         .eq('empresa_id', targetEmpresaId)
         .ilike('nome', produto.nome);
 
       const prodIds = (prods || []).map(p => p.id);
 
-      // 2. Buscar IMEIs disponíveis por produto_id OU pelo nome do produto via join
-      let imeisPorFilial = {};
+      // 2. Buscar todos os IMEIs correspondentes não vendidos da empresa
+      let todosImeis = [];
+      const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) || 
+                        (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) || 
+                        produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
+
       if (isCelular) {
-        // Busca por produto_id nos registros encontrados
-        if (prodIds.length > 0) {
-          const { data: imeisByProdId } = await supabase
-            .from('imeis')
-            .select('produto_id, status, vendido, filial_id')
-            .in('produto_id', prodIds)
-            .eq('vendido', false)
-            .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
-
-          (imeisByProdId || []).forEach(im => {
-            const fid = String(im.filial_id || '');
-            imeisPorFilial[fid] = (imeisPorFilial[fid] || 0) + 1;
-          });
-        }
-
-        // Busca adicional por nome no join (imeis -> produtos)
-        const { data: imeisByName } = await supabase
+        let imeisQuery = supabase
           .from('imeis')
-          .select('produto_id, status, vendido, filial_id, produtos(nome)')
+          .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor, produtos(nome)')
           .eq('empresa_id', targetEmpresaId)
           .eq('vendido', false)
           .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
 
-        (imeisByName || []).forEach(im => {
-          const imeiNome = im.produtos?.nome || '';
-          if (imeiNome.toLowerCase().trim() === produto.nome.toLowerCase().trim()) {
-            const fid = String(im.filial_id || '');
-            imeisPorFilial[fid] = (imeisPorFilial[fid] || 0) + 1;
-          }
-        });
+        if (prodIds.length > 0) {
+          imeisQuery = imeisQuery.or(`produto_id.in.(${prodIds.join(',')})`);
+        }
+
+        const { data: imeisData } = await imeisQuery;
+        if (imeisData) todosImeis = imeisData;
       }
 
-      // 3. Mapear filiais calculando o saldo real
+      // 3. Mapear filiais calculando o saldo real com a mesma função unificada
       const stockList = filiais.map(fil => {
-        const matchedProds = (prods || []).filter(p => String(p.filial_id) === String(fil.id));
-        const matchedProd = matchedProds[0] || null;
-        let finalQty = 0;
-
-        if (isCelular) {
-          // Para celulares: contar IMEIs disponíveis por filial
-          finalQty = imeisPorFilial[String(fil.id)] || 0;
-        } else if (produto.categoria === 'SERVICO') {
-          finalQty = 999;
-        } else {
-          // Para acessórios: somar quantidade de todos os registros desta filial
-          finalQty = matchedProds.reduce((sum, p) => sum + (p.quantidade || 0), 0);
-
-          // Se não há registro por filial, verificar se existe no catálogo e somar do estado local
-          if (finalQty === 0) {
-            const localProd = (produtos || []).filter(pr =>
-              String(pr.filial_id) === String(fil.id) &&
-              pr.nome?.toLowerCase().trim() === produto.nome.toLowerCase().trim()
-            );
-            finalQty = localProd.reduce((sum, p) => sum + (p.quantidade || 0), 0);
-          }
-        }
+        const finalQty = calcularEstoqueProdutoFilial(produto, fil.id, prods, todosImeis);
+        const matchedProd = (prods || []).find(p => String(p.filial_id) === String(fil.id));
 
         return {
           filialId: fil.id,
@@ -10661,68 +10733,8 @@ export default function Dashboard({ session, profileDataProps }) {
       : (produtos && produtos.length > 0 ? produtos : produtosFilial);
 
     return Array.from(uniqueMap.values()).map(p => {
-      const isCelular = (p.tipo && p.tipo.toUpperCase().includes('CELULAR')) || (p.categoria && p.categoria.toUpperCase().includes('CELULAR')) || p.categoria === 'IOS' || p.categoria === 'ANDROID';
-      let localQty = 0;
-
-      if (isCelular) {
-        const localImeis = (disponiveisImeis || []).filter(im => {
-          let imNome = im.produtos?.nome;
-          if (!imNome) {
-            const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
-            if (prodDono) imNome = prodDono.nome;
-          }
-          const matchesProd = (im.produto_id === p.id) || (im.produto_id === p.catalogo_id) || (imNome && p.nome && imNome.toLowerCase().trim() === p.nome.toLowerCase().trim());
-          const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
-          const matchesFilial = !activeFilialId || 
-            String(im.filial_id) === String(activeFilialId) || 
-            String(im.empresa_id) === String(activeFilialId) ||
-            (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
-          
-          // O status também deve considerar se foi escrito de forma diferente, já que o multiloja aceita variações de DISPONÍVEL
-          const isNotSold = !im.vendido && im.status !== 'VENDIDO' && im.status !== 'EM_TRANSITO';
-          return matchesProd && matchesFilial && isNotSold;
-        });
-        localQty = localImeis.length;
-
-        // Se não houver IMEIs físicos bipados, buscar a quantidade informada na coluna quantidade
-        if (localQty === 0) {
-          const matchPhysical = (fonteBaseProds || []).find(pr => 
-            (pr.id && p.id && String(pr.id) === String(p.id)) ||
-            (pr.catalogo_id && p.id && String(pr.catalogo_id) === String(p.id)) ||
-            (pr.id && p.catalogo_id && String(pr.id) === String(p.catalogo_id)) ||
-            (pr.nome && p.nome && pr.nome.toLowerCase().trim() === p.nome.toLowerCase().trim())
-          );
-          if (matchPhysical) {
-            localQty = Number(matchPhysical.quantidade ?? matchPhysical.estoque ?? 0);
-          }
-          if (localQty === 0) {
-            localQty = Number(p.quantidade ?? p.estoque ?? 0);
-          }
-        }
-      } else if (p.categoria === 'SERVICO') {
-        localQty = 999;
-      } else {
-        // Acessórios e Geral: Buscar a quantidade exata para este produto nesta filial de forma tolerante
-        const localProds = (fonteBaseProds || []).filter(pr => {
-          const isFilialMatch = !activeFilialId || String(pr.filial_id) === String(activeFilialId) || String(pr.empresa_id) === String(activeFilialId);
-          if (!isFilialMatch) return false;
-          if (pr.id && p.id && String(pr.id) === String(p.id)) return true;
-          if (pr.id && p.catalogo_id && String(pr.id) === String(p.catalogo_id)) return true;
-
-          const prName = (pr.nome || '').toLowerCase().trim();
-          const pName = (p.nome || '').toLowerCase().trim();
-          const prCor = (pr.cor || '').toLowerCase().trim();
-          const pCor = (p.cor || '').toLowerCase().trim();
-          const prEan = (pr.codigo_barras || '').toLowerCase().trim();
-          const pEan = (p.codigo_barras || '').toLowerCase().trim();
-
-          if (prName !== pName) return false;
-          if (prCor && pCor && prCor !== pCor) return false;
-          if (prEan && pEan && prEan !== pEan) return false;
-          return true;
-        });
-        localQty = localProds.reduce((sum, item) => sum + (item.quantidade || item.estoque || item.estoque_local || item.quantidade_local || 0), 0);
-      }
+      // Cálculo do saldo rigoroso utilizando a função unificada (mesma regra do Modal Multiloja)
+      const localQty = calcularEstoqueProdutoFilial(p, activeFilialId, fonteBaseProds, disponiveisImeis);
 
       // Resolução ultra tolerante de IMEIs e Cor do aparelho / produto
       const allProdImeis = (disponiveisImeis || []).filter(im => {
