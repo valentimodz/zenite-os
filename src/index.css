@@ -39,39 +39,39 @@
 }
 
 html.dark, :root.dark {
-  /* DARK MODE - PREMIUM SLATE ONYX REFINED */
-  --background: #090B10;
-  --foreground: #F8FAFC;
+  /* DARK MODE - CORES ORIGINAIS ZÊNITE (PRETO PURO & ROXO #6A0DAD) */
+  --background: #000000;
+  --foreground: #FFFFFF;
 
-  --card: #11141E;
-  --card-foreground: #F8FAFC;
+  --card: #0A0A0A;
+  --card-foreground: #FFFFFF;
 
-  --popover: #11141E;
-  --popover-foreground: #F8FAFC;
+  --popover: #0A0A0A;
+  --popover-foreground: #FFFFFF;
 
-  --primary: #8B5CF6;
+  --primary: #6A0DAD;
   --primary-foreground: #FFFFFF;
 
-  --secondary: #181C28;
-  --secondary-foreground: #F1F5F9;
+  --secondary: #111111;
+  --secondary-foreground: #FFFFFF;
 
-  --muted: #181C28;
-  --muted-foreground: #94A3B8;
+  --muted: #111111;
+  --muted-foreground: #9CA3AF;
 
-  --accent: #231942;
-  --accent-foreground: #C4B5FD;
+  --accent: #1E0B36;
+  --accent-foreground: #D8B4FE;
 
   --destructive: #EF4444;
   --destructive-foreground: #FFFFFF;
 
-  --border: #1E2433;
-  --input: #1E2433;
-  --ring: #8B5CF6;
+  --border: #222222;
+  --input: #222222;
+  --ring: #6A0DAD;
 
   /* Aliases de superfície */
-  --bg-surface: #11141E;
-  --bg-surface-elevated: #161A26;
-  --bg-surface-muted: #1C2232;
+  --bg-surface: #0A0A0A;
+  --bg-surface-elevated: #111111;
+  --bg-surface-muted: #161616;
 }
 
 html.light, :root.light {
