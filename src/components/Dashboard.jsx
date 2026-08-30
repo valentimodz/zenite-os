@@ -8338,97 +8338,97 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Excluir Produto (Gerente/Admin) - Validação Estrita & Reconciliação Imediata
+  // Excluir Produto (Gerente/Admin) - Padrão Oficial Supabase (Async/Await & Desestruturação Nativa)
   const handleDeleteProduto = async (itemOrId) => {
     if (!itemOrId) return;
     const targetItem = typeof itemOrId === 'object' ? itemOrId : null;
     const targetId = typeof itemOrId === 'object' ? itemOrId.id : itemOrId;
     const targetNome = targetItem?.nome || produtos.find(p => p.id === targetId)?.nome || catalogoProdutos.find(c => c.id === targetId)?.nome || null;
-    const targetCatalogoId = targetItem?.catalogo_id || null;
+    const targetCatalogoId = targetItem?.catalogo_id || (catalogoProdutos.some(c => c.id === targetId) ? targetId : null);
 
     if (!window.confirm(`Tem certeza de que deseja deletar "${targetNome || 'este item'}" do estoque e catálogo?`)) {
       return;
     }
 
+    setLoadingDados(true);
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      setLoadingDados(true);
 
-      let deleteErrors = [];
+      // 1. Limpar IMEIs associados antes de deletar o produto pai
+      if (targetId) {
+        try {
+          await supabase
+            .from('imeis')
+            .delete()
+            .eq('produto_id', targetId);
+        } catch (imeiEx) {
+          console.warn('Aviso ao excluir IMEIs vinculados:', imeiEx);
+        }
+      }
 
-      // 1. Tentar deletar da tabela produtos (estoque físico)
+      // 2. Deletar da tabela produtos (estoque físico)
       if (targetId) {
         const { error: prodErr } = await supabase
           .from('produtos')
           .delete()
           .eq('id', targetId);
-        if (prodErr) deleteErrors.push({ tabela: 'produtos', error: prodErr });
+
+        if (prodErr) {
+          const isFk = prodErr.code === '23503' || (prodErr.message && prodErr.message.includes('foreign key'));
+          if (isFk) {
+            showToast('Não é possível excluir este produto pois ele possui movimentações ou vendas registradas.', 'error');
+          } else {
+            showToast(`Erro ao excluir produto: ${prodErr.message}`, 'error');
+          }
+          return;
+        }
       }
 
-      // 2. Se tiver catalogo_id ou for do catálogo mestre, deletar de produtos_catalogo
-      const catDeleteId = targetCatalogoId || (catalogoProdutos.some(c => c.id === targetId) ? targetId : null);
-      if (catDeleteId) {
+      // 3. Deletar da tabela produtos_catalogo se aplicável
+      if (targetCatalogoId) {
         const { error: catErr } = await supabase
           .from('produtos_catalogo')
           .delete()
-          .eq('id', catDeleteId);
-        if (catErr) deleteErrors.push({ tabela: 'produtos_catalogo', error: catErr });
+          .eq('id', targetCatalogoId);
+
+        if (catErr) {
+          const isFk = catErr.code === '23503' || (catErr.message && catErr.message.includes('foreign key'));
+          if (isFk) {
+            showToast('Não é possível excluir do catálogo pois há registros vinculados.', 'error');
+          } else {
+            showToast(`Erro ao excluir do catálogo: ${catErr.message}`, 'error');
+          }
+          return;
+        }
       }
 
-      // 3. Deletar IMEIs associados se for celular
-      if (targetId) {
-        await supabase
-          .from('imeis')
-          .delete()
-          .eq('produto_id', targetId)
-          .catch(e => console.warn('Aviso ao limpar imeis:', e));
-      }
-
-      // 4. Verificação rigorosa do retorno do Supabase
-      const fkError = deleteErrors.find(e => 
-        e.error?.code === '23503' || 
-        (e.error?.message && (
-          e.error.message.includes('foreign key') || 
-          e.error.message.includes('23503') ||
-          e.error.message.includes('violates foreign key constraint')
-        ))
-      );
-
-      if (fkError) {
-        showToast('Não é possível excluir este produto pois ele possui histórico de movimentações/vendas vinculadas no sistema.', 'error');
-        return;
-      }
-
-      const criticalError = deleteErrors.find(e => e.error);
-      if (criticalError && !targetCatalogoId) {
-        showToast(`Erro ao excluir do banco de dados: ${criticalError.error.message || 'Falha na operação.'}`, 'error');
-        return;
-      }
-
-      // 5. MUTAÇÃO DE ESTADO OBRIGATÓRIA (Reconciliação Otimista)
+      // 4. Sincronização de Interface: Mutação de estado local imediata
       const nomeLower = targetNome ? targetNome.toLowerCase().trim() : null;
 
       setProdutos(prev => prev.filter(p => {
         if (p.id === targetId) return false;
-        if (catDeleteId && p.catalogo_id === catDeleteId) return false;
+        if (targetCatalogoId && p.catalogo_id === targetCatalogoId) return false;
         if (nomeLower && p.nome && p.nome.toLowerCase().trim() === nomeLower && p.id === targetId) return false;
         return true;
       }));
 
       setCatalogoProdutos(prev => prev.filter(c => {
-        if (c.id === targetId || (catDeleteId && c.id === catDeleteId)) return false;
-        if (nomeLower && c.nome && c.nome.toLowerCase().trim() === nomeLower && !catDeleteId) return false;
+        if (c.id === targetId || (targetCatalogoId && c.id === targetCatalogoId)) return false;
+        if (nomeLower && c.nome && c.nome.toLowerCase().trim() === nomeLower && !targetCatalogoId) return false;
         return true;
       }));
 
       setEstoqueConsolidadoLista(prev => prev.filter(item => {
-        if (item.id === targetId || (catDeleteId && item.catalogo_id === catDeleteId)) return false;
+        if (item.id === targetId || (targetCatalogoId && item.catalogo_id === targetCatalogoId)) return false;
         return true;
       }));
 
-      setDisponiveisImeis(prev => prev.filter(im => im.produto_id !== targetId && (!catDeleteId || im.produto_id !== catDeleteId)));
+      setDisponiveisImeis(prev => prev.filter(im => im.produto_id !== targetId && (!targetCatalogoId || im.produto_id !== targetCatalogoId)));
 
-      // 6. Recarregar direto da fonte para garantir integridade absoluta
+      // 5. Toast de sucesso confirmado no banco
+      showToast(`Produto "${targetNome || 'Item'}" excluído com sucesso!`, 'success');
+
+      // 6. Recarregar da fonte
       if (targetEmpresaId) {
         fetchCatalogoProdutos(targetEmpresaId).catch(() => {});
         const targetFilial = activeFilialId || profile?.filial_id || targetEmpresaId;
@@ -8437,11 +8437,9 @@ export default function Dashboard({ session, profileDataProps }) {
           fetchEstoqueConsolidado(filtroFilialEstoque || targetFilial, buscaEstoque, filtroCategoriaEstoque).catch(() => {});
         }
       }
-
-      showToast(`Produto "${targetNome || 'Item'}" excluído com sucesso!`, 'success');
     } catch (err) {
-      console.error('Erro inesperado ao deletar produto:', err);
-      showToast(`Erro inesperado ao excluir produto: ${err.message || 'Falha na conexão'}`, 'error');
+      console.error('Exceção ao deletar produto:', err);
+      showToast(`Falha inesperada ao deletar produto: ${err.message || 'Erro de conexão'}`, 'error');
     } finally {
       setLoadingDados(false);
     }
