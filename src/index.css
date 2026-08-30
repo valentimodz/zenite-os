@@ -39,39 +39,39 @@
 }
 
 html.dark, :root.dark {
-  /* DARK MODE - CORES ORIGINAIS ZÊNITE (PRETO PURO & ROXO #6A0DAD) */
-  --background: #000000;
-  --foreground: #FFFFFF;
+  /* DARK MODE - OPÇÃO 4: MINIMALIST CARBON / MATTE */
+  --background: #121214;
+  --foreground: #F4F4F5;
 
-  --card: #0A0A0A;
-  --card-foreground: #FFFFFF;
+  --card: #1A1A1E;
+  --card-foreground: #F4F4F5;
 
-  --popover: #0A0A0A;
-  --popover-foreground: #FFFFFF;
+  --popover: #1A1A1E;
+  --popover-foreground: #F4F4F5;
 
-  --primary: #6A0DAD;
+  --primary: #9D4EDD;
   --primary-foreground: #FFFFFF;
 
-  --secondary: #111111;
-  --secondary-foreground: #FFFFFF;
+  --secondary: #222226;
+  --secondary-foreground: #F4F4F5;
 
-  --muted: #111111;
-  --muted-foreground: #9CA3AF;
+  --muted: #222226;
+  --muted-foreground: #A1A1AA;
 
-  --accent: #1E0B36;
-  --accent-foreground: #D8B4FE;
+  --accent: #2A1B3D;
+  --accent-foreground: #E0AAFF;
 
   --destructive: #EF4444;
   --destructive-foreground: #FFFFFF;
 
-  --border: #222222;
-  --input: #222222;
-  --ring: #6A0DAD;
+  --border: #2A2A30;
+  --input: #2A2A30;
+  --ring: #9D4EDD;
 
   /* Aliases de superfície */
-  --bg-surface: #0A0A0A;
-  --bg-surface-elevated: #111111;
-  --bg-surface-muted: #161616;
+  --bg-surface: #1A1A1E;
+  --bg-surface-elevated: #222226;
+  --bg-surface-muted: #2A2A30;
 }
 
 html.light, :root.light {
