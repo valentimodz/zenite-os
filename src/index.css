@@ -3,43 +3,43 @@
 @import "tailwindcss/utilities";
 
 :root {
-  /* LIGHT MODE (DEFAULT / ROOT) - PREMIUM SLATE/ZINC CLEAN */
-  --background: #F8FAFC;
-  --foreground: #0F172A;
+  /* DARK MODE PADRÃO - 100% FIEL (PRETO PURO #000000, CARDS #0A0A0A, BORDAS #222222, ROXO #6A0DAD) */
+  --background: #000000;
+  --foreground: #FFFFFF;
 
-  --card: #FFFFFF;
-  --card-foreground: #0F172A;
+  --card: #0A0A0A;
+  --card-foreground: #FFFFFF;
 
-  --popover: #FFFFFF;
-  --popover-foreground: #0F172A;
+  --popover: #0A0A0A;
+  --popover-foreground: #FFFFFF;
 
-  --primary: #7C3AED;
+  --primary: #6A0DAD;
   --primary-foreground: #FFFFFF;
 
-  --secondary: #F1F5F9;
-  --secondary-foreground: #1E293B;
+  --secondary: #111111;
+  --secondary-foreground: #FFFFFF;
 
-  --muted: #F1F5F9;
-  --muted-foreground: #64748B;
+  --muted: #111111;
+  --muted-foreground: #9CA3AF;
 
-  --accent: #F5F3FF;
-  --accent-foreground: #7C3AED;
+  --accent: #1E0B36;
+  --accent-foreground: #D8B4FE;
 
   --destructive: #EF4444;
   --destructive-foreground: #FFFFFF;
 
-  --border: #E2E8F0;
-  --input: #E2E8F0;
-  --ring: #7C3AED;
+  --border: #222222;
+  --input: #222222;
+  --ring: #6A0DAD;
 
   /* Aliases de superfície */
-  --bg-surface: #FFFFFF;
-  --bg-surface-elevated: #F8FAFC;
-  --bg-surface-muted: #F1F5F9;
+  --bg-surface: #0A0A0A;
+  --bg-surface-elevated: #111111;
+  --bg-surface-muted: #161616;
 }
 
 html.dark, :root.dark {
-  /* DARK MODE - 100% FIEL À IMAGEM DE REFERÊNCIA (PRETO PURO & ROXO #6A0DAD) */
+  /* DARK MODE EXPLICITO */
   --background: #000000;
   --foreground: #FFFFFF;
 
