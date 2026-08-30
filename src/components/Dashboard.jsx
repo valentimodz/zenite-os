@@ -7,7 +7,7 @@ import {
   Smartphone, Tag, FileText as LucideFileText, Search, Upload, Award, DollarSign,
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
-  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter, Clock
+  MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter, Clock, Image as ImageIcon
 } from 'lucide-react';
 import { emitirNfseStub } from '../services/fiscal';
 import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
@@ -19735,7 +19735,35 @@ export default function Dashboard({ session, profileDataProps }) {
                   e.stopPropagation();
                   try {
                     let blob = null;
-                    let filename = `comprovante_fechamento_${modalDetalheCaixa.id || 'caixa'}_${idx + 1}.jpg`;
+
+                    // Obter e sanitizar o nome da filial
+                    const rawFilialNome = modalDetalheCaixa.filiais?.nome || 
+                                          modalDetalheCaixa.filial_nome || 
+                                          filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome || 
+                                          'Filial';
+                    const nomeFilialSanitizado = rawFilialNome
+                      .normalize('NFD')
+                      .replace(/[\u0300-\u036f]/g, '') // remove acentos
+                      .replace(/[^a-zA-Z0-9_-]/g, '_') // substitui caracteres especiais e espaços por underline
+                      .replace(/_+/g, '_'); // remove underlines duplicados
+
+                    // Obter e formatar a data sem barras ou caracteres inválidos (formato: YYYY-MM-DD_HH-mm)
+                    const rawData = modalDetalheCaixa.data_fechamento || modalDetalheCaixa.data_abertura || modalDetalheCaixa.created_at;
+                    let dataFormatada = 'fechamento';
+                    if (rawData) {
+                      const d = new Date(rawData);
+                      if (!isNaN(d.getTime())) {
+                        const ano = d.getFullYear();
+                        const mes = String(d.getMonth() + 1).padStart(2, '0');
+                        const dia = String(d.getDate()).padStart(2, '0');
+                        const hora = String(d.getHours()).padStart(2, '0');
+                        const min = String(d.getMinutes()).padStart(2, '0');
+                        dataFormatada = `${ano}-${mes}-${dia}_${hora}-${min}`;
+                      }
+                    }
+
+                    const sufixoIndice = comprovantesList.length > 1 ? `_${idx + 1}` : '';
+                    const filename = `Comprovante_${nomeFilialSanitizado}_${dataFormatada}${sufixoIndice}.jpg`;
 
                     if (urlOrPath.startsWith('data:')) {
                       // Base64 data URL
@@ -19768,7 +19796,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       link.click();
                       document.body.removeChild(link);
                       window.URL.revokeObjectURL(tempUrl);
-                      showToast('Comprovante baixado com sucesso!', 'success');
+                      showToast(`Download de "${filename}" concluído!`, 'success');
                     }
                   } catch (err) {
                     console.error('Erro ao baixar comprovante:', err);
