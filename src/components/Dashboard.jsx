@@ -8402,40 +8402,50 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       }
 
-      // 4. Sincronização de Interface: Mutação de estado local imediata
+      // 4. Sincronização de Interface: Mutação de estado local imediata em todos os arrays de dados
       const nomeLower = targetNome ? targetNome.toLowerCase().trim() : null;
+      const targetIdStr = String(targetId || '');
+      const catIdStr = targetCatalogoId ? String(targetCatalogoId) : '';
 
-      setProdutos(prev => prev.filter(p => {
-        if (p.id === targetId) return false;
-        if (targetCatalogoId && p.catalogo_id === targetCatalogoId) return false;
-        if (nomeLower && p.nome && p.nome.toLowerCase().trim() === nomeLower && p.id === targetId) return false;
+      // Filtro universal para qualquer objeto produto/estoque
+      const itemNaoDeletado = (item) => {
+        if (!item) return false;
+        const itemId = String(item.id || '');
+        const itemCatId = String(item.catalogo_id || '');
+        const itemNome = (item.nome || '').toLowerCase().trim();
+
+        if (targetIdStr && (itemId === targetIdStr || itemCatId === targetIdStr)) return false;
+        if (catIdStr && (itemId === catIdStr || itemCatId === catIdStr)) return false;
+        if (nomeLower && itemNome === nomeLower && (itemId === targetIdStr || itemCatId === catIdStr || !itemId)) return false;
         return true;
-      }));
+      };
 
-      setCatalogoProdutos(prev => prev.filter(c => {
-        if (c.id === targetId || (targetCatalogoId && c.id === targetCatalogoId)) return false;
-        if (nomeLower && c.nome && c.nome.toLowerCase().trim() === nomeLower && !targetCatalogoId) return false;
-        return true;
-      }));
-
-      setEstoqueConsolidadoLista(prev => prev.filter(item => {
-        if (item.id === targetId || (targetCatalogoId && item.catalogo_id === targetCatalogoId)) return false;
-        return true;
-      }));
-
-      setDisponiveisImeis(prev => prev.filter(im => im.produto_id !== targetId && (!targetCatalogoId || im.produto_id !== targetCatalogoId)));
+      setEstoqueConsolidadoLista(prev => (Array.isArray(prev) ? prev.filter(itemNaoDeletado) : []));
+      setProdutos(prev => (Array.isArray(prev) ? prev.filter(itemNaoDeletado) : []));
+      setCatalogoProdutos(prev => (Array.isArray(prev) ? prev.filter(itemNaoDeletado) : []));
+      setDisponiveisImeis(prev => (Array.isArray(prev) ? prev.filter(im => {
+        const prodId = String(im.produto_id || '');
+        return prodId !== targetIdStr && (!catIdStr || prodId !== catIdStr);
+      }) : []));
 
       // 5. Toast de sucesso confirmado no banco
       showToast(`Produto "${targetNome || 'Item'}" excluído com sucesso!`, 'success');
 
-      // 6. Recarregar da fonte
+      // 6. Sincronização Absoluta: Refetch limpo direto do Supabase
       if (targetEmpresaId) {
-        fetchCatalogoProdutos(targetEmpresaId).catch(() => {});
-        const targetFilial = activeFilialId || profile?.filial_id || targetEmpresaId;
-        if (targetFilial) {
-          fetchProdutosPDV(targetFilial).catch(() => {});
-          fetchEstoqueConsolidado(filtroFilialEstoque || targetFilial, buscaEstoque, filtroCategoriaEstoque).catch(() => {});
-        }
+        await Promise.allSettled([
+          fetchCatalogoProdutos(targetEmpresaId),
+          fetchGerenteData ? fetchGerenteData(targetEmpresaId) : Promise.resolve(),
+          (async () => {
+            const targetFilial = filtroFilialEstoque || activeFilialId || profile?.filial_id || targetEmpresaId;
+            if (targetFilial) {
+              await Promise.allSettled([
+                fetchProdutosPDV(targetFilial),
+                fetchEstoqueConsolidado(filtroFilialEstoque || targetFilial, buscaEstoque, filtroCategoriaEstoque)
+              ]);
+            }
+          })()
+        ]);
       }
     } catch (err) {
       console.error('Exceção ao deletar produto:', err);
