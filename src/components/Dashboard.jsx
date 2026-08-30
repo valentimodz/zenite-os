@@ -1223,7 +1223,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
       setTorreFiliais(uniqueFiliais);
       setTorreData(tableData);
-      fetchEstoqueMovimentacoes();
     } catch (error) {
       console.error(error);
       alert('Erro ao carregar Torre de Controlo');
@@ -5516,42 +5515,15 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setTransferenciasPendentesLoading(true);
     try {
-      let { data, error } = await supabase
-        .from('movimentacoes_estoque')
-        .select('*')
-        .or(`empresa_id_destino.eq.${targetFilialId},filial_destino_id.eq.${targetFilialId}`)
-        .eq('status', 'pendente')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        const { data: dataAlt, error: errAlt } = await supabase
-          .from('estoque_movimentacoes')
-          .select('*')
-          .or(`empresa_id_destino.eq.${targetFilialId},filial_destino_id.eq.${targetFilialId}`)
-          .eq('status', 'pendente')
-          .order('created_at', { ascending: false });
-
-        if (!errAlt && dataAlt) {
-          data = dataAlt;
-        }
-      }
-
       let localPending = [];
       try {
         const rawLocal = localStorage.getItem(`zenite_pending_transfers_${targetFilialId}`);
         if (rawLocal) localPending = JSON.parse(rawLocal) || [];
       } catch (e) { }
 
-      const combined = [...(data || [])];
-      localPending.forEach(lp => {
-        if (!combined.some(c => String(c.id) === String(lp.id))) {
-          combined.push(lp);
-        }
-      });
-
-      setTransferenciasPendentes(combined);
+      setTransferenciasPendentes(localPending);
     } catch (err) {
-      console.error("Erro ao buscar transferências pendentes:", err);
+      console.error("Erro ao carregar transferências pendentes locais:", err);
     } finally {
       setTransferenciasPendentesLoading(false);
     }
@@ -5616,26 +5588,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const dataRecebimento = new Date().toISOString();
       const recebidoPorNome = profile?.nome || profile?.email || 'Gerente Filial';
-
-      if (item.id && !String(item.id).startsWith('mov_')) {
-        await supabase
-          .from('movimentacoes_estoque')
-          .update({
-            status: 'concluido',
-            data_recebimento: dataRecebimento,
-            recebido_por: profile?.id
-          })
-          .eq('id', item.id);
-
-        await supabase
-          .from('estoque_movimentacoes')
-          .update({
-            status: 'concluido',
-            data_recebimento: dataRecebimento,
-            recebido_por: profile?.id
-          })
-          .eq('id', item.id);
-      }
 
       try {
         const key = `zenite_pending_transfers_${targetEmpresaId}`;
@@ -5747,20 +5699,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
           if (errIns) throw errIns;
           produtoIdFinal = novoProd?.id;
-        }
-
-        // 2. Grava o histórico contábil de forma segura sem encadeamentos inválidos
-        try {
-          await supabase.from('movimentacoes_estoque').insert([{
-            empresa_id: empresaId,
-            filial_id: empresaId,
-            produto_id: produtoIdFinal,
-            quantidade: qtyToAdd,
-            tipo: 'ENTRADA_DISTRIBUICAO',
-            usuario_id: usuarioId
-          }]);
-        } catch (logErr) {
-          console.log("Aviso de log contábil ignorado:", logErr.message);
         }
 
         totalEnviado += qtyToAdd;
@@ -7908,35 +7846,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar histórico de movimentações de estoque
   const fetchEstoqueMovimentacoes = async () => {
-    if (!company?.id) return;
-    setMovimentacoesLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('estoque_movimentacoes')
-        .select(`
-          id, imei, tipo_movimentacao, quantidade, observacao, created_at, criado_por,
-          usuario:criado_por (
-            id,
-            nome,
-            role
-          ),
-          produtos (
-            nome,
-            tipo
-          ),
-          filial_origem:filial_origem_id (nome),
-          filial_destino:filial_destino_id (nome)
-        `)
-        .eq('empresa_id', company.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setEstoqueMovimentacoes(data || []);
-    } catch (err) {
-      console.error('Erro ao buscar movimentações de estoque:', err);
-    } finally {
-      setMovimentacoesLoading(false);
-    }
+    setEstoqueMovimentacoes([]);
+    setMovimentacoesLoading(false);
   };
 
   // Salvar ajuste manual de estoque
@@ -7970,53 +7881,40 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
       if (!validateLuhn(targetImei)) {
-        alert('O IMEI informado não passou na validação Luhn.');
+        alert('IMEI inválido! O dígito verificador não confere com o algoritmo de Luhn.');
         return;
       }
     }
 
     setIsSavingAjuste(true);
     try {
-      let targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      if (!targetEmpresaId || targetEmpresaId === 'MASTER' || targetEmpresaId === '00000000-0000-0000-0000-000000000001') {
-        const { data: empList } = await supabase.from('empresas').select('id').limit(1);
-        if (empList && empList.length > 0) {
-          targetEmpresaId = empList[0].id;
-        }
-      }
+      const targetEmpresaId = company?.id || profile?.empresa_id;
+      let targetProdutoId = null;
 
-      // 1. Localizar produto na filial de forma segura (retorna array, pega 1º elemento)
-      const { data: existingProds, error: prodFindErr } = await supabase
+      // Buscar produto na filial de destino/origem
+      const { data: existingProds, error: searchErr } = await supabase
         .from('produtos')
         .select('*')
         .eq('empresa_id', targetEmpresaId)
         .eq('filial_id', ajusteFilialId)
-        .eq('nome', ajusteProduto.nome);
+        .ilike('nome', ajusteProduto.nome.trim())
+        .limit(1);
 
-      if (prodFindErr) throw prodFindErr;
-
+      if (searchErr) throw searchErr;
       const existingProd = existingProds && existingProds.length > 0 ? existingProds[0] : null;
-      let targetProdutoId;
 
       if (ajusteTipo === 'ENTRADA') {
-        if (isCelular) {
-          // Verificar de forma segura se IMEI já existe
-          const { data: imeisEncontrados, error: checkErr } = await supabase
-            .from('imeis')
-            .select('imei')
-            .eq('imei', targetImei);
+        if (existingProd) {
+          targetProdutoId = existingProd.id;
+          const { error: updateErr } = await supabase
+            .from('produtos')
+            .update({ quantidade: (existingProd.quantidade || 0) + qty })
+            .eq('id', existingProd.id);
 
-          if (checkErr) throw checkErr;
-          if (imeisEncontrados && imeisEncontrados.length > 0) {
-            alert('Erro: Este IMEI já está registrado no sistema.');
-            setIsSavingAjuste(false);
-            return;
-          }
-        }
-
-        if (!existingProd) {
-          // Criar novo produto para filial
-          const { data: newProds, error: newProdErr } = await supabase
+          if (updateErr) throw updateErr;
+        } else {
+          // Criar novo registro de produto para esta filial
+          const { data: newProd, error: insertErr } = await supabase
             .from('produtos')
             .insert({
               empresa_id: targetEmpresaId,
@@ -8024,38 +7922,28 @@ export default function Dashboard({ session, profileDataProps }) {
               nome: ajusteProduto.nome,
               tipo: ajusteProduto.tipo,
               categoria: ajusteProduto.categoria,
-              preco: parseFloat(ajusteProduto.preco || 0),
+              preco: ajusteProduto.preco,
+              preco_custo: ajusteProduto.preco_custo,
               quantidade: qty,
-              ncm: ajusteProduto.ncm || null,
-              cest: ajusteProduto.cest || null,
-              cfop: ajusteProduto.cfop || null,
-              origem: ajusteProduto.origem || '0'
+              cor: ajusteProduto.cor,
+              sku: ajusteProduto.sku,
+              codigo_barras: ajusteProduto.codigo_barras
             })
-            .select();
+            .select()
+            .single();
 
-          if (newProdErr) throw newProdErr;
-          if (!newProds || newProds.length === 0) {
-            throw new Error('Não foi possível registrar o produto.');
-          }
-          targetProdutoId = newProds[0].id;
-        } else {
-          // Incrementar quantidade
-          const { error: updateErr } = await supabase
-            .from('produtos')
-            .update({ quantidade: (existingProd.quantidade || 0) + qty })
-            .eq('id', existingProd.id);
-
-          if (updateErr) throw updateErr;
-          targetProdutoId = existingProd.id;
+          if (insertErr) throw insertErr;
+          targetProdutoId = newProd.id;
         }
 
         if (isCelular) {
+          // Inserir registro de IMEI
           const { error: imeiErr } = await supabase
             .from('imeis')
             .insert({
-              produto_id: targetProdutoId,
               empresa_id: targetEmpresaId,
               filial_id: ajusteFilialId,
+              produto_id: targetProdutoId,
               imei: targetImei,
               status: 'DISPONÍVEL',
               vendido: false,
@@ -8064,18 +7952,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
           if (imeiErr) throw imeiErr;
         }
-
-        // Log da movimentação
-        await supabase.from('estoque_movimentacoes').insert({
-          empresa_id: targetEmpresaId,
-          produto_id: targetProdutoId,
-          imei: targetImei,
-          tipo_movimentacao: 'AJUSTE_MANUAL_ENTRADA',
-          filial_destino_id: ajusteFilialId,
-          quantidade: qty,
-          observacao: estoqueAjusteMotivo.trim(),
-          criado_por: profile.id
-        });
 
       } else {
         // ajusteTipo === 'SAIDA'
@@ -8121,18 +7997,6 @@ export default function Dashboard({ session, profileDataProps }) {
           .eq('id', existingProd.id);
 
         if (updateErr) throw updateErr;
-
-        // Log da movimentação
-        await supabase.from('estoque_movimentacoes').insert({
-          empresa_id: targetEmpresaId,
-          produto_id: targetProdutoId,
-          imei: targetImei,
-          tipo_movimentacao: 'AJUSTE_MANUAL_SAIDA',
-          filial_origem_id: ajusteFilialId,
-          quantidade: qty,
-          observacao: estoqueAjusteMotivo.trim(),
-          criado_por: profile.id
-        });
       }
 
       alert('Ajuste de estoque realizado com sucesso!');
@@ -9528,29 +9392,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (rpcErr) throw rpcErr;
         createdVendaIds.push(rpcRes.venda_id);
-
-        // Registrar saída de estoque por venda
-        try {
-          const resolvedClienteNome = nomeClienteFinal || 'Consumidor Final';
-          const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
-          const resolvedClienteId = cliente_id || clienteIdBanco || selectedPdvClienteId || null;
-          const resolvedFinanceira = (pdvMetodoPagamento === 'boleto')
-            ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
-            : (pdvMetodoPagamento ? pdvMetodoPagamento.toUpperCase() : 'ZÊNETE PDV');
-
-          await supabase.from('estoque_movimentacoes').insert({
-            empresa_id: company.id,
-            produto_id: realProdutoId || item.produto.id,
-            imei: (item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei) ? item.imei : null,
-            tipo_movimentacao: 'SAIDA_VENDA',
-            filial_origem_id: activeFilialId,
-            quantidade: item.quantidade,
-            observacao: `Venda realizada no PDV por ${profile?.nome || 'Vendedor'} (Venda ID: ${rpcRes.venda_id}).`,
-            criado_por: profile.id
-          });
-        } catch (movErr) {
-          console.error('Erro ao registrar histórico de movimentação de venda:', movErr);
-        }
 
         try {
           const resolvedClienteNome = nomeClienteFinal || 'Consumidor Final';
