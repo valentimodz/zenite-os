@@ -59,8 +59,9 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
     return produtos.map((p) => {
       // 1. Busca o estoque real da filial ativa (estrutura multiloja)
       let estoqueLocal = null;
-      if (p.estoques && Array.isArray(p.estoques)) {
-        const est = p.estoques.find(e => String(e.filial_id) === String(activeEmpresaId) || String(e.empresa_id) === String(activeEmpresaId));
+      const estList = p.estoque_movimentacoes || p.estoques;
+      if (estList && Array.isArray(estList)) {
+        const est = estList.find(e => String(e.filial_id) === String(activeEmpresaId) || String(e.empresa_id) === String(activeEmpresaId));
         if (est && est.quantidade !== undefined) {
           estoqueLocal = est.quantidade;
         }

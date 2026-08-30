@@ -3300,7 +3300,7 @@ export default function Dashboard({ session, profileDataProps }) {
       // Busca os produtos físicos permitindo que targetFilialId seja tanto da empresa quanto da filial logada
       const { data: produtosLoja, error } = await supabase
         .from('produtos')
-        .select('*, estoques(*)')
+        .select('*, estoque_movimentacoes(*)')
         .or(`empresa_id.eq.${targetFilialId},filial_id.eq.${targetFilialId}`);
 
       if (error) {
@@ -3456,7 +3456,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let allProds = [];
       try {
-        const prodsRes = await supabase.from('produtos').select('*, estoques(*)').eq('empresa_id', empId).order('nome', { ascending: true });
+        const prodsRes = await supabase.from('produtos').select('*, estoque_movimentacoes(*)').eq('empresa_id', empId).order('nome', { ascending: true });
         if (prodsRes.data) allProds = prodsRes.data;
       } catch (pErr) {
         console.warn('Aviso: Erro ao buscar produtos:', pErr);
@@ -10558,7 +10558,7 @@ export default function Dashboard({ session, profileDataProps }) {
             tipo: p.tipo || cat.tipo || 'ACESSORIO',
             preco: parseFloat(p.preco || cat.preco || 0),
             quantidade: p.quantidade || cat.quantidade || 0,
-            estoques: p.estoques || cat.estoques || [],
+            estoques: p.estoque_movimentacoes || p.estoques || cat.estoque_movimentacoes || cat.estoques || [],
             imeis_db: p.imeis_db || []
           });
         });
@@ -10576,7 +10576,7 @@ export default function Dashboard({ session, profileDataProps }) {
           quantidade: cat.quantidade || 0,
           sku: cat.sku || null,
           codigo_barras: cat.codigo_barras || null,
-          estoques: cat.estoques || [],
+          estoques: cat.estoque_movimentacoes || cat.estoques || [],
           imeis_db: []
         });
       }
@@ -10841,19 +10841,21 @@ export default function Dashboard({ session, profileDataProps }) {
           );
           if (matchPhysical) {
             localQty = Number(matchPhysical.quantidade || matchPhysical.estoque || matchPhysical.estoque_local || matchPhysical.quantidade_local || 0);
-            if (localQty === 0 && matchPhysical.estoques && Array.isArray(matchPhysical.estoques)) {
-              const estMatch = matchPhysical.estoques.find(e => 
+            const estArrMatch = matchPhysical.estoque_movimentacoes || matchPhysical.estoques;
+            if (localQty === 0 && estArrMatch && Array.isArray(estArrMatch)) {
+              const estMatch = estArrMatch.find(e => 
                 !activeFilialId || String(e.filial_id) === String(activeFilialId) || String(e.empresa_id) === String(activeFilialId)
-              ) || matchPhysical.estoques.find(e => Number(e.quantidade) > 0);
+              ) || estArrMatch.find(e => Number(e.quantidade) > 0);
               if (estMatch) localQty = Number(estMatch.quantidade || 0);
             }
           }
           if (localQty === 0) {
             localQty = Number(p.quantidade || p.estoque || p.estoque_local || p.quantidade_local || 0);
-            if (localQty === 0 && p.estoques && Array.isArray(p.estoques)) {
-              const estP = p.estoques.find(e => 
+            const estArrP = p.estoque_movimentacoes || p.estoques;
+            if (localQty === 0 && estArrP && Array.isArray(estArrP)) {
+              const estP = estArrP.find(e => 
                 !activeFilialId || String(e.filial_id) === String(activeFilialId) || String(e.empresa_id) === String(activeFilialId)
-              ) || p.estoques.find(e => Number(e.quantidade) > 0);
+              ) || estArrP.find(e => Number(e.quantidade) > 0);
               if (estP) localQty = Number(estP.quantidade || 0);
             }
           }
@@ -11888,16 +11890,18 @@ export default function Dashboard({ session, profileDataProps }) {
                       cardImeis = localImeis.length > 0 ? localImeis : matchingImeis;
                       estoqueLocal = cardImeis.length;
 
+                      const prodEstList = prod.estoque_movimentacoes || prod.estoques;
                       if (estoqueLocal === 0) {
                         let rawQ = Number(prod.quantidade || prod.estoque_atual || prod.estoque_local || prod.estoque || 0);
-                        if (rawQ === 0 && prod.estoques && Array.isArray(prod.estoques)) {
-                          const fallbackEst = prod.estoques.find(e => Number(e.quantidade) > 0);
+                        if (rawQ === 0 && prodEstList && Array.isArray(prodEstList)) {
+                          const fallbackEst = prodEstList.find(e => Number(e.quantidade) > 0);
                           if (fallbackEst) rawQ = Number(fallbackEst.quantidade);
                         }
                         if (rawQ > 0) estoqueLocal = rawQ;
                       }
-                    } else if (prod.estoques && Array.isArray(prod.estoques)) {
-                      const est = prod.estoques.find(e =>
+                    } else if ((prod.estoque_movimentacoes || prod.estoques) && Array.isArray(prod.estoque_movimentacoes || prod.estoques)) {
+                      const prodEstList = prod.estoque_movimentacoes || prod.estoques;
+                      const est = prodEstList.find(e =>
                         String(e.filial_id) === idFilial ||
                         String(e.empresa_id) === idFilial ||
                         String(e.loja_id) === idFilial ||
@@ -11908,7 +11912,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       if (est && est.quantidade !== undefined && est.quantidade !== null) {
                         estoqueLocal = Number(est.quantidade);
                       } else if (estoqueLocal <= 0) {
-                        const estAlternativo = prod.estoques.find(e => Number(e.quantidade) > 0);
+                        const estAlternativo = prodEstList.find(e => Number(e.quantidade) > 0);
                         if (estAlternativo) {
                           estoqueLocal = Number(estAlternativo.quantidade);
                         }
