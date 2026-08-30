@@ -11768,7 +11768,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     const isCelularCard = (prod.tipo && prod.tipo.toUpperCase().includes('CELULAR')) || (prod.categoria && prod.categoria.toUpperCase().includes('CELULAR')) || prod.categoria === 'IOS' || prod.categoria === 'ANDROID';
 
-                    let cardImeis = Array.isArray(prod.imeis_db) ? prod.imeis_db : [];
+                    // Garantir que cardImeis carregue exatamente os IMEIs disponíveis desta variação e filial
+                    let cardImeis = (Array.isArray(prod.imeis_db) && prod.imeis_db.length > 0) ? prod.imeis_db : [];
                     if (isCelularCard && cardImeis.length === 0) {
                       const arrGlobal = Array.isArray(disponiveisImeis) && disponiveisImeis.length > 0 ? disponiveisImeis : [];
                       const prodCorNorm = (prod.cor && String(prod.cor).trim().toLowerCase()) || null;
@@ -11807,7 +11808,7 @@ export default function Dashboard({ session, profileDataProps }) {
                     const displayImei = cardImeis[0]?.imei || prod.imei || null;
                     const displayCor = prod.cor || prod.color || cardImeis.find(i => i.cor)?.cor || null;
 
-                    // 4. Aplica a trava matemática rigorosa
+                    // 4. Bloqueio de Interação (Guard Clause): Trava matemática rigorosa por SKU / Variação
                     const isSemEstoque = prod.categoria !== 'SERVICO' && estoqueLocal <= 0;
                     const itemUniqueKey = String(prod.id || prod.catalogo_id || `${prod.nome}_${displayCor || prod.cor || ''}_${displayImei || ''}_${idx}`);
                     return (
@@ -11819,12 +11820,18 @@ export default function Dashboard({ session, profileDataProps }) {
                             setIsModalAbrirCaixaOpen(true);
                             return;
                           }
+                          // Guard Clause estrito: Se estoque for 0, desativa a inserção e NUNCA abre o modal de validação
                           if (isSemEstoque) {
                             handleVerMultiloja(prod);
-                          } else if (isCelularCard) {
-                            // Interceptação de Segurança: Exige validação dos 4 dígitos do IMEI impresso na caixa física
+                            return;
+                          }
+                          if (isCelularCard) {
+                            // Interceptação de Segurança: Repassa o objeto completo com a contagem correta e array de IMEIs da cor
                             setImeiValidationModalProd({
                               ...prod,
+                              estoqueDisponivel: estoqueLocal,
+                              estoque_local: estoqueLocal,
+                              quantidade: estoqueLocal,
                               imei: displayImei,
                               cor: displayCor,
                               imeis_db: cardImeis
@@ -11834,18 +11841,22 @@ export default function Dashboard({ session, profileDataProps }) {
                           } else {
                             handleAddToCart({
                               ...prod,
+                              estoqueDisponivel: estoqueLocal,
+                              estoque_local: estoqueLocal,
+                              quantidade: estoqueLocal,
                               imei: displayImei,
                               cor: displayCor,
                               imeis_db: cardImeis
                             }, displayImei);
                           }
                         }}
+                        aria-disabled={isSemEstoque}
                         className={`group bg-black border p-4 rounded-lg text-left flex flex-col gap-2 transition-all ${isPdvBloqueadoParaUsuario
                           ? 'opacity-40 cursor-not-allowed border-[#222]'
                           : isSemEstoque
-                            ? 'border-[#222222] hover:border-[#6A0DAD]/50 bg-black/60 cursor-pointer'
-                            : pdvCart.some(i => i.produto.id === prod.id)
-                              ? 'border-[#6A0DAD] bg-[#6A0DAD]/5 cursor-pointer'
+                            ? 'opacity-60 border-[#222222] bg-[#0A0A0A] cursor-not-allowed select-none'
+                            : pdvCart.some(i => i.produto.id === prod.id && (displayCor ? (i.cor === displayCor || i.produto.cor === displayCor) : true))
+                              ? 'border-[#6A0DAD] bg-[#6A0DAD]/5 cursor-pointer hover:border-[#6A0DAD]'
                               : 'border-[#222222] hover:border-[#6A0DAD]/40 cursor-pointer'
                           }`}
                       >
@@ -21034,8 +21045,15 @@ export default function Dashboard({ session, profileDataProps }) {
                           {imeiValidationModalProd.cor}
                         </span>
                       )}
-                      <span className="text-[10px] font-mono text-gray-400">
-                        {Array.isArray(imeiValidationModalProd.imeis_db) ? `${imeiValidationModalProd.imeis_db.length} em estoque` : ''}
+                      <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/30 px-1.5 py-0.5 rounded">
+                        {(() => {
+                          const count = Number(
+                            imeiValidationModalProd.estoqueDisponivel ??
+                            imeiValidationModalProd.estoque_local ??
+                            (Array.isArray(imeiValidationModalProd.imeis_db) ? imeiValidationModalProd.imeis_db.length : 0)
+                          );
+                          return `${count} un. disponível${count !== 1 ? 'is' : ''}`;
+                        })()}
                       </span>
                     </div>
                   </div>
