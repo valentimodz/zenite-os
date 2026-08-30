@@ -3300,7 +3300,7 @@ export default function Dashboard({ session, profileDataProps }) {
       // Busca os produtos físicos permitindo que targetFilialId seja tanto da empresa quanto da filial logada
       const { data: produtosLoja, error } = await supabase
         .from('produtos')
-        .select('*, estoque_movimentacoes(*)')
+        .select('*')
         .or(`empresa_id.eq.${targetFilialId},filial_id.eq.${targetFilialId}`);
 
       if (error) {
@@ -3456,7 +3456,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let allProds = [];
       try {
-        const prodsRes = await supabase.from('produtos').select('*, estoque_movimentacoes(*)').eq('empresa_id', empId).order('nome', { ascending: true });
+        const prodsRes = await supabase.from('produtos').select('*').eq('empresa_id', empId).order('nome', { ascending: true });
         if (prodsRes.data) allProds = prodsRes.data;
       } catch (pErr) {
         console.warn('Aviso: Erro ao buscar produtos:', pErr);
