@@ -21359,50 +21359,90 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* Body */}
               <form
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault();
-                  const digits = imeiValidationDigits.trim();
+                  const digits = (imeiValidationDigits || '').trim();
                   if (!digits) {
                     setImeiValidationError('Por favor, informe os 4 dígitos finais do IMEI.');
                     return;
                   }
 
-                  // Array de todos os IMEIs disponíveis deste modelo pai na filial ativa
-                  const pool = Array.isArray(imeiValidationModalProd.imeis_db) && imeiValidationModalProd.imeis_db.length > 0
-                    ? imeiValidationModalProd.imeis_db
-                    : (disponiveisImeis || []).filter(im => {
-                        if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
-                        const matchProd = String(im.produto_id) === String(imeiValidationModalProd.id) ||
-                                          String(im.produto_id) === String(imeiValidationModalProd.catalogo_id);
+                  try {
+                    const filialAtualId = activeFilialId || company?.id || profile?.filial_id;
+                    const prodId = imeiValidationModalProd.id;
+                    const catId = imeiValidationModalProd.catalogo_id;
+
+                    // 1. Busca Direta no Supabase dos IMEIs do produto_id correto, na filial_id atual e com status Disponivel/DISPONÍVEL
+                    let query = supabase
+                      .from('imeis')
+                      .select('*')
+                      .eq('vendido', false);
+
+                    if (filialAtualId) {
+                      query = query.eq('filial_id', filialAtualId);
+                    }
+
+                    const { data: dbImeis, error: fetchErr } = await query;
+
+                    let pool = [];
+                    if (!fetchErr && Array.isArray(dbImeis)) {
+                      pool = dbImeis.filter(im => {
+                        const statusClean = (im.status || '').toLowerCase().trim();
+                        const isDisponivel = statusClean === 'disponível' || statusClean === 'disponivel';
+                        if (!isDisponivel) return false;
+
+                        const matchProd = String(im.produto_id) === String(prodId) ||
+                                          (catId && String(im.produto_id) === String(catId));
                         return matchProd;
                       });
+                    }
 
-                  // Lógica de Auto-Identificação (Auto-Match): Busca pelo final dos 4 dígitos
-                  const matchedImeiObj = pool.find(im => {
-                    const cleanImei = String(im.imei || '').trim();
-                    return cleanImei.endsWith(digits) || cleanImei === digits;
-                  });
+                    // Fallback para pool local caso a query direta do banco esteja vazia
+                    if (pool.length === 0) {
+                      const localPool = Array.isArray(imeiValidationModalProd.imeis_db) && imeiValidationModalProd.imeis_db.length > 0
+                        ? imeiValidationModalProd.imeis_db
+                        : (disponiveisImeis || []);
 
-                  if (!matchedImeiObj) {
-                    setImeiValidationError('IMEI não encontrado para este modelo no estoque local.');
-                    return;
+                      pool = localPool.filter(im => {
+                        if (im.vendido) return false;
+                        const statusClean = (im.status || '').toLowerCase().trim();
+                        if (statusClean && statusClean !== 'disponível' && statusClean !== 'disponivel') return false;
+
+                        const matchProd = String(im.produto_id) === String(prodId) ||
+                                          (catId && String(im.produto_id) === String(catId));
+                        return matchProd;
+                      });
+                    }
+
+                    // 2. Comparação de Sufixo Obrigatória via .endsWith()
+                    const matchedImeiObj = pool.find(item => {
+                      const numeroImei = String(item.imei || item.numero_imei || '').trim();
+                      return numeroImei.endsWith(digits) || numeroImei === digits;
+                    });
+
+                    if (!matchedImeiObj) {
+                      setImeiValidationError('IMEI não encontrado para este modelo no estoque local.');
+                      return;
+                    }
+
+                    const imeiCompleto = matchedImeiObj.imei || matchedImeiObj.numero_imei;
+                    const autoCorIdentificada = matchedImeiObj.cor || null;
+
+                    // 3. Inserção no Carrinho com o IMEI completo validado
+                    handleAddToCart({
+                      ...imeiValidationModalProd,
+                      imei: imeiCompleto,
+                      cor: autoCorIdentificada,
+                      imeis_db: [matchedImeiObj]
+                    }, imeiCompleto, autoCorIdentificada);
+
+                    setImeiValidationModalProd(null);
+                    setImeiValidationDigits('');
+                    setImeiValidationError('');
+                  } catch (err) {
+                    console.error("Erro na validação do IMEI:", err);
+                    setImeiValidationError('Erro ao consultar banco de dados. Tente novamente.');
                   }
-
-                  // Auto-identificar a cor física real a partir do registro do IMEI
-                  const autoCorIdentificada = matchedImeiObj.cor || null;
-
-                  // Inserção Inteligente no Carrinho com o SKU completo
-                  handleAddToCart({
-                    ...imeiValidationModalProd,
-                    imei: matchedImeiObj.imei,
-                    cor: autoCorIdentificada,
-                    imeis_db: [matchedImeiObj]
-                  }, matchedImeiObj.imei, autoCorIdentificada);
-
-                  // Fechar modal e limpar campos
-                  setImeiValidationModalProd(null);
-                  setImeiValidationDigits('');
-                  setImeiValidationError('');
                 }}
                 className="p-6 space-y-4"
               >
