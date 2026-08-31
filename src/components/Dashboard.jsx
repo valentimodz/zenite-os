@@ -5287,12 +5287,12 @@ export default function Dashboard({ session, profileDataProps }) {
     }
     setLoadingCatalogo(true);
     try {
-      // 1. Busca relacional direta da tabela de produtos reais -> imeis
+      // 1. Busca relacional direta da tabela de produtos reais -> imeis desambiguada via produto_id
       let query = supabase
         .from('produtos')
         .select(`
           *,
-          imeis (
+          imeis!produto_id (
             id,
             imei,
             cor,
