@@ -8,7 +8,7 @@ import {
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
   MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter, Clock, Image as ImageIcon,
-  Sun, Moon, Layers
+  Sun, Moon, Layers, RotateCcw
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { emitirNfseStub } from '../services/fiscal';
