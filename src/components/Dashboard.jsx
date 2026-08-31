@@ -573,6 +573,26 @@ export default function Dashboard({ session, profileDataProps }) {
   const [productImeisMap, setProductImeisMap] = useState({});
 
   // --- Poka-Yoke: Módulo de Entrada de Estoque Avançado ---
+  const INITIAL_CATALOGO_FORM_DATA = {
+    id: null,
+    nome: '',
+    tipo: 'ACESSORIO',
+    categoria: '',
+    sku: '',
+    condicao: 'NOVO',
+    codigoBarras: '',
+    numeroSerie: '',
+    cor: '',
+    estoqueMinimo: '',
+    preco: '',
+    precoCusto: '',
+    ncm: '',
+    cest: '',
+    cfop: '5102',
+    origem: '0'
+  };
+
+  // 1. DECLARAÇÃO DE ESTADOS (TOPO DO BLANCO)
   const [catalogoProdutos, setCatalogoProdutos] = useState([]); // Produtos_Catalogo
   const [buscaCatalogoMestre, setBuscaCatalogoMestre] = useState('');
   const [buscaCatalogoMestreDebounced, setBuscaCatalogoMestreDebounced] = useState('');
@@ -580,26 +600,14 @@ export default function Dashboard({ session, profileDataProps }) {
   const [debouncedEanImeiSearch, setDebouncedEanImeiSearch] = useState('');
   const [catalogoTotalCount, setCatalogoTotalCount] = useState(0);
   const [catalogoPage, setCatalogoPage] = useState(0);
+  const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
+  const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
+  const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
+  const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
+  const [formData, setFormData] = useState(INITIAL_CATALOGO_FORM_DATA);
   const parentRef = useRef(null);
 
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedEanImeiSearch(eanImeiSearch);
-      setCatalogoPage(0); // Reseta a paginação ao buscar
-    }, 300);
-    return () => clearTimeout(handler);
-  }, [eanImeiSearch]);
-
-  useEffect(() => {
-    if (debouncedEanImeiSearch && debouncedEanImeiSearch.trim() !== '') {
-      const targetEmp = activeFilialId || company?.id || profile?.empresa_id;
-      if (targetEmp) {
-        fetchCatalogoProdutos(targetEmp, '', categoriaCatalogoMestre, 0, debouncedEanImeiSearch);
-      }
-    }
-  }, [debouncedEanImeiSearch]);
-
-  // Filtro síncrono client-side para busca em tempo real em zero latência
+  // 2. VARIÁVEIS DERIVADAS (MEMOS E FILTROS SÍNCRONOS)
   const catalogoProdutosFiltrados = useMemo(() => {
     if (!catalogoProdutos || catalogoProdutos.length === 0) return [];
     const termInput = (eanImeiSearch || '').trim().toLowerCase();
@@ -630,30 +638,23 @@ export default function Dashboard({ session, profileDataProps }) {
     overscan: 5,
   });
 
-  const INITIAL_CATALOGO_FORM_DATA = {
-    id: null,
-    nome: '',
-    tipo: 'ACESSORIO',
-    categoria: '',
-    sku: '',
-    condicao: 'NOVO',
-    codigoBarras: '',
-    numeroSerie: '',
-    cor: '',
-    estoqueMinimo: '',
-    preco: '',
-    precoCusto: '',
-    ncm: '',
-    cest: '',
-    cfop: '5102',
-    origem: '0'
-  };
+  // 3. EFEITOS E CALLBACKS
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedEanImeiSearch(eanImeiSearch);
+      setCatalogoPage(0); // Reseta a paginação ao buscar
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [eanImeiSearch]);
 
-  const [formData, setFormData] = useState(INITIAL_CATALOGO_FORM_DATA);
-  const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
-  const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
-  const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
-  const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
+  useEffect(() => {
+    if (debouncedEanImeiSearch && debouncedEanImeiSearch.trim() !== '') {
+      const targetEmp = activeFilialId || company?.id || profile?.empresa_id;
+      if (targetEmp) {
+        fetchCatalogoProdutos(targetEmp, '', categoriaCatalogoMestre, 0, debouncedEanImeiSearch);
+      }
+    }
+  }, [debouncedEanImeiSearch]);
   // --- Estados do Modal "Distribuir Estoque Matriz" ---
   const [distribuirModalOpen, setDistribuirModalOpen] = useState(false);
   const [produtoDistribuir, setProdutoDistribuir] = useState(null);
