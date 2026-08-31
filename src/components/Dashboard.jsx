@@ -7624,6 +7624,13 @@ export default function Dashboard({ session, profileDataProps }) {
     if (entradaFiltroCategoria && entradaFiltroCategoria !== 'todas' && entradaFiltroCategoria !== 'all') {
       const catTarget = String(entradaFiltroCategoria || '').trim().toLowerCase();
 
+      // Mapeamento de ID de categoria para nome (se categorias estiver preenchido)
+      const catObj = (categorias || []).find(c =>
+        String(c.id).toLowerCase() === catTarget ||
+        String(c.nome || '').trim().toLowerCase() === catTarget
+      );
+      const catObjName = catObj ? String(catObj.nome || '').trim().toLowerCase() : '';
+
       list = list.filter(p => {
         if (!p) return false;
 
@@ -7653,12 +7660,21 @@ export default function Dashboard({ session, profileDataProps }) {
           ''
         ).trim().toLowerCase();
 
-        // 1. Tratamento abrangente e resiliente para a categoria Celular / Smartphone / iOS / Android
+        // Resolvendo nome da categoria vinculada ao produto se p.categoria/p.categoria_id for um UUID
+        const matchedCategoryObj = (categorias || []).find(c =>
+          String(c.id).toLowerCase() === pCat ||
+          String(c.id).toLowerCase() === String(p.categoria_id || '').toLowerCase()
+        );
+        const resolvedCatName = matchedCategoryObj ? String(matchedCategoryObj.nome || '').trim().toLowerCase() : '';
+
+        // 1. Categoria alvo é de Telefonia / Celulares / Smartphones / iOS / Android
         const isTargetCelular =
           catTarget.includes('celular') ||
           catTarget.includes('smartphone') ||
           catTarget === 'ios' ||
-          catTarget === 'android';
+          catTarget === 'android' ||
+          catObjName.includes('celular') ||
+          catObjName.includes('smartphone');
 
         if (isTargetCelular) {
           const isProdCelular =
@@ -7670,6 +7686,12 @@ export default function Dashboard({ session, profileDataProps }) {
             pCat.includes('android') ||
             pCat.includes('iphone') ||
             pCat.includes('aparelho') ||
+            resolvedCatName.includes('celular') ||
+            resolvedCatName.includes('smartphone') ||
+            resolvedCatName.includes('ios') ||
+            resolvedCatName.includes('android') ||
+            resolvedCatName.includes('iphone') ||
+            resolvedCatName.includes('aparelho') ||
             pNome.includes('iphone') ||
             pNome.includes('galaxy') ||
             pNome.includes('xiaomi') ||
@@ -7677,6 +7699,13 @@ export default function Dashboard({ session, profileDataProps }) {
             pNome.includes('redmi') ||
             pNome.includes('poco') ||
             pNome.includes('realme') ||
+            pNome.includes('samsung') ||
+            pNome.includes('apple') ||
+            pNome.includes('asus') ||
+            pNome.includes('infinix') ||
+            pNome.includes('oppo') ||
+            pNome.includes('vivo') ||
+            pNome.includes('oneplus') ||
             p.exige_imei === true ||
             p.is_celular === true ||
             p.is_imei === true ||
@@ -7685,18 +7714,26 @@ export default function Dashboard({ session, profileDataProps }) {
           if (isProdCelular) return true;
         }
 
-        // Se a categoria/tipo do produto no banco for vazia, não descarta o produto
-        if (!pCat && !pTipo) return true;
+        // Se a categoria/tipo do produto no banco estiver vazia, não descarta o produto
+        if (!pCat && !pTipo && !resolvedCatName) return true;
 
-        // 2. Comparação case-insensitive e trim em ambos os lados
-        return (
+        // 2. Comparação direta e tolerante a singular/plural (ex: "celular" vs "celulares")
+        const matchesCategory =
           pCat === catTarget ||
           pTipo === catTarget ||
-          pCat.includes(catTarget) ||
-          pTipo.includes(catTarget) ||
-          catTarget.includes(pCat) ||
-          catTarget.includes(pTipo)
-        );
+          resolvedCatName === catTarget ||
+          (pCat && pCat.includes(catTarget)) ||
+          (pTipo && pTipo.includes(catTarget)) ||
+          (catTarget && catTarget.includes(pCat)) ||
+          (catTarget && catTarget.includes(pTipo)) ||
+          (resolvedCatName && (resolvedCatName.includes(catTarget) || catTarget.includes(resolvedCatName))) ||
+          (catObjName && (pCat.includes(catObjName) || catObjName.includes(pCat))) ||
+          (catTarget.endsWith('s') && (pCat === catTarget.slice(0, -1) || pTipo === catTarget.slice(0, -1) || resolvedCatName === catTarget.slice(0, -1))) ||
+          (pCat.endsWith('s') && pCat.slice(0, -1) === catTarget) ||
+          (pTipo.endsWith('s') && pTipo.slice(0, -1) === catTarget) ||
+          (resolvedCatName.endsWith('s') && resolvedCatName.slice(0, -1) === catTarget);
+
+        return matchesCategory;
       });
     }
 
@@ -7719,12 +7756,8 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     });
 
-    const produtosFiltrados = unique;
-    const categoriaSelecionada = entradaFiltroCategoria;
-    console.warn('FILTRADOS:', produtosFiltrados, 'CATEGORIA ALVO:', categoriaSelecionada);
-
     return unique;
-  }, [catalogoProdutos, entradaFiltroCategoria, entradaBuscaMestre]);
+  }, [catalogoProdutos, categorias, entradaFiltroCategoria, entradaBuscaMestre]);
 
   const handleBuscaMestreChange = (val) => {
     const termoLimpo = (val || '').replace(/[\r\n]/g, '');
@@ -18181,12 +18214,17 @@ export default function Dashboard({ session, profileDataProps }) {
                               const isCelularForm = Boolean(
                                 (selectedProdutoMestre && (
                                   selectedProdutoMestre.tipo?.toLowerCase().includes('celular') ||
+                                  selectedProdutoMestre.tipo?.toLowerCase().includes('smartphone') ||
                                   selectedProdutoMestre.categoria?.toLowerCase().includes('celular') ||
+                                  selectedProdutoMestre.categoria?.toLowerCase().includes('smartphone') ||
                                   selectedProdutoMestre.categoria?.toLowerCase().includes('ios') ||
-                                  selectedProdutoMestre.categoria?.toLowerCase().includes('android')
+                                  selectedProdutoMestre.categoria?.toLowerCase().includes('android') ||
+                                  selectedProdutoMestre.exige_imei === true ||
+                                  selectedProdutoMestre.is_celular === true
                                 )) ||
                                 (!selectedProdutoMestre && entradaFiltroCategoria && (
                                   entradaFiltroCategoria.toLowerCase().includes('celular') ||
+                                  entradaFiltroCategoria.toLowerCase().includes('smartphone') ||
                                   entradaFiltroCategoria.toLowerCase().includes('ios') ||
                                   entradaFiltroCategoria.toLowerCase().includes('android')
                                 ))
