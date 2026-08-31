@@ -333,11 +333,20 @@ function ProductTableRow({
               return bateId || bateNome;
             });
 
-            // Se p.imeis_count ou p.quantidade_real vierem agregados direto da query, prioriza
-            let qtdReal = typeof p.quantidade_real === 'number' ? p.quantidade_real : (typeof p.imeis_count === 'number' ? p.imeis_count : imeisValidos.length);
-            if (qtdReal === 0 && Array.isArray(p.imeis_db) && p.imeis_db.length > 0) {
-              qtdReal = p.imeis_db.filter(i => !i.vendido && i.status !== 'VENDIDO').length;
+            // Se o accordion já foi aberto ou p possui itens_imei/imeis_db, usa essa contagem sincronizada
+            let imeisCountMap = 0;
+            if (productImeisMap[p.id]) {
+              imeisCountMap = productImeisMap[p.id].filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
+            } else if (Array.isArray(p.itens_imei) && p.itens_imei.length > 0) {
+              imeisCountMap = p.itens_imei.filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
+            } else if (Array.isArray(p.imeis_db) && p.imeis_db.length > 0) {
+              imeisCountMap = p.imeis_db.filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
+            } else if (Array.isArray(p.imeis) && p.imeis.length > 0) {
+              imeisCountMap = p.imeis.filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
             }
+
+            let qtdReal = imeisCountMap > 0 ? imeisCountMap : (typeof p.quantidade_real === 'number' ? p.quantidade_real : (typeof p.imeis_count === 'number' ? p.imeis_count : imeisValidos.length));
+            if (qtdReal === 0 && imeisCountMap > 0) qtdReal = imeisCountMap;
 
             p.quantidade_real = qtdReal;
 
@@ -3136,13 +3145,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const baseProdutos = prodsRes.data || [];
       const baseImeis = allImeisRes.data || [];
-      
+
       let imeisMapGlobal = {};
       baseImeis.forEach(im => {
         if (!imeisMapGlobal[im.produto_id]) imeisMapGlobal[im.produto_id] = [];
         imeisMapGlobal[im.produto_id].push(im);
       });
-      
+
       const prodsMapeados = baseProdutos.map(p => ({
         ...p,
         imeis_db: imeisMapGlobal[p.id] || []
@@ -3229,7 +3238,7 @@ export default function Dashboard({ session, profileDataProps }) {
         const sessoesMapeadas = data.map(cx => {
           const filialEncontrada = filiais.find(f => String(f.id) === String(cx.filial_id));
           const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(cx.operador_id)) ||
-                                     (teamMembers || []).find(t => String(t.id) === String(cx.operador_id));
+            (teamMembers || []).find(t => String(t.id) === String(cx.operador_id));
 
           return {
             ...cx,
@@ -3410,7 +3419,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       const { data: imeisLoja } = await imeisQuery;
-          
+
       (imeisLoja || []).forEach(im => {
         if (!imeisMap[im.produto_id]) imeisMap[im.produto_id] = [];
         imeisMap[im.produto_id].push(im);
@@ -3576,12 +3585,12 @@ export default function Dashboard({ session, profileDataProps }) {
             imeisMapGlobal[im.produto_id].push(im);
           });
         }
-        
+
         const prodsMapeados = allProds.map(p => ({
           ...p,
           imeis_db: imeisMapGlobal[p.id] || []
         }));
-        
+
         setProdutos(prodsMapeados);
       }
 
@@ -5291,16 +5300,15 @@ export default function Dashboard({ session, profileDataProps }) {
       let query = supabase
         .from('produtos')
         .select(`
-          *,
-          imeis!produto_id (
-            id,
-            imei,
-            cor,
-            status,
-            filial_id,
-            filiais ( id, nome )
-          )
-        `)
+    *,
+    imeis!imeis_produto_id_fkey (
+      id,
+      imei,
+      cor,
+      status,
+      filial_id
+    )
+  `)
         .eq('empresa_id', empresaId);
 
       if (searchParam && searchParam.trim() !== '') {
@@ -6268,8 +6276,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const fId = String(targetFilialIdParam || activeFilialId || profile?.filial_id || '');
     const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) ||
-                      (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
-                      produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
+      (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
+      produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
     const pNome = (produto.nome || '').toLowerCase().trim();
     const pCor = (produto.cor || produto.color || '').toLowerCase().trim();
@@ -6288,10 +6296,10 @@ export default function Dashboard({ session, profileDataProps }) {
         const imeiFilialObj = filiais.find(f => String(f.id) === imFid);
         const targetFilialObj = filiais.find(f => String(f.id) === fId);
 
-        const matchFilial = !fId || 
-                            imFid === fId || 
-                            String(im.empresa_id) === fId ||
-                            (imeiFilialObj && targetFilialObj && imeiFilialObj.nome && targetFilialObj.nome && imeiFilialObj.nome.toLowerCase().trim() === targetFilialObj.nome.toLowerCase().trim());
+        const matchFilial = !fId ||
+          imFid === fId ||
+          String(im.empresa_id) === fId ||
+          (imeiFilialObj && targetFilialObj && imeiFilialObj.nome && targetFilialObj.nome && imeiFilialObj.nome.toLowerCase().trim() === targetFilialObj.nome.toLowerCase().trim());
 
         if (!matchFilial) return false;
 
@@ -6302,8 +6310,8 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         const matchProdRef = String(im.produto_id) === pId ||
-                             String(im.produto_id) === pCatId ||
-                             (imNome && pNome && imNome.toLowerCase().trim() === pNome);
+          String(im.produto_id) === pCatId ||
+          (imNome && pNome && imNome.toLowerCase().trim() === pNome);
 
         if (!matchProdRef) return false;
 
@@ -6328,9 +6336,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
         const prNome = (pr.nome || '').toLowerCase().trim();
         return (pr.id && pId && String(pr.id) === pId) ||
-               (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) ||
-               (pr.id && pCatId && String(pr.id) === pCatId) ||
-               (prNome && pNome && prNome === pNome);
+          (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) ||
+          (pr.id && pCatId && String(pr.id) === pCatId) ||
+          (prNome && pNome && prNome === pNome);
       });
 
       if (matchedProds.length > 0) {
@@ -6384,9 +6392,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // 2. Buscar todos os IMEIs correspondentes não vendidos da empresa
       let todosImeis = [];
-      const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) || 
-                        (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) || 
-                        produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
+      const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) ||
+        (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
+        produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
       if (isCelular) {
         let imeisQuery = supabase
@@ -8492,22 +8500,26 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
-      // 1. Trava de Exclusão Segura: Verificar se existem IMEIs atrelados a este produto no Supabase
+      // 1. Exclusão em Cascata (Front-end): Deletar IMEIs vinculados antes para permitir apagar o produto sem travas
       if (targetId) {
-        const { data: imeisAtrelados, error: imeiCheckErr } = await supabase
+        const { error: imeiDelErr } = await supabase
           .from('imeis')
-          .select('id')
+          .delete()
           .eq('produto_id', targetId);
 
-        if (imeiCheckErr) {
-          console.error("Erro ao verificar relacionamento com IMEIs:", imeiCheckErr);
-          throw new Error(`Falha ao verificar chaves estrangeiras: ${imeiCheckErr.message}`);
+        if (imeiDelErr) {
+          console.warn("Aviso ao deletar IMEIs vinculados em cascata:", imeiDelErr.message);
         }
+      }
 
-        if (imeisAtrelados && imeisAtrelados.length > 0) {
-          showToast("Não é possível excluir: existem IMEIs atrelados a este produto.", "error");
-          setLoadingDados(false);
-          return;
+      if (targetCatalogoId) {
+        const { error: imeiCatDelErr } = await supabase
+          .from('imeis')
+          .delete()
+          .eq('produto_catalogo_id', targetCatalogoId);
+
+        if (imeiCatDelErr) {
+          console.warn("Aviso ao deletar IMEIs por catálogo vinculados em cascata:", imeiCatDelErr.message);
         }
       }
 
@@ -8757,9 +8769,9 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    const isCelular = (produto.tipo && produto.tipo.toUpperCase().includes('CELULAR')) || 
-      (produto.categoria && produto.categoria.toUpperCase().includes('CELULAR')) || 
-      produto.categoria === 'IOS' || 
+    const isCelular = (produto.tipo && produto.tipo.toUpperCase().includes('CELULAR')) ||
+      (produto.categoria && produto.categoria.toUpperCase().includes('CELULAR')) ||
+      produto.categoria === 'IOS' ||
       produto.categoria === 'ANDROID';
 
     let availableImeis = [];
@@ -8772,7 +8784,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const allMatching = (disponiveisImeis || []).filter(im => {
         if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
-        
+
         let imNome = im.produtos?.nome;
         if (!imNome) {
           const prodDono = listaProdutosConsolidada.find(pr => String(pr.id) === String(im.produto_id));
@@ -8780,7 +8792,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         return prodIds.includes(String(im.produto_id)) ||
-               (imNome && prodNome && imNome.toLowerCase().trim() === prodNome);
+          (imNome && prodNome && imNome.toLowerCase().trim() === prodNome);
       });
 
       const localMatching = allMatching.filter(im => {
@@ -8788,11 +8800,11 @@ export default function Dashboard({ session, profileDataProps }) {
         const imeiFilialObj = filiais.find(f => String(f.id) === imFid);
         const targetFilialObj = filiais.find(f => String(f.id) === String(activeFilialId));
 
-        return !activeFilialId || 
-               imFid === String(activeFilialId) || 
-               String(im.empresa_id) === String(activeFilialId) ||
-               (imeiFilialObj && targetFilialObj && imeiFilialObj.nome && targetFilialObj.nome && 
-                imeiFilialObj.nome.toLowerCase().trim() === targetFilialObj.nome.toLowerCase().trim());
+        return !activeFilialId ||
+          imFid === String(activeFilialId) ||
+          String(im.empresa_id) === String(activeFilialId) ||
+          (imeiFilialObj && targetFilialObj && imeiFilialObj.nome && targetFilialObj.nome &&
+            imeiFilialObj.nome.toLowerCase().trim() === targetFilialObj.nome.toLowerCase().trim());
       });
 
       availableImeis = localMatching.length > 0 ? localMatching : allMatching;
@@ -9149,8 +9161,8 @@ export default function Dashboard({ session, profileDataProps }) {
     let imeiObj = null;
 
     if (disponiveisImeis && disponiveisImeis.length > 0) {
-      imeiObj = disponiveisImeis.find(im => 
-        !im.vendido && 
+      imeiObj = disponiveisImeis.find(im =>
+        !im.vendido &&
         (im.imei === rawInput || (cleanDigits.length >= 8 && im.imei && im.imei.replace(/\D/g, '') === cleanDigits))
       );
     }
@@ -9185,7 +9197,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       playBeepSucesso();
-      const prod = imeiObj.produtos || 
+      const prod = imeiObj.produtos ||
         listaProdutosPdvDinamica.find(p => String(p.id) === String(imeiObj.produto_id) || String(p.catalogo_id) === String(imeiObj.produto_id)) ||
         listaProdutosConsolidada.find(p => String(p.id) === String(imeiObj.produto_id) || String(p.catalogo_id) === String(imeiObj.produto_id)) ||
         (produtos || []).find(p => String(p.id) === String(imeiObj.produto_id)) ||
@@ -10975,8 +10987,8 @@ export default function Dashboard({ session, profileDataProps }) {
       const nomeKey = nomeBase.toLowerCase();
 
       const isCelular = (p.tipo && String(p.tipo).toUpperCase().includes('CELULAR')) ||
-                        (p.categoria && String(p.categoria).toUpperCase().includes('CELULAR')) ||
-                        p.categoria === 'IOS' || p.categoria === 'ANDROID';
+        (p.categoria && String(p.categoria).toUpperCase().includes('CELULAR')) ||
+        p.categoria === 'IOS' || p.categoria === 'ANDROID';
 
       // Chave única do acumulador (acc) baseada no nome principal do produto
       if (!acc[nomeKey]) {
@@ -11028,17 +11040,17 @@ export default function Dashboard({ session, profileDataProps }) {
             if (prodDono) imNome = prodDono.nome;
           }
 
-          return (String(im.produto_id) === pId) || 
-                 (String(im.produto_id) === pCatId) || 
-                 (String(im.produto_catalogo_id) === pId) ||
-                 (String(im.produto_catalogo_id) === pCatId) ||
-                 (imNome && pNome && imNome.toLowerCase().trim() === pNome);
+          return (String(im.produto_id) === pId) ||
+            (String(im.produto_id) === pCatId) ||
+            (String(im.produto_catalogo_id) === pId) ||
+            (String(im.produto_catalogo_id) === pCatId) ||
+            (imNome && pNome && imNome.toLowerCase().trim() === pNome);
         });
 
         const localProdImeis = allProdImeis.filter(im => {
           const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
-          return !activeFilialId || 
-            String(im.filial_id) === String(activeFilialId) || 
+          return !activeFilialId ||
+            String(im.filial_id) === String(activeFilialId) ||
             String(im.empresa_id) === String(activeFilialId) ||
             (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
         });
@@ -11077,7 +11089,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Fallback: se não há rastreio de IMEI na tabela imeis, ler a quantidade física da filial na tabela produtos
         if (Object.keys(corMap).length === 0 && modeloPai.rawItems.length > 0) {
           // Filtrar itens da filial ativa
-          const filialRawItems = modeloPai.rawItems.filter(r => 
+          const filialRawItems = modeloPai.rawItems.filter(r =>
             !activeFilialId || !r.filial_id || String(r.filial_id) === String(activeFilialId)
           );
           const targetItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
@@ -11136,7 +11148,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // Para Acessórios / Produtos por Quantidade:
       // Filtrar produtos específicos da filial ativa para evitar somar estoques de outras lojas ou do catálogo mestre duplicado
-      const filialRawItems = (modeloPai.rawItems || []).filter(r => 
+      const filialRawItems = (modeloPai.rawItems || []).filter(r =>
         !activeFilialId || !r.filial_id || String(r.filial_id) === String(activeFilialId)
       );
       const targetRawItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
@@ -20109,15 +20121,15 @@ export default function Dashboard({ session, profileDataProps }) {
                   <div>
                     <span className="text-gray-500 text-[10px] block">Operador Responsável</span>
                     <strong className="text-white text-xs">
-                      {modalDetalheCaixa.operador_nome || 
-                       modalDetalheCaixa.profiles?.nome || 
-                       modalDetalheCaixa.usuarios?.nome || 
-                       modalDetalheCaixa.profiles?.nome_completo ||
-                       modalDetalheCaixa.usuarios?.nome_completo ||
-                       vendedores?.find(c => String(c.id) === String(modalDetalheCaixa.operador_id))?.nome ||
-                       teamMembers?.find(t => String(t.id) === String(modalDetalheCaixa.operador_id))?.nome ||
-                       (modalDetalheCaixa.operador_id === session?.user?.id ? (profile?.nome || session?.user?.email?.split('@')[0]) : null) ||
-                       'Operador'}
+                      {modalDetalheCaixa.operador_nome ||
+                        modalDetalheCaixa.profiles?.nome ||
+                        modalDetalheCaixa.usuarios?.nome ||
+                        modalDetalheCaixa.profiles?.nome_completo ||
+                        modalDetalheCaixa.usuarios?.nome_completo ||
+                        vendedores?.find(c => String(c.id) === String(modalDetalheCaixa.operador_id))?.nome ||
+                        teamMembers?.find(t => String(t.id) === String(modalDetalheCaixa.operador_id))?.nome ||
+                        (modalDetalheCaixa.operador_id === session?.user?.id ? (profile?.nome || session?.user?.email?.split('@')[0]) : null) ||
+                        'Operador'}
                     </strong>
                   </div>
                   <div>
@@ -20203,11 +20215,11 @@ export default function Dashboard({ session, profileDataProps }) {
 
                 // Fallback: se não estiver direto no objeto do caixa, buscar na lista de fechamentos correspondente
                 if (comprovantesList.length === 0 && fechamentos && fechamentos.length > 0) {
-                  const fechRelacionado = fechamentos.find(f => 
+                  const fechRelacionado = fechamentos.find(f =>
                     (modalDetalheCaixa.id && f.caixa_id && String(f.caixa_id) === String(modalDetalheCaixa.id)) ||
-                    (String(f.filial_id) === String(modalDetalheCaixa.filial_id) && 
-                     modalDetalheCaixa.data_fechamento && 
-                     Math.abs(new Date(f.created_at || f.data_fechamento).getTime() - new Date(modalDetalheCaixa.data_fechamento).getTime()) < 3600000)
+                    (String(f.filial_id) === String(modalDetalheCaixa.filial_id) &&
+                      modalDetalheCaixa.data_fechamento &&
+                      Math.abs(new Date(f.created_at || f.data_fechamento).getTime() - new Date(modalDetalheCaixa.data_fechamento).getTime()) < 3600000)
                   );
                   if (fechRelacionado) {
                     if (Array.isArray(fechRelacionado.comprovante_url)) {
@@ -20226,10 +20238,10 @@ export default function Dashboard({ session, profileDataProps }) {
                     let blob = null;
 
                     // Obter e sanitizar o nome da filial
-                    const rawFilialNome = modalDetalheCaixa.filiais?.nome || 
-                                          modalDetalheCaixa.filial_nome || 
-                                          filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome || 
-                                          'Filial';
+                    const rawFilialNome = modalDetalheCaixa.filiais?.nome ||
+                      modalDetalheCaixa.filial_nome ||
+                      filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome ||
+                      'Filial';
                     const nomeFilialSanitizado = rawFilialNome
                       .normalize('NFD')
                       .replace(/[\u0300-\u036f]/g, '') // remove acentos
@@ -20314,8 +20326,8 @@ export default function Dashboard({ session, profileDataProps }) {
                     ) : (
                       <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5 max-h-48 overflow-y-auto pr-1">
                         {comprovantesList.map((urlOrPath, idx) => {
-                          const src = urlOrPath.startsWith('http') || urlOrPath.startsWith('data:') 
-                            ? urlOrPath 
+                          const src = urlOrPath.startsWith('http') || urlOrPath.startsWith('data:')
+                            ? urlOrPath
                             : supabase.storage.from('comprovantes').getPublicUrl(urlOrPath)?.data?.publicUrl || urlOrPath;
 
                           return (
@@ -21366,7 +21378,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         if (!isDisponivel) return false;
 
                         const matchProd = String(im.produto_id) === String(prodId) ||
-                                          (catId && String(im.produto_id) === String(catId));
+                          (catId && String(im.produto_id) === String(catId));
                         return matchProd;
                       });
                     }
@@ -21383,7 +21395,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         if (statusClean && statusClean !== 'disponível' && statusClean !== 'disponivel') return false;
 
                         const matchProd = String(im.produto_id) === String(prodId) ||
-                                          (catId && String(im.produto_id) === String(catId));
+                          (catId && String(im.produto_id) === String(catId));
                         return matchProd;
                       });
                     }
@@ -22781,8 +22793,8 @@ export default function Dashboard({ session, profileDataProps }) {
                   selectedVariantModalProd.variants.map((v, vIdx) => {
                     const isVariantSemEstoque = selectedVariantModalProd.categoria !== 'SERVICO' && (v.estoque || 0) <= 0;
                     const isCelular = (selectedVariantModalProd.tipo && selectedVariantModalProd.tipo.toUpperCase().includes('CELULAR')) ||
-                                      (selectedVariantModalProd.categoria && selectedVariantModalProd.categoria.toUpperCase().includes('CELULAR')) ||
-                                      selectedVariantModalProd.categoria === 'IOS' || selectedVariantModalProd.categoria === 'ANDROID';
+                      (selectedVariantModalProd.categoria && selectedVariantModalProd.categoria.toUpperCase().includes('CELULAR')) ||
+                      selectedVariantModalProd.categoria === 'IOS' || selectedVariantModalProd.categoria === 'ANDROID';
 
                     return (
                       <button
