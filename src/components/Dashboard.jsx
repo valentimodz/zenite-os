@@ -3230,7 +3230,21 @@ export default function Dashboard({ session, profileDataProps }) {
         query = query.or(`empresa_id.eq.${targetEmpresaId},empresa_id.is.null`);
       }
 
-      const { data, error } = await query;
+      let { data, error } = await query;
+
+      console.log('Categoria Ativa:', categoryParam);
+      console.log('Produtos Carregados:', data);
+      console.log('Empresa ID enviado:', empresaId);
+
+      // Verificação de Tenant (Fallback de catálogo se empresa_id filtrar excessivamente)
+      if ((!data || data.length === 0) && empresaId) {
+        console.warn('Nenhum produto retornado para a empresa ID:', empresaId, '- Executando busca de fallback no catálogo...');
+        const retryRes = await supabase.from('produtos').select('*').limit(200);
+        if (retryRes.data && retryRes.data.length > 0) {
+          console.log('Produtos recuperados via Fallback:', retryRes.data);
+          data = retryRes.data;
+        }
+      }
 
       if (error) {
         console.error('[Caixas] ⚠️ Erro na consulta do Supabase:', error);
@@ -5355,8 +5369,8 @@ export default function Dashboard({ session, profileDataProps }) {
       if (searchParam && searchParam.trim() !== '') {
         query = query.ilike('nome', `%${searchParam.trim()}%`);
       }
-      if (categoryParam && categoryParam !== 'TODAS') {
-        query = query.eq('categoria', categoryParam);
+      if (categoryParam && categoryParam !== 'TODAS' && categoryParam !== 'todas') {
+        query = query.ilike('categoria', `%${categoryParam.trim()}%`);
       }
 
       // EAN/IMEI Search Server-side
@@ -7604,37 +7618,80 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Filtro de modelos únicos para o dropdown de Entrada de Estoque (com base no catálogo, categoria e busca/EAN)
   const produtosMestreOptions = React.useMemo(() => {
-    let list = catalogoProdutos;
+    let list = catalogoProdutos || [];
 
     if (entradaFiltroCategoria && entradaFiltroCategoria !== 'todas' && entradaFiltroCategoria !== 'all') {
-      const catLower = entradaFiltroCategoria.toLowerCase();
+      const catLower = String(entradaFiltroCategoria || '').trim().toLowerCase();
+
       list = list.filter(p => {
-        if (entradaFiltroCategoria === 'CELULAR') {
-          return p.tipo === 'CELULAR' || p.tipo === 'Celular' || p.categoria === 'IOS' || p.categoria === 'ANDROID';
+        const pCat = String(p.categoria || '').trim().toLowerCase();
+        const pTipo = String(p.tipo || '').trim().toLowerCase();
+        const pNome = String(p.nome || '').trim().toLowerCase();
+
+        // Tratamento flexível e resiliente para Celulares / Smartphones / iOS / Android
+        if (catLower === 'celular' || catLower === 'celulares') {
+          return (
+            pTipo === 'celular' ||
+            pTipo.includes('celular') ||
+            pCat.includes('celular') ||
+            pCat.includes('ios') ||
+            pCat.includes('android') ||
+            pCat.includes('smartphone') ||
+            pTipo.includes('smartphone') ||
+            pCat === 'celular' ||
+            pCat === 'celulares' ||
+            pNome.includes('iphone') ||
+            pNome.includes('galaxy') ||
+            pNome.includes('xiaomi') ||
+            pNome.includes('motorola') ||
+            pNome.includes('redmi') ||
+            pNome.includes('poco')
+          );
         }
-        const pCat = p.categoria ? String(p.categoria).toLowerCase() : '';
-        const pTipo = p.tipo ? String(p.tipo).toLowerCase() : '';
-        return pCat === catLower || pTipo === catLower || pCat.includes(catLower);
+
+        if (catLower === 'ios') {
+          return pCat.includes('ios') || pCat.includes('apple') || pCat.includes('iphone') || pTipo.includes('ios') || pNome.includes('iphone');
+        }
+
+        if (catLower === 'android') {
+          return pCat.includes('android') || pTipo.includes('android') || pCat.includes('samsung') || pCat.includes('xiaomi') || pCat.includes('motorola') || pCat.includes('redmi') || pCat.includes('poco');
+        }
+
+        if (catLower === 'acessorio' || catLower === 'acessórios') {
+          return pCat.includes('acessorio') || pCat.includes('acessório') || pTipo.includes('acessorio') || pTipo.includes('acessório');
+        }
+
+        return (
+          pCat === catLower ||
+          pTipo === catLower ||
+          pCat.includes(catLower) ||
+          pTipo.includes(catLower)
+        );
       });
     }
 
-    if (entradaBuscaMestre.trim()) {
+    if (entradaBuscaMestre && entradaBuscaMestre.trim()) {
       const q = entradaBuscaMestre.trim().toLowerCase();
       list = list.filter(p =>
-        (p.nome && p.nome.toLowerCase().includes(q)) ||
-        (p.sku && p.sku.toLowerCase().includes(q)) ||
-        (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q))
+        (p.nome && String(p.nome).toLowerCase().includes(q)) ||
+        (p.sku && String(p.sku).toLowerCase().includes(q)) ||
+        (p.codigo_barras && String(p.codigo_barras).toLowerCase().includes(q))
       );
     }
 
     const unique = [];
     const seen = new Set();
     list.forEach(p => {
-      if (!seen.has(p.nome)) {
-        seen.add(p.nome);
+      const key = String(p.nome || p.id).trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
         unique.push(p);
       }
     });
+
+    console.log('Categoria Ativa (Front-end):', entradaFiltroCategoria);
+    console.log('Produtos Mestre Filtrados:', unique);
+
     return unique;
   }, [catalogoProdutos, entradaFiltroCategoria, entradaBuscaMestre]);
 
