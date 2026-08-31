@@ -607,25 +607,36 @@ export default function Dashboard({ session, profileDataProps }) {
   const [formData, setFormData] = useState(INITIAL_CATALOGO_FORM_DATA);
   const parentRef = useRef(null);
 
-  // 2. VARIÁVEIS DERIVADAS (MEMOS E FILTROS SÍNCRONOS)
+  // 2. VARIÁVEIS DERIVADAS (MEMOS E FILTROS SÍNCRONOS DEFENSIVOS)
   const catalogoProdutosFiltrados = useMemo(() => {
-    if (!catalogoProdutos || catalogoProdutos.length === 0) return [];
-    const termInput = (eanImeiSearch || '').trim().toLowerCase();
-    const termDebounced = (buscaCatalogoMestreDebounced || '').trim().toLowerCase();
+    if (!Array.isArray(catalogoProdutos) || catalogoProdutos.length === 0) return [];
+
+    const termInput = String(eanImeiSearch || '').toLowerCase().trim();
+    const termDebounced = String(buscaCatalogoMestreDebounced || '').toLowerCase().trim();
     const termo = termInput || termDebounced;
-    const catFiltro = (categoriaCatalogoMestre || 'TODAS').toUpperCase();
+    const catFiltro = String(categoriaCatalogoMestre || 'TODAS').toLowerCase().trim();
 
     return catalogoProdutos.filter(item => {
-      if (!item) return false;
-      const matchesTerm = !termo ||
-        (item.nome && item.nome.toLowerCase().includes(termo)) ||
-        (item.categoria && item.categoria.toLowerCase().includes(termo)) ||
-        (item.cor && item.cor.toLowerCase().includes(termo)) ||
-        (item.sku && String(item.sku).toLowerCase().includes(termo)) ||
-        (item.codigo_barras && String(item.codigo_barras).toLowerCase().includes(termo)) ||
-        (item.tipo && item.tipo.toLowerCase().includes(termo));
+      if (!item || typeof item !== 'object') return false;
 
-      const matchesCategory = catFiltro === 'TODAS' || (item.categoria || 'GERAL').toUpperCase() === catFiltro;
+      const nome = String(item.nome || item.produtos_catalogo?.nome || item.produtos?.nome || '').toLowerCase();
+      const categoria = String(item.categoria || item.produtos_catalogo?.categoria || item.produtos?.categoria || '').toLowerCase();
+      const cor = String(item.cor || item.produtos_catalogo?.cor || item.produtos?.cor || '').toLowerCase();
+      const sku = String(item.sku || item.produtos_catalogo?.sku || item.produtos?.sku || '').toLowerCase();
+      const codigoBarras = String(item.codigo_barras || item.codigoBarras || item.produtos_catalogo?.codigo_barras || item.produtos?.codigo_barras || '').toLowerCase();
+      const tipo = String(item.tipo || item.produtos_catalogo?.tipo || item.produtos?.tipo || '').toLowerCase();
+      const numeroSerie = String(item.numero_serie || item.numeroSerie || '').toLowerCase();
+
+      const matchesTerm = !termo ||
+        nome.includes(termo) ||
+        categoria.includes(termo) ||
+        cor.includes(termo) ||
+        sku.includes(termo) ||
+        codigoBarras.includes(termo) ||
+        tipo.includes(termo) ||
+        numeroSerie.includes(termo);
+
+      const matchesCategory = catFiltro === 'todas' || !catFiltro || categoria.includes(catFiltro) || catFiltro.includes(categoria);
 
       return matchesTerm && matchesCategory;
     });
