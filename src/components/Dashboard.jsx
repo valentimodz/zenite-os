@@ -5343,7 +5343,7 @@ export default function Dashboard({ session, profileDataProps }) {
   // --- FUNÇÕES POKA-YOKE: ENTRADA DE ESTOQUE AVANÇADA ---
 
   // Buscar catálogo de produtos (produtos_catalogo com suporte a busca server-side ilike, categoria e fallback)
-  const fetchCatalogoProdutos = async (empIdParam = null, searchParam = '', categoryParam = 'TODAS', page = 0, isEanImeiSearch = '') => {
+  const fetchCatalogoProdutos = async (empIdParam = null, searchParam = '', categoryParam = 'TODAS', page = 0, isEanImeiSearch = '', limitParam = 1000) => {
     const empresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
     if (!empresaId) {
       console.warn("fetchCatalogoProdutos: ID da empresa não encontrado.");
@@ -5391,10 +5391,13 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // Pagination
-      const limit = 50;
-      const from = page * limit;
-      const to = from + limit - 1;
-      query = query.range(from, to).order('nome', { ascending: true });
+      if (limitParam && limitParam > 0) {
+        const from = page * limitParam;
+        const to = from + limitParam - 1;
+        query = query.range(from, to).order('nome', { ascending: true });
+      } else {
+        query = query.order('nome', { ascending: true });
+      }
 
       // Count query
       const countQuery = supabase
