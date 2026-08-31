@@ -2053,6 +2053,14 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView]);
 
+  // Recarregar catálogo de produtos (invalidação de cache / stale data) ao alternar para 'estoque' ou 'catalogo_mestre'
+  useEffect(() => {
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    if (targetEmpresaId && (activeTab === 'estoque' || activeTab === 'catalogo_mestre' || currentView === 'estoque' || currentView === 'catalogo_mestre')) {
+      fetchCatalogoProdutos(targetEmpresaId);
+    }
+  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView]);
+
   // Monitorar capacidade de rolagem horizontal das categorias no PDV
   useEffect(() => {
     const timer = setTimeout(() => checkCategoryScroll(), 200);
@@ -5342,7 +5350,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // --- FUNÇÕES POKA-YOKE: ENTRADA DE ESTOQUE AVANÇADA ---
 
-  // Buscar catálogo de produtos (produtos_catalogo com suporte a busca server-side ilike, categoria e fallback)
+  // Buscar catálogo de produtos (produtos_catalogo + produtos com suporte a busca server-side ilike, categoria e fallback)
   const fetchCatalogoProdutos = async (empIdParam = null, searchParam = '', categoryParam = 'TODAS', page = 0, isEanImeiSearch = '', limitParam = 1000) => {
     const empresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
     if (!empresaId) {
@@ -5352,7 +5360,21 @@ export default function Dashboard({ session, profileDataProps }) {
     }
     setLoadingCatalogo(true);
     try {
-      // 1. Busca relacional direta da tabela de produtos reais -> imeis desambiguada via produto_id
+      // 1. Busca pura da tabela mestre de catálogo (produtos_catalogo)
+      let catQuery = supabase
+        .from('produtos_catalogo')
+        .select('*')
+        .eq('empresa_id', empresaId);
+
+      if (searchParam && searchParam.trim() !== '') {
+        catQuery = catQuery.ilike('nome', `%${searchParam.trim()}%`);
+      }
+      if (categoryParam && categoryParam !== 'TODAS' && categoryParam !== 'todas') {
+        catQuery = catQuery.ilike('categoria', `%${categoryParam.trim()}%`);
+      }
+      const { data: catData } = await catQuery;
+
+      // 2. Busca relacional direta da tabela de produtos reais -> imeis desambiguada via produto_id
       let query = supabase
         .from('produtos')
         .select(`
@@ -5399,33 +5421,37 @@ export default function Dashboard({ session, profileDataProps }) {
         query = query.order('nome', { ascending: true });
       }
 
-      // Count query
-      const countQuery = supabase
-        .from('produtos')
-        .select('id', { count: 'exact', head: true })
-        .eq('empresa_id', empresaId);
-
-      if (isEanImeiSearch && isEanImeiSearch.trim() !== '') {
-        const termo = isEanImeiSearch.trim();
-        const { data: imeisMatch } = await supabase.from('imeis').select('produto_id').ilike('imei', `%${termo}%`);
-        const matchedIds = (imeisMatch || []).map(i => i.produto_id).filter(Boolean);
-        if (matchedIds.length > 0) {
-          countQuery.or(`codigo_barras.ilike.*${termo}*,sku.ilike.*${termo}*,id.in.(${matchedIds.join(',')})`);
-        } else {
-          countQuery.or(`codigo_barras.ilike.*${termo}*,sku.ilike.*${termo}*`);
-        }
-      }
-      const { count: exactCount } = await countQuery;
-      if (exactCount !== null) setCatalogoTotalCount(exactCount);
-
-      const { data, error } = await query;
+      const { data: prodData, error } = await query;
 
       if (error) {
         console.error("Erro na busca relacional de produtos com IMEIs:", error);
-        throw new Error(`Falha na consulta relacional do banco de dados (PGRST200): ${error.message}`);
       }
 
-      let baseCatalogo = data || [];
+      // Consolidar e mesclar produtos_catalogo com produtos sem duplicidade
+      const mapModelos = new Map();
+      (catData || []).forEach(c => {
+        if (c && (c.nome || c.id)) {
+          const key = String(c.nome || c.id).trim().toLowerCase();
+          mapModelos.set(key, { ...c });
+        }
+      });
+      (prodData || []).forEach(p => {
+        if (p && (p.nome || p.id)) {
+          const key = String(p.nome || p.id).trim().toLowerCase();
+          const master = mapModelos.get(key) || {};
+          mapModelos.set(key, {
+            ...master,
+            ...p,
+            id: p.id || master.id,
+            codigo_barras: p.codigo_barras || master.codigo_barras,
+            sku: p.sku || master.sku,
+            categoria: p.categoria || master.categoria,
+            tipo: p.tipo || master.tipo
+          });
+        }
+      });
+
+      let baseCatalogo = Array.from(mapModelos.values());
 
       const { data: imeisRes, error: imeisErr } = await supabase
         .from('imeis')
@@ -5435,7 +5461,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (imeisErr) {
         console.error("Erro ao buscar registros da tabela imeis:", imeisErr);
-        throw new Error(`Falha na consulta de IMEIs (PGRST200): ${imeisErr.message}`);
       }
 
       const imeisDiretos = imeisRes || [];
@@ -5466,8 +5491,8 @@ export default function Dashboard({ session, profileDataProps }) {
         const pImeis = p.imeis || imeisDiretos.filter(i => (
           i.produto_id === p.id ||
           i.produto_catalogo_id === p.id ||
-          (i.produtos_catalogo?.nome && i.produtos_catalogo.nome === p.nome) ||
-          (i.produtos?.nome && i.produtos.nome === p.nome)
+          (i.produtos_catalogo?.nome && String(i.produtos_catalogo.nome).toLowerCase().trim() === String(p.nome).toLowerCase().trim()) ||
+          (i.produtos?.nome && String(i.produtos.nome).toLowerCase().trim() === String(p.nome).toLowerCase().trim())
         ));
 
         const qtdCalculada = counts[p.nome] !== undefined ? counts[p.nome] : (p.quantidade ?? (pImeis ? pImeis.length : 0));
@@ -5478,9 +5503,12 @@ export default function Dashboard({ session, profileDataProps }) {
           total_estoque: pImeis ? pImeis.length : 0,
           itens_imei: pImeis || []
         };
-      });
+      }).sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || '')));
 
       setCatalogoProdutos(enrichedData);
+      if (enrichedData.length > 0) {
+        setCatalogoTotalCount(enrichedData.length);
+      }
     } catch (err) {
       console.error('Erro ao buscar catálogo de produtos:', err);
     } finally {
@@ -7376,7 +7404,7 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchTaxasCartao(tenantId);
       fetchTenantSettings();
       fetchTeamMembers(tenantId);
-    } else if (view === 'gestao') {
+    } else if (view === 'gestao' || view === 'estoque' || view === 'catalogo_mestre') {
       fetchGerenteData(tenantId);
       fetchCatalogoProdutos(tenantId);
     } else if (view === 'assinatura') {
