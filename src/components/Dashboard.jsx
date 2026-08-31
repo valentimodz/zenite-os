@@ -586,12 +586,45 @@ export default function Dashboard({ session, profileDataProps }) {
     const handler = setTimeout(() => {
       setDebouncedEanImeiSearch(eanImeiSearch);
       setCatalogoPage(0); // Reseta a paginação ao buscar
-    }, 500);
+    }, 300);
     return () => clearTimeout(handler);
   }, [eanImeiSearch]);
 
+  useEffect(() => {
+    if (debouncedEanImeiSearch && debouncedEanImeiSearch.trim() !== '') {
+      const targetEmp = activeFilialId || company?.id || profile?.empresa_id;
+      if (targetEmp) {
+        fetchCatalogoProdutos(targetEmp, '', categoriaCatalogoMestre, 0, debouncedEanImeiSearch);
+      }
+    }
+  }, [debouncedEanImeiSearch]);
+
+  // Filtro síncrono client-side para busca em tempo real em zero latência
+  const catalogoProdutosFiltrados = useMemo(() => {
+    if (!catalogoProdutos || catalogoProdutos.length === 0) return [];
+    const termInput = (eanImeiSearch || '').trim().toLowerCase();
+    const termDebounced = (buscaCatalogoMestreDebounced || '').trim().toLowerCase();
+    const termo = termInput || termDebounced;
+    const catFiltro = (categoriaCatalogoMestre || 'TODAS').toUpperCase();
+
+    return catalogoProdutos.filter(item => {
+      if (!item) return false;
+      const matchesTerm = !termo ||
+        (item.nome && item.nome.toLowerCase().includes(termo)) ||
+        (item.categoria && item.categoria.toLowerCase().includes(termo)) ||
+        (item.cor && item.cor.toLowerCase().includes(termo)) ||
+        (item.sku && String(item.sku).toLowerCase().includes(termo)) ||
+        (item.codigo_barras && String(item.codigo_barras).toLowerCase().includes(termo)) ||
+        (item.tipo && item.tipo.toLowerCase().includes(termo));
+
+      const matchesCategory = catFiltro === 'TODAS' || (item.categoria || 'GERAL').toUpperCase() === catFiltro;
+
+      return matchesTerm && matchesCategory;
+    });
+  }, [catalogoProdutos, eanImeiSearch, buscaCatalogoMestreDebounced, categoriaCatalogoMestre]);
+
   const virtualizer = useVirtualizer({
-    count: catalogoProdutos.length,
+    count: catalogoProdutosFiltrados.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 75,
     overscan: 5,
@@ -1450,18 +1483,7 @@ export default function Dashboard({ session, profileDataProps }) {
     return ['TODAS', ...Array.from(cats).sort()];
   }, [catalogoProdutos]);
 
-  // Produtos filtrados do catálogo mestre
-  const catalogoProdutosFiltrados = useMemo(() => {
-    return (catalogoProdutos || []).filter(p => {
-      const term = (buscaCatalogoMestreDebounced || '').toLowerCase().trim();
-      const catFiltro = (categoriaCatalogoMestre || 'TODAS').toUpperCase();
 
-      const matchesName = !term || (p.nome || '').toLowerCase().includes(term) || (p.sku || '').toLowerCase().includes(term) || (p.cor || '').toLowerCase().includes(term);
-      const matchesCategory = catFiltro === 'TODAS' || (p.categoria || 'GERAL').toUpperCase() === catFiltro;
-
-      return matchesName && matchesCategory;
-    });
-  }, [catalogoProdutos, buscaCatalogoMestreDebounced, categoriaCatalogoMestre]);
 
   // --- ATALHOS DE TECLADO PDV ---
   useEffect(() => {
@@ -16741,13 +16763,15 @@ export default function Dashboard({ session, profileDataProps }) {
                                 {/* Lista do catálogo atual */}
                                 <div>
                                   <div className="mb-3 flex flex-col gap-2">
-                                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Modelos Cadastrados ({catalogoTotalCount > 0 ? catalogoTotalCount : catalogoProdutos.length})</p>
+                                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                      Modelos Cadastrados ({catalogoProdutosFiltrados.length}{catalogoProdutos.length !== catalogoProdutosFiltrados.length ? ` de ${catalogoProdutos.length}` : ''})
+                                    </p>
                                     <div className="relative">
                                       <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                                       <input
                                         type="text"
-                                        placeholder="Buscar por EAN ou IMEI (Server-Side)..."
-                                        className="w-full bg-[#111111] border border-[#222222] rounded-md py-1.5 pl-8 pr-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#6A0DAD]"
+                                        placeholder="Buscar por nome, modelo, EAN, SKU ou cor..."
+                                        className="w-full bg-[#111111] border border-[#222222] focus:border-[#6A0DAD] rounded-md py-1.5 pl-8 pr-3 text-xs text-white placeholder-gray-500 focus:outline-none transition-all"
                                         value={eanImeiSearch}
                                         onChange={(e) => setEanImeiSearch(e.target.value)}
                                       />
@@ -16757,10 +16781,12 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <div className="flex items-center justify-center py-8">
                                       <div className="w-6 h-6 border-2 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
                                     </div>
-                                  ) : catalogoProdutos.length === 0 ? (
+                                  ) : catalogoProdutosFiltrados.length === 0 ? (
                                     <div className="text-center py-8 text-gray-700 border border-dashed border-[#222222] rounded-lg">
                                       <Package size={24} className="mx-auto mb-2 opacity-30" />
-                                      <p className="text-xs italic">Nenhum modelo cadastrado ainda.</p>
+                                      <p className="text-xs italic">
+                                        {eanImeiSearch ? `Nenhum modelo encontrado para "${eanImeiSearch}".` : 'Nenhum modelo cadastrado ainda.'}
+                                      </p>
                                     </div>
                                   ) : (
 
@@ -16774,7 +16800,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                         }}
                                       >
                                         {virtualizer.getVirtualItems().map((virtualRow) => {
-                                          const p = catalogoProdutos[virtualRow.index];
+                                          const p = catalogoProdutosFiltrados[virtualRow.index];
                                           if (!p) return null;
                                           const isCardSelected = (formData.id && String(formData.id) === String(p.id)) || (editingCatalogoProduto && String(editingCatalogoProduto.id) === String(p.id));
                                           return (
