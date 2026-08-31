@@ -25,6 +25,7 @@ import ModalAuditoriaCega from './ModalAuditoriaCega';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
 import RankingVendedores from './RankingVendedores';
 import ColorBadge from './ColorBadge';
+import ModalEditarImei from './ModalEditarImei';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -121,6 +122,7 @@ function ProductTableRow({
   toggleVerImeis,
   onUpdateProdutoField,
   onDeleteProduto,
+  onOpenEditImeiModal,
   userRole
 }) {
   const [editingField, setEditingField] = useState(null);
@@ -229,11 +231,24 @@ function ProductTableRow({
       {expandedProductImeis[p.id] && (
         <tr className="bg-black">
           <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
-            <div className="bg-[#050505] p-3 rounded-lg grid grid-cols-3 gap-2">
+            <div className="bg-[#050505] border border-[#1A1A1A] p-3 rounded-xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
               {productImeisMap[p.id]?.map((im, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-black border border-[#222222] p-2 rounded text-xs font-mono">
-                  <span className="text-gray-200">{im.imei}</span>
-                  <ColorBadge cor={im.cor} />
+                <div key={idx} className="flex items-center justify-between bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-2.5 rounded-lg text-xs font-mono gap-2 transition-all group">
+                  <span className="text-gray-200 font-bold tracking-wide">{im.imei}</span>
+                  <div className="flex items-center gap-1.5">
+                    <ColorBadge cor={im.cor} />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onOpenEditImeiModal) onOpenEditImeiModal(im);
+                      }}
+                      className="text-gray-500 hover:text-[#6A0DAD] p-1 rounded hover:bg-purple-950/30 transition-colors cursor-pointer"
+                      title="Editar Cor deste IMEI"
+                    >
+                      <Edit2 size={12} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -795,6 +810,58 @@ export default function Dashboard({ session, profileDataProps }) {
   const [buscaDesconto, setBuscaDesconto] = useState('');
   const [isLoadingDescontos, setIsLoadingDescontos] = useState(false);
   const [isModalAuditoriaCegaOpen, setIsModalAuditoriaCegaOpen] = useState(false);
+
+  // Estados para Edição de IMEI / Cor em Modal dedicado
+  const [selectedImeiForEdit, setSelectedImeiForEdit] = useState(null);
+  const [isEditImeiModalOpen, setIsEditImeiModalOpen] = useState(false);
+
+  const handleOpenEditImeiModal = (imeiObj) => {
+    setSelectedImeiForEdit(imeiObj);
+    setIsEditImeiModalOpen(true);
+  };
+
+  const handleSaveImeiCor = async (imeiId, novaCor, produtoId) => {
+    if (!imeiId || !novaCor) return;
+
+    const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+    const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
+
+    const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
+    const corTrimmed = String(novaCor).trim();
+
+    const { error } = await dbClient
+      .from('imeis')
+      .update({ cor: corTrimmed })
+      .eq('id', imeiId);
+
+    if (error) {
+      console.error("Erro ao atualizar cor do IMEI no Supabase:", error);
+      showToast("Erro ao atualizar cor do IMEI: " + error.message, "error");
+      throw error;
+    }
+
+    // Atualização reativa imediata dos estados locais para re-render sem refresh
+    if (produtoId) {
+      setProductImeisMap(prev => {
+        const currentList = prev[produtoId] || [];
+        const updatedList = currentList.map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im);
+        return { ...prev, [produtoId]: updatedList };
+      });
+    } else {
+      setProductImeisMap(prev => {
+        const newMap = { ...prev };
+        Object.keys(newMap).forEach(key => {
+          newMap[key] = (newMap[key] || []).map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im);
+        });
+        return newMap;
+      });
+    }
+
+    setDisponiveisImeis(prev => (prev || []).map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im));
+    setUltimosRecebidos(prev => (prev || []).map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im));
+
+    showToast(`Cor do IMEI alterada para "${corTrimmed}" com sucesso!`, "success");
+  };
 
   // Estados para Edição de Informações do Colaborador (Nome, E-mail, Telefone, CPF, Senha, Role, Filial)
   const [editingColaborador, setEditingColaborador] = useState(null);
@@ -18249,6 +18316,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                         toggleVerImeis={toggleVerImeis}
                                         onUpdateProdutoField={handleUpdateProdutoField}
                                         onDeleteProduto={handleDeleteProduto}
+                                        onOpenEditImeiModal={handleOpenEditImeiModal}
                                         userRole={profile?.role}
                                       />
                                     ))}
@@ -21129,6 +21197,14 @@ export default function Dashboard({ session, profileDataProps }) {
             setIsModalAuditoriaCegaOpen(false);
             showToast('Auditoria matinal cega registrada com sucesso!', 'success');
           }}
+        />
+
+        {/* MODAL DE EDIÇÃO DE COR DE IMEI */}
+        <ModalEditarImei
+          imeiObj={selectedImeiForEdit}
+          isOpen={isEditImeiModalOpen}
+          onClose={() => setIsEditImeiModalOpen(false)}
+          onSave={handleSaveImeiCor}
         />
 
         {/* MODAL DE CONFIRMAÇÃO DE FINALIZAÇÃO DE CHAMADO S.O.S */}
