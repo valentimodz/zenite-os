@@ -603,6 +603,11 @@ export default function Dashboard({ session, profileDataProps }) {
   // { [vendedorId]: 'FATURAMENTO_GERAL' | 'BOLETO' }
   const [metaTipoMap, setMetaTipoMap] = useState({});
 
+  // Estados do Modal de Transferência de Filial
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [selectedEmployeeTransfer, setSelectedEmployeeTransfer] = useState(null);
+  const [newBranchId, setNewBranchId] = useState('');
+
   // --- Novos Estados de Controle e Negócio (Estoque, PDV, Comissões e Relatórios) ---
   const [activeTab, setActiveTab] = useState('gestao'); // Para GERENTE: 'gestao' | 'estoque' | 'ranking' | 'fechamentos'
   const [activeSellerTab, setActiveSellerTab] = useState('pdv'); // Para VENDEDOR: 'pdv' | 'metas' | 'fechamento'
@@ -4909,6 +4914,42 @@ export default function Dashboard({ session, profileDataProps }) {
       alert('Falha ao excluir vendedor.');
     } finally {
       setLoadingVendedor(false);
+    }
+  };
+
+  const handleTransferBranch = async () => {
+    if (!selectedEmployeeTransfer || !newBranchId) {
+      showToast('Selecione uma filial de destino válida.', 'error');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ filial_id: newBranchId })
+        .eq('id', selectedEmployeeTransfer);
+
+      if (error) throw error;
+
+      // UX: Atualização de Estado local imediata sem recarregar a página
+      setVendedores(prev =>
+        prev.map(v => (v.id === selectedEmployeeTransfer ? { ...v, filial_id: newBranchId } : v))
+      );
+      if (typeof setTeamMembers === 'function') {
+        setTeamMembers(prev =>
+          prev.map(m => (m.id === selectedEmployeeTransfer ? { ...m, filial_id: newBranchId } : m))
+        );
+      }
+
+      setIsTransferModalOpen(false);
+      setSelectedEmployeeTransfer(null);
+      setNewBranchId('');
+
+      const filialNome = filiais.find(f => f.id === newBranchId)?.nome || 'Filial';
+      showToast(`Filial do colaborador alterada para "${filialNome}" com sucesso!`, 'success');
+    } catch (err) {
+      console.error('Erro ao transferir filial do vendedor:', err);
+      showToast('Erro ao transferir filial: ' + (err.message || 'Falha na conexão.'), 'error');
     }
   };
 
