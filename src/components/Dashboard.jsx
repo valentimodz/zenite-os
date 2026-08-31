@@ -4793,7 +4793,13 @@ export default function Dashboard({ session, profileDataProps }) {
         setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
         setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
         setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
+        setEstoqueConsolidadoLista(prev => prev.map(e => (e.id === produtoId || e.nome === nome) ? { ...e, cor: corTrimmed } : e));
         showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
+
+        const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
+        if (filialParaRecarregar) {
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
+        }
       } catch (err) {
         console.error('Erro ao atualizar cor:', err);
         showToast('Erro ao atualizar cor: ' + err.message, 'error');
@@ -4824,7 +4830,13 @@ export default function Dashboard({ session, profileDataProps }) {
         setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
         setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
         setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
+        setEstoqueConsolidadoLista(prev => prev.map(e => (e.id === produtoId || e.nome === nome) ? { ...e, preco: novoPreco } : e));
         showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
+
+        const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
+        if (filialParaRecarregar) {
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
+        }
       } catch (err) {
         console.error('Erro ao atualizar preço:', err);
         showToast('Erro ao atualizar preço: ' + err.message, 'error');
@@ -4879,12 +4891,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
         setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
         setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
+        setEstoqueConsolidadoLista(prev => prev.map(e => (e.id === produtoId || (e.nome?.toLowerCase() === nome?.toLowerCase() && e.filial_id === resolvedFilialId)) ? { ...e, quantidade: novaQtd } : e));
 
         showToast(`Estoque de "${nome}" alterado para ${novaQtd} un. com sucesso!`, 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
         if (filialParaRecarregar) {
-          await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
         }
       } catch (err) {
         console.error('Erro ao atualizar quantidade:', err);
