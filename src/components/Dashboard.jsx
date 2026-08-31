@@ -348,7 +348,7 @@ function ProductTableRow({
             let qtdReal = imeisCountMap > 0 ? imeisCountMap : (typeof p.quantidade_real === 'number' ? p.quantidade_real : (typeof p.imeis_count === 'number' ? p.imeis_count : imeisValidos.length));
             if (qtdReal === 0 && imeisCountMap > 0) qtdReal = imeisCountMap;
 
-            p.quantidade_real = qtdReal;
+            const countImeisDireto = p.imeis ? p.imeis.length : (p.itens_imei ? p.itens_imei.length : (p.imeis_db ? p.imeis_db.length : qtdReal));
 
             return (
               <button
@@ -357,7 +357,7 @@ function ProductTableRow({
                 className="text-[#6A0DAD] underline font-bold hover:text-purple-300 transition-colors cursor-pointer"
                 title="Clique para ver os IMEIs deste aparelho"
               >
-                {qtdReal} (IMEIs)
+                {countImeisDireto} (IMEIs)
               </button>
             );
           })() : editingField === 'quantidade' ? (
