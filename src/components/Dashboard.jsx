@@ -4767,23 +4767,31 @@ export default function Dashboard({ session, profileDataProps }) {
 
   const handleUpdateProdutoField = async (produtoId, nome, field, newValue, itemFilialId) => {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+    const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
+
+    // Cliente com permissão estendida (Super Admin / Admin bypass RLS cross-branch)
+    const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
     const resolvedFilialId = itemFilialId || activeFilialId || filiais[0]?.id;
 
     if (field === 'cor') {
       const corTrimmed = String(newValue || '').trim();
       try {
         if (produtoId && !String(produtoId).startsWith('synth_')) {
-          let q = supabase.from('produtos').update({ cor: corTrimmed }).eq('id', produtoId);
-          if (resolvedFilialId) {
-            q = q.eq('filial_id', resolvedFilialId);
+          let q = dbClient.from('produtos').update({ cor: corTrimmed }).eq('id', produtoId);
+          if (itemFilialId) {
+            q = q.eq('filial_id', itemFilialId);
           }
           const { error } = await q;
           if (error) throw error;
         }
 
-        // Optimistic UI updates (isolado estritamente por produto e filial)
-        setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, cor: corTrimmed } : p));
-        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, cor: corTrimmed } : p));
+        if (nome) {
+          await dbClient.from('produtos_catalogo').update({ cor: corTrimmed }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
+        }
+
+        setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
+        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
         setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
         showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
       } catch (err) {
@@ -4801,17 +4809,20 @@ export default function Dashboard({ session, profileDataProps }) {
 
       try {
         if (produtoId && !String(produtoId).startsWith('synth_')) {
-          let q = supabase.from('produtos').update({ preco: novoPreco }).eq('id', produtoId);
-          if (resolvedFilialId) {
-            q = q.eq('filial_id', resolvedFilialId);
+          let q = dbClient.from('produtos').update({ preco: novoPreco }).eq('id', produtoId);
+          if (itemFilialId) {
+            q = q.eq('filial_id', itemFilialId);
           }
           const { error } = await q;
           if (error) throw error;
         }
 
-        // Optimistic UI updates (isolado estritamente por produto e filial)
-        setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, preco: novoPreco } : p));
-        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, preco: novoPreco } : p));
+        if (nome) {
+          await dbClient.from('produtos_catalogo').update({ preco: novoPreco }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
+        }
+
+        setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
+        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
         setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
         showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
       } catch (err) {
@@ -4827,16 +4838,14 @@ export default function Dashboard({ session, profileDataProps }) {
 
       try {
         if (produtoId && !String(produtoId).startsWith('synth_')) {
-          // ISOLAMENTO TOTAL (PATCH): Atualiza APENAS { quantidade: novaQtd } com chave composta .eq('id', produtoId).eq('filial_id', resolvedFilialId)
-          let q = supabase.from('produtos').update({ quantidade: novaQtd }).eq('id', produtoId);
-          if (resolvedFilialId) {
-            q = q.eq('filial_id', resolvedFilialId);
+          let q = dbClient.from('produtos').update({ quantidade: novaQtd }).eq('id', produtoId);
+          if (itemFilialId) {
+            q = q.eq('filial_id', itemFilialId);
           }
           const { error } = await q;
           if (error) throw error;
         } else if (nome && resolvedFilialId) {
-          // Produto sintético: buscar exclusivamente na filial da linha
-          const { data: prodsBanco } = await supabase
+          const { data: prodsBanco } = await dbClient
             .from('produtos')
             .select('id, filial_id')
             .eq('empresa_id', targetEmpresaId)
@@ -4844,15 +4853,14 @@ export default function Dashboard({ session, profileDataProps }) {
             .ilike('nome', nome);
 
           if (prodsBanco && prodsBanco.length > 0) {
-            const { error: updErr } = await supabase
+            const { error: updErr } = await dbClient
               .from('produtos')
               .update({ quantidade: novaQtd })
-              .eq('id', prodsBanco[0].id)
-              .eq('filial_id', resolvedFilialId);
+              .eq('id', prodsBanco[0].id);
             if (updErr) throw updErr;
           } else {
             const catMatch = (catalogoProdutos || []).find(c => c.nome?.toLowerCase() === nome.toLowerCase()) || {};
-            const { error: insErr } = await supabase
+            const { error: insErr } = await dbClient
               .from('produtos')
               .insert({
                 empresa_id: targetEmpresaId,
@@ -4869,7 +4877,6 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }
 
-        // Optimistic UI updates
         setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
         setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
 
@@ -4887,143 +4894,15 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   const handleUpdateProdutoPreco = async (produtoId, nome, precoAtual, itemFilialId) => {
-    const novoPrecoStr = window.prompt(`Novo preço para ${nome}:`, precoAtual);
-    if (novoPrecoStr === null) return; // User cancelled
-
-    const sanitized = String(novoPrecoStr).replace(/[^\d.,]/g, '').replace(',', '.');
-    const novoPreco = parseFloat(sanitized);
-
-    if (isNaN(novoPreco)) {
-      showToast('Por favor, digite um preço numérico válido.', 'error');
-      return;
-    }
-
-    try {
-      const resolvedFilialId = itemFilialId || activeFilialId || filiais[0]?.id;
-
-      // 1. Atualizar com payload estritamente isolado { preco: novoPreco } e chave composta
-      if (produtoId && !String(produtoId).startsWith('synth_')) {
-        let q = supabase.from('produtos').update({ preco: novoPreco }).eq('id', produtoId);
-        if (resolvedFilialId) {
-          q = q.eq('filial_id', resolvedFilialId);
-        }
-        const { error } = await q;
-        if (error) throw error;
-      }
-
-      // 2. Atualizar estados locais apenas para o item na filial correta
-      setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, preco: novoPreco } : p));
-      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, preco: novoPreco } : p));
-      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
-
-      showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
-    } catch (err) {
-      console.error('Erro ao atualizar preço:', err);
-      showToast('Erro ao atualizar preço: ' + err.message, 'error');
-    }
+    return handleUpdateProdutoField(produtoId, nome, 'preco', precoAtual, itemFilialId);
   };
 
   const handleUpdateProdutoQuantidade = async (produtoId, nome, quantidadeAtual, itemFilialId) => {
-    const novaQtdStr = window.prompt(`Nova quantidade em estoque para ${nome}:`, quantidadeAtual);
-    if (novaQtdStr === null) return; // User cancelled
-
-    const novaQtd = parseInt(novaQtdStr, 10);
-
-    if (isNaN(novaQtd) || novaQtd < 0) {
-      showToast('Por favor, digite um número inteiro válido (>= 0).', 'error');
-      return;
-    }
-
-    try {
-      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      const resolvedFilialId = itemFilialId || activeFilialId || filiais[0]?.id;
-
-      // 1. Se for um ID real da tabela produtos, atualizar ESTRITAMENTE com { quantidade: novaQtd }
-      if (produtoId && !String(produtoId).startsWith('synth_')) {
-        let q = supabase.from('produtos').update({ quantidade: novaQtd }).eq('id', produtoId);
-        if (resolvedFilialId) {
-          q = q.eq('filial_id', resolvedFilialId);
-        }
-        const { error } = await q;
-        if (error) throw error;
-      } else if (nome && resolvedFilialId) {
-        // 2. Buscar na tabela 'produtos' por nome e filial estrita
-        const { data: prodsBanco } = await supabase
-          .from('produtos')
-          .select('id, filial_id')
-          .eq('empresa_id', targetEmpresaId)
-          .eq('filial_id', resolvedFilialId)
-          .ilike('nome', nome);
-
-        if (prodsBanco && prodsBanco.length > 0) {
-          const { error: updErr } = await supabase
-            .from('produtos')
-            .update({ quantidade: novaQtd })
-            .eq('id', prodsBanco[0].id)
-            .eq('filial_id', resolvedFilialId);
-          if (updErr) throw updErr;
-        } else {
-          const catMatch = (catalogoProdutos || []).find(c => c.nome?.toLowerCase() === nome.toLowerCase()) || {};
-          const { error: insErr } = await supabase
-            .from('produtos')
-            .insert({
-              empresa_id: targetEmpresaId,
-              filial_id: resolvedFilialId,
-              nome: nome,
-              tipo: catMatch.tipo || 'ACESSORIO',
-              categoria: catMatch.categoria || 'GERAL',
-              preco: parseFloat(catMatch.preco || 0),
-              quantidade: novaQtd,
-              sku: catMatch.sku || null,
-              codigo_barras: catMatch.codigo_barras || null
-            });
-          if (insErr) throw insErr;
-        }
-      }
-
-      // 3. Atualizar os estados locais no React
-      setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
-      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
-
-      showToast(`Estoque de "${nome}" alterado para ${novaQtd} un. com sucesso!`, 'success');
-
-      const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
-      if (filialParaRecarregar) {
-        await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
-      }
-    } catch (err) {
-      console.error('Erro ao atualizar quantidade:', err);
-      showToast('Erro ao atualizar quantidade: ' + err.message, 'error');
-    }
+    return handleUpdateProdutoField(produtoId, nome, 'quantidade', quantidadeAtual, itemFilialId);
   };
 
   const handleUpdateProdutoCor = async (produtoId, nome, corAtual, itemFilialId) => {
-    const novaCor = window.prompt(`Definir/Alterar cor para "${nome}":`, corAtual || '');
-    if (novaCor === null) return; // User cancelled
-
-    const corTrimmed = novaCor.trim();
-
-    try {
-      const resolvedFilialId = itemFilialId || activeFilialId || filiais[0]?.id;
-
-      if (produtoId && !String(produtoId).startsWith('synth_')) {
-        let q = supabase.from('produtos').update({ cor: corTrimmed }).eq('id', produtoId);
-        if (resolvedFilialId) {
-          q = q.eq('filial_id', resolvedFilialId);
-        }
-        const { error } = await q;
-        if (error) throw error;
-      }
-
-      setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, cor: corTrimmed } : p));
-      setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome === nome && (!resolvedFilialId || p.filial_id === resolvedFilialId))) ? { ...p, cor: corTrimmed } : p));
-      setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
-
-      showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
-    } catch (err) {
-      console.error('Erro ao atualizar cor:', err);
-      showToast('Erro ao atualizar cor: ' + err.message, 'error');
-    }
+    return handleUpdateProdutoField(produtoId, nome, 'cor', corAtual, itemFilialId);
   };
 
   const toggleVendedorTrainee = async (vendedorId, currentIsTreinner) => {
