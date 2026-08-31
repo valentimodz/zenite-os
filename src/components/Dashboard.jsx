@@ -16000,18 +16000,25 @@ export default function Dashboard({ session, profileDataProps }) {
                                         {v.is_treinner ? 'Promover' : 'Tornar Trainee'}
                                       </button>
 
-                                      {/* Filial: Badge Minimalista de Informação */}
-                                      {v.filial_id ? (
-                                        <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-[#111111] text-purple-400 border border-[#222222] whitespace-nowrap flex-shrink-0">
-                                          {filiais.find(f => f.id === v.filial_id)?.nome || 'Desconhecida'}
-                                        </span>
-                                      ) : (
-                                        <span className="px-3 h-10 flex items-center justify-center rounded text-xs font-semibold bg-yellow-950/20 text-yellow-500 border border-yellow-900/35 whitespace-nowrap flex-shrink-0">
-                                          ⚠️ Filial Pendente
-                                        </span>
-                                      )}
+                                      {/* Filial: Botão Gatilho para Modal de Transferência */}
+                                       <button
+                                         type="button"
+                                         onClick={() => {
+                                           setSelectedEmployeeTransfer(v.id);
+                                           setNewBranchId(v.filial_id || (filiais[0]?.id || ''));
+                                           setIsTransferModalOpen(true);
+                                         }}
+                                         title="Clique para transferir a filial do vendedor"
+                                         className={`px-3 h-10 flex items-center justify-center rounded text-xs font-semibold border whitespace-nowrap flex-shrink-0 transition-all hover:scale-[1.02] cursor-pointer ${
+                                           v.filial_id
+                                             ? 'bg-[#111111] text-purple-400 border-[#222222] hover:border-purple-600/50 hover:bg-[#181818]'
+                                             : 'bg-yellow-950/20 text-yellow-500 border-yellow-900/35 hover:border-yellow-600/50 hover:bg-yellow-950/40'
+                                         }`}
+                                       >
+                                         {v.filial_id ? (filiais.find(f => f.id === v.filial_id)?.nome || 'Desconhecida') : '⚠️ Filial Pendente'}
+                                       </button>
 
-                                      {/* Botão Excluir (Lixeira) */}
+                                       {/* Botão Excluir (Lixeira) */}
                                       <button
                                         onClick={() => handleDeleteVendedor(v.id, v.nome)}
                                         className="h-10 w-10 flex items-center justify-center text-red-500 hover:bg-red-950/40 rounded border border-[#222222] hover:border-red-900/50 transition-colors flex-shrink-0"
@@ -16029,6 +16036,78 @@ export default function Dashboard({ session, profileDataProps }) {
                       )}
 
                     </div>
+
+                    {/* Modal de Transferência de Filial */}
+                    {isTransferModalOpen && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                        <div className="bg-[#0D0D0D] border border-gray-800 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-5">
+                          <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+                            <h3 className="text-base font-bold text-white flex items-center gap-2">
+                              <Building size={18} className="text-purple-500" />
+                              Transferir Filial do Vendedor
+                            </h3>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsTransferModalOpen(false);
+                                setSelectedEmployeeTransfer(null);
+                                setNewBranchId('');
+                              }}
+                              className="text-gray-400 hover:text-white text-sm"
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-gray-400 mb-1 font-medium">Funcionário:</p>
+                            <p className="text-sm font-semibold text-white bg-[#141414] border border-gray-800 p-2.5 rounded-lg">
+                              {vendedores.find(v => v.id === selectedEmployeeTransfer)?.nome || 'Vendedor Selecionado'}
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs text-gray-400 mb-1 font-medium">
+                              Nova Filial de Destino:
+                            </label>
+                            <select
+                              value={newBranchId}
+                              onChange={(e) => setNewBranchId(e.target.value)}
+                              className="w-full bg-[#141414] border border-gray-800 focus:border-[#6A0DAD] text-white text-sm rounded-lg p-2.5 outline-none transition-colors cursor-pointer"
+                            >
+                              <option value="" disabled>Selecione a filial de destino</option>
+                              {filiais.map(f => (
+                                <option key={f.id} value={f.id}>
+                                  {f.nome}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex justify-end gap-3 pt-2 border-t border-gray-800">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsTransferModalOpen(false);
+                                setSelectedEmployeeTransfer(null);
+                                setNewBranchId('');
+                              }}
+                              className="px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white bg-[#1A1A1A] hover:bg-[#252525] rounded-lg transition-colors cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleTransferBranch}
+                              disabled={!newBranchId}
+                              className="px-4 py-2 text-xs font-bold text-white bg-[#6A0DAD] hover:bg-[#500885] disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors shadow-lg shadow-purple-900/30 cursor-pointer"
+                            >
+                              Transferir
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* CARD DE CONFIGURAÇÕES FISCAIS (Oculto para GERENTE) */}
                     {['SUPER_ADMIN', 'OWNER', 'ADMIN'].includes(profile?.role) && company?.id && company.id !== 'MASTER' && (
