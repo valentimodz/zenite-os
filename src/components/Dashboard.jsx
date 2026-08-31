@@ -7869,7 +7869,7 @@ export default function Dashboard({ session, profileDataProps }) {
           vendido: false
         };
 
-        console.log("PAYLOAD TENTANDO INSERIR:", payloadImei);
+        console.log("DADOS EXATOS ENVIADOS:", payloadImei);
 
         let { error: insertErr } = await supabase
           .from('imeis')
@@ -7879,7 +7879,7 @@ export default function Dashboard({ session, profileDataProps }) {
         if (insertErr && (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check'))) {
           console.warn("Retentando com status 'DISPONÍVEL' (com acento)...");
           const retryPayload = { ...payloadImei, status: 'DISPONÍVEL' };
-          console.log("PAYLOAD TENTANDO INSERIR (retry com acento):", retryPayload);
+          console.log("DADOS EXATOS ENVIADOS (retry com acento):", retryPayload);
           const { error: retryErr } = await supabase.from('imeis').insert(retryPayload);
           if (retryErr) {
             insertErr = retryErr;
@@ -7889,12 +7889,9 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         if (insertErr) {
-          console.error("FALHA SUPABASE:", insertErr);
-          if (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check')) {
-            showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
-          } else {
-            showToast(`Falha ao registrar IMEI: ${insertErr.message || 'Erro desconhecido'}`, 'error');
-          }
+          console.error("ERRO SUPABASE:", insertErr);
+          const errDetail = insertErr.details || insertErr.message || 'Erro desconhecido no banco de dados';
+          showToast(`Falha ao registrar IMEI: ${errDetail}`, 'error');
           setLoadingEntrada(false);
           return;
         }
@@ -8027,13 +8024,13 @@ export default function Dashboard({ session, profileDataProps }) {
           is_seminovo: !!is_seminovo
         }));
 
-        console.log("PAYLOAD TENTANDO INSERIR:", imeisData);
+        console.log("DADOS EXATOS ENVIADOS:", imeisData);
 
         let { error: imeisErr } = await supabase.from('imeis').insert(imeisData);
         if (imeisErr && (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check'))) {
           console.warn("Retentando com status 'DISPONÍVEL' (com acento)...");
           const retryData = imeisData.map(i => ({ ...i, status: 'DISPONÍVEL' }));
-          console.log("PAYLOAD TENTANDO INSERIR (retry com acento):", retryData);
+          console.log("DADOS EXATOS ENVIADOS (retry com acento):", retryData);
           const { error: retryErr } = await supabase.from('imeis').insert(retryData);
           if (retryErr) {
             imeisErr = retryErr;
@@ -8043,12 +8040,9 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         if (imeisErr) {
-          console.error("FALHA SUPABASE:", imeisErr);
-          if (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check')) {
-            showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
-          } else {
-            showToast(`Falha ao registrar IMEI: ${imeisErr.message || 'Erro desconhecido'}`, 'error');
-          }
+          console.error("ERRO SUPABASE:", imeisErr);
+          const errDetail = imeisErr.details || imeisErr.message || 'Erro desconhecido no banco de dados';
+          showToast(`Falha ao registrar IMEI: ${errDetail}`, 'error');
           setLoadingEntrada(false);
           return;
         }
@@ -8527,15 +8521,17 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
-      // 1. Limpar IMEIs associados antes de deletar o produto pai
+      // 1. Verificar se existem IMEIs atrelados a este produto no Supabase
       if (targetId) {
-        try {
-          await supabase
-            .from('imeis')
-            .delete()
-            .eq('produto_id', targetId);
-        } catch (imeiEx) {
-          console.warn('Aviso ao excluir IMEIs vinculados:', imeiEx);
+        const { data: childImeis, error: imeiCheckErr } = await supabase
+          .from('imeis')
+          .select('id')
+          .eq('produto_id', targetId);
+
+        if (!imeiCheckErr && childImeis && childImeis.length > 0) {
+          showToast("Não é possível excluir: existem IMEIs atrelados a este produto.", "error");
+          setLoadingDados(false);
+          return;
         }
       }
 
