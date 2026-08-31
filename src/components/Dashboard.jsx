@@ -611,21 +611,21 @@ export default function Dashboard({ session, profileDataProps }) {
   const catalogoProdutosFiltrados = useMemo(() => {
     if (!Array.isArray(catalogoProdutos) || catalogoProdutos.length === 0) return [];
 
-    const termInput = String(eanImeiSearch || '').toLowerCase().trim();
-    const termDebounced = String(buscaCatalogoMestreDebounced || '').toLowerCase().trim();
-    const termo = termInput || termDebounced;
+    const termo = String(eanImeiSearch || buscaCatalogoMestreDebounced || '').toLowerCase().trim();
     const catFiltro = String(categoriaCatalogoMestre || 'TODAS').toLowerCase().trim();
 
-    return catalogoProdutos.filter(item => {
+    if (!termo && (catFiltro === 'todas' || !catFiltro)) return catalogoProdutos;
+
+    return catalogoProdutos.filter((item, index) => {
       if (!item || typeof item !== 'object') return false;
 
-      const nome = String(item.nome || item.produtos_catalogo?.nome || item.produtos?.nome || '').toLowerCase();
-      const categoria = String(item.categoria || item.produtos_catalogo?.categoria || item.produtos?.categoria || '').toLowerCase();
-      const cor = String(item.cor || item.produtos_catalogo?.cor || item.produtos?.cor || '').toLowerCase();
-      const sku = String(item.sku || item.produtos_catalogo?.sku || item.produtos?.sku || '').toLowerCase();
-      const codigoBarras = String(item.codigo_barras || item.codigoBarras || item.produtos_catalogo?.codigo_barras || item.produtos?.codigo_barras || '').toLowerCase();
-      const tipo = String(item.tipo || item.produtos_catalogo?.tipo || item.produtos?.tipo || '').toLowerCase();
-      const numeroSerie = String(item.numero_serie || item.numeroSerie || '').toLowerCase();
+      const nome = String(item.nome || item.produtos_catalogo?.nome || item.produtos?.nome || item.modelo || '').toLowerCase().trim();
+      const categoria = String(item.categoria || item.produtos_catalogo?.categoria || item.produtos?.categoria || '').toLowerCase().trim();
+      const cor = String(item.cor || item.produtos_catalogo?.cor || item.produtos?.cor || '').toLowerCase().trim();
+      const sku = String(item.sku || item.produtos_catalogo?.sku || item.produtos?.sku || '').toLowerCase().trim();
+      const codigoBarras = String(item.codigo_barras || item.codigoBarras || item.produtos_catalogo?.codigo_barras || item.produtos?.codigo_barras || '').toLowerCase().trim();
+      const tipo = String(item.tipo || item.produtos_catalogo?.tipo || item.produtos?.tipo || '').toLowerCase().trim();
+      const numeroSerie = String(item.numero_serie || item.numeroSerie || item.imei || '').toLowerCase().trim();
 
       const matchesTerm = !termo ||
         nome.includes(termo) ||
@@ -642,6 +642,14 @@ export default function Dashboard({ session, profileDataProps }) {
     });
   }, [catalogoProdutos, eanImeiSearch, buscaCatalogoMestreDebounced, categoriaCatalogoMestre]);
 
+  // Inspection Log para auditoria imediata no console F12
+  if (catalogoProdutos && catalogoProdutos.length > 0) {
+    console.log('🔥 [DEBUG CATALOGO ITEM 0]:', catalogoProdutos[0]);
+    if (eanImeiSearch) {
+      console.log(`🔍 [DEBUG BUSCA]: "${eanImeiSearch}" | Encontrados: ${catalogoProdutosFiltrados.length} de ${catalogoProdutos.length}`);
+    }
+  }
+
   const virtualizer = useVirtualizer({
     count: catalogoProdutosFiltrados.length,
     getScrollElement: () => parentRef.current,
@@ -653,19 +661,10 @@ export default function Dashboard({ session, profileDataProps }) {
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedEanImeiSearch(eanImeiSearch);
-      setCatalogoPage(0); // Reseta a paginação ao buscar
+      setCatalogoPage(0);
     }, 300);
     return () => clearTimeout(handler);
   }, [eanImeiSearch]);
-
-  useEffect(() => {
-    if (debouncedEanImeiSearch && debouncedEanImeiSearch.trim() !== '') {
-      const targetEmp = activeFilialId || company?.id || profile?.empresa_id;
-      if (targetEmp) {
-        fetchCatalogoProdutos(targetEmp, '', categoriaCatalogoMestre, 0, debouncedEanImeiSearch);
-      }
-    }
-  }, [debouncedEanImeiSearch]);
   // --- Estados do Modal "Distribuir Estoque Matriz" ---
   const [distribuirModalOpen, setDistribuirModalOpen] = useState(false);
   const [produtoDistribuir, setProdutoDistribuir] = useState(null);
