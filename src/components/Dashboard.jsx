@@ -597,6 +597,26 @@ export default function Dashboard({ session, profileDataProps }) {
     overscan: 5,
   });
 
+  const INITIAL_CATALOGO_FORM_DATA = {
+    id: null,
+    nome: '',
+    tipo: 'ACESSORIO',
+    categoria: '',
+    sku: '',
+    condicao: 'NOVO',
+    codigoBarras: '',
+    numeroSerie: '',
+    cor: '',
+    estoqueMinimo: '',
+    preco: '',
+    precoCusto: '',
+    ncm: '',
+    cest: '',
+    cfop: '5102',
+    origem: '0'
+  };
+
+  const [formData, setFormData] = useState(INITIAL_CATALOGO_FORM_DATA);
   const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
   const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
@@ -5312,25 +5332,74 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   const handleStartEditCatalogo = (p) => {
+    if (!p) return;
+    const mapped = {
+      id: p.id || null,
+      nome: p.nome || '',
+      tipo: p.tipo || 'ACESSORIO',
+      categoria: p.categoria || '',
+      sku: p.sku || '',
+      condicao: p.condicao || 'NOVO',
+      codigoBarras: p.codigo_barras || p.codigoBarras || '',
+      numeroSerie: p.numero_serie || p.numeroSerie || '',
+      cor: p.cor || '',
+      estoqueMinimo: p.estoque_minimo !== undefined && p.estoque_minimo !== null ? String(p.estoque_minimo) : '',
+      preco: p.preco !== undefined && p.preco !== null ? String(p.preco) : '',
+      precoCusto: p.preco_custo !== undefined && p.preco_custo !== null ? String(p.preco_custo) : '',
+      ncm: p.ncm || '',
+      cest: p.cest || '',
+      cfop: p.cfop || '5102',
+      origem: p.origem !== undefined && p.origem !== null ? String(p.origem) : '0'
+    };
+
+    setFormData(mapped);
     setEditingCatalogoProduto(p);
-    setNomeProduto(p.nome || '');
-    setTipoProduto(p.tipo || 'CELULAR');
-    setCategoriaProduto(p.categoria || '');
-    setPrecoProduto(p.preco ? String(p.preco) : '');
-    setPrecoCustoProduto(p.preco_custo ? String(p.preco_custo) : '');
-    setSkuProduto(p.sku || '');
-    setCodigoBarras(p.codigo_barras || p.codigoBarras || '');
-    setNumeroSerie(p.numero_serie || p.numeroSerie || '');
-    setCondicaoProduto(p.condicao || 'NOVO');
-    setEstoqueMinimoProduto(p.estoque_minimo ? String(p.estoque_minimo) : '');
-    setCorCatalogoProduto(p.cor || '');
-    setNcmProduto(p.ncm || '');
-    setCestProduto(p.cest || '');
-    setCfopProduto(p.cfop || '5102');
-    setOrigemProduto(p.origem || '0');
+    setIsProdutoExistenteCatalogo(false);
+    setProdutoExistenteMaster(null);
+
+    // Sincronizar setters de estado legados
+    setNomeProduto(mapped.nome);
+    setTipoProduto(mapped.tipo);
+    setCategoriaProduto(mapped.categoria);
+    setPrecoProduto(mapped.preco);
+    setPrecoCustoProduto(mapped.precoCusto);
+    setSkuProduto(mapped.sku);
+    setCodigoBarras(mapped.codigoBarras);
+    setNumeroSerie(mapped.numeroSerie);
+    setCondicaoProduto(mapped.condicao);
+    setEstoqueMinimoProduto(mapped.estoqueMinimo);
+    setCorCatalogoProduto(mapped.cor);
+    setNcmProduto(mapped.ncm);
+    setCestProduto(mapped.cest);
+    setCfopProduto(mapped.cfop);
+    setOrigemProduto(mapped.origem);
+
     setTimeout(() => {
       document.getElementById('catalogo-nome')?.focus();
     }, 50);
+  };
+
+  const handleResetForm = () => {
+    setFormData(INITIAL_CATALOGO_FORM_DATA);
+    setEditingCatalogoProduto(null);
+    setIsProdutoExistenteCatalogo(false);
+    setProdutoExistenteMaster(null);
+
+    setNomeProduto('');
+    setTipoProduto('ACESSORIO');
+    setCategoriaProduto('');
+    setSkuProduto('');
+    setCondicaoProduto('NOVO');
+    setCodigoBarras('');
+    setNumeroSerie('');
+    setCorCatalogoProduto('');
+    setEstoqueMinimoProduto('');
+    setPrecoProduto('');
+    setPrecoCustoProduto('');
+    setNcmProduto('');
+    setCestProduto('');
+    setCfopProduto('5102');
+    setOrigemProduto('0');
   };
 
   // Validação em Tempo Real de Duplicidade por Código de Barras / SKU no Catálogo Mestre
@@ -5754,9 +5823,16 @@ export default function Dashboard({ session, profileDataProps }) {
 
       console.log("🔥 [AUDITORIA PAYLOAD PRODUTO] Enviando ao Supabase:", payload);
 
+      const targetId = formData.id || editingCatalogoProduto?.id;
+      const isEditMode = Boolean(targetId);
+
+      const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
+      const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
+      const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
+
       if (isProdutoExistenteCatalogo && produtoExistenteMaster) {
         // Se o produto já existia no catálogo mestre, reaproveitamos o registro e apenas atualizamos o preço/custo se alterado
-        let { error: updateExistingErr } = await supabase
+        let { error: updateExistingErr } = await dbClient
           .from('produtos_catalogo')
           .update({
             preco: parseFloat(precoProduto || produtoExistenteMaster.preco || 0),
@@ -5769,11 +5845,12 @@ export default function Dashboard({ session, profileDataProps }) {
         }
         var data = { ...produtoExistenteMaster, preco: parseFloat(precoProduto || produtoExistenteMaster.preco || 0) };
         showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
-      } else if (editingCatalogoProduto) {
-        let { error } = await supabase
+      } else if (isEditMode && targetId) {
+        // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE
+        let { error } = await dbClient
           .from('produtos_catalogo')
           .update(payload)
-          .eq('id', editingCatalogoProduto.id);
+          .eq('id', targetId);
 
         if (error && (error.code === 'PGRST204' || error.message?.includes('could not find the column') || error.message?.includes('does not exist'))) {
           const strictPayload = {
@@ -5784,32 +5861,38 @@ export default function Dashboard({ session, profileDataProps }) {
             preco: parseFloat(precoProduto || 0),
             codigo_barras: codigoBarrasFinal
           };
-          const { error: retryErr } = await supabase
+          const { error: retryErr } = await dbClient
             .from('produtos_catalogo')
             .update(strictPayload)
-            .eq('id', editingCatalogoProduto.id);
+            .eq('id', targetId);
 
           if (retryErr) throw retryErr;
         } else if (error) {
           throw error;
         }
 
-        alert('Produto atualizado com sucesso!');
+        showToast('Modelo do catálogo atualizado com sucesso!', 'success');
 
+        // Reatividade local síncrona usando .map()
         setCatalogoProdutos(prev =>
           prev.map(item =>
-            item.id === editingCatalogoProduto.id
-              ? { ...item, ...payload, id: item.id }
+            String(item.id) === String(targetId)
+              ? { ...item, ...payload, id: targetId }
               : item
           )
         );
 
-        setEditingCatalogoProduto(null);
+        setProdutos(prev => prev.map(p => (String(p.id) === String(targetId) || String(p.catalogo_id) === String(targetId)) ? { ...p, ...payload } : p));
+        setEstoqueConsolidadoLista(prev => prev.map(e => (String(e.id) === String(targetId) || String(e.catalogo_id) === String(targetId)) ? { ...e, ...payload } : e));
+
+        handleResetForm();
+        return;
       } else {
+        // BIFURCAÇÃO 2: INSERT DE NOVO MODELO
         payload.preco_custo = parseFloat(precoCustoProduto || 0);
 
         let data = null;
-        const { data: insertedData, error } = await supabase
+        const { data: insertedData, error } = await dbClient
           .from('produtos_catalogo')
           .insert(payload)
           .select()
@@ -16228,6 +16311,26 @@ export default function Dashboard({ session, profileDataProps }) {
 
                                 {/* Formulário de cadastro de catálogo */}
                                 <div className="space-y-3">
+                                  {(formData.id || editingCatalogoProduto) && (
+                                    <div className="bg-[#6A0DAD]/20 border border-[#6A0DAD]/50 p-3 rounded-xl flex items-center justify-between gap-3 text-purple-200 text-xs mb-3 animate-fadeIn">
+                                      <div className="flex items-center gap-2">
+                                        <Edit2 size={16} className="text-purple-400 shrink-0" />
+                                        <span>
+                                          <strong>Modo de Edição:</strong> <strong className="text-white">{formData.nome || editingCatalogoProduto?.nome}</strong>
+                                        </span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={handleResetForm}
+                                        className="text-xs bg-purple-950/60 hover:bg-purple-900 border border-purple-700/50 text-white px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 font-bold cursor-pointer"
+                                        title="Cancelar edição e voltar ao modo de cadastro"
+                                      >
+                                        <RotateCcw size={12} />
+                                        <span>Limpar / Novo Produto</span>
+                                      </button>
+                                    </div>
+                                  )}
+
                                   {isProdutoExistenteCatalogo && produtoExistenteMaster && (
                                     <div className="bg-amber-950/40 border border-amber-500/50 p-3 rounded-lg flex items-center justify-between gap-3 text-amber-300 text-xs mb-3 animate-fadeIn">
                                       <div className="flex items-center gap-2">
@@ -16611,36 +16714,26 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </div>
 
                                   <div className="flex gap-2 pt-2">
-                                    {editingCatalogoProduto && (
+                                    {(formData.id || editingCatalogoProduto) && (
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          setEditingCatalogoProduto(null);
-                                          setNomeProduto('');
-                                          setPrecoProduto('');
-                                          setPrecoCustoProduto('');
-                                          setSkuProduto('');
-                                          setCondicaoProduto('NOVO');
-                                          setEstoqueMinimoProduto('');
-                                          setCorCatalogoProduto('');
-                                          setNcmProduto('');
-                                          setCestProduto('');
-                                          setCfopProduto('5102');
-                                          setOrigemProduto('0');
-                                        }}
-                                        className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2.5 px-4 rounded-md transition-colors text-sm"
+                                        onClick={handleResetForm}
+                                        className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2.5 px-4 rounded-xl transition-all text-xs flex items-center gap-1.5 cursor-pointer"
+                                        title="Cancelar edição e voltar ao modo de cadastro"
                                       >
-                                        Cancelar
+                                        <RotateCcw size={14} />
+                                        <span>Limpar / Novo Produto</span>
                                       </button>
                                     )}
                                     <button
+                                      type="button"
                                       onClick={handleSaveCatalogoProduto}
-                                      className={`flex-1 ${isProdutoExistenteCatalogo ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-950/40' : 'bg-[#6A0DAD] hover:bg-[#500885]'} text-white font-bold py-2.5 px-4 rounded-md transition-colors flex items-center justify-center gap-2 text-sm shadow-md`}
+                                      className={`flex-1 ${(formData.id || editingCatalogoProduto) ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-950/40' : (isProdutoExistenteCatalogo ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-950/40' : 'bg-[#6A0DAD] hover:bg-[#500885]')} text-white font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm shadow-md cursor-pointer`}
                                     >
-                                      {editingCatalogoProduto ? <Save size={15} /> : (isProdutoExistenteCatalogo ? <Database size={15} /> : <Plus size={15} />)}
-                                      {editingCatalogoProduto
-                                        ? 'Salvar Alterações'
-                                        : (isProdutoExistenteCatalogo ? 'Vincular Estoque à Loja Atual' : 'Adicionar ao Catálogo')}
+                                      {(formData.id || editingCatalogoProduto) ? <Save size={15} /> : (isProdutoExistenteCatalogo ? <Database size={15} /> : <Plus size={15} />)}
+                                      {(formData.id || editingCatalogoProduto)
+                                        ? 'Salvar Alterações (UPDATE)'
+                                        : (isProdutoExistenteCatalogo ? 'Vincular Estoque à Loja Atual' : 'Adicionar ao Catálogo (INSERT)')}
                                     </button>
                                   </div>
                                 </div>
@@ -16683,6 +16776,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                         {virtualizer.getVirtualItems().map((virtualRow) => {
                                           const p = catalogoProdutos[virtualRow.index];
                                           if (!p) return null;
+                                          const isCardSelected = (formData.id && String(formData.id) === String(p.id)) || (editingCatalogoProduto && String(editingCatalogoProduto.id) === String(p.id));
                                           return (
                                             <div
                                               key={virtualRow.index}
@@ -16696,7 +16790,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                                 paddingBottom: '8px'
                                               }}
                                             >
-                                              <div className="flex items-center justify-between bg-black border border-[#222222] px-3 py-2 rounded-lg h-full">
+                                              <div
+                                                onClick={() => handleStartEditCatalogo(p)}
+                                                className={`flex items-center justify-between bg-black border ${
+                                                  isCardSelected
+                                                    ? 'border-[#6A0DAD] bg-[#6A0DAD]/10 shadow-[0_0_12px_rgba(106,13,173,0.3)]'
+                                                    : 'border-[#222222] hover:border-[#6A0DAD]/50'
+                                                } px-3 py-2 rounded-lg h-full transition-all cursor-pointer group`}
+                                              >
                                                 <div className="flex items-center gap-2">
                                                   {p.tipo === 'CELULAR' ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
                                                   <div className="flex flex-col gap-1">
