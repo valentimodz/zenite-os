@@ -5295,9 +5295,9 @@ export default function Dashboard({ session, profileDataProps }) {
     }
     setLoadingCatalogo(true);
     try {
-      // 1. Tentar busca relacional produtos_catalogo -> imeis com preparo de busca server-side
+      // 1. Busca relacional direta da tabela de produtos reais -> imeis
       let query = supabase
-        .from('produtos_catalogo')
+        .from('produtos')
         .select(`
           *,
           imeis (
@@ -5340,9 +5340,9 @@ export default function Dashboard({ session, profileDataProps }) {
       const to = from + limit - 1;
       query = query.range(from, to).order('nome', { ascending: true });
 
-      // Override original select to get count
+      // Count query
       const countQuery = supabase
-        .from('produtos_catalogo')
+        .from('produtos')
         .select('id', { count: 'exact', head: true })
         .eq('empresa_id', empresaId);
 
@@ -5361,48 +5361,25 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const { data, error } = await query;
 
-      let baseCatalogo = data;
-      let imeisDiretos = [];
-
       if (error) {
-        console.warn("Busca relacional produtos_catalogo -> imeis falhou, utilizando fallback:", error);
-        // Fallback: Busca produtos_catalogo e imeis separadamente
-        const { data: catFallback } = await supabase
-          .from('produtos_catalogo')
-          .select('*')
-          .eq('empresa_id', empresaId)
-          .order('nome', { ascending: true });
-
-        baseCatalogo = catFallback || [];
-
-        const { data: imeisRes } = await supabase
-          .from('imeis')
-          .select('*, produtos(*), produtos_catalogo(*), filiais:filial_id(id, nome)')
-          .eq('empresa_id', empresaId)
-          .eq('vendido', false);
-
-        imeisDiretos = imeisRes || [];
-      } else {
-        const { data: imeisRes } = await supabase
-          .from('imeis')
-          .select('*, produtos(*), produtos_catalogo(*), filiais:filial_id(id, nome)')
-          .eq('empresa_id', empresaId)
-          .eq('vendido', false);
-
-        imeisDiretos = imeisRes || [];
+        console.error("Erro na busca relacional de produtos com IMEIs:", error);
+        throw new Error(`Falha na consulta relacional do banco de dados (PGRST200): ${error.message}`);
       }
 
-      // Se a busca filtrada retornar vazia, fazer fallback geral no banco de dados para não ocultar modelos salvos
-      if (!baseCatalogo || baseCatalogo.length === 0) {
-        const { data: allCat } = await supabase
-          .from('produtos_catalogo')
-          .select('*')
-          .order('nome', { ascending: true });
+      let baseCatalogo = data || [];
 
-        if (allCat && allCat.length > 0) {
-          baseCatalogo = allCat;
-        }
+      const { data: imeisRes, error: imeisErr } = await supabase
+        .from('imeis')
+        .select('*, produtos(*), filiais:filial_id(id, nome)')
+        .eq('empresa_id', empresaId)
+        .eq('vendido', false);
+
+      if (imeisErr) {
+        console.error("Erro ao buscar registros da tabela imeis:", imeisErr);
+        throw new Error(`Falha na consulta de IMEIs (PGRST200): ${imeisErr.message}`);
       }
+
+      const imeisDiretos = imeisRes || [];
 
       // Buscar quantidades da tabela public.produtos para acessórios/produtos gerais
       const { data: prodsData } = await supabase
@@ -8523,14 +8500,19 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
-      // 1. Verificar se existem IMEIs atrelados a este produto no Supabase
+      // 1. Trava de Exclusão Segura: Verificar se existem IMEIs atrelados a este produto no Supabase
       if (targetId) {
-        const { data: childImeis, error: imeiCheckErr } = await supabase
+        const { data: imeisAtrelados, error: imeiCheckErr } = await supabase
           .from('imeis')
           .select('id')
           .eq('produto_id', targetId);
 
-        if (!imeiCheckErr && childImeis && childImeis.length > 0) {
+        if (imeiCheckErr) {
+          console.error("Erro ao verificar relacionamento com IMEIs:", imeiCheckErr);
+          throw new Error(`Falha ao verificar chaves estrangeiras: ${imeiCheckErr.message}`);
+        }
+
+        if (imeisAtrelados && imeisAtrelados.length > 0) {
           showToast("Não é possível excluir: existem IMEIs atrelados a este produto.", "error");
           setLoadingDados(false);
           return;
