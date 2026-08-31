@@ -7622,51 +7622,80 @@ export default function Dashboard({ session, profileDataProps }) {
     let list = catalogoProdutos || [];
 
     if (entradaFiltroCategoria && entradaFiltroCategoria !== 'todas' && entradaFiltroCategoria !== 'all') {
-      const catLower = String(entradaFiltroCategoria || '').trim().toLowerCase();
+      const catTarget = String(entradaFiltroCategoria || '').trim().toLowerCase();
 
       list = list.filter(p => {
-        const pCat = String(p.categoria || '').trim().toLowerCase();
-        const pTipo = String(p.tipo || '').trim().toLowerCase();
-        const pNome = String(p.nome || '').trim().toLowerCase();
+        if (!p) return false;
 
-        // Tratamento flexível e resiliente para Celulares / Smartphones / iOS / Android
-        if (catLower === 'celular' || catLower === 'celulares') {
-          return (
-            pTipo === 'celular' ||
+        // Extrair todas as propriedades de categoria, tipo e nome possíveis retornado pelo Supabase
+        const pCat = String(
+          p.categoria ||
+          p.categoria_nome ||
+          p.categoria_id ||
+          p.categories?.nome ||
+          p.categorias?.nome ||
+          p.category ||
+          ''
+        ).trim().toLowerCase();
+
+        const pTipo = String(
+          p.tipo ||
+          p.tipo_produto ||
+          p.type ||
+          ''
+        ).trim().toLowerCase();
+
+        const pNome = String(
+          p.nome ||
+          p.name ||
+          p.modelo ||
+          p.descricao ||
+          ''
+        ).trim().toLowerCase();
+
+        // 1. Tratamento abrangente e resiliente para a categoria Celular / Smartphone / iOS / Android
+        const isTargetCelular =
+          catTarget.includes('celular') ||
+          catTarget.includes('smartphone') ||
+          catTarget === 'ios' ||
+          catTarget === 'android';
+
+        if (isTargetCelular) {
+          const isProdCelular =
             pTipo.includes('celular') ||
+            pTipo.includes('smartphone') ||
             pCat.includes('celular') ||
+            pCat.includes('smartphone') ||
             pCat.includes('ios') ||
             pCat.includes('android') ||
-            pCat.includes('smartphone') ||
-            pTipo.includes('smartphone') ||
-            pCat === 'celular' ||
-            pCat === 'celulares' ||
+            pCat.includes('iphone') ||
+            pCat.includes('aparelho') ||
             pNome.includes('iphone') ||
             pNome.includes('galaxy') ||
             pNome.includes('xiaomi') ||
             pNome.includes('motorola') ||
             pNome.includes('redmi') ||
-            pNome.includes('poco')
-          );
+            pNome.includes('poco') ||
+            pNome.includes('realme') ||
+            p.exige_imei === true ||
+            p.is_celular === true ||
+            p.is_imei === true ||
+            (Array.isArray(p.imeis) && p.imeis.length > 0);
+
+          if (isProdCelular) return true;
         }
 
-        if (catLower === 'ios') {
-          return pCat.includes('ios') || pCat.includes('apple') || pCat.includes('iphone') || pTipo.includes('ios') || pNome.includes('iphone');
-        }
+        // Se a categoria/tipo do produto no banco for vazia, não descarta o produto
+        if (!pCat && !pTipo) return true;
 
-        if (catLower === 'android') {
-          return pCat.includes('android') || pTipo.includes('android') || pCat.includes('samsung') || pCat.includes('xiaomi') || pCat.includes('motorola') || pCat.includes('redmi') || pCat.includes('poco');
-        }
-
-        if (catLower === 'acessorio' || catLower === 'acessórios') {
-          return pCat.includes('acessorio') || pCat.includes('acessório') || pTipo.includes('acessorio') || pTipo.includes('acessório');
-        }
-
+        // 2. Comparação case-insensitive e trim em ambos os lados
         return (
-          pCat === catLower ||
-          pTipo === catLower ||
-          pCat.includes(catLower) ||
-          pTipo.includes(catLower)
+          pCat === catTarget ||
+          pTipo === catTarget ||
+          pCat.includes(catTarget) ||
+          pTipo.includes(catTarget) ||
+          catTarget.includes(pCat) ||
+          catTarget.includes(pTipo)
         );
       });
     }
@@ -7683,7 +7712,7 @@ export default function Dashboard({ session, profileDataProps }) {
     const unique = [];
     const seen = new Set();
     list.forEach(p => {
-      const key = String(p.nome || p.id).trim().toLowerCase();
+      const key = String(p.nome || p.name || p.id).trim().toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
         unique.push(p);
