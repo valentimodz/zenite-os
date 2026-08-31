@@ -24,6 +24,7 @@ import ImportadorVendasCSV from './ImportadorVendasCSV';
 import ModalAuditoriaCega from './ModalAuditoriaCega';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
 import RankingVendedores from './RankingVendedores';
+import ColorBadge from './ColorBadge';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -111,7 +112,6 @@ const permiteParticipacaoTreener = (carrinho) => {
   });
 };
 
-// Subcomponente isolado para linha da tabela de produtos com edição inline e isolamento de estado
 function ProductTableRow({
   produto: p,
   filiais = [],
@@ -123,7 +123,7 @@ function ProductTableRow({
   onDeleteProduto,
   userRole
 }) {
-  const [editingField, setEditingField] = useState(null); // 'cor' | 'preco' | 'quantidade' | null
+  const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -143,310 +143,99 @@ function ProductTableRow({
   const saveEdit = async (e) => {
     if (e) e.stopPropagation();
     if (!editingField || isSaving) return;
-
     setIsSaving(true);
     try {
       await onUpdateProdutoField(p.id, p.nome, editingField, editValue, p.filial_id);
       setEditingField(null);
     } catch (err) {
-      console.error('Erro ao salvar alteração inline:', err);
+      console.error(err);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      saveEdit(e);
-    } else if (e.key === 'Escape') {
-      cancelEdit(e);
-    }
-  };
-
-  const handleDelete = async (e) => {
-    e.stopPropagation();
-    if (isDeleting) return;
-    setIsDeleting(true);
-    try {
-      await onDeleteProduto(p);
-    } catch (err) {
-      console.error('Erro ao excluir produto:', err);
-    } finally {
-      setIsDeleting(false);
-    }
+    if (e.key === 'Enter') saveEdit(e);
+    else if (e.key === 'Escape') cancelEdit(e);
   };
 
   const isCelular = p.tipo === 'CELULAR';
-  const isServico = p.categoria === 'SERVICO';
 
   return (
     <React.Fragment>
       <tr className="hover:bg-[#6A0DAD]/5 transition-colors">
-        {/* Nome do Produto */}
         <td className="py-2.5 font-semibold text-white">
           <div className="flex items-center gap-1.5">
             {isCelular ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
             <span className="truncate max-w-[120px]" title={p.nome}>{p.nome}</span>
           </div>
         </td>
-
-        {/* Filial */}
-        <td className="py-2.5 text-gray-500 truncate max-w-[80px]">
-          {filiais.find(f => f.id === p.filial_id)?.nome || '-'}
-        </td>
-
-        {/* Categoria */}
+        <td className="py-2.5 text-gray-500 truncate max-w-[80px]">{filiais.find(f => f.id === p.filial_id)?.nome || '-'}</td>
         <td className="py-2.5">
-          <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${p.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' :
-            p.categoria === 'ANDROID' ? 'bg-green-950/20 text-green-400 border border-green-800/20' :
-              p.categoria === 'SERVICO' ? 'bg-pink-950/20 text-pink-400 border border-pink-800/20' :
-                'bg-purple-950/20 text-purple-400 border border-purple-800/20'
-            }`}>{p.categoria || 'GERAL'}</span>
+          <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${p.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' : 'bg-purple-950/20 text-purple-400 border border-purple-800/20'}`}>{p.categoria || 'GERAL'}</span>
         </td>
-
-        {/* Célula: Cor */}
         <td className="py-2.5">
           {editingField === 'cor' ? (
             <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-              <input
-                type="text"
-                autoFocus
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSaving}
-                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-medium"
-              />
-              <button
-                type="button"
-                onClick={saveEdit}
-                disabled={isSaving}
-                className="p-1 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
-                title="Salvar (Enter)"
-              >
-                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-              </button>
-              <button
-                type="button"
-                onClick={cancelEdit}
-                disabled={isSaving}
-                className="p-1 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                title="Cancelar (Esc)"
-              >
-                <X size={12} />
-              </button>
+              <input type="text" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown} disabled={isSaving} className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-medium" />
+              <button type="button" onClick={saveEdit} disabled={isSaving} className="text-emerald-400"><Check size={12} /></button>
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
-              <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium border ${p.cor ? 'bg-purple-950/30 text-purple-300 border-purple-800/30 font-bold' : 'bg-zinc-900/50 text-gray-500 border-zinc-800/40'
-                }`}>
-                {p.cor || 'Sem cor'}
-              </span>
-              <button
-                type="button"
-                onClick={e => startEdit(e, 'cor', p.cor || '')}
-                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
-                title="Alterar Cor"
-              >
-                <Edit2 size={11} />
-              </button>
+              <ColorBadge cor={p.cor} />
+              <button onClick={e => startEdit(e, 'cor', p.cor)} className="text-gray-500 hover:text-[#6A0DAD]"><Edit2 size={11} /></button>
             </div>
           )}
         </td>
-
-        {/* Célula: Preço */}
         <td className="py-2.5 font-mono font-bold text-white text-[11px]">
           {editingField === 'preco' ? (
             <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-              <span className="text-[10px] text-gray-500 font-bold">R$</span>
-              <input
-                type="number"
-                step="0.01"
-                autoFocus
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSaving}
-                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono font-bold"
-              />
-              <button
-                type="button"
-                onClick={saveEdit}
-                disabled={isSaving}
-                className="p-1 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
-                title="Salvar (Enter)"
-              >
-                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-              </button>
-              <button
-                type="button"
-                onClick={cancelEdit}
-                disabled={isSaving}
-                className="p-1 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                title="Cancelar (Esc)"
-              >
-                <X size={12} />
-              </button>
+              <input type="number" step="0.01" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown} className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none" />
+              <button type="button" onClick={saveEdit} className="text-emerald-400"><Check size={12} /></button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <span>R$ {parseFloat(p.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-              <button
-                type="button"
-                onClick={e => startEdit(e, 'preco', p.preco || 0)}
-                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
-                title="Editar Preço"
-              >
-                <Edit2 size={12} />
-              </button>
+              <button onClick={e => startEdit(e, 'preco', p.preco)} className="text-gray-500 hover:text-[#6A0DAD]"><Edit2 size={12} /></button>
             </div>
           )}
         </td>
-
-        {/* Célula: Quantidade */}
-        <td className="py-2.5 font-mono text-xs">
-          {isCelular ? (() => {
-            // Contagem precisa de IMEIs disponíveis associados ao produto/modelo na filial
-            const pIdStr = String(p.id || '');
-            const pCatIdStr = String(p.catalogo_id || '');
-            const pNomeStr = (p.nome || '').toLowerCase().trim();
-            const pFilialIdStr = p.filial_id ? String(p.filial_id) : '';
-
-            const imeisValidos = (disponiveisImeis || []).filter(im => {
-              if (!im) return false;
-              if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
-
-              // Validação de Filial
-              if (pFilialIdStr) {
-                const imFilialIdStr = im.filial_id ? String(im.filial_id) : '';
-                if (imFilialIdStr && imFilialIdStr !== pFilialIdStr) return false;
-              }
-
-              // Validação de Vinculação com o Produto
-              const imProdId = String(im.produto_id || '');
-              const imCatId = String(im.produto_catalogo_id || '');
-              const imNome = (im.produtos?.nome || im.produtos_catalogo?.nome || '').toLowerCase().trim();
-
-              const bateId = (pIdStr && imProdId === pIdStr) || (pCatIdStr && imProdId === pCatIdStr) || (pCatIdStr && imCatId === pCatIdStr) || (pIdStr && imCatId === pIdStr);
-              const bateNome = Boolean(pNomeStr && imNome && imNome === pNomeStr);
-
-              return bateId || bateNome;
-            });
-
-            // Se o accordion já foi aberto ou p possui itens_imei/imeis_db, usa essa contagem sincronizada
-            let imeisCountMap = 0;
-            if (productImeisMap[p.id]) {
-              imeisCountMap = productImeisMap[p.id].filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
-            } else if (Array.isArray(p.itens_imei) && p.itens_imei.length > 0) {
-              imeisCountMap = p.itens_imei.filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
-            } else if (Array.isArray(p.imeis_db) && p.imeis_db.length > 0) {
-              imeisCountMap = p.imeis_db.filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
-            } else if (Array.isArray(p.imeis) && p.imeis.length > 0) {
-              imeisCountMap = p.imeis.filter(im => !im.vendido && im.status !== 'VENDIDO' && (!pFilialIdStr || !im.filial_id || String(im.filial_id) === pFilialIdStr)).length;
-            }
-
-            let qtdReal = imeisCountMap > 0 ? imeisCountMap : (typeof p.quantidade_real === 'number' ? p.quantidade_real : (typeof p.imeis_count === 'number' ? p.imeis_count : imeisValidos.length));
-            if (qtdReal === 0 && imeisCountMap > 0) qtdReal = imeisCountMap;
-
-            const countImeisDireto = p.imeis ? p.imeis.length : (p.itens_imei ? p.itens_imei.length : (p.imeis_db ? p.imeis_db.length : qtdReal));
-
-            return (
-              <button
-                type="button"
-                onClick={e => { e.stopPropagation(); toggleVerImeis(p.id); }}
-                className="text-[#6A0DAD] underline font-bold hover:text-purple-300 transition-colors cursor-pointer"
-                title="Clique para ver os IMEIs deste aparelho"
-              >
-                {countImeisDireto} (IMEIs)
-              </button>
-            );
-          })() : editingField === 'quantidade' ? (
+        <td className="py-2.5 font-mono text-[11px]">
+          {editingField === 'quantidade' && !isCelular ? (
             <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-              <input
-                type="number"
-                step="1"
-                min="0"
-                autoFocus
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSaving}
-                className="w-16 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono font-bold"
-              />
-              <button
-                type="button"
-                onClick={saveEdit}
-                disabled={isSaving}
-                className="p-1 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
-                title="Salvar (Enter)"
-              >
-                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-              </button>
-              <button
-                type="button"
-                onClick={cancelEdit}
-                disabled={isSaving}
-                className="p-1 text-red-400 hover:text-red-300 transition-colors cursor-pointer"
-                title="Cancelar (Esc)"
-              >
-                <X size={12} />
-              </button>
+              <input type="number" step="1" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown} className="w-16 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none" />
+              <button type="button" onClick={saveEdit} className="text-emerald-400"><Check size={12} /></button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-gray-300 font-bold">{isServico ? '∞' : (p.quantidade_real ?? p.quantidade ?? 0)}</span>
-              {!isServico && (
-                <button
-                  type="button"
-                  onClick={e => startEdit(e, 'quantidade', p.quantidade || 0)}
-                  className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
-                  title="Alterar Estoque"
-                >
-                  <Edit2 size={12} />
+            <div className="flex items-center gap-1.5">
+              {isCelular ? (
+                <button type="button" onClick={e => { e.stopPropagation(); toggleVerImeis(p.id); }} className="text-[#6A0DAD] font-bold underline cursor-pointer flex items-center gap-1">
+                  <span>{(p.imeis_count || 0)} (IMEIs)</span>
+                  <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180' : ''} />
                 </button>
+              ) : (
+                <span className="font-bold text-gray-300">{p.quantidade || 0} unids</span>
               )}
+              {!isCelular && <button onClick={e => startEdit(e, 'quantidade', p.quantidade)} className="text-gray-500 hover:text-[#6A0DAD]"><Edit2 size={11} /></button>}
             </div>
           )}
         </td>
-
-        {/* Ações (Exclusão) */}
-        {userRole !== 'DONO' && (
-          <td className="py-2.5 text-right">
-            {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'ESTOQUISTA'].includes(userRole) && (
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="p-1 border border-[#222222] hover:border-red-800/60 text-gray-600 hover:text-red-400 rounded bg-black transition-colors cursor-pointer disabled:opacity-50"
-                title="Remover produto"
-              >
-                {isDeleting ? <Loader2 size={12} className="animate-spin text-red-400" /> : <Trash2 size={12} />}
-              </button>
-            )}
-          </td>
-        )}
+        <td className="py-2.5 text-right">
+          {['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO'].includes((userRole || '').toUpperCase()) && (
+            <button type="button" onClick={async (e) => { e.stopPropagation(); await onDeleteProduto(p); }} className="text-gray-600 hover:text-red-400"><Trash2 size={14} /></button>
+          )}
+        </td>
       </tr>
-
-      {/* Accordion de IMEIs */}
       {expandedProductImeis[p.id] && (
         <tr className="bg-black">
           <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
-            <div className="bg-[#050505] border border-[#1A1A1A] p-3 rounded-lg">
-              <span className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wide">
-                IMEIs de {p.nome} nesta filial
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5">
-                {(!productImeisMap[p.id] || productImeisMap[p.id].filter(imObj => imObj.filial_id === p.filial_id).length === 0) ? (
-                  <span className="text-xs italic text-gray-700 col-span-3">Nenhum IMEI registrado nesta filial.</span>
-                ) : (
-                  productImeisMap[p.id]?.filter(imObj => imObj.filial_id === p.filial_id).map((imObj, idx) => (
-                    <div key={idx} className="flex flex-col bg-black border border-[#222222] p-2.5 rounded text-xs font-mono gap-1">
-                      <span className="text-gray-300 font-bold">{imObj.imei}</span>
-                      {imObj.cor && <span className="text-[10px] text-purple-400">🎨 Cor: {imObj.cor}</span>}
-                    </div>
-                  ))
-                )}
-              </div>
+            <div className="bg-[#050505] p-3 rounded-lg grid grid-cols-3 gap-2">
+              {productImeisMap[p.id]?.map((im, idx) => (
+                <div key={idx} className="flex items-center justify-between bg-black border border-[#222222] p-2 rounded text-xs font-mono">
+                  <span className="text-gray-200">{im.imei}</span>
+                  <ColorBadge cor={im.cor} />
+                </div>
+              ))}
             </div>
           </td>
         </tr>
@@ -18069,11 +17858,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <span className="text-[9px] bg-purple-950/30 text-purple-400 border border-purple-800/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
                                     {p.categoria || 'Geral'}
                                   </span>
-                                  {p.cor && (
-                                    <span className="bg-[#1A1A1A] text-purple-300 border border-purple-900/50 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                      🎨 {p.cor}
-                                    </span>
-                                  )}
+                                  {p.cor && <ColorBadge cor={p.cor} />}
                                 </div>
                                 <h5 className="text-sm font-bold text-white mt-2 group-hover:text-purple-300 transition-colors">{p.nome}</h5>
                                 <p className="text-xs font-mono font-bold text-emerald-400 mt-1">R$ {parseFloat(p.preco || 0).toFixed(2)}</p>
@@ -18261,49 +18046,55 @@ export default function Dashboard({ session, profileDataProps }) {
                                       <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
                                         IMEI (Exclusivo, 15 dígitos) <span className="text-red-500">*</span>
                                       </label>
-                                      <input
-                                        ref={imeiInputRef}
-                                        type="text"
-                                        inputMode="numeric"
-                                        value={entradaImei}
-                                        onChange={(e) => setEntradaImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') {
-                                            e.preventDefault();
-                                            handleSalvarEstoqueFisico(e);
-                                          }
-                                        }}
-                                        placeholder="Digite ou bipe o IMEI..."
-                                        maxLength={15}
-                                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono tracking-widest transition-all"
-                                      />
+                                      <div className="relative">
+                                        <input
+                                          ref={imeiInputRef}
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={entradaImei}
+                                          onChange={(e) => setEntradaImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              e.preventDefault();
+                                              handleSalvarEstoqueFisico(e);
+                                            }
+                                          }}
+                                          placeholder="Digite ou bipe os 15 dígitos do IMEI..."
+                                          maxLength={15}
+                                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2.5 text-sm outline-none font-mono tracking-widest transition-all"
+                                        />
+                                        <Smartphone size={16} className="absolute left-3 top-3 text-[#6A0DAD]" />
+                                      </div>
                                     </div>
 
                                     <div>
                                       <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
                                         Cor do Aparelho <span className="text-red-500">*</span>
                                       </label>
-                                      <div className="relative">
-                                        <input
-                                          type="text"
-                                          value={entradaCorDispositivo}
-                                          onChange={(e) => setEntradaCorDispositivo(e.target.value)}
-                                          placeholder="Selecione ou digite a cor..."
-                                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                                          list="cores-sugeridas-recebimento"
-                                        />
-                                        <datalist id="cores-sugeridas-recebimento">
-                                          <option value="Titânio Natural" />
-                                          <option value="Titânio Preto" />
-                                          <option value="Titânio Branco" />
-                                          <option value="Titânio Azul" />
-                                          <option value="Preto" />
-                                          <option value="Branco" />
-                                          <option value="Gold" />
-                                          <option value="Silver" />
-                                          <option value="Cinza Espacial" />
-                                        </datalist>
-                                      </div>
+                                      <input
+                                        type="text"
+                                        value={entradaCorDispositivo}
+                                        onChange={(e) => setEntradaCorDispositivo(e.target.value)}
+                                        placeholder="Selecione ou digite a cor..."
+                                        list="lista-cores-sugeridas"
+                                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                                      />
+                                      <datalist id="lista-cores-sugeridas">
+                                        <option value="Preto" />
+                                        <option value="Branco" />
+                                        <option value="Azul" />
+                                        <option value="Vermelho" />
+                                        <option value="Verde" />
+                                        <option value="Rosa" />
+                                        <option value="Dourado" />
+                                        <option value="Prateado" />
+                                        <option value="Cinza" />
+                                        <option value="Roxo" />
+                                        <option value="Grafite" />
+                                        <option value="Titânio Natural" />
+                                        <option value="Titânio Preto" />
+                                        <option value="Titânio Branco" />
+                                      </datalist>
                                     </div>
                                   </>
                                 );
@@ -18405,9 +18196,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                       <p className="text-xs font-bold text-white tracking-wider">
                                         {item.produtos?.nome || 'Modelo não identificado'}
                                       </p>
-                                      <p className="text-[10px] text-gray-500 font-mono">
-                                        IMEI: <span className="text-gray-300 font-semibold">{item.imei}</span> · Cor: <span className="text-gray-300 font-semibold">{item.cor || 'Sem Cor'}</span>
-                                      </p>
+                                      <div className="flex items-center gap-2 text-[10px] font-mono mt-0.5 flex-wrap">
+                                        <span className="text-gray-500">IMEI: <span className="text-gray-300 font-semibold">{item.imei}</span></span>
+                                        <ColorBadge cor={item.cor} />
+                                      </div>
                                     </div>
                                   </div>
                                   <div>
