@@ -7865,21 +7865,21 @@ export default function Dashboard({ session, profileDataProps }) {
           filial_id: selectedFilialDestino,
           imei: String(imei).trim(),
           cor: (entradaCorDispositivo || selectedProdutoMestre?.cor || 'Preto').trim(),
-          status: 'DISPONÍVEL',
+          status: 'DISPONIVEL',
           vendido: false
         };
 
-        console.log("Payload enviado:", payloadImei);
+        console.log("PAYLOAD TENTANDO INSERIR:", payloadImei);
 
         let { error: insertErr } = await supabase
           .from('imeis')
           .insert(payloadImei);
 
-        // Fallback inteligente caso a constraint do banco tenha sido criada sem acento
+        // Fallback inteligente caso a constraint do banco tenha sido criada com acento ('DISPONÍVEL')
         if (insertErr && (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check'))) {
-          console.warn("Retentando com status 'DISPONIVEL' (sem acento)...");
-          const retryPayload = { ...payloadImei, status: 'DISPONIVEL' };
-          console.log("Payload enviado (retry sem acento):", retryPayload);
+          console.warn("Retentando com status 'DISPONÍVEL' (com acento)...");
+          const retryPayload = { ...payloadImei, status: 'DISPONÍVEL' };
+          console.log("PAYLOAD TENTANDO INSERIR (retry com acento):", retryPayload);
           const { error: retryErr } = await supabase.from('imeis').insert(retryPayload);
           if (retryErr) {
             insertErr = retryErr;
@@ -7889,7 +7889,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         if (insertErr) {
-          console.error("Erro ao registrar IMEI no Supabase:", insertErr);
+          console.error("FALHA SUPABASE:", insertErr);
           if (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check')) {
             showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
           } else {
@@ -8018,7 +8018,7 @@ export default function Dashboard({ session, profileDataProps }) {
           empresa_id: company.id,
           filial_id: entradaFilial,
           imei: String(imei).trim(),
-          status: 'DISPONÍVEL',
+          status: 'DISPONIVEL',
           vendido: false,
           cor: (cor || 'Preto').trim(),
           bateria_saude: bateria_saude || null,
@@ -8027,13 +8027,13 @@ export default function Dashboard({ session, profileDataProps }) {
           is_seminovo: !!is_seminovo
         }));
 
-        console.log("Payload enviado (lote IMEIs):", imeisData);
+        console.log("PAYLOAD TENTANDO INSERIR:", imeisData);
 
         let { error: imeisErr } = await supabase.from('imeis').insert(imeisData);
         if (imeisErr && (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check'))) {
-          console.warn("Retentando com status 'DISPONIVEL' (sem acento)...");
-          const retryData = imeisData.map(i => ({ ...i, status: 'DISPONIVEL' }));
-          console.log("Payload enviado (retry sem acento):", retryData);
+          console.warn("Retentando com status 'DISPONÍVEL' (com acento)...");
+          const retryData = imeisData.map(i => ({ ...i, status: 'DISPONÍVEL' }));
+          console.log("PAYLOAD TENTANDO INSERIR (retry com acento):", retryData);
           const { error: retryErr } = await supabase.from('imeis').insert(retryData);
           if (retryErr) {
             imeisErr = retryErr;
@@ -8043,7 +8043,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         if (imeisErr) {
-          console.error("Erro ao registrar IMEIs:", imeisErr);
+          console.error("FALHA SUPABASE:", imeisErr);
           if (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check')) {
             showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
           } else {
