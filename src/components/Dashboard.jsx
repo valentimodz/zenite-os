@@ -665,6 +665,24 @@ export default function Dashboard({ session, profileDataProps }) {
     }, 300);
     return () => clearTimeout(handler);
   }, [eanImeiSearch]);
+
+  // Revalidação em Segundo Plano (Stale-While-Revalidate): atualiza o catálogo de produtos ao focar a janela ou receber o evento catalogo_updated
+  useEffect(() => {
+    const handleRevalidate = () => {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      if (targetEmpresaId) {
+        fetchCatalogoProdutos(targetEmpresaId);
+      }
+    };
+
+    window.addEventListener('focus', handleRevalidate);
+    window.addEventListener('catalogo_updated', handleRevalidate);
+
+    return () => {
+      window.removeEventListener('focus', handleRevalidate);
+      window.removeEventListener('catalogo_updated', handleRevalidate);
+    };
+  }, [profile?.empresa_id, company?.id, activeEmpresaId]);
   // --- Estados do Modal "Distribuir Estoque Matriz" ---
   const [distribuirModalOpen, setDistribuirModalOpen] = useState(false);
   const [produtoDistribuir, setProdutoDistribuir] = useState(null);
@@ -5918,6 +5936,7 @@ export default function Dashboard({ session, profileDataProps }) {
         setProdutos(prev => prev.map(p => (String(p.id) === String(targetId) || String(p.catalogo_id) === String(targetId)) ? { ...p, ...payload } : p));
         setEstoqueConsolidadoLista(prev => prev.map(e => (String(e.id) === String(targetId) || String(e.catalogo_id) === String(targetId)) ? { ...e, ...payload } : e));
 
+        window.dispatchEvent(new Event('catalogo_updated'));
         handleResetForm();
         return;
       } else {
@@ -6111,16 +6130,18 @@ export default function Dashboard({ session, profileDataProps }) {
 
         // 3. Injetar produto no estado do React para aparecer na tela NA HORA
         setCatalogoProdutos(prev => {
-          const exists = prev.some(item => item.id === data.id || item.nome === data.nome);
+          const list = Array.isArray(prev) ? prev : [];
+          const exists = list.some(item => item && (String(item.id) === String(data.id) || String(item.nome || '').toLowerCase() === String(data.nome || '').toLowerCase()));
           if (exists) {
-            return prev.map(item => item.id === data.id || item.nome === data.nome ? { ...item, ...data } : item);
+            return list.map(item => item && (String(item.id) === String(data.id) || String(item.nome || '').toLowerCase() === String(data.nome || '').toLowerCase()) ? { ...item, ...data } : item);
           }
-          return [...prev, { ...data, estoque_atual: initialQty, total_estoque: initialQty }].sort((a, b) => a.nome.localeCompare(b.nome));
+          return [{ ...data, estoque_atual: initialQty, total_estoque: initialQty }, ...list].sort((a, b) => String(a?.nome || '').localeCompare(String(b?.nome || '')));
         });
 
-        alert('✅ Produto adicionado ao catálogo com sucesso!');
+        showToast('✅ Produto adicionado ao catálogo com sucesso!', 'success');
         fetchCatalogoProdutos(targetEmpresaId);
         fetchGerenteData(targetEmpresaId);
+        window.dispatchEvent(new Event('catalogo_updated'));
 
         setCatalogoFilialEstoque('');
         setCatalogoEstoqueInicial('1');
