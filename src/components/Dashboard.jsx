@@ -5362,7 +5362,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const { data: imeisRes, error: imeisErr } = await supabase
         .from('imeis')
-        .select('*, produtos(*), filiais:filial_id(id, nome)')
+        .select('*, produtos!produto_id(*), filiais:filial_id(id, nome)')
         .eq('empresa_id', empresaId)
         .eq('vendido', false);
 
@@ -9061,7 +9061,7 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const { data: imeiRows } = await supabase
         .from('imeis')
-        .select('*, produtos(*)')
+        .select('*, produtos!produto_id(*)')
         .eq('imei', query)
         .eq('status', 'DISPONIVEL')
         .eq('vendido', false)
@@ -9159,7 +9159,7 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let query = supabase
           .from('imeis')
-          .select('*, produtos(*)')
+          .select('*, produtos!produto_id(*)')
           .eq('vendido', false);
 
         if (cleanDigits.length >= 8) {
