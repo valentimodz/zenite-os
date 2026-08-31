@@ -3231,6 +3231,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       let { data, error } = await query;
+      console.error('DADOS CRUS DO BANCO:', data, error);
 
       console.log('Categoria Ativa:', categoryParam);
       console.log('Produtos Carregados:', data);
@@ -7689,8 +7690,9 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     });
 
-    console.log('Categoria Ativa (Front-end):', entradaFiltroCategoria);
-    console.log('Produtos Mestre Filtrados:', unique);
+    const produtosFiltrados = unique;
+    const categoriaSelecionada = entradaFiltroCategoria;
+    console.warn('FILTRADOS:', produtosFiltrados, 'CATEGORIA ALVO:', categoriaSelecionada);
 
     return unique;
   }, [catalogoProdutos, entradaFiltroCategoria, entradaBuscaMestre]);
@@ -18120,23 +18122,28 @@ export default function Dashboard({ session, profileDataProps }) {
                                 Produto Mestre <span className="text-red-500">*</span>
                               </label>
                               <select
-                                value={selectedProdutoMestre ? selectedProdutoMestre.id : ''}
+                                value={selectedProdutoMestre ? String(selectedProdutoMestre.id) : ''}
                                 onChange={(e) => {
-                                  const prodId = e.target.value;
-                                  const prod = catalogoProdutos.find(p => p.id === prodId);
+                                  const prodId = String(e.target.value || '');
+                                  const prod = (produtosMestreOptions || []).find(p => String(p.id) === prodId) || (catalogoProdutos || []).find(p => String(p.id) === prodId);
                                   setSelectedProdutoMestre(prod || null);
                                   if (prod) {
-                                    setEntradaCodigoBarras(prod.codigo_barras || '');
+                                    setEntradaCodigoBarras(prod.codigo_barras || prod.barcode || prod.ean || '');
                                   }
                                 }}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
                               >
                                 <option value="">Selecione o Produto Mestre...</option>
-                                {produtosMestreOptions.map(p => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.nome} {p.codigo_barras ? `[EAN: ${p.codigo_barras}]` : ''} ({p.tipo || p.categoria})
-                                  </option>
-                                ))}
+                                {(produtosMestreOptions || []).map(p => {
+                                  const nomeExibido = p.nome || p.name || 'Produto sem Nome';
+                                  const eanExibido = p.codigo_barras || p.barcode || p.ean;
+                                  const catExibida = p.categoria || p.tipo || p.category || 'Geral';
+                                  return (
+                                    <option key={p.id || p.nome} value={p.id}>
+                                      {nomeExibido} {eanExibido ? `[EAN: ${eanExibido}]` : ''} ({catExibida})
+                                    </option>
+                                  );
+                                })}
                               </select>
                             </div>
 
