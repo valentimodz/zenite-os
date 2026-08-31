@@ -6139,13 +6139,21 @@ export default function Dashboard({ session, profileDataProps }) {
               produto_id: newProd.id,
               empresa_id: targetEmpresaId,
               filial_id: catalogoFilialEstoque,
-              imei: imei,
+              imei: String(imei).trim(),
               cor: (data.cor || 'Preto').trim(),
-              status: 'DISPONÍVEL',
+              status: 'DISPONIVEL',
               vendido: false
             }));
 
-            await supabase.from('imeis').insert(imeiRows);
+            let { error: insImeiErr } = await supabase.from('imeis').insert(imeiRows);
+            if (insImeiErr && (insImeiErr.code === '23514' || insImeiErr.message?.includes('check constraint'))) {
+              // Fallback caso a constraint do banco exija com acento 'DISPONÍVEL'
+              const retryRows = imeiRows.map(r => ({ ...r, status: 'DISPONÍVEL' }));
+              const { error: retryErr } = await supabase.from('imeis').insert(retryRows);
+              if (retryErr) {
+                console.warn("Aviso ao cadastrar IMEIs iniciais com acento:", retryErr);
+              }
+            }
           } catch (iErr) {
             console.warn("Aviso ao cadastrar IMEIs iniciais:", iErr);
           }
@@ -7844,20 +7852,40 @@ export default function Dashboard({ session, profileDataProps }) {
         const payload = {
           produto_id: targetProdutoId,
           empresa_id: targetEmpresaId,
-          imei: imei,
-          cor: entradaCorDispositivo.trim(),
+          imei: String(imei).trim(),
+          cor: (entradaCorDispositivo || 'Preto').trim(),
           filial_id: selectedFilialDestino,
-          status: 'DISPONÍVEL',
+          status: 'DISPONIVEL',
           vendido: false
         };
 
-        const { error: insertErr } = await supabase
+        let { error: insertErr } = await supabase
           .from('imeis')
           .insert(payload);
 
-        if (insertErr) throw insertErr;
+        // Fallback inteligente para compatibilidade com constraints com acento
+        if (insertErr && (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check'))) {
+          const retryPayload = { ...payload, status: 'DISPONÍVEL' };
+          const { error: retryErr } = await supabase.from('imeis').insert(retryPayload);
+          if (retryErr) {
+            insertErr = retryErr;
+          } else {
+            insertErr = null;
+          }
+        }
 
-        alert(`✅ IMEI ${imei} cadastrado com sucesso!`);
+        if (insertErr) {
+          console.error("Erro ao registrar IMEI:", insertErr);
+          if (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check')) {
+            showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
+          } else {
+            showToast(`Falha ao registrar IMEI: ${insertErr.message || 'Erro desconhecido'}`, 'error');
+          }
+          setLoadingEntrada(false);
+          return;
+        }
+
+        showToast(`✅ IMEI ${imei} cadastrado com sucesso!`, 'success');
         setEntradaImei('');
         setTimeout(() => {
           if (imeiInputRef.current) {
@@ -7865,7 +7893,7 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }, 50);
       } else {
-        alert(`✅ Entrada de ${qtyToAdd} unidade(s) do acessório "${selectedProdutoMestre.nome}" registrada com sucesso!`);
+        showToast(`✅ Entrada de ${qtyToAdd} unidade(s) do acessório "${selectedProdutoMestre.nome}" registrada com sucesso!`, 'success');
         setEntradaCodigoBarras('');
         setEntradaQtdAcessorio('1');
       }
@@ -7887,8 +7915,12 @@ export default function Dashboard({ session, profileDataProps }) {
         await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
       }
     } catch (err) {
-      console.error(err);
-      alert('Erro ao salvar no estoque físico: ' + err.message);
+      console.error('Erro na entrada de estoque:', err);
+      if (err.code === '23514' || err.message?.includes('check constraint') || err.message?.includes('imeis_status_check')) {
+        showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
+      } else {
+        showToast('Erro ao salvar no estoque físico: ' + (err.message || 'Erro de conexão'), 'error');
+      }
     } finally {
       setLoadingEntrada(false);
     }
@@ -7961,23 +7993,40 @@ export default function Dashboard({ session, profileDataProps }) {
           produto_id: prodData.id,
           empresa_id: company.id,
           filial_id: entradaFilial,
-          imei,
-          status: 'DISPONÍVEL',
+          imei: String(imei).trim(),
+          status: 'DISPONIVEL',
           vendido: false,
-          cor: cor || null,
+          cor: (cor || 'Preto').trim(),
           bateria_saude: bateria_saude || null,
           observacoes: observacoes || null,
           preco_compra: preco_compra || 0,
           is_seminovo: !!is_seminovo
         }));
 
-        console.log("PAYLOAD DE ENVIO:", imeisData.map(i => ({ imei: i.imei, filial_id: i.filial_id, status: i.status })));
+        let { error: imeisErr } = await supabase.from('imeis').insert(imeisData);
+        if (imeisErr && (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check'))) {
+          const retryData = imeisData.map(i => ({ ...i, status: 'DISPONÍVEL' }));
+          const { error: retryErr } = await supabase.from('imeis').insert(retryData);
+          if (retryErr) {
+            imeisErr = retryErr;
+          } else {
+            imeisErr = null;
+          }
+        }
 
-        const { error: imeisErr } = await supabase.from('imeis').insert(imeisData);
-        if (imeisErr) throw imeisErr;
+        if (imeisErr) {
+          console.error("Erro ao registrar IMEIs:", imeisErr);
+          if (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check')) {
+            showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
+          } else {
+            showToast(`Falha ao registrar IMEI: ${imeisErr.message || 'Erro desconhecido'}`, 'error');
+          }
+          setLoadingEntrada(false);
+          return;
+        }
       }
 
-      alert(`✅ ${qtd} ${isCelular ? 'celular(es)' : 'unidade(s)'} de "${entradaProdutoSelecionado.nome}" inserido(s) com sucesso!`);
+      showToast(`✅ ${qtd} ${isCelular ? 'celular(es)' : 'unidade(s)'} de "${entradaProdutoSelecionado.nome}" inserido(s) com sucesso!`, 'success');
 
       // Resetar formulário
       setEntradaProdutoSelecionado(null);
@@ -8104,19 +8153,40 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (isCelular) {
           // Inserir registro de IMEI
-          const { error: imeiErr } = await supabase
-            .from('imeis')
-            .insert({
-              empresa_id: targetEmpresaId,
-              filial_id: ajusteFilialId,
-              produto_id: targetProdutoId,
-              imei: targetImei,
-              status: 'DISPONÍVEL',
-              vendido: false,
-              cor: (ajusteProduto.cor || 'Preto').trim()
-            });
+          const imeiPayload = {
+            empresa_id: targetEmpresaId,
+            filial_id: ajusteFilialId,
+            produto_id: targetProdutoId,
+            imei: String(targetImei).trim(),
+            status: 'DISPONIVEL',
+            vendido: false,
+            cor: (ajusteProduto.cor || 'Preto').trim()
+          };
 
-          if (imeiErr) throw imeiErr;
+          let { error: imeiErr } = await supabase
+            .from('imeis')
+            .insert(imeiPayload);
+
+          if (imeiErr && (imeiErr.code === '23514' || imeiErr.message?.includes('check constraint') || imeiErr.message?.includes('imeis_status_check'))) {
+            const retryPayload = { ...imeiPayload, status: 'DISPONÍVEL' };
+            const { error: retryErr } = await supabase.from('imeis').insert(retryPayload);
+            if (retryErr) {
+              imeiErr = retryErr;
+            } else {
+              imeiErr = null;
+            }
+          }
+
+          if (imeiErr) {
+            console.error("Erro ao registrar IMEI no ajuste:", imeiErr);
+            if (imeiErr.code === '23514' || imeiErr.message?.includes('check constraint') || imeiErr.message?.includes('imeis_status_check')) {
+              showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
+            } else {
+              showToast(`Falha ao registrar IMEI: ${imeiErr.message || 'Erro desconhecido'}`, 'error');
+            }
+            setIsSavingAjuste(false);
+            return;
+          }
         }
 
       } else {
@@ -8358,21 +8428,38 @@ export default function Dashboard({ session, profileDataProps }) {
           produto_id: prodData.id,
           empresa_id: company.id,
           filial_id: filialProduto,
-          status: 'DISPONÍVEL',
-          imei: imei,
+          status: 'DISPONIVEL',
+          imei: String(imei).trim(),
           vendido: false
         }));
 
-        console.log("PAYLOAD DE ENVIO:", imeisInsertData.map(i => ({ imei: i.imei, filial_id: i.filial_id, status: i.status })));
-
-        const { error: imeisErr } = await supabase
+        let { error: imeisErr } = await supabase
           .from('imeis')
           .insert(imeisInsertData);
 
-        if (imeisErr) throw imeisErr;
+        if (imeisErr && (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check'))) {
+          const retryData = imeisInsertData.map(i => ({ ...i, status: 'DISPONÍVEL' }));
+          const { error: retryErr } = await supabase.from('imeis').insert(retryData);
+          if (retryErr) {
+            imeisErr = retryErr;
+          } else {
+            imeisErr = null;
+          }
+        }
+
+        if (imeisErr) {
+          console.error("Erro ao registrar IMEIs no cadastro de produto:", imeisErr);
+          if (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check')) {
+            showToast('Falha ao registrar IMEI: Status ou formato de dado inválido para o sistema.', 'error');
+          } else {
+            showToast(`Falha ao registrar IMEI: ${imeisErr.message || 'Erro desconhecido'}`, 'error');
+          }
+          setLoadingProdutos(false);
+          return;
+        }
       }
 
-      alert('Produto cadastrado e estoque atualizado com sucesso!');
+      showToast('Produto cadastrado e estoque atualizado com sucesso!', 'success');
 
       // Resetar form
       setNomeProduto('');
