@@ -4774,6 +4774,26 @@ export default function Dashboard({ session, profileDataProps }) {
     const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
     const resolvedFilialId = itemFilialId || activeFilialId || filiais[0]?.id;
 
+    // Helper de correspondência resiliente (ID numérico/string, catalogo_id e Nome normalizado)
+    const isTargetItem = (item) => {
+      if (!item) return false;
+      const pidStr = produtoId ? String(produtoId) : '';
+      const itemIdStr = item.id ? String(item.id) : '';
+      const itemCatIdStr = item.catalogo_id ? String(item.catalogo_id) : '';
+
+      if (pidStr && (itemIdStr === pidStr || itemCatIdStr === pidStr)) return true;
+
+      const targetNomeNorm = nome ? String(nome).trim().toLowerCase() : '';
+      const itemNomeNorm = item.nome ? String(item.nome).trim().toLowerCase() : '';
+
+      if (targetNomeNorm && itemNomeNorm && targetNomeNorm === itemNomeNorm) {
+        if (!itemFilialId || !item.filial_id || String(item.filial_id) === String(itemFilialId)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     if (field === 'cor') {
       const corTrimmed = String(newValue || '').trim();
       try {
@@ -4790,10 +4810,11 @@ export default function Dashboard({ session, profileDataProps }) {
           await dbClient.from('produtos_catalogo').update({ cor: corTrimmed }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
         }
 
-        setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
-        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, cor: corTrimmed } : p));
-        setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, cor: corTrimmed } : c));
-        setEstoqueConsolidadoLista(prev => prev.map(e => (e.id === produtoId || e.nome === nome) ? { ...e, cor: corTrimmed } : e));
+        // Imutabilidade estrita (Deep object copy com spread operator)
+        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, cor: corTrimmed } : p));
+        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, cor: corTrimmed } : p));
+        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, cor: corTrimmed } : c));
+        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, cor: corTrimmed } : e));
         showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
@@ -4827,15 +4848,16 @@ export default function Dashboard({ session, profileDataProps }) {
           await dbClient.from('produtos_catalogo').update({ preco: novoPreco }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
         }
 
-        setProdutos(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
-        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || p.nome === nome) ? { ...p, preco: novoPreco } : p));
-        setCatalogoProdutos(prev => prev.map(c => (c.id === produtoId || c.nome === nome) ? { ...c, preco: novoPreco } : c));
-        setEstoqueConsolidadoLista(prev => prev.map(e => (e.id === produtoId || e.nome === nome) ? { ...e, preco: novoPreco } : e));
+        // Imutabilidade estrita (Deep object copy com spread operator + nova referência de objeto)
+        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, preco: novoPreco } : p));
+        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, preco: novoPreco } : p));
+        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, preco: novoPreco } : c));
+        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, preco: novoPreco } : e));
         showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
         if (filialParaRecarregar) {
-          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
+          await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
         }
       } catch (err) {
         console.error('Erro ao atualizar preço:', err);
@@ -4889,15 +4911,15 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }
 
-        setProdutos(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
-        setProdutosFilial(prev => prev.map(p => (p.id === produtoId || (p.nome?.toLowerCase() === nome?.toLowerCase() && p.filial_id === resolvedFilialId)) ? { ...p, quantidade: novaQtd } : p));
-        setEstoqueConsolidadoLista(prev => prev.map(e => (e.id === produtoId || (e.nome?.toLowerCase() === nome?.toLowerCase() && e.filial_id === resolvedFilialId)) ? { ...e, quantidade: novaQtd } : e));
+        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, quantidade: novaQtd } : p));
+        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, quantidade: novaQtd } : p));
+        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, quantidade: novaQtd } : e));
 
         showToast(`Estoque de "${nome}" alterado para ${novaQtd} un. com sucesso!`, 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
         if (filialParaRecarregar) {
-          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
+          await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
         }
       } catch (err) {
         console.error('Erro ao atualizar quantidade:', err);
