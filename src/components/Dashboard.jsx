@@ -7620,129 +7620,122 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Filtro de modelos únicos para o dropdown de Entrada de Estoque (com base no catálogo, categoria e busca/EAN)
+  // Filtro derivado de modelos para o dropdown de Entrada de Estoque (Pipeline: Dados Brutos -> Filtro por Categoria -> Select)
   const produtosMestreOptions = React.useMemo(() => {
-    let list = catalogoProdutos || [];
+    const rawList = catalogoProdutos || [];
 
-    if (entradaFiltroCategoria && entradaFiltroCategoria !== 'todas' && entradaFiltroCategoria !== 'all') {
-      const catTarget = String(entradaFiltroCategoria || '').trim().toLowerCase();
-
-      // Mapeamento de ID de categoria para nome (se categorias estiver preenchido)
-      const catObj = (categorias || []).find(c =>
-        String(c.id).toLowerCase() === catTarget ||
-        String(c.nome || '').trim().toLowerCase() === catTarget
-      );
-      const catObjName = catObj ? String(catObj.nome || '').trim().toLowerCase() : '';
-
-      list = list.filter(p => {
-        if (!p) return false;
-
-        // Extrair todas as propriedades de categoria, tipo e nome possíveis retornado pelo Supabase
-        const pCat = String(
-          p.categoria ||
-          p.categoria_nome ||
-          p.categoria_id ||
-          p.categories?.nome ||
-          p.categorias?.nome ||
-          p.category ||
-          ''
-        ).trim().toLowerCase();
-
-        const pTipo = String(
-          p.tipo ||
-          p.tipo_produto ||
-          p.type ||
-          ''
-        ).trim().toLowerCase();
-
-        const pNome = String(
-          p.nome ||
-          p.name ||
-          p.modelo ||
-          p.descricao ||
-          ''
-        ).trim().toLowerCase();
-
-        // Resolvendo nome da categoria vinculada ao produto se p.categoria/p.categoria_id for um UUID
-        const matchedCategoryObj = (categorias || []).find(c =>
-          String(c.id).toLowerCase() === pCat ||
-          String(c.id).toLowerCase() === String(p.categoria_id || '').toLowerCase()
+    // 1. Se nenhuma categoria estiver selecionada ou se for 'todas', retorna o catálogo completo
+    if (!entradaFiltroCategoria || entradaFiltroCategoria === 'todas' || entradaFiltroCategoria === 'all') {
+      let filtered = rawList;
+      if (entradaBuscaMestre && entradaBuscaMestre.trim()) {
+        const q = entradaBuscaMestre.trim().toLowerCase();
+        filtered = filtered.filter(p =>
+          (p.nome && String(p.nome).toLowerCase().includes(q)) ||
+          (p.sku && String(p.sku).toLowerCase().includes(q)) ||
+          (p.codigo_barras && String(p.codigo_barras).toLowerCase().includes(q))
         );
-        const resolvedCatName = matchedCategoryObj ? String(matchedCategoryObj.nome || '').trim().toLowerCase() : '';
-
-        // 1. Categoria alvo é de Telefonia / Celulares / Smartphones / iOS / Android
-        const isTargetCelular =
-          catTarget.includes('celular') ||
-          catTarget.includes('smartphone') ||
-          catTarget === 'ios' ||
-          catTarget === 'android' ||
-          catObjName.includes('celular') ||
-          catObjName.includes('smartphone');
-
-        if (isTargetCelular) {
-          const isProdCelular =
-            pTipo.includes('celular') ||
-            pTipo.includes('smartphone') ||
-            pCat.includes('celular') ||
-            pCat.includes('smartphone') ||
-            pCat.includes('ios') ||
-            pCat.includes('android') ||
-            pCat.includes('iphone') ||
-            pCat.includes('aparelho') ||
-            resolvedCatName.includes('celular') ||
-            resolvedCatName.includes('smartphone') ||
-            resolvedCatName.includes('ios') ||
-            resolvedCatName.includes('android') ||
-            resolvedCatName.includes('iphone') ||
-            resolvedCatName.includes('aparelho') ||
-            pNome.includes('iphone') ||
-            pNome.includes('galaxy') ||
-            pNome.includes('xiaomi') ||
-            pNome.includes('motorola') ||
-            pNome.includes('redmi') ||
-            pNome.includes('poco') ||
-            pNome.includes('realme') ||
-            pNome.includes('samsung') ||
-            pNome.includes('apple') ||
-            pNome.includes('asus') ||
-            pNome.includes('infinix') ||
-            pNome.includes('oppo') ||
-            pNome.includes('vivo') ||
-            pNome.includes('oneplus') ||
-            p.exige_imei === true ||
-            p.is_celular === true ||
-            p.is_imei === true ||
-            (Array.isArray(p.imeis) && p.imeis.length > 0);
-
-          if (isProdCelular) return true;
+      }
+      const unique = [];
+      const seen = new Set();
+      filtered.forEach(p => {
+        const key = String(p.nome || p.name || p.id).trim().toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(p);
         }
-
-        // Se a categoria/tipo do produto no banco estiver vazia, não descarta o produto
-        if (!pCat && !pTipo && !resolvedCatName) return true;
-
-        // 2. Comparação direta e tolerante a singular/plural (ex: "celular" vs "celulares")
-        const matchesCategory =
-          pCat === catTarget ||
-          pTipo === catTarget ||
-          resolvedCatName === catTarget ||
-          (pCat && pCat.includes(catTarget)) ||
-          (pTipo && pTipo.includes(catTarget)) ||
-          (catTarget && catTarget.includes(pCat)) ||
-          (catTarget && catTarget.includes(pTipo)) ||
-          (resolvedCatName && (resolvedCatName.includes(catTarget) || catTarget.includes(resolvedCatName))) ||
-          (catObjName && (pCat.includes(catObjName) || catObjName.includes(pCat))) ||
-          (catTarget.endsWith('s') && (pCat === catTarget.slice(0, -1) || pTipo === catTarget.slice(0, -1) || resolvedCatName === catTarget.slice(0, -1))) ||
-          (pCat.endsWith('s') && pCat.slice(0, -1) === catTarget) ||
-          (pTipo.endsWith('s') && pTipo.slice(0, -1) === catTarget) ||
-          (resolvedCatName.endsWith('s') && resolvedCatName.slice(0, -1) === catTarget);
-
-        return matchesCategory;
       });
+      return unique;
     }
 
+    const catTarget = String(entradaFiltroCategoria || '').trim().toLowerCase();
+
+    // Mapeamento de ID de categoria para nome em categorias cadastradas
+    const catObj = (categorias || []).find(c =>
+      String(c.id).toLowerCase() === catTarget ||
+      String(c.nome || '').trim().toLowerCase() === catTarget
+    );
+    const catObjName = catObj ? String(catObj.nome || '').trim().toLowerCase() : '';
+
+    // 2. Filtrar estritamente pela categoria selecionada
+    const list = rawList.filter(p => {
+      if (!p) return false;
+
+      const pCat = String(
+        p.categoria ||
+        p.categoria_nome ||
+        p.categoria_id ||
+        p.categories?.nome ||
+        p.categorias?.nome ||
+        p.category ||
+        ''
+      ).trim().toLowerCase();
+
+      const pTipo = String(
+        p.tipo ||
+        p.tipo_produto ||
+        p.type ||
+        ''
+      ).trim().toLowerCase();
+
+      // Resolvendo nome da categoria via ID cadastrado em `categorias`
+      const matchedCategoryObj = (categorias || []).find(c =>
+        String(c.id).toLowerCase() === pCat ||
+        String(c.id).toLowerCase() === String(p.categoria_id || '').toLowerCase()
+      );
+      const resolvedCatName = matchedCategoryObj ? String(matchedCategoryObj.nome || '').trim().toLowerCase() : '';
+
+      const isTargetCelular =
+        catTarget.includes('celular') ||
+        catTarget.includes('smartphone') ||
+        catTarget === 'ios' ||
+        catTarget === 'android' ||
+        catObjName.includes('celular') ||
+        catObjName.includes('smartphone');
+
+      if (isTargetCelular) {
+        const isProdCelular =
+          pTipo.includes('celular') ||
+          pTipo.includes('smartphone') ||
+          pCat.includes('celular') ||
+          pCat.includes('smartphone') ||
+          pCat.includes('ios') ||
+          pCat.includes('android') ||
+          pCat.includes('iphone') ||
+          pCat.includes('aparelho') ||
+          resolvedCatName.includes('celular') ||
+          resolvedCatName.includes('smartphone') ||
+          resolvedCatName.includes('ios') ||
+          resolvedCatName.includes('android') ||
+          resolvedCatName.includes('iphone') ||
+          resolvedCatName.includes('aparelho') ||
+          p.exige_imei === true ||
+          p.is_celular === true ||
+          p.is_imei === true;
+
+        return isProdCelular;
+      }
+
+      // Para outras categorias específicas (ex: "Tablets", "Acessórios", "Serviços", etc.)
+      const targetBase = catTarget.endsWith('s') ? catTarget.slice(0, -1) : catTarget;
+      const catBase = pCat.endsWith('s') ? pCat.slice(0, -1) : pCat;
+      const tipoBase = pTipo.endsWith('s') ? pTipo.slice(0, -1) : pTipo;
+      const resolvedBase = resolvedCatName.endsWith('s') ? resolvedCatName.slice(0, -1) : resolvedCatName;
+
+      return (
+        catBase === targetBase ||
+        tipoBase === targetBase ||
+        resolvedBase === targetBase ||
+        (catObjName && (pCat.includes(catObjName) || catObjName.includes(pCat))) ||
+        (pCat && pCat.includes(targetBase)) ||
+        (pTipo && pTipo.includes(targetBase)) ||
+        (resolvedCatName && resolvedCatName.includes(targetBase))
+      );
+    });
+
+    let filtered = list;
     if (entradaBuscaMestre && entradaBuscaMestre.trim()) {
       const q = entradaBuscaMestre.trim().toLowerCase();
-      list = list.filter(p =>
+      filtered = filtered.filter(p =>
         (p.nome && String(p.nome).toLowerCase().includes(q)) ||
         (p.sku && String(p.sku).toLowerCase().includes(q)) ||
         (p.codigo_barras && String(p.codigo_barras).toLowerCase().includes(q))
@@ -7751,7 +7744,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const unique = [];
     const seen = new Set();
-    list.forEach(p => {
+    filtered.forEach(p => {
       const key = String(p.nome || p.name || p.id).trim().toLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
