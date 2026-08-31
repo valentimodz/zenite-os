@@ -7849,37 +7849,32 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // 3. Inserir registro na tabela imeis se for celular
       if (isCelular) {
-        if (!targetProdutoId) {
-          throw new Error('ID do produto físico não identificado para vincular o IMEI.');
-        }
-        if (!selectedFilialDestino) {
-          throw new Error('Filial de destino não selecionada.');
-        }
-        if (!targetEmpresaId) {
-          throw new Error('Empresa do contexto não identificada.');
-        }
-
         const payloadImei = {
           produto_id: targetProdutoId,
           empresa_id: targetEmpresaId,
           filial_id: selectedFilialDestino,
           imei: String(imei).trim(),
           cor: (entradaCorDispositivo || selectedProdutoMestre?.cor || 'Preto').trim(),
-          status: 'DISPONIVEL',
+          status: 'Disponível',
           vendido: false
         };
 
-        console.log("DADOS EXATOS ENVIADOS:", payloadImei);
+        // Trava de segurança de Chaves Estrangeiras
+        if (!payloadImei.produto_id || !payloadImei.filial_id) {
+          throw new Error("ID do produto ou filial ausente.");
+        }
+
+        console.log("ENVIANDO PARA O BANCO:", payloadImei);
 
         let { error: insertErr } = await supabase
           .from('imeis')
           .insert(payloadImei);
 
-        // Fallback inteligente caso a constraint do banco tenha sido criada com acento ('DISPONÍVEL')
+        // Fallback inteligente caso a constraint exija 'DISPONÍVEL' em maiúsculas
         if (insertErr && (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check'))) {
-          console.warn("Retentando com status 'DISPONÍVEL' (com acento)...");
+          console.warn("Retentando com status 'DISPONÍVEL' (maiúsculas)...");
           const retryPayload = { ...payloadImei, status: 'DISPONÍVEL' };
-          console.log("DADOS EXATOS ENVIADOS (retry com acento):", retryPayload);
+          console.log("ENVIANDO PARA O BANCO (retry maiúsculas):", retryPayload);
           const { error: retryErr } = await supabase.from('imeis').insert(retryPayload);
           if (retryErr) {
             insertErr = retryErr;
@@ -8015,7 +8010,7 @@ export default function Dashboard({ session, profileDataProps }) {
           empresa_id: company.id,
           filial_id: entradaFilial,
           imei: String(imei).trim(),
-          status: 'DISPONIVEL',
+          status: 'Disponível',
           vendido: false,
           cor: (cor || 'Preto').trim(),
           bateria_saude: bateria_saude || null,
@@ -8024,13 +8019,20 @@ export default function Dashboard({ session, profileDataProps }) {
           is_seminovo: !!is_seminovo
         }));
 
-        console.log("DADOS EXATOS ENVIADOS:", imeisData);
+        // Trava de segurança de Chaves Estrangeiras
+        for (const item of imeisData) {
+          if (!item.produto_id || !item.filial_id) {
+            throw new Error("ID do produto ou filial ausente.");
+          }
+        }
+
+        console.log("ENVIANDO PARA O BANCO:", imeisData);
 
         let { error: imeisErr } = await supabase.from('imeis').insert(imeisData);
         if (imeisErr && (imeisErr.code === '23514' || imeisErr.message?.includes('check constraint') || imeisErr.message?.includes('imeis_status_check'))) {
-          console.warn("Retentando com status 'DISPONÍVEL' (com acento)...");
+          console.warn("Retentando com status 'DISPONÍVEL' (maiúsculas)...");
           const retryData = imeisData.map(i => ({ ...i, status: 'DISPONÍVEL' }));
-          console.log("DADOS EXATOS ENVIADOS (retry com acento):", retryData);
+          console.log("ENVIANDO PARA O BANCO (retry maiúsculas):", retryData);
           const { error: retryErr } = await supabase.from('imeis').insert(retryData);
           if (retryErr) {
             imeisErr = retryErr;
