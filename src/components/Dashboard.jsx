@@ -1429,14 +1429,6 @@ export default function Dashboard({ session, profileDataProps }) {
               categoria,
               cor,
               preco
-            ),
-            produtos_catalogo (
-              id,
-              nome,
-              tipo,
-              categoria,
-              cor,
-              preco
             )
           `)
           .eq('empresa_id', targetEmp)
