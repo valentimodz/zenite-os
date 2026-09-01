@@ -273,6 +273,11 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
                         {isSemEstoque ? 'Estoque Local: 0 un.' : `Estoque: ${qtdLocal} un.`}
                       </span>
                     </div>
+
+                    {/* DEBUG VISUAL DA CARGA BRUTA DO PRODUTO */}
+                    <pre className="text-[9px] bg-red-900 text-white p-1 max-w-full overflow-hidden mt-1 text-left font-mono">
+                      {JSON.stringify(prod, null, 2)}
+                    </pre>
                   </button>
                 );
               })}
