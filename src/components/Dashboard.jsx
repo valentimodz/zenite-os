@@ -3451,9 +3451,7 @@ export default function Dashboard({ session, profileDataProps }) {
       // Se houver erro no !inner (ex: acessórios que não possuem linhas na tabela imeis), fazemos a consulta secundária de acessórios isolados por filial
       if (error) {
         let fallbackQuery = supabase.from('produtos').select('*');
-        if (targetFilialId) {
-          fallbackQuery = fallbackQuery.eq('filial_id', targetFilialId);
-        }
+
         if (termoBusca && termoBusca.trim() !== '') {
           fallbackQuery = fallbackQuery.ilike('nome', `%${termoBusca.trim()}%`);
         }
@@ -3574,11 +3572,14 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const imeisRes = await supabase
           .from('imeis')
+        isRes = await supabase
+          .from('imeis')
           .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, created_at, produtos(nome)')
           .eq('empresa_id', empId)
+          .eq('filial_id', filialId) // 1. O MURO: Isola estritamente a loja ativa do vendedor
           .eq('vendido', false)
-          .order('created_at', { ascending: false })
-          .limit(5000);
+          .eq('status', 'disponivel') // 2. O FILTRO FANTASMA: Garante que não conte transferências ou defeitos
+          .order('created_at', { ascending: false });
         if (imeisRes.data) {
           imeisDataGlobal = imeisRes.data;
           branchImeis = imeisRes.data.filter(im => String(im.filial_id) === String(filialId));
@@ -6413,14 +6414,24 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
-      // 1. Buscar todos os registros físicos por nome na tabela produtos da empresa
-      const { data: prods } = await supabase
+      // 1. Buscar todos os registros físicos por nome ou catalogo_id na tabela produtos da empresa
+      let prodsQuery = supabase
         .from('produtos')
-        .select('id, nome, quantidade, tipo, categoria, filial_id, empresa_id, catalogo_id, cor, codigo_barras')
-        .eq('empresa_id', targetEmpresaId)
-        .ilike('nome', produto.nome);
+        .select('id, nome, quantidade, tipo, categoria, empresa_id, catalogo_id, cor, codigo_barras, filial_id')
+        .eq('empresa_id', targetEmpresaId);
+
+      if (produto.catalogo_id) {
+        prodsQuery = prodsQuery.or(`catalogo_id.eq.${produto.catalogo_id},nome.ilike.%${produto.nome.trim()}%`);
+      } else {
+        prodsQuery = prodsQuery.ilike('nome', `%${produto.nome.trim()}%`);
+      }
+
+      const { data: prods } = await prodsQuery;
 
       const prodIds = (prods || []).map(p => p.id);
+      if (produto.id && !prodIds.includes(produto.id)) {
+        prodIds.push(produto.id);
+      }
 
       // 2. Buscar todos os IMEIs correspondentes não vendidos da empresa
       let todosImeis = [];
@@ -6428,20 +6439,23 @@ export default function Dashboard({ session, profileDataProps }) {
         (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
         produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
-      if (isCelular) {
-        let imeisQuery = supabase
+      // Removemos o "if (isCelular)" para garantir que a busca ocorra
+      if (prodIds && prodIds.length > 0) {
+        const { data: imeisData, error: imeisError } = await supabase
           .from('imeis')
-          .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor, produtos(nome)')
+          .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor')
           .eq('empresa_id', targetEmpresaId)
           .eq('vendido', false)
-          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
+          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel', 'disponível', 'disponivel'])
+          .in('produto_id', prodIds); // <-- O MÉTODO NATIVO E SEGURO
 
-        if (prodIds.length > 0) {
-          imeisQuery = imeisQuery.or(`produto_id.in.(${prodIds.join(',')})`);
+        if (imeisError) {
+          console.error('[MultiLoja] Erro ao buscar IMEIs:', imeisError);
         }
 
-        const { data: imeisData } = await imeisQuery;
-        if (imeisData) todosImeis = imeisData;
+        if (imeisData) {
+          todosImeis = imeisData;
+        }
       }
 
       // 3. Mapear filiais calculando o saldo real com a mesma função unificada
@@ -16091,24 +16105,23 @@ export default function Dashboard({ session, profileDataProps }) {
                                       </button>
 
                                       {/* Filial: Botão Gatilho para Modal de Transferência */}
-                                       <button
-                                         type="button"
-                                         onClick={() => {
-                                           setSelectedEmployeeTransfer(v.id);
-                                           setNewBranchId(v.filial_id || (filiais[0]?.id || ''));
-                                           setIsTransferModalOpen(true);
-                                         }}
-                                         title="Clique para transferir a filial do vendedor"
-                                         className={`px-3 h-10 flex items-center justify-center rounded text-xs font-semibold border whitespace-nowrap flex-shrink-0 transition-all hover:scale-[1.02] cursor-pointer ${
-                                           v.filial_id
-                                             ? 'bg-[#111111] text-purple-400 border-[#222222] hover:border-purple-600/50 hover:bg-[#181818]'
-                                             : 'bg-yellow-950/20 text-yellow-500 border-yellow-900/35 hover:border-yellow-600/50 hover:bg-yellow-950/40'
-                                         }`}
-                                       >
-                                         {v.filial_id ? (filiais.find(f => f.id === v.filial_id)?.nome || 'Desconhecida') : '⚠️ Filial Pendente'}
-                                       </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedEmployeeTransfer(v.id);
+                                          setNewBranchId(v.filial_id || (filiais[0]?.id || ''));
+                                          setIsTransferModalOpen(true);
+                                        }}
+                                        title="Clique para transferir a filial do vendedor"
+                                        className={`px-3 h-10 flex items-center justify-center rounded text-xs font-semibold border whitespace-nowrap flex-shrink-0 transition-all hover:scale-[1.02] cursor-pointer ${v.filial_id
+                                          ? 'bg-[#111111] text-purple-400 border-[#222222] hover:border-purple-600/50 hover:bg-[#181818]'
+                                          : 'bg-yellow-950/20 text-yellow-500 border-yellow-900/35 hover:border-yellow-600/50 hover:bg-yellow-950/40'
+                                          }`}
+                                      >
+                                        {v.filial_id ? (filiais.find(f => f.id === v.filial_id)?.nome || 'Desconhecida') : '⚠️ Filial Pendente'}
+                                      </button>
 
-                                       {/* Botão Excluir (Lixeira) */}
+                                      {/* Botão Excluir (Lixeira) */}
                                       <button
                                         onClick={() => handleDeleteVendedor(v.id, v.nome)}
                                         className="h-10 w-10 flex items-center justify-center text-red-500 hover:bg-red-950/40 rounded border border-[#222222] hover:border-red-900/50 transition-colors flex-shrink-0"
@@ -16888,11 +16901,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                             >
                                               <div
                                                 onClick={() => handleStartEditCatalogo(p)}
-                                                className={`flex items-center justify-between bg-black border ${
-                                                  isCardSelected
-                                                    ? 'border-[#6A0DAD] bg-[#6A0DAD]/10 shadow-[0_0_12px_rgba(106,13,173,0.3)]'
-                                                    : 'border-[#222222] hover:border-[#6A0DAD]/50'
-                                                } px-3 py-2 rounded-lg h-full transition-all cursor-pointer group`}
+                                                className={`flex items-center justify-between bg-black border ${isCardSelected
+                                                  ? 'border-[#6A0DAD] bg-[#6A0DAD]/10 shadow-[0_0_12px_rgba(106,13,173,0.3)]'
+                                                  : 'border-[#222222] hover:border-[#6A0DAD]/50'
+                                                  } px-3 py-2 rounded-lg h-full transition-all cursor-pointer group`}
                                               >
                                                 <div className="flex items-center gap-2">
                                                   {p.tipo === 'CELULAR' ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
