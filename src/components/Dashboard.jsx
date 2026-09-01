@@ -3403,9 +3403,10 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar produtos do Estoque Consolidado isolando por filial ativa do usuário/seletor
+  // Buscar produtos do Estoque Consolidado isolando por filial ativa do usuário/seletor com Join restrito em IMEIs
   const fetchEstoqueConsolidado = async (filialSelecionadaId, termoBusca = '', categoriaFiltro = '') => {
     try {
+      // Cleanup imediato para zerar visualmente a lista antes de buscar novos dados
       setEstoqueConsolidadoLista([]);
 
       const targetFilialId = (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '')
@@ -3414,10 +3415,26 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let query = supabase
         .from('produtos')
-        .select('*');
+        .select(`
+          *,
+          imeis!inner(
+            id,
+            imei,
+            cor,
+            status,
+            vendido,
+            filial_id,
+            produto_id
+          )
+        `);
 
       if (targetFilialId) {
-        query = query.eq('filial_id', targetFilialId);
+        query = query
+          .eq('filial_id', targetFilialId)
+          .eq('imeis.filial_id', targetFilialId)
+          .eq('imeis.vendido', false);
+      } else {
+        query = query.eq('imeis.vendido', false);
       }
 
       // Filtra por termo de busca se houver
@@ -3430,14 +3447,65 @@ export default function Dashboard({ session, profileDataProps }) {
         query = query.eq('categoria', categoriaFiltro);
       }
 
-      let { data: produtosConsolidados, error } = await query;
+      let { data: produtosComImeis, error } = await query;
 
+      // Se houver erro no !inner (ex: acessórios que não possuem linhas na tabela imeis), fazemos a consulta secundária de acessórios isolados por filial
       if (error) {
-        console.error("Erro ao carregar estoque consolidado:", error);
+        let fallbackQuery = supabase.from('produtos').select('*');
+        if (targetFilialId) {
+          fallbackQuery = fallbackQuery.eq('filial_id', targetFilialId);
+        }
+        if (termoBusca && termoBusca.trim() !== '') {
+          fallbackQuery = fallbackQuery.ilike('nome', `%${termoBusca.trim()}%`);
+        }
+        if (categoriaFiltro && categoriaFiltro !== 'Todas as Categorias (Geral)' && categoriaFiltro !== 'todas' && categoriaFiltro !== 'all' && categoriaFiltro !== '') {
+          fallbackQuery = fallbackQuery.eq('categoria', categoriaFiltro);
+        }
+        const { data: prodsFallback } = await fallbackQuery;
+
+        // Para os produtos de celular, buscamos os imeis estritamente filtrados pela filial
+        let imeisQuery = supabase
+          .from('imeis')
+          .select('id, imei, cor, status, vendido, filial_id, produto_id')
+          .eq('vendido', false);
+
+        if (targetFilialId) {
+          imeisQuery = imeisQuery.eq('filial_id', targetFilialId);
+        }
+
+        const { data: imeisLoja } = await imeisQuery;
+
+        const imeisMapByProd = {};
+        (imeisLoja || []).forEach(im => {
+          if (!imeisMapByProd[im.produto_id]) imeisMapByProd[im.produto_id] = [];
+          imeisMapByProd[im.produto_id].push(im);
+        });
+
+        const listaConsolidada = (prodsFallback || []).map(p => {
+          const imeisDoProduto = (imeisMapByProd[p.id] || []).filter(im => !targetFilialId || String(im.filial_id) === String(targetFilialId));
+          const isCelular = p.tipo === 'CELULAR';
+          return {
+            ...p,
+            imeis_db: imeisDoProduto,
+            imeis_count: isCelular ? imeisDoProduto.length : Number(p.quantidade || 0)
+          };
+        });
+
+        setEstoqueConsolidadoLista(listaConsolidada);
         return;
       }
 
-      setEstoqueConsolidadoLista(produtosConsolidados || []);
+      const listaConsolidada = (produtosComImeis || []).map(p => {
+        const imeisFiltrados = (p.imeis || []).filter(im => !targetFilialId || String(im.filial_id) === String(targetFilialId));
+        const isCelular = p.tipo === 'CELULAR';
+        return {
+          ...p,
+          imeis_db: imeisFiltrados,
+          imeis_count: isCelular ? imeisFiltrados.length : Number(p.quantidade || 0)
+        };
+      });
+
+      setEstoqueConsolidadoLista(listaConsolidada);
     } catch (err) {
       console.error("Erro ao executar fetchEstoqueConsolidado:", err);
     }
