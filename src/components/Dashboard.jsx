@@ -3330,75 +3330,106 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar produtos disponíveis para venda no PDV filtrando estritamente pela filial ativa
+  // Buscar produtos disponíveis para venda no PDV filtrando estritamente pela filial ativa com Inner Join
   const fetchProdutosPDV = async (filialIdAtiva) => {
     const targetFilialId = filialIdAtiva || activeFilialId || profile?.filial_id;
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
     if (!targetFilialId && !targetEmpresaId) return;
 
     try {
-      // 1. Busca os produtos cadastrados estritamente para a filial ativa
+      // 1. Busca os produtos com inner join na tabela de imeis filtrando estritamente pela loja ativa
       let query = supabase
         .from('produtos')
-        .select('*');
+        .select(`
+          *,
+          imeis!inner(
+            id,
+            filial_id,
+            status,
+            vendido,
+            imei,
+            cor
+          )
+        `);
 
       if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
-        query = query.eq('filial_id', targetFilialId);
+        query = query
+          .eq('filial_id', targetFilialId)
+          .eq('imeis.filial_id', targetFilialId)
+          .eq('imeis.vendido', false)
+          .in('imeis.status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
       } else if (targetEmpresaId) {
-        query = query.eq('empresa_id', targetEmpresaId);
+        query = query
+          .eq('empresa_id', targetEmpresaId)
+          .eq('imeis.vendido', false)
+          .in('imeis.status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
       }
 
-      const { data: produtosLoja, error } = await query;
+      let { data, error } = await query;
 
-      if (error) {
-        console.error("Erro ao carregar produtos na vitrine do PDV:", error);
-        return;
-      }
+      console.log('PAYLOAD BRUTO PDV:', data);
 
-      // 2. Buscar IMEIs físicos disponíveis estritamente desta filial
-      let imeisMap = {};
-      let imeisQuery = supabase
-        .from('imeis')
-        .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
-        .eq('vendido', false)
-        .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
+      let produtosMapeados = [];
 
-      if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
-        imeisQuery = imeisQuery.eq('filial_id', targetFilialId);
-      } else if (targetEmpresaId) {
-        imeisQuery = imeisQuery.eq('empresa_id', targetEmpresaId);
-      }
+      if (!error && data) {
+        produtosMapeados = data.map(item => {
+          const imeisFiltrados = (item.imeis || []).filter(im => !im.vendido && String(im.filial_id) === String(targetFilialId));
+          const isCelular = item.tipo === 'CELULAR' || item.tipo === 'Celular';
+          const qtdRealLoja = isCelular ? imeisFiltrados.length : Number(item.quantidade || 0);
 
-      const { data: imeisLoja } = await imeisQuery;
+          return {
+            ...item,
+            estoque: qtdRealLoja,
+            estoque_local: qtdRealLoja,
+            quantidade_local: qtdRealLoja,
+            quantidade: qtdRealLoja,
+            imeis_db: imeisFiltrados
+          };
+        });
+      } else {
+        // Fallback em caso de produtos sem linha de IMEI (acessórios/serviços)
+        let fallbackQuery = supabase.from('produtos').select('*');
+        if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
+          fallbackQuery = fallbackQuery.eq('filial_id', targetFilialId);
+        } else if (targetEmpresaId) {
+          fallbackQuery = fallbackQuery.eq('empresa_id', targetEmpresaId);
+        }
 
-      (imeisLoja || []).forEach(im => {
-        if (!imeisMap[im.produto_id]) imeisMap[im.produto_id] = [];
-        imeisMap[im.produto_id].push(im);
-      });
+        const { data: prodsFallback } = await fallbackQuery;
 
-      if (imeisLoja && imeisLoja.length > 0) {
-        setDisponiveisImeis(prev => {
-          const mapPrev = new Map((prev || []).map(i => [i.id || i.imei, i]));
-          imeisLoja.forEach(i => mapPrev.set(i.id || i.imei, i));
-          return Array.from(mapPrev.values());
+        let imeisQuery = supabase
+          .from('imeis')
+          .select('id, produto_id, filial_id, status, vendido, imei, cor')
+          .eq('vendido', false)
+          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
+
+        if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
+          imeisQuery = imeisQuery.eq('filial_id', targetFilialId);
+        }
+
+        const { data: imeisLoja } = await imeisQuery;
+
+        const mapImeis = {};
+        (imeisLoja || []).forEach(im => {
+          if (!mapImeis[im.produto_id]) mapImeis[im.produto_id] = [];
+          mapImeis[im.produto_id].push(im);
+        });
+
+        produtosMapeados = (prodsFallback || []).map(item => {
+          const isCelular = item.tipo === 'CELULAR' || item.tipo === 'Celular';
+          const imeisDoItem = mapImeis[item.id] || [];
+          const qtdRealLoja = isCelular ? imeisDoItem.length : Number(item.quantidade || 0);
+
+          return {
+            ...item,
+            estoque: qtdRealLoja,
+            estoque_local: qtdRealLoja,
+            quantidade_local: qtdRealLoja,
+            quantidade: qtdRealLoja,
+            imeis_db: imeisDoItem
+          };
         });
       }
-
-      // Mapeamento forçado: preserva dados consistentes isolados para a filial ativa
-      const produtosMapeados = (produtosLoja || []).map(item => {
-        const isCelular = item.tipo === 'CELULAR' || item.tipo === 'Celular';
-        const imeisDoItem = imeisMap[item.id] || [];
-        const qtdLocal = isCelular ? imeisDoItem.length : Number(item.quantidade || 0);
-
-        return {
-          ...item,
-          estoque: qtdLocal,
-          estoque_local: qtdLocal,
-          quantidade_local: qtdLocal,
-          quantidade: qtdLocal,
-          imeis_db: imeisDoItem
-        };
-      });
 
       setProdutosDisponiveisPDV(produtosMapeados);
     } catch (err) {
