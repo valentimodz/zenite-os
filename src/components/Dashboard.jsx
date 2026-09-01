@@ -3331,113 +3331,74 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar produtos disponíveis para venda no PDV filtrando estritamente pela filial ativa
   const fetchProdutosPDV = async (filialIdAtiva) => {
-    const targetFilialId = (filialIdAtiva || activeFilialId || profile?.filial_id || '').trim();
-    const targetEmpresaId = (profile?.empresa_id || company?.id || activeEmpresaId || '').trim();
-    if (!targetFilialId && !targetEmpresaId) return;
+    const rawFilial = filialIdAtiva || activeFilialId || profile?.filial_id;
+    const rawEmpresa = profile?.empresa_id || company?.id || activeEmpresaId;
+
+    const targetFilialId = rawFilial && typeof rawFilial === 'string' ? rawFilial.trim() : (rawFilial ? String(rawFilial).trim() : '');
+    const targetEmpresaId = rawEmpresa && typeof rawEmpresa === 'string' ? rawEmpresa.trim() : (rawEmpresa ? String(rawEmpresa).trim() : '');
+
+    // CLAUSULA DE GUARDA: Bloquear requisição se os parâmetros obrigatórios forem inexistentes ou inválidos
+    const isFilialValida = targetFilialId && targetFilialId !== 'null' && targetFilialId !== 'undefined' && targetFilialId !== 'todas' && targetFilialId !== 'ALL';
+    const isEmpresaValida = targetEmpresaId && targetEmpresaId !== 'null' && targetEmpresaId !== 'undefined' && targetEmpresaId !== 'ALL';
+
+    if (!isFilialValida && !isEmpresaValida) {
+      console.warn('[PDV Fetch] Requisição abortada: Filial ID e Empresa ID ausentes ou inválidos.', { targetFilialId, targetEmpresaId });
+      setProdutosDisponiveisPDV([]);
+      return;
+    }
 
     try {
+      // String de select totalmente sanitizada sem quebras de linha ou espaços extras
       let query = supabase
         .from('produtos')
-        .select(`
-          *,
-          imeis(
-            id,
-            filial_id,
-            status,
-            vendido,
-            imei,
-            cor
-          )
-        `);
+        .select('*,imeis(id,produto_id,filial_id,status,vendido,imei,cor)');
 
-      if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL' && targetFilialId !== 'null' && targetFilialId !== 'undefined') {
+      if (isFilialValida) {
         query = query.eq('filial_id', targetFilialId);
-      } else if (targetEmpresaId && targetEmpresaId !== 'null' && targetEmpresaId !== 'undefined') {
+      } else if (isEmpresaValida) {
         query = query.eq('empresa_id', targetEmpresaId);
       }
 
-      let { data, error } = await query;
+      const { data, error } = await query;
 
       if (error) {
-        console.error('ERRO QUERY VITRINE SUPABASE:', error.message, error.details, error.hint, error);
-      } else {
-        console.log('JSON BRUTO VITRINE:', data);
+        console.error('ERRO QUERY VITRINE SUPABASE (HTTP 400 DETECTADO):', {
+          mensagem: error.message,
+          detalhes: error.details,
+          dica: error.hint,
+          codigo: error.code,
+          targetFilialId,
+          targetEmpresaId
+        });
+        setProdutosDisponiveisPDV([]);
+        return;
       }
 
-      let produtosMapeados = [];
+      console.log('JSON BRUTO VITRINE:', data);
 
-      if (!error && data) {
-        const todosImeis = data.flatMap(p => p.imeis || []);
-        produtosMapeados = data.map(item => {
-          const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, data, todosImeis);
-          const imeisFiltrados = (item.imeis || []).filter(im =>
-            !im.vendido &&
-            String(im.status || '').toUpperCase().includes('DISPONIV') &&
-            String(im.filial_id || '').trim() === String(targetFilialId).trim()
-          );
+      const todosImeis = (data || []).flatMap(p => p.imeis || []);
+      const produtosMapeados = (data || []).map(item => {
+        const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, data, todosImeis);
+        const imeisFiltrados = (item.imeis || []).filter(im =>
+          !im.vendido &&
+          String(im.status || '').toUpperCase().includes('DISPONIV') &&
+          String(im.filial_id || '').trim() === String(targetFilialId).trim()
+        );
 
-          return {
-            ...item,
-            estoque: qtdRealLoja,
-            estoque_local: qtdRealLoja,
-            quantidade_local: qtdRealLoja,
-            quantidade: qtdRealLoja,
-            imeis_db: imeisFiltrados
-          };
-        });
-      } else {
-        // Fallback em caso de produtos sem linha de IMEI (acessórios/serviços)
-        let fallbackQuery = supabase.from('produtos').select('*');
-        if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL' && targetFilialId !== 'null' && targetFilialId !== 'undefined') {
-          fallbackQuery = fallbackQuery.eq('filial_id', targetFilialId);
-        } else if (targetEmpresaId && targetEmpresaId !== 'null' && targetEmpresaId !== 'undefined') {
-          fallbackQuery = fallbackQuery.eq('empresa_id', targetEmpresaId);
-        }
-
-        const { data: prodsFallback, error: fallbackErr } = await fallbackQuery;
-        if (fallbackErr) {
-          console.error('ERRO FALLBACK PRODUTOS SUPABASE:', fallbackErr.message, fallbackErr.details, fallbackErr.hint);
-        }
-
-        let imeisQuery = supabase
-          .from('imeis')
-          .select('id, produto_id, filial_id, status, vendido, imei, cor')
-          .eq('vendido', false)
-          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
-
-        if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL' && targetFilialId !== 'null' && targetFilialId !== 'undefined') {
-          imeisQuery = imeisQuery.eq('filial_id', targetFilialId);
-        }
-
-        const { data: imeisLoja, error: imeisErr } = await imeisQuery;
-        if (imeisErr) {
-          console.error('ERRO QUERY IMEIS SUPABASE:', imeisErr.message, imeisErr.details, imeisErr.hint);
-        }
-
-        const mapImeis = {};
-        (imeisLoja || []).forEach(im => {
-          if (!mapImeis[im.produto_id]) mapImeis[im.produto_id] = [];
-          mapImeis[im.produto_id].push(im);
-        });
-
-        produtosMapeados = (prodsFallback || []).map(item => {
-          const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, prodsFallback, imeisLoja);
-          const imeisDoItem = mapImeis[item.id] || [];
-
-          return {
-            ...item,
-            estoque: qtdRealLoja,
-            estoque_local: qtdRealLoja,
-            quantidade_local: qtdRealLoja,
-            quantidade: qtdRealLoja,
-            imeis_db: imeisDoItem
-          };
-        });
-      }
+        return {
+          ...item,
+          estoque: qtdRealLoja,
+          estoque_local: qtdRealLoja,
+          quantidade_local: qtdRealLoja,
+          quantidade: qtdRealLoja,
+          imeis_db: imeisFiltrados
+        };
+      });
 
       setProdutosDisponiveisPDV(produtosMapeados);
     } catch (err) {
       console.error("Erro fatal ao executar fetchProdutosPDV:", err.message, err);
+      setProdutosDisponiveisPDV([]);
     }
   };
 
