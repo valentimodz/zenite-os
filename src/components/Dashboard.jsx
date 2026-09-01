@@ -6364,20 +6364,49 @@ export default function Dashboard({ session, profileDataProps }) {
 
         const matchProdRef = (pId && String(im.produto_id) === pId) ||
           (pCatId && String(im.produto_id) === pCatId) ||
-          (imNome && pNome && imNome.toLowerCase().trim() === pNome);
+          (imNome && pNome && (imNome.toLowerCase().trim() === pNome || imNome.toLowerCase().trim().includes(pNome) || pNome.includes(imNome.toLowerCase().trim())));
 
         if (!matchProdRef) return false;
 
-        // Se o card/produto possui cor especificada, o IMEI DEVE corresponder a esta mesma cor
-        if (pCor) {
-          const imCor = (im.cor || '').toLowerCase().trim();
+        // Se o card/produto possui cor especificada, e o IMEI também possui cor, valida compatibilidade
+        if (pCor && im.cor) {
+          const imCor = String(im.cor || '').toLowerCase().trim();
           if (imCor && imCor !== pCor) return false;
         }
 
         return true;
       });
 
-      return imeisFilial.length;
+      // Se encontrou IMEIs cadastrados na filial, retorna a contagem exata
+      if (imeisFilial.length > 0) {
+        return imeisFilial.length;
+      }
+
+      // Se não há IMEIs físicos nesta filial, verifica se há registro de produto com quantidade numérica direta
+      const matchedCelularProds = prodsPool.filter(pr => {
+        const prFid = String(pr.filial_id || '').trim();
+        if (!prFid || prFid === 'null' || prFid === 'undefined') return false;
+        if (prFid !== fId) return false;
+
+        const prNome = (pr.nome || '').toLowerCase().trim();
+        const prCor = (pr.cor || '').toLowerCase().trim();
+        const prEan = (pr.codigo_barras || '').toLowerCase().trim();
+        const pEan = (produto.codigo_barras || '').toLowerCase().trim();
+
+        if (pr.id && pId && String(pr.id) === pId) return true;
+        if (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) return true;
+        if (pr.id && pCatId && String(pr.id) === pCatId) return true;
+
+        if (prNome === pNome || (prNome && pNome && (prNome.includes(pNome) || pNome.includes(prNome)))) {
+          if (pCor && prCor && prCor !== pCor) return false;
+          if (pEan && prEan && prEan !== pEan) return false;
+          return true;
+        }
+        return false;
+      });
+
+      const totalQtyNumerica = matchedCelularProds.reduce((sum, p) => sum + Number(p.quantidade || p.estoque || p.estoque_local || p.quantidade_local || 0), 0);
+      return totalQtyNumerica;
     }
 
     // Para Acessórios e demais produtos: Somar quantidade de registros com filial_id válido da filial ativa
@@ -6389,7 +6418,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const prNome = (pr.nome || '').toLowerCase().trim();
       const prCor = (pr.cor || '').toLowerCase().trim();
-      const pCor = (produto.cor || '').toLowerCase().trim();
       const prEan = (pr.codigo_barras || '').toLowerCase().trim();
       const pEan = (produto.codigo_barras || '').toLowerCase().trim();
 
@@ -6397,10 +6425,12 @@ export default function Dashboard({ session, profileDataProps }) {
       if (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) return true;
       if (pr.id && pCatId && String(pr.id) === pCatId) return true;
 
-      if (prNome !== pNome) return false;
-      if (prCor && pCor && prCor !== pCor) return false;
-      if (prEan && pEan && prEan !== pEan) return false;
-      return true;
+      if (prNome === pNome || (prNome && pNome && (prNome.includes(pNome) || pNome.includes(prNome)))) {
+        if (prCor && pCor && prCor !== pCor) return false;
+        if (prEan && pEan && prEan !== pEan) return false;
+        return true;
+      }
+      return false;
     });
 
     return matchedProds.reduce((sum, p) => sum + Number(p.quantidade || p.estoque || p.estoque_local || p.quantidade_local || 0), 0);
@@ -6420,10 +6450,11 @@ export default function Dashboard({ session, profileDataProps }) {
         .select('id, nome, quantidade, tipo, categoria, empresa_id, catalogo_id, cor, codigo_barras, filial_id')
         .eq('empresa_id', targetEmpresaId);
 
+      const termoBusca = (produto.nome || '').trim();
       if (produto.catalogo_id) {
-        prodsQuery = prodsQuery.or(`catalogo_id.eq.${produto.catalogo_id},nome.ilike.%${produto.nome.trim()}%`);
+        prodsQuery = prodsQuery.or(`catalogo_id.eq.${produto.catalogo_id},nome.ilike.%${termoBusca}%`);
       } else {
-        prodsQuery = prodsQuery.ilike('nome', `%${produto.nome.trim()}%`);
+        prodsQuery = prodsQuery.ilike('nome', `%${termoBusca}%`);
       }
 
       const { data: prods } = await prodsQuery;
@@ -6439,23 +6470,20 @@ export default function Dashboard({ session, profileDataProps }) {
         (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
         produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
-      // Removemos o "if (isCelular)" para garantir que a busca ocorra
-      if (prodIds && prodIds.length > 0) {
-        const { data: imeisData, error: imeisError } = await supabase
-          .from('imeis')
-          .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor')
-          .eq('empresa_id', targetEmpresaId)
-          .eq('vendido', false)
-          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel', 'disponível', 'disponivel'])
-          .in('produto_id', prodIds); // <-- O MÉTODO NATIVO E SEGURO
+      // Busca IMEIs por ID dos produtos encontrados OU geral da empresa para não perder correspondência
+      const { data: imeisData, error: imeisError } = await supabase
+        .from('imeis')
+        .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor, produtos(id, nome, categoria, tipo)')
+        .eq('empresa_id', targetEmpresaId)
+        .eq('vendido', false)
+        .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel', 'disponível', 'disponivel']);
 
-        if (imeisError) {
-          console.error('[MultiLoja] Erro ao buscar IMEIs:', imeisError);
-        }
+      if (imeisError) {
+        console.error('[MultiLoja] Erro ao buscar IMEIs:', imeisError);
+      }
 
-        if (imeisData) {
-          todosImeis = imeisData;
-        }
+      if (imeisData) {
+        todosImeis = imeisData;
       }
 
       // 3. Mapear filiais calculando o saldo real com a mesma função unificada
