@@ -3337,13 +3337,13 @@ export default function Dashboard({ session, profileDataProps }) {
     if (!targetFilialId && !targetEmpresaId) return;
 
     try {
-      // 1. Busca os produtos cadastrados para a empresa/filial
+      // 1. Busca os produtos cadastrados estritamente para a filial ativa
       let query = supabase
         .from('produtos')
         .select('*');
 
       if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
-        query = query.or(`filial_id.eq.${targetFilialId},empresa_id.eq.${targetEmpresaId}`);
+        query = query.eq('filial_id', targetFilialId);
       } else if (targetEmpresaId) {
         query = query.eq('empresa_id', targetEmpresaId);
       }
@@ -3355,12 +3355,8 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
 
-      // 2. Buscar IMEIs físicos disponíveis estritamente não vendidos desta filial/empresa
+      // 2. Buscar IMEIs físicos disponíveis estritamente desta filial
       let imeisMap = {};
-      const prodsIds = (produtosLoja || []).map(p => p.id).filter(Boolean);
-      const catIds = (produtosLoja || []).map(p => p.catalogo_id).filter(Boolean);
-      const allIds = [...new Set([...prodsIds, ...catIds])];
-
       let imeisQuery = supabase
         .from('imeis')
         .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, produtos(nome)')
@@ -3368,7 +3364,7 @@ export default function Dashboard({ session, profileDataProps }) {
         .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
 
       if (targetFilialId && targetFilialId !== 'todas' && targetFilialId !== 'ALL') {
-        imeisQuery = imeisQuery.or(`filial_id.eq.${targetFilialId},empresa_id.eq.${targetEmpresaId}`);
+        imeisQuery = imeisQuery.eq('filial_id', targetFilialId);
       } else if (targetEmpresaId) {
         imeisQuery = imeisQuery.eq('empresa_id', targetEmpresaId);
       }
@@ -3388,14 +3384,21 @@ export default function Dashboard({ session, profileDataProps }) {
         });
       }
 
-      // Mapeamento forçado: preserva dados consistentes
-      const produtosMapeados = (produtosLoja || []).map(item => ({
-        ...item,
-        estoque: item.quantidade || 0,
-        estoque_local: item.quantidade || 0,
-        quantidade_local: item.quantidade || 0,
-        imeis_db: imeisMap[item.id] || []
-      }));
+      // Mapeamento forçado: preserva dados consistentes isolados para a filial ativa
+      const produtosMapeados = (produtosLoja || []).map(item => {
+        const isCelular = item.tipo === 'CELULAR' || item.tipo === 'Celular';
+        const imeisDoItem = imeisMap[item.id] || [];
+        const qtdLocal = isCelular ? imeisDoItem.length : Number(item.quantidade || 0);
+
+        return {
+          ...item,
+          estoque: qtdLocal,
+          estoque_local: qtdLocal,
+          quantidade_local: qtdLocal,
+          quantidade: qtdLocal,
+          imeis_db: imeisDoItem
+        };
+      });
 
       setProdutosDisponiveisPDV(produtosMapeados);
     } catch (err) {

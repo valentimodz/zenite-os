@@ -8,24 +8,32 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
   const [lastAddedId, setLastAddedId] = useState(null);
   const [estoqueFisicoLocal, setEstoqueFisicoLocal] = useState([]);
 
-  // Buscar produtos diretamente da tabela public.produtos para obter o estoque físico real
+  // Buscar produtos diretamente da tabela public.produtos filtrando estritamente pela filial do usuário
   useEffect(() => {
     if (!isOpen) return;
 
     const carregarEstoqueFisico = async () => {
       try {
         let empresaId = session?.user?.user_metadata?.empresa_id;
-        if (!empresaId && session?.user?.id) {
+        let filialId = session?.user?.user_metadata?.filial_id || localStorage.getItem('zenite_active_filial_id') || localStorage.getItem('activeFilialId');
+        if ((!empresaId || !filialId) && session?.user?.id) {
           const { data: prof } = await supabase
             .from('profiles')
-            .select('empresa_id')
+            .select('empresa_id, filial_id')
             .eq('id', session.user.id)
             .single();
-          empresaId = prof?.empresa_id;
+          if (prof) {
+            if (!empresaId) empresaId = prof.empresa_id;
+            if (!filialId) filialId = prof.filial_id;
+          }
         }
 
         let query = supabase.from('produtos').select('*');
-        if (empresaId) query = query.eq('empresa_id', empresaId);
+        if (filialId) {
+          query = query.eq('filial_id', filialId);
+        } else if (empresaId) {
+          query = query.eq('empresa_id', empresaId);
+        }
 
         const { data: prodsData, error } = await query;
         if (!error && prodsData) {
@@ -51,20 +59,16 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
     return map;
   }, [estoqueFisicoLocal]);
 
-  // Filtrar produtos genéricos e acessórios
   // Filtrar produtos genéricos e acessórios e CORRIGIR ESTOQUE MULTILOJA
   const produtosFiltrados = useMemo(() => {
-    const activeEmpresaId = session?.user?.user_metadata?.empresa_id;
-
     return produtos.map((p) => {
-      // Define a quantidade final diretamente de p.quantidade
       const itemFisico = mapEstoqueFisico.get(p.id) ||
         (p.codigo_barras ? mapEstoqueFisico.get(p.codigo_barras.trim()) : null) ||
         (p.nome ? mapEstoqueFisico.get(p.nome.toLowerCase().trim()) : null);
 
-      const qtdFisica = (itemFisico && itemFisico.quantidade !== undefined && itemFisico.quantidade !== null)
-        ? Number(itemFisico.quantidade)
-        : Number(p.quantidade ?? p.estoque_atual ?? 0);
+      const qtdFisica = itemFisico
+        ? Number(itemFisico.quantidade ?? 0)
+        : Number(p.quantidade_local ?? p.estoque_local ?? p.quantidade ?? 0);
 
       return {
         ...p,
@@ -107,7 +111,7 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
 
       return bateBusca && bateCategoria;
     });
-  }, [produtos, mapEstoqueFisico, busca, categoriaAtiva, session]);
+  }, [produtos, mapEstoqueFisico, busca, categoriaAtiva]);
 
   if (!isOpen) return null;
 
@@ -210,6 +214,8 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2 sm:gap-3.5">
               {produtosFiltrados.map((prod) => {
                 const isJustAdded = lastAddedId === prod.id;
+                const qtdLocal = Number(prod.quantidade ?? prod.estoque_atual ?? 0);
+                const isSemEstoque = qtdLocal <= 0;
                 const precoFormatado = (parseFloat(prod.preco) || 0).toLocaleString('pt-BR', {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2
@@ -218,12 +224,15 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
                 return (
                   <button
                     key={prod.id}
-                    onClick={() => handleSelect(prod)}
+                    disabled={isSemEstoque}
+                    onClick={() => !isSemEstoque && handleSelect(prod)}
                     className={`
                       relative text-left p-2.5 sm:p-3.5 rounded-xl border flex flex-col justify-between transition-all select-none group min-h-[95px] sm:min-h-[115px]
-                      ${isJustAdded
-                        ? 'bg-green-950/40 border-green-500 shadow-lg shadow-green-950/40 scale-[0.98]'
-                        : 'bg-black/70 hover:bg-neutral-900 border-neutral-800 hover:border-[#6A0DAD]/60 hover:shadow-lg hover:shadow-purple-950/20 active:scale-[0.96]'
+                      ${isSemEstoque
+                        ? 'opacity-50 border-neutral-900 bg-neutral-950/40 cursor-not-allowed'
+                        : isJustAdded
+                          ? 'bg-green-950/40 border-green-500 shadow-lg shadow-green-950/40 scale-[0.98]'
+                          : 'bg-black/70 hover:bg-neutral-900 border-neutral-800 hover:border-[#6A0DAD]/60 hover:shadow-lg hover:shadow-purple-950/20 active:scale-[0.96]'
                       }
                     `}
                   >
@@ -237,7 +246,7 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
                           <Check className="w-2.5 h-2.5" /> OK
                         </span>
                       ) : (
-                        <div className="p-0.5 sm:p-1 rounded-md bg-[#6A0DAD]/10 text-[#c084fc] group-hover:bg-[#6A0DAD] group-hover:text-white transition-colors shrink-0">
+                        <div className={`p-0.5 sm:p-1 rounded-md ${isSemEstoque ? 'bg-neutral-900 text-neutral-600' : 'bg-[#6A0DAD]/10 text-[#c084fc] group-hover:bg-[#6A0DAD] group-hover:text-white'} transition-colors shrink-0`}>
                           <Plus className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                         </div>
                       )}
@@ -260,8 +269,8 @@ export default function PainelVendaRapida({ isOpen, onClose, session, produtos =
                       <span className="text-[11px] sm:text-sm font-mono font-extrabold text-purple-300 group-hover:text-purple-200">
                         R$ {precoFormatado}
                       </span>
-                      <span className="text-[9px] sm:text-[10px] text-neutral-500 font-medium">
-                        Qtd: {prod.quantidade ?? prod.estoque_atual ?? 1}
+                      <span className={`text-[9px] sm:text-[10px] font-bold ${isSemEstoque ? 'text-red-400 font-extrabold' : 'text-neutral-500 font-medium'}`}>
+                        {isSemEstoque ? 'Estoque Local: 0 un.' : `Estoque: ${qtdLocal} un.`}
                       </span>
                     </div>
                   </button>
