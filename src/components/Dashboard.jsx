@@ -3403,16 +3403,21 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar produtos do Estoque Consolidado de forma tolerante filtrando por filial selecionada, busca e categoria
+  // Buscar produtos do Estoque Consolidado isolando por filial ativa do usuário/seletor
   const fetchEstoqueConsolidado = async (filialSelecionadaId, termoBusca = '', categoriaFiltro = '') => {
     try {
+      setEstoqueConsolidadoLista([]);
+
+      const targetFilialId = (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '')
+        ? filialSelecionadaId
+        : (activeFilialId || profile?.filial_id || '');
+
       let query = supabase
         .from('produtos')
         .select('*');
 
-      // Se houver uma filial selecionada (e não for "todas"), filtra por ela de forma tolerante
-      if (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '') {
-        query = query.or(`empresa_id.eq.${filialSelecionadaId},filial_id.eq.${filialSelecionadaId}`);
+      if (targetFilialId) {
+        query = query.eq('filial_id', targetFilialId);
       }
 
       // Filtra por termo de busca se houver
@@ -3427,25 +3432,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let { data: produtosConsolidados, error } = await query;
 
-      if (error || !produtosConsolidados) {
-        // Fallback em caso de falha na cláusula .or()
-        let fallbackQuery = supabase.from('produtos').select('*');
-        if (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '') {
-          fallbackQuery = fallbackQuery.eq('empresa_id', filialSelecionadaId);
-        }
-        if (termoBusca && termoBusca.trim() !== '') {
-          fallbackQuery = fallbackQuery.ilike('nome', `%${termoBusca.trim()}%`);
-        }
-        if (categoriaFiltro && categoriaFiltro !== 'Todas as Categorias (Geral)' && categoriaFiltro !== 'todas' && categoriaFiltro !== 'all' && categoriaFiltro !== '') {
-          fallbackQuery = fallbackQuery.eq('categoria', categoriaFiltro);
-        }
-        const { data: fallbackData, error: fallbackErr } = await fallbackQuery;
-
-        if (fallbackErr) {
-          console.error("Erro ao carregar estoque consolidado:", fallbackErr);
-          return;
-        }
-        produtosConsolidados = fallbackData;
+      if (error) {
+        console.error("Erro ao carregar estoque consolidado:", error);
+        return;
       }
 
       setEstoqueConsolidadoLista(produtosConsolidados || []);
