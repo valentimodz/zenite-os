@@ -3372,10 +3372,14 @@ export default function Dashboard({ session, profileDataProps }) {
       let produtosMapeados = [];
 
       if (!error && data) {
+        const todosImeis = data.flatMap(p => p.imeis || []);
         produtosMapeados = data.map(item => {
-          const imeisFiltrados = (item.imeis || []).filter(im => !im.vendido && String(im.filial_id) === String(targetFilialId));
-          const isCelular = item.tipo === 'CELULAR' || item.tipo === 'Celular';
-          const qtdRealLoja = isCelular ? imeisFiltrados.length : Number(item.quantidade || 0);
+          const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, data, todosImeis);
+          const imeisFiltrados = (item.imeis || []).filter(im =>
+            !im.vendido &&
+            String(im.status || '').toUpperCase().includes('DISPONIV') &&
+            String(im.filial_id || '').trim() === String(targetFilialId).trim()
+          );
 
           return {
             ...item,
@@ -3416,9 +3420,8 @@ export default function Dashboard({ session, profileDataProps }) {
         });
 
         produtosMapeados = (prodsFallback || []).map(item => {
-          const isCelular = item.tipo === 'CELULAR' || item.tipo === 'Celular';
+          const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, prodsFallback, imeisLoja);
           const imeisDoItem = mapImeis[item.id] || [];
-          const qtdRealLoja = isCelular ? imeisDoItem.length : Number(item.quantidade || 0);
 
           return {
             ...item,
@@ -6359,33 +6362,35 @@ export default function Dashboard({ session, profileDataProps }) {
     if (!produto) return 0;
     if (produto.categoria === 'SERVICO') return 999;
 
-    const fId = String(targetFilialIdParam || activeFilialId || profile?.filial_id || '');
+    const fId = String(targetFilialIdParam || activeFilialId || profile?.filial_id || '').trim();
+    if (!fId || fId === 'null' || fId === 'undefined') return 0;
+
     const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) ||
       (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
       produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
 
     const pNome = (produto.nome || '').toLowerCase().trim();
     const pCor = (produto.cor || produto.color || '').toLowerCase().trim();
-    const pId = String(produto.id || '');
-    const pCatId = String(produto.catalogo_id || '');
+    const pId = String(produto.id || '').trim();
+    const pCatId = String(produto.catalogo_id || '').trim();
 
     const imeisPool = todosImeis || disponiveisImeis || [];
     const prodsPool = todosProds || produtosDisponiveisPDV || produtos || [];
 
     if (isCelular) {
-      // Contagem estrita de IMEIs físicos disponíveis vinculados a esta filial específica e à VARIAÇÃO/COR EXATA
+      // Contagem estrita de IMEIs físicos disponíveis vinculados a esta filial específica com status VÁLIDO
       const imeisFilial = imeisPool.filter(im => {
-        if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+        if (!im || im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO' || im.status === 'DEFEITO') return false;
 
-        const imFid = String(im.filial_id || '');
-        const imeiFilialObj = filiais.find(f => String(f.id) === imFid);
-        const targetFilialObj = filiais.find(f => String(f.id) === fId);
+        const statusUpper = String(im.status || '').toUpperCase().trim();
+        const isDisponivel = statusUpper === 'DISPONÍVEL' || statusUpper === 'DISPONIVEL';
+        if (!isDisponivel) return false;
 
-        const matchFilial = !fId ||
-          imFid === fId ||
-          String(im.empresa_id) === fId ||
-          (imeiFilialObj && targetFilialObj && imeiFilialObj.nome && targetFilialObj.nome && imeiFilialObj.nome.toLowerCase().trim() === targetFilialObj.nome.toLowerCase().trim());
+        // Órfãos de filial ou filial diferente: rejeitar estritamente
+        const imFid = String(im.filial_id || '').trim();
+        if (!imFid || imFid === 'null' || imFid === 'undefined') return false;
 
+        const matchFilial = imFid === fId;
         if (!matchFilial) return false;
 
         let imNome = im.produtos?.nome;
@@ -6394,8 +6399,8 @@ export default function Dashboard({ session, profileDataProps }) {
           if (prodDono) imNome = prodDono.nome;
         }
 
-        const matchProdRef = String(im.produto_id) === pId ||
-          String(im.produto_id) === pCatId ||
+        const matchProdRef = (pId && String(im.produto_id) === pId) ||
+          (pCatId && String(im.produto_id) === pCatId) ||
           (imNome && pNome && imNome.toLowerCase().trim() === pNome);
 
         if (!matchProdRef) return false;
@@ -6409,34 +6414,14 @@ export default function Dashboard({ session, profileDataProps }) {
         return true;
       });
 
-      if (imeisFilial.length > 0) {
-        return imeisFilial.length;
-      }
-
-      // Fallback: se nenhum IMEI individual foi cadastrado ainda, verificar registro físico direto na tabela produtos para esta filial
-      const matchedProds = prodsPool.filter(pr => {
-        const prFid = String(pr.filial_id || '');
-        const matchFilial = !fId || prFid === fId || String(pr.empresa_id) === fId;
-        if (!matchFilial) return false;
-
-        const prNome = (pr.nome || '').toLowerCase().trim();
-        return (pr.id && pId && String(pr.id) === pId) ||
-          (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) ||
-          (pr.id && pCatId && String(pr.id) === pCatId) ||
-          (prNome && pNome && prNome === pNome);
-      });
-
-      if (matchedProds.length > 0) {
-        return matchedProds.reduce((sum, p) => sum + Number(p.quantidade || p.estoque || p.estoque_local || 0), 0);
-      }
-
-      return 0;
+      return imeisFilial.length;
     }
 
-    // Para Acessórios e demais produtos: Somar quantidade de todos os registros da filial ativa
+    // Para Acessórios e demais produtos: Somar quantidade de registros com filial_id válido da filial ativa
     const matchedProds = prodsPool.filter(pr => {
-      const prFid = String(pr.filial_id || '');
-      const matchFilial = !fId || prFid === fId || String(pr.empresa_id) === fId;
+      const prFid = String(pr.filial_id || '').trim();
+      if (!prFid || prFid === 'null' || prFid === 'undefined') return false;
+      const matchFilial = prFid === fId;
       if (!matchFilial) return false;
 
       const prNome = (pr.nome || '').toLowerCase().trim();
