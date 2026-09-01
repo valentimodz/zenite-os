@@ -3368,6 +3368,14 @@ export default function Dashboard({ session, profileDataProps }) {
       let { data, error } = await query;
 
       console.log('JSON BRUTO VITRINE:', data);
+      const targetProdDebug = (data || []).find(p => p.nome && (p.nome.includes('A17') || p.nome.includes('A15') || p.nome.includes('A14') || p.nome.toLowerCase().includes('galaxy') || p.nome.toLowerCase().includes('realme')));
+      if (targetProdDebug) {
+        console.log('PRODUTO GALAXY A17 (BRUTO):', targetProdDebug);
+        if (targetProdDebug.imeis) {
+          console.log('STATUS DOS 5 IMEIS:', targetProdDebug.imeis.map(i => ({ status: i.status, filial: i.filial_id, vendido: i.vendido })));
+        }
+      }
+
       if (error) {
         console.error('ERRO QUERY VITRINE SUPABASE:', error);
       }
