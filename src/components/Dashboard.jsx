@@ -3367,7 +3367,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let { data, error } = await query;
 
-      console.log('PAYLOAD BRUTO PDV:', data);
+      console.log('JSON BRUTO VITRINE:', data);
+      if (error) {
+        console.error('ERRO QUERY VITRINE SUPABASE:', error);
+      }
 
       let produtosMapeados = [];
 
