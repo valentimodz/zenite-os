@@ -3217,20 +3217,25 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar status do Caixa Aberto da Filial Ativa (Bloqueio PDV)
+  // Buscar status do Caixa Aberto da Filial Ativa (Bloqueio PDV - Isolamento Estrito de Filial e Empresa)
   const fetchStatusCaixa = async (filialId) => {
     const targetFilialId = filialId || activeFilialId || profile?.filial_id;
-    if (!targetFilialId) {
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+
+    // 1. Cláusula de Guarda Obrigatória: Prevenção de HTTP 400 e Cross-Tenant Leakage
+    if (!targetFilialId || !targetEmpresaId) {
       setCaixaAtual(null);
       setIsCaixaAberto(false);
       return null;
     }
+
     setIsLoadingCaixa(true);
     try {
-      // Validação Estrita: buscar caixa que ainda não foi fechado (data_fechamento é nulo e status é ABERTO/aberto)
+      // 2. Isolamento de Sessão de Caixa: exige empresa_id e filial_id simultaneamente
       const { data, error } = await supabase
         .from('caixas')
         .select('*')
+        .eq('empresa_id', targetEmpresaId)
         .eq('filial_id', targetFilialId)
         .is('data_fechamento', null)
         .or('status.eq.ABERTO,status.eq.aberto')
@@ -3265,42 +3270,36 @@ export default function Dashboard({ session, profileDataProps }) {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
     const operadorId = session?.user?.id || profile?.id;
 
-    if (!targetFilialId) {
+    if (!targetFilialId || !targetEmpresaId) {
       showToast('Selecione uma filial antes de abrir o caixa.', 'error');
       return;
     }
 
-    const saldoInicialNum = parseFloat(String(fundoTrocoInput).replace(',', '.')) || 0;
-    if (isNaN(saldoInicialNum) || saldoInicialNum < 0) {
-      showToast('Informe um valor de Fundo de Troco válido (mínimo R$ 0,00).', 'error');
-      return;
-    }
-
+    const saldoInicialNum = parseFloat(fundoTrocoInput.replace(/\./g, '').replace(',', '.')) || 0;
     setIsSubmittingAbertura(true);
+
     try {
-      const filialObj = filiais.find(f => String(f.id) === String(targetFilialId));
-      const payloadCaixa = {
+      const payload = {
         empresa_id: targetEmpresaId,
         filial_id: targetFilialId,
-        filial_nome: filialObj?.nome || activeFilialNome || 'Filial',
         operador_id: operadorId,
-        operador_nome: profile?.nome || session?.user?.email || 'Operador PDV',
         saldo_inicial: saldoInicialNum,
+        observacoes_abertura: obsAberturaInput.trim() || null,
         status: 'aberto',
         data_abertura: new Date().toISOString(),
-        data_fechamento: null,
-        observacoes_abertura: obsAberturaInput.trim() || null
+        data_fechamento: null
       };
 
       const { data, error } = await supabase
         .from('caixas')
-        .insert(payloadCaixa)
+        .insert(payload)
         .select()
         .single();
 
       if (error) {
         console.error('Erro ao abrir caixa no Supabase (tentando fallback):', error);
         const fallbackPayload = {
+          empresa_id: targetEmpresaId,
           filial_id: targetFilialId,
           operador_id: operadorId,
           saldo_inicial: saldoInicialNum,
@@ -3329,60 +3328,68 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar produtos disponíveis para venda no PDV filtrando estritamente pela filial ativa
+  // Buscar produtos disponíveis para venda no PDV (Blindagem de Estoque da Vitrine)
   const fetchProdutosPDV = async (filialIdAtiva) => {
     const rawFilial = filialIdAtiva || activeFilialId || profile?.filial_id;
     const rawEmpresa = profile?.empresa_id || company?.id || activeEmpresaId;
 
-    const targetFilialId = rawFilial && typeof rawFilial === 'string' ? rawFilial.trim() : (rawFilial ? String(rawFilial).trim() : '');
-    const targetEmpresaId = rawEmpresa && typeof rawEmpresa === 'string' ? rawEmpresa.trim() : (rawEmpresa ? String(rawEmpresa).trim() : '');
+    const targetFilialId = rawFilial ? String(rawFilial).trim() : '';
+    const targetEmpresaId = rawEmpresa ? String(rawEmpresa).trim() : '';
 
-    // CLAUSULA DE GUARDA: Bloquear requisição se os parâmetros obrigatórios forem inexistentes ou inválidos
-    const isFilialValida = targetFilialId && targetFilialId !== 'null' && targetFilialId !== 'undefined' && targetFilialId !== 'todas' && targetFilialId !== 'ALL';
-    const isEmpresaValida = targetEmpresaId && targetEmpresaId !== 'null' && targetEmpresaId !== 'undefined' && targetEmpresaId !== 'ALL';
-
-    if (!isFilialValida && !isEmpresaValida) {
-      console.warn('[PDV Fetch] Requisição abortada: Filial ID e Empresa ID ausentes ou inválidos.', { targetFilialId, targetEmpresaId });
+    // 1. Cláusula de Guarda Obrigatória: Prevenção de HTTP 400 e Isolamento de Filial
+    if (!targetFilialId || !targetEmpresaId || targetFilialId === 'null' || targetFilialId === 'undefined' || targetEmpresaId === 'null' || targetEmpresaId === 'undefined') {
+      console.warn('[PDV Fetch] Requisição abortada: Empresa ou Filial não definidas.');
       setProdutosDisponiveisPDV([]);
       return;
     }
 
     try {
-      // String de select totalmente sanitizada sem quebras de linha ou espaços extras
-      let query = supabase
+      // 3. Blindagem de Estoque da Vitrine: Produtos globais da empresa + IMEIs restritos à filial ativa
+      const { data, error } = await supabase
         .from('produtos')
-        .select('*,imeis(id,produto_id,filial_id,status,vendido,imei,cor)');
-
-      if (isFilialValida) {
-        query = query.eq('filial_id', targetFilialId);
-      } else if (isEmpresaValida) {
-        query = query.eq('empresa_id', targetEmpresaId);
-      }
-
-      const { data, error } = await query;
+        .select(`
+          id,
+          nome,
+          tipo,
+          categoria,
+          preco,
+          preco_custo,
+          empresa_id,
+          catalogo_id,
+          cor,
+          codigo_barras,
+          imeis(
+            id,
+            produto_id,
+            filial_id,
+            empresa_id,
+            status,
+            vendido,
+            imei,
+            cor
+          )
+        `)
+        .eq('empresa_id', targetEmpresaId);
 
       if (error) {
-        console.error('ERRO QUERY VITRINE SUPABASE (HTTP 400 DETECTADO):', {
-          mensagem: error.message,
-          detalhes: error.details,
-          dica: error.hint,
-          codigo: error.code,
-          targetFilialId,
-          targetEmpresaId
-        });
+        console.error('ERRO QUERY VITRINE SUPABASE (HTTP 400 DETECTADO):', error);
         setProdutosDisponiveisPDV([]);
         return;
       }
 
-      console.log('JSON BRUTO VITRINE:', data);
+      // Filtrar estritamente os IMEIs que pertencem à filial ativa e estão disponíveis
+      const todosImeisFilial = (data || []).flatMap(p => p.imeis || []).filter(im =>
+        !im.vendido &&
+        String(im.filial_id || '').trim() === targetFilialId &&
+        String(im.status || '').toUpperCase().includes('DISPONIV')
+      );
 
-      const todosImeis = (data || []).flatMap(p => p.imeis || []);
       const produtosMapeados = (data || []).map(item => {
-        const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, data, todosImeis);
+        const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, data, todosImeisFilial);
         const imeisFiltrados = (item.imeis || []).filter(im =>
           !im.vendido &&
-          String(im.status || '').toUpperCase().includes('DISPONIV') &&
-          String(im.filial_id || '').trim() === String(targetFilialId).trim()
+          String(im.filial_id || '').trim() === targetFilialId &&
+          String(im.status || '').toUpperCase().includes('DISPONIV')
         );
 
         return {
@@ -3397,7 +3404,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       setProdutosDisponiveisPDV(produtosMapeados);
     } catch (err) {
-      console.error("Erro fatal ao executar fetchProdutosPDV:", err.message, err);
+      console.error("Erro fatal ao executar fetchProdutosPDV:", err);
       setProdutosDisponiveisPDV([]);
     }
   };
@@ -6438,16 +6445,21 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Visualizador de Disponibilidade Multiloja
   const handleVerMultiloja = async (produto) => {
+    if (!produto) return;
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    if (!targetEmpresaId) {
+      console.warn('[MultiLoja] Requisição abortada: Empresa não identificada.');
+      return;
+    }
+
     setSelectedMultilojaProd(produto);
     setLoadingMultilojaStock(true);
     setMultilojaStockData([]);
     try {
-      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-
-      // 1. Buscar todos os registros físicos por nome ou catalogo_id na tabela produtos da empresa
+      // 1. Buscar todos os registros da tabela produtos da empresa (Produtos são globais)
       let prodsQuery = supabase
         .from('produtos')
-        .select('id, nome, quantidade, tipo, categoria, empresa_id, catalogo_id, cor, codigo_barras, filial_id')
+        .select('id, nome, quantidade, tipo, categoria, empresa_id, catalogo_id, cor, codigo_barras')
         .eq('empresa_id', targetEmpresaId);
 
       const termoBusca = (produto.nome || '').trim();
@@ -6464,13 +6476,8 @@ export default function Dashboard({ session, profileDataProps }) {
         prodIds.push(produto.id);
       }
 
-      // 2. Buscar todos os IMEIs correspondentes não vendidos da empresa
+      // 2. Buscar todos os IMEIs locais por filial na empresa
       let todosImeis = [];
-      const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) ||
-        (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
-        produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
-
-      // Busca IMEIs por ID dos produtos encontrados OU geral da empresa para não perder correspondência
       const { data: imeisData, error: imeisError } = await supabase
         .from('imeis')
         .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor, produtos(id, nome, categoria, tipo)')
@@ -6489,14 +6496,12 @@ export default function Dashboard({ session, profileDataProps }) {
       // 3. Mapear filiais calculando o saldo real com a mesma função unificada
       const stockList = filiais.map(fil => {
         const finalQty = calcularEstoqueProdutoFilial(produto, fil.id, prods, todosImeis);
-        const matchedProd = (prods || []).find(p => String(p.filial_id) === String(fil.id));
-
         return {
           filialId: fil.id,
           filialNome: fil.nome,
           filialTipo: fil.tipo,
           quantidade: finalQty,
-          tipo: matchedProd ? matchedProd.tipo : (produto.tipo || 'OUTRO')
+          tipo: produto.tipo || 'OUTRO'
         };
       });
 
