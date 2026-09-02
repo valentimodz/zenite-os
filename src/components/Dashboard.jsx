@@ -55,6 +55,7 @@ const safeFetchJson = async (url, options = {}) => {
   }
 };
 
+
 // Motor de Elegibilidade de Crédito (Boleto exige Celular Android e proíbe iPhone/Apple ou apenas Acessórios)
 const verificarElegibilidadeBoleto = (carrinho) => {
   if (!carrinho || carrinho.length === 0) return false;
@@ -265,7 +266,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [vendaDetalheSelecionada, setVendaDetalheSelecionada] = useState(null);
   const [profile, setProfile] = useState(profileDataProps || null);
   const [company, setCompany] = useState(null);
-  const activeEmpresaId = profile?.empresa_id || company?.id;
+  const activeEmpresaId = localStorage.getItem('@zenite_empresaId') || profile?.empresa_id
   const [loading, setLoading] = useState(profileDataProps ? false : true);
   const [error, setError] = useState('');
 
@@ -418,7 +419,9 @@ export default function Dashboard({ session, profileDataProps }) {
   const [activeSellerTab, setActiveSellerTab] = useState('pdv'); // Para VENDEDOR: 'pdv' | 'metas' | 'fechamento'
 
   // Estado de Filial Ativa do Vendedor
-  const [activeFilialId, setActiveFilialId] = useState(() => localStorage.getItem('zenite_active_filial_id') || '');
+  const [activeFilialId, setActiveFilialId] = useState(
+    localStorage.getItem('@zenite_filialId') || profile?.filial_id || null
+  );
   const [activeFilialNome, setActiveFilialNome] = useState(() => localStorage.getItem('zenite_active_filial_nome') || '');
 
   // Dados do Estoque (Gerente)
@@ -3366,7 +3369,6 @@ export default function Dashboard({ session, profileDataProps }) {
           preco,
           preco_custo,
           empresa_id,
-          catalogo_id,
           cor,
           codigo_barras,
           imeis(
@@ -3396,24 +3398,34 @@ export default function Dashboard({ session, profileDataProps }) {
       );
 
       const produtosMapeados = (data || []).map(item => {
-        const qtdRealLoja = calcularEstoqueProdutoFilial(item, targetFilialId, data, todosImeisFilial);
+        // 1. Filtro restrito para a vitrine da loja atual
         const imeisFiltrados = (item.imeis || []).filter(im =>
           !im.vendido &&
-          String(im.filial_id || '').trim() === targetFilialId &&
+          String(im.filial_id || '').trim() === String(targetFilialId || '').trim() &&
           String(im.status || '').toUpperCase().includes('DISPONIV')
         );
 
+        // 2. Filtro global normalizado para o modal "Rede" ler sem erros de tipo ou espaçamento
+        const imeisGlobais = (item.imeis || []).filter(im =>
+          !im.vendido &&
+          String(im.status || '').toUpperCase().includes('DISPONIV')
+        ).map(im => ({
+          ...im,
+          filial_id: String(im.filial_id || '').trim()
+        }));
+
         return {
           ...item,
-          estoque: qtdRealLoja,
-          estoque_local: qtdRealLoja,
-          quantidade_local: qtdRealLoja,
-          quantidade: qtdRealLoja,
-          imeis_db: imeisFiltrados
+          estoque: imeisFiltrados.length,          // Vitrine local exata
+          estoque_local: imeisFiltrados.length,
+          quantidade_local: imeisFiltrados.length,
+          quantidade: imeisFiltrados.length,
+          imeis_db: imeisGlobais                   // Modal "Rede" alimentado e limpo
         };
       });
 
       setProdutosDisponiveisPDV(produtosMapeados);
+
     } catch (err) {
       console.error("Erro fatal ao executar fetchProdutosPDV:", err);
       setProdutosDisponiveisPDV([]);
@@ -12623,7 +12635,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               Rede
                             </button>
                             <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-destructive font-bold' : 'text-foreground-muted'}`}>
-                              {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${estoqueLocal} un.`}
+                              {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${prod.estoque} un.`}
                             </span>
                           </div>
                         </div>

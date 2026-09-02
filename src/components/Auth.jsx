@@ -27,19 +27,42 @@ export default function Auth() {
     setMessage({ text: '', type: '' });
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      // 1. Valida as credenciais
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
-      if (error) throw error;
+      if (authError) throw authError;
+
+      // 2. BUSCA A IDENTIDADE CORPORATIVA EXATA
+      // Verifique se o nome da sua tabela é 'profiles', 'usuarios' ou similar.
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('empresa_id, filial_id')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (profileError || !profile) {
+        throw new Error('Perfil de filial não encontrado no banco de dados.');
+      }
+
+      // 3. ISOLAMENTO ABSOLUTO NO CACHE DO NAVEGADOR
+      // Isso esmaga o cache antigo e impede que a Islayne herde os IDs do Marlon
+      localStorage.setItem('@zenite_empresaId', profile.empresa_id);
+      localStorage.setItem('@zenite_filialId', profile.filial_id);
+
+      // IMPORTANTE: Se você usa um Context API (como AuthContext), dispare a atualização dele AQUI.
 
       setMessage({ text: 'Autenticado com sucesso! Acessando sistema...', type: 'success' });
-      // Aqui você faria o redirecionamento ou atualização de estado global
-      console.log('Login com sucesso:', data);
+
+      // 4. Redirecionamento 
+      // window.location.href = '/dashboard'; 
+
     } catch (err) {
       setMessage({ text: err.message || 'Erro ao realizar login.', type: 'error' });
-    } finally {
+    }
+    finally {
       setLoading(false);
     }
   };
@@ -108,7 +131,7 @@ export default function Auth() {
   return (
     <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md bg-[#0A0A0A] border border-[#222222] rounded-lg p-8 shadow-2xl">
-        
+
         {/* Cabeçalho */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-white tracking-tight">
@@ -123,21 +146,19 @@ export default function Auth() {
         <div className="flex border-b border-[#222222] mb-6">
           <button
             onClick={() => handleTabChange('login')}
-            className={`flex-1 text-center py-3 font-semibold text-sm transition-colors border-b-2 ${
-              activeTab === 'login'
+            className={`flex-1 text-center py-3 font-semibold text-sm transition-colors border-b-2 ${activeTab === 'login'
                 ? 'text-white border-[#6A0DAD]'
                 : 'text-gray-500 border-transparent hover:text-gray-300'
-            }`}
+              }`}
           >
             Entrar
           </button>
           <button
             onClick={() => handleTabChange('signup')}
-            className={`flex-1 text-center py-3 font-semibold text-sm transition-colors border-b-2 ${
-              activeTab === 'signup'
+            className={`flex-1 text-center py-3 font-semibold text-sm transition-colors border-b-2 ${activeTab === 'signup'
                 ? 'text-white border-[#6A0DAD]'
                 : 'text-gray-500 border-transparent hover:text-gray-300'
-            }`}
+              }`}
           >
             Cadastrar
           </button>
@@ -146,11 +167,10 @@ export default function Auth() {
         {/* Alertas */}
         {message.text && (
           <div
-            className={`mb-6 p-4 rounded-md text-sm border ${
-              message.type === 'success'
+            className={`mb-6 p-4 rounded-md text-sm border ${message.type === 'success'
                 ? 'bg-green-950/20 border-green-800 text-green-400'
                 : 'bg-red-950/20 border-red-800 text-red-400'
-            }`}
+              }`}
           >
             {message.text}
           </div>
