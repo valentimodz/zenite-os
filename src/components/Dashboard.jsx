@@ -11416,13 +11416,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
         const localProdImeis = allProdImeis.filter(im => {
           const imeiFilial = filiais.find(f => String(f.id) === String(im.filial_id));
-          return !activeFilialId ||
-            String(im.filial_id) === String(activeFilialId) ||
-            String(im.empresa_id) === String(activeFilialId) ||
+          return String(im.filial_id) === String(activeFilialId) ||
             (imeiFilial && activeFilialNome && imeiFilial.nome === activeFilialNome);
         });
 
-        const poolImeis = localProdImeis.length > 0 ? localProdImeis : (activeFilialId ? [] : allProdImeis);
+        // Se activeFilialId estiver definido e a filial não tiver IMEIs, a piscina deve ser vazia (0 un.)
+        const poolImeis = activeFilialId ? localProdImeis : (localProdImeis.length > 0 ? localProdImeis : allProdImeis);
 
         // Agrupar variações de cores usando reduce (1 IMEI = 1 unidade real)
         const corMap = poolImeis.reduce((map, im) => {
@@ -11453,13 +11452,12 @@ export default function Dashboard({ session, profileDataProps }) {
           return map;
         }, {});
 
-        // Fallback: se não há rastreio de IMEI na tabela imeis, ler a quantidade física da filial na tabela produtos
+        // Fallback para celulares: se não há rastreio na tabela imeis, ler a quantidade física EXCLUSIVA da filial ativa
         if (Object.keys(corMap).length === 0 && modeloPai.rawItems.length > 0) {
-          // Filtrar itens da filial ativa
           const filialRawItems = modeloPai.rawItems.filter(r =>
-            !activeFilialId || !r.filial_id || String(r.filial_id) === String(activeFilialId)
+            activeFilialId ? String(r.filial_id) === String(activeFilialId) : true
           );
-          const targetItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
+          const targetItems = filialRawItems;
 
           targetItems.forEach(raw => {
             // Extração fiel da cor real cadastrada no banco sem máscara ou substituição
@@ -11514,11 +11512,11 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // Para Acessórios / Produtos por Quantidade:
-      // Filtrar produtos específicos da filial ativa para evitar somar estoques de outras lojas ou do catálogo mestre duplicado
+      // Filtrar produtos específicos EXCLUSIVAMENTE da filial ativa
       const filialRawItems = (modeloPai.rawItems || []).filter(r =>
-        !activeFilialId || !r.filial_id || String(r.filial_id) === String(activeFilialId)
+        activeFilialId ? String(r.filial_id) === String(activeFilialId) : true
       );
-      const targetRawItems = filialRawItems.length > 0 ? filialRawItems : modeloPai.rawItems;
+      const targetRawItems = filialRawItems;
 
       const varMap = targetRawItems.reduce((map, raw) => {
         const corReal = (raw.cor || raw.nome_cor || raw.corReal || raw.color || '').trim();
