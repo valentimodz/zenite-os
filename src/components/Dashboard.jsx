@@ -6529,7 +6529,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const isCelular = (produto.tipo && String(produto.tipo).toUpperCase().includes('CELULAR')) ||
       (produto.categoria && String(produto.categoria).toUpperCase().includes('CELULAR')) ||
-      produto.categoria === 'IOS' || produto.categoria === 'ANDROID';
+      produto.categoria === 'IOS' || produto.categoria === 'ANDROID' ||
+      Boolean(produto.isModelBase);
 
     const pNome = (produto.nome || '').toLowerCase().trim();
     const pCor = (produto.cor || produto.color || '').toLowerCase().trim();
@@ -6540,13 +6541,16 @@ export default function Dashboard({ session, profileDataProps }) {
     const prodsPool = todosProds || produtosDisponiveisPDV || produtos || [];
 
     if (isCelular) {
-      // Contagem estrita de IMEIs físicos disponíveis vinculados a esta filial específica com status VÁLIDO
+      // Contagem de IMEIs físicos disponíveis vinculados a esta filial específica
       const imeisFilial = imeisPool.filter(im => {
-        if (!im || im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO' || im.status === 'DEFEITO') return false;
+        if (!im || im.vendido) return false;
 
+        // Validação de status flexível idêntica ao PDV
         const statusUpper = String(im.status || '').toUpperCase().trim();
-        const isDisponivel = statusUpper === 'DISPONÍVEL' || statusUpper === 'DISPONIVEL';
-        if (!isDisponivel) return false;
+        if (statusUpper === 'VENDIDO' || statusUpper === 'EM_TRANSITO' || statusUpper === 'DEFEITO' || statusUpper === 'RESERVADO_OUTRO') {
+          return false;
+        }
+        if (statusUpper && statusUpper.includes('VEND')) return false;
 
         // Órfãos de filial ou filial diferente: rejeitar estritamente
         const imFid = String(im.filial_id || '').trim();
@@ -6555,14 +6559,20 @@ export default function Dashboard({ session, profileDataProps }) {
         const matchFilial = imFid === fId;
         if (!matchFilial) return false;
 
-        let imNome = im.produtos?.nome;
-        if (!imNome) {
-          const prodDono = prodsPool.find(pr => String(pr.id) === String(im.produto_id));
-          if (prodDono) imNome = prodDono.nome;
+        let imNome = im.produtos?.nome || im.produtos_catalogo?.nome;
+        let imCatId = im.produto_catalogo_id ? String(im.produto_catalogo_id) : null;
+        if (!imNome || !imCatId) {
+          const prodDono = prodsPool.find(pr => String(pr.id) === String(im.produto_id) || (pr.catalogo_id && String(pr.catalogo_id) === String(im.produto_id)));
+          if (prodDono) {
+            if (!imNome) imNome = prodDono.nome;
+            if (!imCatId && prodDono.catalogo_id) imCatId = String(prodDono.catalogo_id);
+          }
         }
 
         const matchProdRef = (pId && String(im.produto_id) === pId) ||
           (pCatId && String(im.produto_id) === pCatId) ||
+          (imCatId && pCatId && imCatId === pCatId) ||
+          (imCatId && pId && imCatId === pId) ||
           (imNome && pNome && (imNome.toLowerCase().trim() === pNome || imNome.toLowerCase().trim().includes(pNome) || pNome.includes(imNome.toLowerCase().trim())));
 
         if (!matchProdRef) return false;
@@ -6595,6 +6605,7 @@ export default function Dashboard({ session, profileDataProps }) {
         if (pr.id && pId && String(pr.id) === pId) return true;
         if (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) return true;
         if (pr.id && pCatId && String(pr.id) === pCatId) return true;
+        if (pr.catalogo_id && pCatId && String(pr.catalogo_id) === pCatId) return true;
 
         if (prNome === pNome || (prNome && pNome && (prNome.includes(pNome) || pNome.includes(prNome)))) {
           if (pCor && prCor && prCor !== pCor) return false;
@@ -6623,6 +6634,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (pr.id && pId && String(pr.id) === pId) return true;
       if (pr.catalogo_id && pId && String(pr.catalogo_id) === pId) return true;
       if (pr.id && pCatId && String(pr.id) === pCatId) return true;
+      if (pr.catalogo_id && pCatId && String(pr.catalogo_id) === pCatId) return true;
 
       if (prNome === pNome || (prNome && pNome && (prNome.includes(pNome) || pNome.includes(prNome)))) {
         if (prCor && pCor && prCor !== pCor) return false;
@@ -6648,41 +6660,30 @@ export default function Dashboard({ session, profileDataProps }) {
     setLoadingMultilojaStock(true);
     setMultilojaStockData([]);
     try {
-      // 1. Buscar todos os registros da tabela produtos da empresa (Produtos são globais)
-      let prodsQuery = supabase
-        .from('produtos')
-        .select('*')
-        .eq('empresa_id', targetEmpresaId);
+      // 1. Buscar todos os produtos e IMEIs da empresa de forma resiliente
+      const [resProdutos, resImeis] = await Promise.all([
+        supabase
+          .from('produtos')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId),
+        supabase
+          .from('imeis')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .eq('vendido', false)
+      ]);
 
-      const termoBusca = (produto.nome || '').trim();
-      if (produto.catalogo_id) {
-        prodsQuery = prodsQuery.or(`catalogo_id.eq.${produto.catalogo_id},nome.ilike.%${termoBusca}%`);
-      } else {
-        prodsQuery = prodsQuery.ilike('nome', `%${termoBusca}%`);
+      const prods = resProdutos.data || produtos || [];
+      const todosImeis = resImeis.data || disponiveisImeis || [];
+
+      if (resProdutos.error) {
+        console.error('[MultiLoja] Erro ao buscar produtos:', resProdutos.error);
+      }
+      if (resImeis.error) {
+        console.error('[MultiLoja] Erro ao buscar IMEIs:', resImeis.error);
       }
 
-      const { data: prods, error: prodsError } = await prodsQuery;
-      if (prodsError) {
-        console.error('[MultiLoja] Erro ao buscar produtos:', prodsError);
-      }
-
-      // 2. Buscar todos os IMEIs locais por filial na empresa
-      let todosImeis = [];
-      const { data: imeisData, error: imeisError } = await supabase
-        .from('imeis')
-        .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor')
-        .eq('empresa_id', targetEmpresaId)
-        .eq('vendido', false);
-
-      if (imeisError) {
-        console.error('[MultiLoja] Erro ao buscar IMEIs:', imeisError);
-      }
-
-      if (imeisData) {
-        todosImeis = imeisData;
-      }
-
-      // 3. Mapear filiais calculando o saldo real com a mesma função unificada
+      // 2. Mapear filiais calculando o saldo real com a função unificada
       const stockList = filiais.map(fil => {
         const finalQty = calcularEstoqueProdutoFilial(produto, fil.id, prods, todosImeis);
         return {
@@ -6717,7 +6718,7 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       setLoadingMultilojaStock(true);
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-      const isCelular = produto.tipo === 'CELULAR' || produto.tipo === 'Celular';
+      const isCelular = produto.tipo === 'CELULAR' || produto.tipo === 'Celular' || Boolean(produto.isModelBase);
       let prodParaCarrinho = null;
       let imeiParaCarrinho = null;
 
@@ -6728,17 +6729,48 @@ export default function Dashboard({ session, profileDataProps }) {
           .select('*')
           .eq('empresa_id', targetEmpresaId)
           .eq('filial_id', origenFilialId)
-          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel'])
-          .eq('vendido', false)
-          .limit(1);
+          .neq('status', 'VENDIDO')
+          .neq('status', 'EM_TRANSITO')
+          .neq('status', 'DEFEITO')
+          .eq('vendido', false);
 
         if (findImeiErr) throw findImeiErr;
-        if (!imeisDisp || imeisDisp.length === 0) {
+
+        // Filtrar o IMEI que realmente pertence ao produto/modelo solicitado
+        const pId = String(produto.id || '').trim();
+        const pCatId = String(produto.catalogo_id || '').trim();
+        const pNome = (produto.nome || '').toLowerCase().trim();
+        const pCor = (produto.cor || produto.color || '').toLowerCase().trim();
+
+        const imeisCandidatos = (imeisDisp || []).filter(im => {
+          const matchRef = (pId && String(im.produto_id) === pId) ||
+            (pCatId && String(im.produto_id) === pCatId) ||
+            (im.produto_catalogo_id && pCatId && String(im.produto_catalogo_id) === pCatId) ||
+            (im.produtos?.nome && pNome && im.produtos.nome.toLowerCase().trim() === pNome);
+
+          if (!matchRef && pNome) {
+            const imNome = (im.produtos?.nome || '').toLowerCase().trim();
+            if (imNome && (imNome.includes(pNome) || pNome.includes(imNome))) {
+              if (pCor && im.cor) {
+                return String(im.cor).toLowerCase().trim() === pCor;
+              }
+              return true;
+            }
+          }
+
+          if (pCor && im.cor) {
+            return String(im.cor).toLowerCase().trim() === pCor;
+          }
+
+          return Boolean(matchRef);
+        });
+
+        const imeiDisponivel = imeisCandidatos.length > 0 ? imeisCandidatos[0] : imeisDisp?.[0];
+
+        if (!imeiDisponivel) {
           showToast(`Não há IMEIs disponíveis na filial ${origenFilialNome} para efetuar a reserva.`, 'error');
           return;
         }
-
-        const imeiDisponivel = imeisDisp[0];
 
         // Transferir e marcar o IMEI como alocado na filial ativa (ficando INDISPONÍVEL na origem e DISPONÍVEL na atual)
         const { error: updateImeiErr } = await supabase
