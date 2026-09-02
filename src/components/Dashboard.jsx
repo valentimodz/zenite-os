@@ -6651,7 +6651,7 @@ export default function Dashboard({ session, profileDataProps }) {
       // 1. Buscar todos os registros da tabela produtos da empresa (Produtos são globais)
       let prodsQuery = supabase
         .from('produtos')
-        .select('id, nome, quantidade, tipo, categoria, empresa_id, catalogo_id, cor, codigo_barras')
+        .select('*')
         .eq('empresa_id', targetEmpresaId);
 
       const termoBusca = (produto.nome || '').trim();
@@ -6661,21 +6661,18 @@ export default function Dashboard({ session, profileDataProps }) {
         prodsQuery = prodsQuery.ilike('nome', `%${termoBusca}%`);
       }
 
-      const { data: prods } = await prodsQuery;
-
-      const prodIds = (prods || []).map(p => p.id);
-      if (produto.id && !prodIds.includes(produto.id)) {
-        prodIds.push(produto.id);
+      const { data: prods, error: prodsError } = await prodsQuery;
+      if (prodsError) {
+        console.error('[MultiLoja] Erro ao buscar produtos:', prodsError);
       }
 
       // 2. Buscar todos os IMEIs locais por filial na empresa
       let todosImeis = [];
       const { data: imeisData, error: imeisError } = await supabase
         .from('imeis')
-        .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor, produtos(id, nome, categoria, tipo)')
+        .select('id, produto_id, status, vendido, filial_id, empresa_id, imei, cor')
         .eq('empresa_id', targetEmpresaId)
-        .eq('vendido', false)
-        .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel', 'disponível', 'disponivel']);
+        .eq('vendido', false);
 
       if (imeisError) {
         console.error('[MultiLoja] Erro ao buscar IMEIs:', imeisError);
