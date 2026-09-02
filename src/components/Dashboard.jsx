@@ -260,6 +260,7 @@ function ProductTableRow({
 }
 
 export default function Dashboard({ session, profileDataProps }) {
+
   const { theme, toggleTheme, isDark } = useTheme();
   const [vendaDetalheSelecionada, setVendaDetalheSelecionada] = useState(null);
   const [profile, setProfile] = useState(profileDataProps || null);
@@ -743,6 +744,17 @@ export default function Dashboard({ session, profileDataProps }) {
   const [ajusteValorPix, setAjusteValorPix] = useState('');
   const [ajusteMotivo, setAjusteMotivo] = useState('');
   const [loadingAjusteCaixa, setLoadingAjusteCaixa] = useState(false);
+
+  // Estados para Fechamento Gerencial de Caixa Aberto (Dificuldade do Vendedor)
+  const [isConfirmingFecharCaixaGerencial, setIsConfirmingFecharCaixaGerencial] = useState(false);
+  const [fechamentoGerencialValores, setFechamentoGerencialValores] = useState({
+    dinheiro: '',
+    cartao: '',
+    pix: '',
+    outros: ''
+  });
+  const [fechamentoGerencialObs, setFechamentoGerencialObs] = useState('');
+  const [loadingFecharCaixaGerencial, setLoadingFecharCaixaGerencial] = useState(false);
 
   // --- CONFIGURAÇÕES FISCAIS E NCM ---
   const [ncmProduto, setNcmProduto] = useState('');
@@ -3168,7 +3180,6 @@ export default function Dashboard({ session, profileDataProps }) {
       let { data, error } = await query;
       console.error('DADOS CRUS DO BANCO:', data, error);
 
-      console.log('Categoria Ativa:', categoryParam);
       console.log('Produtos Carregados:', data);
       console.log('Empresa ID enviado:', empresaId);
 
@@ -5233,6 +5244,175 @@ export default function Dashboard({ session, profileDataProps }) {
       showToast('Erro ao salvar as alterações do fechamento.', 'error');
     } finally {
       setLoadingAjusteCaixa(false);
+    }
+  };
+
+  // Cálculos de Vendas da Sessão de Caixa Selecionada no Modal
+  const vendasSessaoDetalhe = useMemo(() => {
+    if (!modalDetalheCaixa) return [];
+    return (vendas || []).filter(v => {
+      if (modalDetalheCaixa.id && v.caixa_id && String(v.caixa_id) === String(modalDetalheCaixa.id)) {
+        return true;
+      }
+      if (modalDetalheCaixa.filial_id && String(v.filial_id) === String(modalDetalheCaixa.filial_id)) {
+        const dVenda = new Date(v.created_at || v.data_venda);
+        const dAbertura = new Date(modalDetalheCaixa.data_abertura);
+        if (!isNaN(dVenda.getTime()) && !isNaN(dAbertura.getTime()) && dVenda >= dAbertura) {
+          if (modalDetalheCaixa.data_fechamento) {
+            const dFechamento = new Date(modalDetalheCaixa.data_fechamento);
+            return !isNaN(dFechamento.getTime()) && dVenda <= dFechamento;
+          }
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [modalDetalheCaixa, vendas]);
+
+  const totaisVendasSessaoDetalhe = useMemo(() => {
+    let especie = 0;
+    let cartao = 0;
+    let pix = 0;
+    let boleto = 0;
+    let troca = 0;
+
+    vendasSessaoDetalhe.forEach(sale => {
+      const val = parseFloat(sale.valor_total || 0);
+      const mp = (sale.metodo_pagamento || sale.forma_pagamento || '').toLowerCase();
+      const descTroca = parseFloat(sale.valor_desconto_troca || sale.used_valor_avaliacao || 0);
+
+      if (mp === 'especie' || mp === 'dinheiro' || mp === 'dinero') {
+        especie += val;
+      } else if (mp.includes('cartao') || mp.includes('credito') || mp.includes('debito')) {
+        cartao += val;
+      } else if (mp === 'pix') {
+        pix += val;
+      } else if (mp === 'boleto') {
+        boleto += val;
+      } else if (mp === 'troca') {
+        troca += val;
+      } else {
+        cartao += val;
+      }
+
+      if (descTroca > 0 && mp !== 'troca') {
+        troca += descTroca;
+      }
+    });
+
+    return {
+      dinheiro: Number(especie.toFixed(2)),
+      cartao: Number(cartao.toFixed(2)),
+      pix: Number(pix.toFixed(2)),
+      boleto: Number(boleto.toFixed(2)),
+      troca: Number(troca.toFixed(2)),
+      outros: Number((boleto + troca).toFixed(2)),
+      total: Number((especie + cartao + pix + boleto + troca).toFixed(2))
+    };
+  }, [vendasSessaoDetalhe]);
+
+  const handleIniciarFechamentoGerencial = () => {
+    setFechamentoGerencialValores({
+      dinheiro: String(totaisVendasSessaoDetalhe.dinheiro),
+      cartao: String(totaisVendasSessaoDetalhe.cartao),
+      pix: String(totaisVendasSessaoDetalhe.pix),
+      outros: String(totaisVendasSessaoDetalhe.outros)
+    });
+    setFechamentoGerencialObs('Fechamento manual realizado pela gerência');
+    setIsConfirmingFecharCaixaGerencial(true);
+  };
+
+  const handleFecharCaixaGerencial = async () => {
+    if (!modalDetalheCaixa) return;
+    setLoadingFecharCaixaGerencial(true);
+
+    try {
+      const dataFechamentoISO = new Date().toISOString();
+      const valDinheiro = parseFloat(fechamentoGerencialValores.dinheiro !== '' ? fechamentoGerencialValores.dinheiro : totaisVendasSessaoDetalhe.dinheiro) || 0;
+      const valCartao = parseFloat(fechamentoGerencialValores.cartao !== '' ? fechamentoGerencialValores.cartao : totaisVendasSessaoDetalhe.cartao) || 0;
+      const valPix = parseFloat(fechamentoGerencialValores.pix !== '' ? fechamentoGerencialValores.pix : totaisVendasSessaoDetalhe.pix) || 0;
+      const valOutros = parseFloat(fechamentoGerencialValores.outros !== '' ? fechamentoGerencialValores.outros : totaisVendasSessaoDetalhe.outros) || 0;
+      const totalGeral = valDinheiro + valCartao + valPix + valOutros;
+      const obsFinal = (fechamentoGerencialObs || 'Fechamento manual realizado pela gerência').trim();
+
+      const targetEmpresaId = modalDetalheCaixa.empresa_id || profile?.empresa_id || company?.id || activeEmpresaId;
+      const targetOperadorId = modalDetalheCaixa.operador_id || session?.user?.id;
+
+      // 1. Inserir registro na tabela fechamentos
+      try {
+        await supabase
+          .from('fechamentos')
+          .insert({
+            empresa_id: targetEmpresaId,
+            filial_id: modalDetalheCaixa.filial_id,
+            vendedor_id: targetOperadorId,
+            caixa_id: modalDetalheCaixa.id || null,
+            valor_dinheiro: valDinheiro,
+            valor_cartao: valCartao,
+            valor_pix: valPix,
+            valor_boleto: valOutros,
+            valor_troca: 0,
+            qtd_transferencias_saida: 0,
+            qtd_transferencias_entrada: 0,
+            comprovante_url: null,
+            observacoes: obsFinal
+          });
+      } catch (insertFechErr) {
+        console.warn('[Dashboard] Aviso ao registrar em fechamentos:', insertFechErr);
+      }
+
+      // 2. Atualizar tabela caixas
+      const { error: caixaErr } = await supabase
+        .from('caixas')
+        .update({
+          status: 'fechado',
+          data_fechamento: dataFechamentoISO,
+          saldo_final_dinheiro: valDinheiro,
+          saldo_final_cartao: valCartao,
+          saldo_final_pix: valPix,
+          saldo_final_boleto: valOutros,
+          total_vendas: totalGeral,
+          total_dinheiro: valDinheiro,
+          total_cartao: valCartao,
+          total_pix: valPix,
+          observacoes_fechamento: obsFinal
+        })
+        .eq('id', modalDetalheCaixa.id);
+
+      if (caixaErr) throw caixaErr;
+
+      // 3. Se for o caixa da filial ativa localmente no state, resetar estado do caixa
+      if (caixaAtual?.id === modalDetalheCaixa.id || String(activeFilialId) === String(modalDetalheCaixa.filial_id)) {
+        setIsCaixaAberto(false);
+        setCaixaAtual(null);
+      }
+
+      showToast('Caixa encerrado com sucesso pela gerência!', 'success');
+      setIsConfirmingFecharCaixaGerencial(false);
+      setModalDetalheCaixa(null);
+
+      // 4. Recarregar dados
+      fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+      fetchStatusCaixa(modalDetalheCaixa.filial_id);
+
+      try {
+        const { data: newFechamentos } = await supabase
+          .from('fechamentos')
+          .select('*, profiles!vendedor_id(*), filiais(*)')
+          .eq('empresa_id', targetEmpresaId)
+          .order('created_at', { ascending: false });
+
+        if (newFechamentos) {
+          setFechamentos(newFechamentos);
+        }
+      } catch (e) {
+        console.warn('Erro ao atualizar lista de fechamentos:', e);
+      }
+    } catch (err) {
+      console.error('Erro ao fechar caixa gerencialmente:', err);
+      showToast(`Erro ao fechar caixa: ${err.message || 'Falha na comunicação'}`, 'error');
+    } finally {
+      setLoadingFecharCaixaGerencial(false);
     }
   };
 
@@ -20369,7 +20549,7 @@ export default function Dashboard({ session, profileDataProps }) {
         {/* MODAL DE DETALHES DA SESSÃO DE CAIXA */}
         {modalDetalheCaixa && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
-            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-lg w-full p-6 space-y-5 flex flex-col relative shadow-2xl font-sans">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-lg w-full p-6 space-y-5 flex flex-col relative shadow-2xl font-sans max-h-[90vh] overflow-y-auto">
               {/* Header */}
               <div className="flex items-center justify-between pb-3 border-b border-border">
                 <div className="flex items-center gap-3">
@@ -20396,7 +20576,10 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 </div>
                 <button
-                  onClick={() => setModalDetalheCaixa(null)}
+                  onClick={() => {
+                    setModalDetalheCaixa(null);
+                    setIsConfirmingFecharCaixaGerencial(false);
+                  }}
                   className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground bg-surface hover:bg-surface-elevated transition-colors cursor-pointer"
                 >
                   <X size={16} />
@@ -20446,9 +20629,41 @@ export default function Dashboard({ session, profileDataProps }) {
                   {modalDetalheCaixa.status === 'aberto' ? 'Status Atual do Turno' : 'Fechamento & Valores Reportados'}
                 </span>
                 {modalDetalheCaixa.status === 'aberto' ? (
-                  <div className="text-xs text-amber-300/90 flex items-center gap-2 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg">
-                    <Clock size={16} className="animate-spin text-amber-400 shrink-0" />
-                    <span>Este caixa continua aberto em operação no PDV. Os totais serão consolidados no encerramento.</span>
+                  <div className="space-y-3 text-xs">
+                    <div className="text-xs text-amber-300/90 flex items-center gap-2 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg">
+                      <Clock size={16} className="animate-spin text-amber-400 shrink-0" />
+                      <span>Este caixa continua aberto em operação no PDV.</span>
+                    </div>
+
+                    {/* Resumo ao vivo das vendas do turno */}
+                    <div className="bg-black/50 border border-[#222] p-3 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between border-b border-[#222] pb-2">
+                        <span className="text-[11px] font-bold text-gray-400">Total Vendas Acumuladas:</span>
+                        <span className="text-sm font-mono font-black text-white">
+                          R$ {totaisVendasSessaoDetalhe.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
+                        <div className="bg-[#161616] border border-[#262626] p-2 rounded">
+                          <span className="text-[10px] text-gray-500 block">Dinheiro</span>
+                          <span className="text-xs text-gray-200 font-bold">R$ {totaisVendasSessaoDetalhe.dinheiro.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-[#161616] border border-[#262626] p-2 rounded">
+                          <span className="text-[10px] text-gray-500 block">PIX</span>
+                          <span className="text-xs text-purple-300 font-bold">R$ {totaisVendasSessaoDetalhe.pix.toFixed(2)}</span>
+                        </div>
+                        <div className="bg-[#161616] border border-[#262626] p-2 rounded">
+                          <span className="text-[10px] text-gray-500 block">Cartão</span>
+                          <span className="text-xs text-blue-300 font-bold">R$ {totaisVendasSessaoDetalhe.cartao.toFixed(2)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 text-[11px] text-gray-400">
+                        <span>Dinheiro Esperado na Gaveta:</span>
+                        <strong className="text-emerald-400 font-mono">
+                          R$ {(Number(modalDetalheCaixa.saldo_inicial || 0) + totaisVendasSessaoDetalhe.dinheiro).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </strong>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-2.5 text-xs">
@@ -20489,6 +20704,106 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 )}
               </div>
+
+              {/* Seção de Formulário de Encerramento Gerencial */}
+              {modalDetalheCaixa.status === 'aberto' && isConfirmingFecharCaixaGerencial && (
+                <div className="bg-rose-950/20 border border-rose-800/40 rounded-xl p-4 space-y-3 animate-fadeIn">
+                  <div className="flex items-center gap-2 text-rose-400 font-extrabold text-xs">
+                    <AlertTriangle size={16} className="text-rose-400 shrink-0" />
+                    <span>Encerramento Gerencial / Forçado do Caixa</span>
+                  </div>
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    Utilize esta opção caso o vendedor esteja com dificuldades ou impossibilitado de fechar o caixa no PDV. Os totais abaixo foram pré-preenchidos com as vendas registradas e podem ser ajustados se necessário:
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 block mb-1">Dinheiro em Caixa (R$)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={fechamentoGerencialValores.dinheiro}
+                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, dinheiro: e.target.value }))}
+                        placeholder="0.00"
+                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 block mb-1">Cartão (R$)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={fechamentoGerencialValores.cartao}
+                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, cartao: e.target.value }))}
+                        placeholder="0.00"
+                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 block mb-1">PIX (R$)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={fechamentoGerencialValores.pix}
+                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, pix: e.target.value }))}
+                        placeholder="0.00"
+                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-400 block mb-1">Outros / Boleto (R$)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={fechamentoGerencialValores.outros}
+                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, outros: e.target.value }))}
+                        placeholder="0.00"
+                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-gray-400 block mb-1">Motivo / Observação do Fechamento</label>
+                    <textarea
+                      rows={2}
+                      value={fechamentoGerencialObs}
+                      onChange={(e) => setFechamentoGerencialObs(e.target.value)}
+                      placeholder="Descreva o motivo do fechamento pela gerência..."
+                      className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:border-rose-500 focus:outline-none resize-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingFecharCaixaGerencial(false)}
+                      disabled={loadingFecharCaixaGerencial}
+                      className="flex-1 py-2 bg-[#222] hover:bg-[#333] text-gray-300 font-bold rounded-lg text-xs transition-all cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleFecharCaixaGerencial}
+                      disabled={loadingFecharCaixaGerencial}
+                      className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-rose-900/30 cursor-pointer disabled:opacity-50"
+                    >
+                      {loadingFecharCaixaGerencial ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          Encerrando Caixa...
+                        </>
+                      ) : (
+                        <>
+                          <Lock size={14} />
+                          Confirmar Fechamento
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Seção de Comprovantes Anexados */}
               {(() => {
@@ -20665,14 +20980,33 @@ export default function Dashboard({ session, profileDataProps }) {
                 );
               })()}
 
-              {/* Botão Fechar */}
-              <button
-                type="button"
-                onClick={() => setModalDetalheCaixa(null)}
-                className="w-full py-2.5 bg-[#222] hover:bg-[#333] text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
-              >
-                Fechar Detalhes
-              </button>
+              {/* Botões do Rodapé */}
+              {!isConfirmingFecharCaixaGerencial ? (
+                <div className="flex items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalDetalheCaixa(null);
+                      setIsConfirmingFecharCaixaGerencial(false);
+                    }}
+                    className="flex-1 py-2.5 bg-[#222] hover:bg-[#333] text-white font-bold rounded-xl text-xs transition-all cursor-pointer"
+                  >
+                    Fechar Detalhes
+                  </button>
+
+                  {modalDetalheCaixa.status === 'aberto' && (
+                    <button
+                      type="button"
+                      onClick={handleIniciarFechamentoGerencial}
+                      className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40 border border-rose-500/30"
+                      title="Encerrar este caixa manualmente caso o vendedor esteja com dificuldades"
+                    >
+                      <Lock size={14} />
+                      Fechar Caixa (Gerência)
+                    </button>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         )}
