@@ -51,31 +51,53 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
     e.preventDefault();
     if (!corSelecionada || isSaving) return;
 
+    // 1. Identificar se existe um UUID ou número de IMEI válido
+    const targetUuid = (imeiObj.id || imeiObj.imei_id || imeiObj.id_imei) ? String(imeiObj.id || imeiObj.imei_id || imeiObj.id_imei).trim() : null;
+    const numeroImeiLimpo = (imeiObj.imei || imeiObj.numero_imei || imeiObj.serial) ? String(imeiObj.imei || imeiObj.numero_imei || imeiObj.serial).trim() : null;
+
+    // 3. Cláusula de guarda antes de chamar o Supabase
+    const isValidoUuid = targetUuid && targetUuid !== 'undefined' && targetUuid !== 'null' && targetUuid.length > 10;
+    const isValidoImei = numeroImeiLimpo && numeroImeiLimpo !== 'undefined' && numeroImeiLimpo !== 'null';
+
+    if (!isValidoUuid && !isValidoImei) {
+      console.error("[ModalEditarImei] Nenhum identificador válido (UUID ou IMEI) encontrado no objeto recebido:", imeiObj);
+      alert("Não foi possível identificar o aparelho selecionado (ID e IMEI ausentes).");
+      return;
+    }
+
     setIsSaving(true);
     try {
       const corTrimmed = String(corSelecionada).trim();
 
-      // 1. Executar o UPDATE na tabela 'imeis' usando o ID correto
-      const { error } = await supabase
-        .from('imeis')
-        .update({ cor: corTrimmed })
-        .eq('id', imeiObj.id);
+      // 2. Executar o UPDATE na tabela 'imeis':
+      // Se houver UUID válido, busca por id. Caso contrário, busca pela coluna 'imei'
+      let query = supabase.from('imeis').update({ cor: corTrimmed });
+      if (isValidoUuid) {
+        query = query.eq('id', targetUuid);
+      } else {
+        query = query.eq('imei', numeroImeiLimpo);
+      }
 
-      // 2. Verificar o 'error' da requisição imediatamente. Se houver erro, alertar e NÃO fechar o modal
+      const { error } = await query;
+
+      // Se houver erro, alertar e NÃO fechar o modal
       if (error) {
-        console.error("Erro ao atualizar cor do IMEI no Supabase:", error);
+        console.error("[ModalEditarImei] Erro ao atualizar cor do IMEI no Supabase:", error, { targetUuid, numeroImeiLimpo, imeiObj });
         alert(`Erro ao salvar cor do aparelho: ${error.message || 'Falha na comunicação com o banco de dados.'}`);
         return;
       }
 
-      // 3. Se a atualização for um sucesso, fechar o modal e disparar callbacks para atualizar a tela instantaneamente
+      // Se a atualização for um sucesso, fechar o modal e disparar callbacks para atualizar a tela instantaneamente
       onClose();
 
+      const idParaCallback = isValidoUuid ? targetUuid : (numeroImeiLimpo || imeiObj.id);
+      const prodId = imeiObj.produto_id || imeiObj.produto_catalogo_id;
+
       if (typeof onSave === 'function') {
-        await onSave(imeiObj.id, corTrimmed, imeiObj.produto_id || imeiObj.produto_catalogo_id);
+        await onSave(idParaCallback, corTrimmed, prodId, numeroImeiLimpo);
       }
       if (typeof onSuccess === 'function') {
-        onSuccess(imeiObj.id, corTrimmed);
+        onSuccess(idParaCallback, corTrimmed, prodId, numeroImeiLimpo);
       }
       if (typeof recarregarLista === 'function') {
         recarregarLista();
@@ -84,7 +106,7 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
         fetchProdutos();
       }
     } catch (err) {
-      console.error("Erro ao salvar cor do IMEI:", err);
+      console.error("[ModalEditarImei] Falha inesperada ao atualizar cor:", err);
       alert(`Falha inesperada ao atualizar cor: ${err.message || 'Erro interno.'}`);
     } finally {
       setIsSaving(false);

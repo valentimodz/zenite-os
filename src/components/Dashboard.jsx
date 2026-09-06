@@ -917,45 +917,62 @@ export default function Dashboard({ session, profileDataProps }) {
     setIsEditImeiModalOpen(true);
   };
 
-  const handleSaveImeiCor = async (imeiId, novaCor, produtoId) => {
-    if (!imeiId || !novaCor) return;
+  const handleSaveImeiCor = async (imeiIdOrNumber, novaCor, produtoId, numeroImeiFallback = null) => {
+    if (!imeiIdOrNumber || !novaCor) return;
 
     const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
     const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
 
     const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
     const corTrimmed = String(novaCor).trim();
+    const targetStr = String(imeiIdOrNumber).trim();
+    const imeiStr = numeroImeiFallback ? String(numeroImeiFallback).trim() : null;
 
-    const { error } = await dbClient
-      .from('imeis')
-      .update({ cor: corTrimmed })
-      .eq('id', imeiId);
+    const isUuid = targetStr !== 'undefined' && targetStr !== 'null' && targetStr.length > 10 && targetStr.includes('-');
 
-    if (error) {
-      console.error("Erro ao atualizar cor do IMEI no Supabase:", error);
-      showToast("Erro ao atualizar cor do IMEI: " + error.message, "error");
-      throw error;
+    // 1. Atualizar banco apenas se for chamado diretamente (fora do Modal que já fez o update ou como garantia)
+    try {
+      let query = dbClient.from('imeis').update({ cor: corTrimmed });
+      if (isUuid) {
+        query = query.eq('id', targetStr);
+      } else {
+        query = query.eq('imei', targetStr);
+      }
+      const { error } = await query;
+      if (error) {
+        console.warn("[Dashboard] Aviso no update de cor do IMEI:", error);
+      }
+    } catch (err) {
+      console.warn("[Dashboard] Exceção no update de cor do IMEI:", err);
     }
 
-    // Atualização reativa imediata dos estados locais para re-render sem refresh
+    // 2. Atualização reativa imediata dos estados locais (compatível com id ou número de IMEI)
+    const matchImei = (im) => {
+      if (!im) return false;
+      if (isUuid && String(im.id) === targetStr) return true;
+      if (String(im.imei) === targetStr) return true;
+      if (imeiStr && String(im.imei) === imeiStr) return true;
+      return false;
+    };
+
     if (produtoId) {
       setProductImeisMap(prev => {
         const currentList = prev[produtoId] || [];
-        const updatedList = currentList.map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im);
+        const updatedList = currentList.map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im);
         return { ...prev, [produtoId]: updatedList };
       });
     } else {
       setProductImeisMap(prev => {
         const newMap = { ...prev };
         Object.keys(newMap).forEach(key => {
-          newMap[key] = (newMap[key] || []).map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im);
+          newMap[key] = (newMap[key] || []).map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im);
         });
         return newMap;
       });
     }
 
-    setDisponiveisImeis(prev => (prev || []).map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im));
-    setUltimosRecebidos(prev => (prev || []).map(im => String(im.id) === String(imeiId) ? { ...im, cor: corTrimmed } : im));
+    setDisponiveisImeis(prev => (prev || []).map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im));
+    setUltimosRecebidos(prev => (prev || []).map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im));
 
     showToast(`Cor do IMEI alterada para "${corTrimmed}" com sucesso!`, "success");
   };
