@@ -10634,34 +10634,59 @@ export default function Dashboard({ session, profileDataProps }) {
             return;
           }
 
-          // Localizar produto correspondente na filial de destino (por código de barras se existir, ou por nome insensível a maiúsculas/minúsculas)
+          // Localizar produto correspondente na filial de destino (por SKU, código de barras ou nome)
           let destProd = null;
+          const barcode = (origProd.codigo_barras || item.codigo_barras || '').trim();
+          const skuCode = (origProd.sku || '').trim();
+          const nomeBusca = (origProd.nome || item.nome || '').trim();
 
-          if (origProd.codigo_barras || item.codigo_barras) {
-            const barcode = (origProd.codigo_barras || item.codigo_barras).trim();
-            const { data: prodByBarcode } = await supabase
+          // 1. Tentar por código de barras na filial de destino
+          if (barcode) {
+            const { data: prodByBarcode, error: errBarcode } = await supabase
               .from('produtos')
-              .select('id, quantidade')
+              .select('id, quantidade, nome')
               .eq('empresa_id', profile.empresa_id)
               .eq('filial_id', transfDestinoId)
               .eq('codigo_barras', barcode)
-              .maybeSingle();
-            if (prodByBarcode) destProd = prodByBarcode;
+              .limit(1);
+
+            if (errBarcode) {
+              console.warn('[Transferência] Aviso ao buscar por código de barras no destino:', errBarcode);
+            } else if (prodByBarcode && prodByBarcode.length > 0) {
+              destProd = prodByBarcode[0];
+            }
           }
 
-          if (!destProd) {
-            const nomeBusca = (origProd.nome || item.nome).trim();
+          // 2. Tentar por SKU na filial de destino se ainda não achou
+          if (!destProd && skuCode) {
+            const { data: prodBySku, error: errSku } = await supabase
+              .from('produtos')
+              .select('id, quantidade, nome')
+              .eq('empresa_id', profile.empresa_id)
+              .eq('filial_id', transfDestinoId)
+              .eq('sku', skuCode)
+              .limit(1);
+
+            if (errSku) {
+              console.warn('[Transferência] Aviso ao buscar por SKU no destino:', errSku);
+            } else if (prodBySku && prodBySku.length > 0) {
+              destProd = prodBySku[0];
+            }
+          }
+
+          // 3. Tentar por nome exato / ilike na filial de destino
+          if (!destProd && nomeBusca) {
             const { data: prodsByName, error: destProdErr } = await supabase
               .from('produtos')
-              .select('id, quantidade')
+              .select('id, quantidade, nome')
               .eq('empresa_id', profile.empresa_id)
               .eq('filial_id', transfDestinoId)
               .ilike('nome', nomeBusca)
               .limit(1);
 
             if (destProdErr) {
-              console.error('Erro ao buscar produto na filial de destino:', destProdErr);
-              alert(`Erro ao buscar produto "${item.nome}" na filial de destino: ${destProdErr.message}`);
+              console.error('[Transferência] Erro ao buscar produto por nome na filial de destino:', destProdErr);
+              alert(`Erro ao consultar produto "${item.nome}" na filial de destino: ${destProdErr.message}`);
               return;
             }
 
@@ -10673,40 +10698,76 @@ export default function Dashboard({ session, profileDataProps }) {
           if (destProd) {
             // Se o produto já existe na filial de destino, incrementa a quantidade
             const novaQtdDestino = (destProd.quantidade || 0) + qtdTransferir;
+            console.log(`[Transferência] Incrementando produto existente (${destProd.id}) no destino para ${novaQtdDestino}`);
+
             const { error: destUpdateErr } = await supabase
               .from('produtos')
               .update({ quantidade: novaQtdDestino })
               .eq('id', destProd.id);
 
             if (destUpdateErr) {
-              console.error('Falha ao creditar produto na filial de destino:', destUpdateErr);
-              alert(`Falha ao creditar produto "${item.nome}" no destino: ${destUpdateErr.message}`);
+              console.error('[Transferência] Falha crítica ao creditar produto na filial de destino:', destUpdateErr);
+              alert(`Falha ao creditar produto "${item.nome}" na filial de destino: ${destUpdateErr.message || JSON.stringify(destUpdateErr)}`);
               return;
             }
           } else {
             // Se o produto NÃO existe ainda na filial de destino, cria um novo registro de produto para essa filial
-            const novoProdutoDestino = {
+            const payloadInsert = {
               empresa_id: profile.empresa_id,
               filial_id: transfDestinoId,
               nome: origProd.nome || item.nome,
               tipo: origProd.tipo || item.tipo || 'ACESSORIO',
               categoria: origProd.categoria || item.categoria || 'ACESSORIOS',
-              preco: origProd.preco || 0,
-              preco_custo: origProd.preco_custo || 0,
-              quantidade: qtdTransferir,
-              cor: origProd.cor || null,
-              sku: origProd.sku || null,
-              codigo_barras: origProd.codigo_barras || item.codigo_barras || null
+              preco: parseFloat(origProd.preco || 0),
+              quantidade: qtdTransferir
             };
 
-            const { error: destInsertErr } = await supabase
+            // Adicionar campos secundários apenas se existirem valores válidos
+            if (origProd.preco_custo !== undefined && origProd.preco_custo !== null) {
+              payloadInsert.preco_custo = parseFloat(origProd.preco_custo || 0);
+            }
+            if (origProd.cor) payloadInsert.cor = origProd.cor;
+            if (origProd.sku) payloadInsert.sku = origProd.sku;
+            if (origProd.codigo_barras || item.codigo_barras) {
+              payloadInsert.codigo_barras = origProd.codigo_barras || item.codigo_barras;
+            }
+
+            console.log('[Transferência] Inserindo novo produto na filial de destino:', payloadInsert);
+
+            const { data: insertedProd, error: destInsertErr } = await supabase
               .from('produtos')
-              .insert([novoProdutoDestino]);
+              .insert([payloadInsert])
+              .select()
+              .maybeSingle();
 
             if (destInsertErr) {
-              console.error('Falha ao cadastrar produto na filial de destino:', destInsertErr);
-              alert(`Falha ao registrar produto "${item.nome}" no estoque da filial de destino: ${destInsertErr.message}`);
-              return;
+              console.error('[Transferência] Falha crítica ao criar produto na filial de destino:', destInsertErr);
+
+              // Tentativa de fallback sem colunas que possam não existir na tabela
+              if (destInsertErr.code === '42703' || destInsertErr.message?.includes('does not exist')) {
+                console.warn('[Transferência] Retentando insert com payload simplificado sem colunas extras...');
+                const simplifiedPayload = {
+                  empresa_id: profile.empresa_id,
+                  filial_id: transfDestinoId,
+                  nome: origProd.nome || item.nome,
+                  tipo: origProd.tipo || item.tipo || 'ACESSORIO',
+                  categoria: origProd.categoria || item.categoria || 'ACESSORIOS',
+                  preco: parseFloat(origProd.preco || 0),
+                  quantidade: qtdTransferir
+                };
+                const { error: retryErr } = await supabase
+                  .from('produtos')
+                  .insert([simplifiedPayload]);
+
+                if (retryErr) {
+                  console.error('[Transferência] Falha também no insert simplificado:', retryErr);
+                  alert(`Falha ao registrar produto "${item.nome}" no estoque da filial de destino: ${retryErr.message}`);
+                  return;
+                }
+              } else {
+                alert(`Falha ao registrar produto "${item.nome}" no estoque da filial de destino: ${destInsertErr.message || JSON.stringify(destInsertErr)}`);
+                return;
+              }
             }
           }
         }
@@ -10784,6 +10845,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
       if (profile?.empresa_id) {
         fetchGerenteData(profile.empresa_id);
+        fetchCatalogoProdutos(profile.empresa_id);
       }
       const filialParaRecarregar = filtroFilialEstoque || finalOrigemId || activeFilialId;
       if (filialParaRecarregar) {
@@ -10791,6 +10853,9 @@ export default function Dashboard({ session, profileDataProps }) {
       }
       if (activeFilialId) {
         fetchProdutosPDV(activeFilialId);
+        if (session?.user?.id) {
+          fetchVendedorData(activeFilialId, session.user.id);
+        }
       }
     } catch (error) {
       console.error('Erro ao processar transferência de estoque:', error);
