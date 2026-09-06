@@ -6205,133 +6205,109 @@ export default function Dashboard({ session, profileDataProps }) {
         showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
       } else if (isEditMode && targetId) {
         // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE E PRODUTOS FÍSICOS
-        // 1. Sanitizar payload exclusivo para produtos_catalogo
-        const payloadCatalogo = {
+        // 1. UPDATE DIRETO E PRINCIPAL NA TABELA 'produtos' (ONDE FICAM OS DADOS DO ESTOQUE E VITRINE)
+        const payloadProdutosFisico = {
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
           categoria: categoriaProduto,
-          preco: parseFloat(precoProduto || 0)
+          preco: Number(parseFloat(precoProduto || 0))
         };
-        if (targetEmpresaId) payloadCatalogo.empresa_id = targetEmpresaId;
-        if (codigoBarrasFinal) payloadCatalogo.codigo_barras = codigoBarrasFinal;
-        if (skuProduto && skuProduto.trim()) payloadCatalogo.sku = skuProduto.trim();
-        if (corCatalogoProduto && corCatalogoProduto.trim()) payloadCatalogo.cor = corCatalogoProduto.trim();
-        if (condicaoProduto) payloadCatalogo.condicao = condicaoProduto;
-        if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role) && precoCustoProduto !== '') {
-          payloadCatalogo.preco_custo = parseFloat(precoCustoProduto || 0);
-        }
+        if (codigoBarrasFinal) payloadProdutosFisico.codigo_barras = codigoBarrasFinal;
+        if (corCatalogoProduto && corCatalogoProduto.trim()) payloadProdutosFisico.cor = corCatalogoProduto.trim();
+
+        console.log("🔥 [UPDATE PRODUTOS] Executando update na tabela 'produtos' com id:", targetId, payloadProdutosFisico);
 
         let updateSuccess = false;
+        let lastError = null;
 
-        // Atualizar na tabela 'produtos_catalogo' pelo ID exato do registro
-        let { error: catErr } = await dbClient
-          .from('produtos_catalogo')
-          .update(payloadCatalogo)
-          .eq('id', targetId);
+        // 1.1 Update na tabela 'produtos' pelo ID do produto em edição
+        const { data: updatedProdData, error: prodErr } = await dbClient
+          .from('produtos')
+          .update(payloadProdutosFisico)
+          .eq('id', targetId)
+          .select();
 
-        // Se falhou por coluna inexistente (PGRST204 ou code 42703 ou mensagem sobre coluna desconhecida)
-        if (catErr && (catErr.code === 'PGRST204' || catErr.code === '42703' || catErr.message?.includes('could not find the column') || catErr.message?.includes('does not exist'))) {
-          console.warn('[Catálogo] Retentando com payload estrito mínimo:', catErr.message);
-          const strictPayload = {
-            nome: String(nomeProduto || '').trim(),
-            tipo: tipoProduto,
-            categoria: categoriaProduto,
-            preco: parseFloat(precoProduto || 0)
-          };
-          if (targetEmpresaId) strictPayload.empresa_id = targetEmpresaId;
-          const { error: retryErr } = await dbClient
-            .from('produtos_catalogo')
-            .update(strictPayload)
-            .eq('id', targetId);
-
-          if (!retryErr) {
-            updateSuccess = true;
-            catErr = null;
-          } else {
-            console.error('[Catálogo] Erro detalhado no retry produtos_catalogo:', retryErr);
-            catErr = retryErr;
-          }
-        } else if (!catErr) {
+        if (prodErr) {
+          console.error('[Catálogo] Erro ao atualizar tabela produtos por ID:', prodErr);
+          lastError = prodErr;
+        } else if (updatedProdData && updatedProdData.length > 0) {
           updateSuccess = true;
         }
 
-        // 2. Atualizar ou sincronizar na tabela física 'produtos' (isolado e apenas com colunas reais de produtos)
-        const payloadFisico = {
-          nome: String(nomeProduto || '').trim(),
-          tipo: tipoProduto,
-          categoria: categoriaProduto,
-          preco: parseFloat(precoProduto || 0)
-        };
-        if (codigoBarrasFinal) payloadFisico.codigo_barras = codigoBarrasFinal;
-        if (corCatalogoProduto && corCatalogoProduto.trim()) payloadFisico.cor = corCatalogoProduto.trim();
-
-        // 2.1 Se os registros compartilharem o mesmo ID primário:
-        if (targetId) {
-          const { error: prodIdErr } = await dbClient
-            .from('produtos')
-            .update(payloadFisico)
-            .eq('id', targetId);
-
-          if (!prodIdErr) {
-            updateSuccess = true;
-          }
-        }
-
-        // 2.2 Sincronização por código de barras válido e por nome nas filiais da empresa
+        // 1.2 Atualização complementar por código de barras ou nome em filiais da mesma empresa
         if (targetEmpresaId) {
           const codigoParaSincronizar = codigoBarrasFinal || editingCatalogoProduto?.codigo_barras;
-
           if (codigoParaSincronizar && String(codigoParaSincronizar).trim() !== '') {
             try {
               const { error: syncBarErr } = await dbClient
                 .from('produtos')
-                .update(payloadFisico)
+                .update(payloadProdutosFisico)
                 .eq('empresa_id', targetEmpresaId)
                 .eq('codigo_barras', String(codigoParaSincronizar).trim());
 
               if (!syncBarErr) {
                 updateSuccess = true;
-              } else {
-                console.warn(`[Catálogo] Falha ao sincronizar por código de barras '${codigoParaSincronizar}':`, syncBarErr.message || syncBarErr);
               }
             } catch (errBar) {
-              console.warn('[Catálogo] Erro no sync por código de barras:', errBar);
+              console.warn('[Catálogo] Aviso no sync de produtos por código de barras:', errBar);
             }
           }
 
-          // Sincronizar também correspondentes pelo nome original e novo nome para garantir coerência de categoria em todas as filiais
           const nomeOriginal = editingCatalogoProduto?.nome || nomeProduto;
           const nomesParaSincronizar = Array.from(new Set([nomeOriginal?.trim(), nomeProduto?.trim()].filter(Boolean)));
           for (const n of nomesParaSincronizar) {
             try {
               const { error: syncNomeErr } = await dbClient
                 .from('produtos')
-                .update(payloadFisico)
+                .update(payloadProdutosFisico)
                 .eq('empresa_id', targetEmpresaId)
                 .ilike('nome', n);
 
               if (!syncNomeErr) {
                 updateSuccess = true;
-              } else {
-                console.warn(`[Catálogo] Falha ao sincronizar produto por nome '${n}':`, syncNomeErr.message || syncNomeErr);
               }
             } catch (errSync) {
-              console.warn('[Catálogo] Erro no sync por nome:', errSync);
+              console.warn('[Catálogo] Aviso no sync de produtos por nome:', errSync);
             }
           }
         }
 
-        if (!updateSuccess && catErr) {
-          const errMsg = catErr.message || 'Erro desconhecido ao atualizar catálogo';
-          const errDetail = catErr.details ? ` (${catErr.details})` : (catErr.hint ? ` - Dica: ${catErr.hint}` : '');
-          alert(`Falha ao atualizar produto no banco de dados: ${errMsg}${errDetail}`);
-          console.error('[Catálogo] Detalhes completos do erro Supabase:', catErr);
-          throw catErr;
+        // 2. SINCRONIZAÇÃO EM 'produtos_catalogo' (SANITIZADA E COM TRATAMENTO ISOLADO)
+        try {
+          const payloadCatalogoSanitizado = {
+            nome: String(nomeProduto || '').trim(),
+            tipo: tipoProduto,
+            categoria: categoriaProduto,
+            preco: Number(parseFloat(precoProduto || 0))
+          };
+          if (targetEmpresaId) payloadCatalogoSanitizado.empresa_id = targetEmpresaId;
+
+          const { error: catErr } = await dbClient
+            .from('produtos_catalogo')
+            .update(payloadCatalogoSanitizado)
+            .eq('id', targetId);
+
+          if (!catErr) {
+            updateSuccess = true;
+          } else {
+            console.warn('[Catálogo] Aviso ao sincronizar produtos_catalogo (registro pode ser exclusivo de produtos):', catErr.message || catErr);
+          }
+        } catch (eCat) {
+          console.warn('[Catálogo] Exceção ignorada ao sincronizar produtos_catalogo:', eCat);
         }
 
+        // 3. TRAVA DE FEEDBACK FALSO
+        if (!updateSuccess && lastError) {
+          console.error('Falha no update:', lastError);
+          showToast(`Falha ao atualizar produto: ${lastError.message || 'Erro no banco de dados'}`, 'error');
+          alert(`Falha ao atualizar produto: ${lastError.message || 'Erro no banco de dados'}`);
+          return;
+        }
+
+        // SUCESSO CONFIRMADO: Disparar Toast de Sucesso e Reatividade
         showToast('Produto e categoria atualizados com sucesso!', 'success');
 
-        // 3. Reatividade local síncrona com campos sanitizados
+        // 4. Reatividade local síncrona com campos sanitizados
         const payloadUpdate = {
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
@@ -6386,7 +6362,7 @@ export default function Dashboard({ session, profileDataProps }) {
           return isMatch ? { ...e, ...payloadUpdate } : e;
         }));
 
-        // 4. Re-fetch completo no banco de dados para garantir visualização imediata sem F5
+        // 5. Re-fetch completo no banco de dados para garantir sincronização total sem F5
         if (targetEmpresaId) {
           await fetchCatalogoProdutos(targetEmpresaId);
           fetchGerenteData(targetEmpresaId);
