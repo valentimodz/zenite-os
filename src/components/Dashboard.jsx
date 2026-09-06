@@ -6223,7 +6223,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         let updateSuccess = false;
 
-        // Atualizar na tabela 'produtos_catalogo'
+        // Atualizar na tabela 'produtos_catalogo' pelo ID exato do registro
         let { error: catErr } = await dbClient
           .from('produtos_catalogo')
           .update(payloadCatalogo)
@@ -6281,7 +6281,6 @@ export default function Dashboard({ session, profileDataProps }) {
         if (targetEmpresaId) {
           const codigoParaSincronizar = codigoBarrasFinal || editingCatalogoProduto?.codigo_barras;
 
-          // Se houver código de barras válido, sincronizar via codigo_barras
           if (codigoParaSincronizar && String(codigoParaSincronizar).trim() !== '') {
             try {
               const { error: syncBarErr } = await dbClient
@@ -6332,7 +6331,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         showToast('Produto e categoria atualizados com sucesso!', 'success');
 
-        // Reatividade local síncrona com campos sanitizados
+        // 3. Reatividade local síncrona com campos sanitizados
         const payloadUpdate = {
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
@@ -6345,29 +6344,51 @@ export default function Dashboard({ session, profileDataProps }) {
           ...(precoCustoProduto !== '' ? { preco_custo: parseFloat(precoCustoProduto || 0) } : {})
         };
 
+        const targetIdStr = String(targetId || '').trim();
+        const editingIdStr = String(editingCatalogoProduto?.id || '').trim();
+        const nomeAlvoLimpo = String(nomeProduto || '').toLowerCase().trim();
+        const nomeOrigLimpo = String(editingCatalogoProduto?.nome || '').toLowerCase().trim();
+
         setCatalogoProdutos(prev =>
-          prev.map(item =>
-            (String(item.id) === String(targetId) || String(item.nome || '').toLowerCase().trim() === String(nomeProduto).toLowerCase().trim())
+          prev.map(item => {
+            const itemIdStr = String(item.id || '').trim();
+            const itemNomeLimpo = String(item.nome || '').toLowerCase().trim();
+            const isMatch = (targetIdStr && itemIdStr === targetIdStr) ||
+              (editingIdStr && itemIdStr === editingIdStr) ||
+              (nomeAlvoLimpo && itemNomeLimpo === nomeAlvoLimpo) ||
+              (nomeOrigLimpo && itemNomeLimpo === nomeOrigLimpo);
+
+            return isMatch
               ? { ...item, ...payloadUpdate, id: item.id || targetId }
-              : item
-          )
+              : item;
+          })
         );
 
-        setProdutos(prev => prev.map(p =>
-          (String(p.id) === String(targetId) || String(p.catalogo_id) === String(targetId) || String(p.nome || '').toLowerCase().trim() === String(nomeProduto).toLowerCase().trim())
-            ? { ...p, ...payloadUpdate }
-            : p
-        ));
+        setProdutos(prev => prev.map(p => {
+          const pIdStr = String(p.id || '').trim();
+          const pNomeLimpo = String(p.nome || '').toLowerCase().trim();
+          const isMatch = (targetIdStr && pIdStr === targetIdStr) ||
+            (editingIdStr && pIdStr === editingIdStr) ||
+            (nomeAlvoLimpo && pNomeLimpo === nomeAlvoLimpo) ||
+            (nomeOrigLimpo && pNomeLimpo === nomeOrigLimpo);
 
-        setEstoqueConsolidadoLista(prev => prev.map(e =>
-          (String(e.id) === String(targetId) || String(e.catalogo_id) === String(targetId) || String(e.nome || '').toLowerCase().trim() === String(nomeProduto).toLowerCase().trim())
-            ? { ...e, ...payloadUpdate }
-            : e
-        ));
+          return isMatch ? { ...p, ...payloadUpdate } : p;
+        }));
 
-        // Re-fetch completo no banco de dados para garantir visualização imediata sem F5
+        setEstoqueConsolidadoLista(prev => prev.map(e => {
+          const eIdStr = String(e.id || '').trim();
+          const eNomeLimpo = String(e.nome || '').toLowerCase().trim();
+          const isMatch = (targetIdStr && eIdStr === targetIdStr) ||
+            (editingIdStr && eIdStr === editingIdStr) ||
+            (nomeAlvoLimpo && eNomeLimpo === nomeAlvoLimpo) ||
+            (nomeOrigLimpo && eNomeLimpo === nomeOrigLimpo);
+
+          return isMatch ? { ...e, ...payloadUpdate } : e;
+        }));
+
+        // 4. Re-fetch completo no banco de dados para garantir visualização imediata sem F5
         if (targetEmpresaId) {
-          fetchCatalogoProdutos(targetEmpresaId);
+          await fetchCatalogoProdutos(targetEmpresaId);
           fetchGerenteData(targetEmpresaId);
         }
         const filialParaRecarregar = filtroFilialEstoque || activeFilialId;
