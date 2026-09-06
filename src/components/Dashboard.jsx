@@ -10585,7 +10585,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setLoadingTransferencias(true);
     try {
-      // 1. Atualizar tabelas 'imeis' e 'produtos' no Supabase diretamente
+      // 1. Executar primeiro a atualização de estoque no Supabase (tabela 'imeis' ou 'produtos')
       for (const item of transfItens) {
         if (item.imei) {
           const { error: imeiErr } = await supabase
@@ -10594,23 +10594,40 @@ export default function Dashboard({ session, profileDataProps }) {
             .eq('imei', item.imei)
             .eq('filial_id', finalOrigemId);
 
-          if (imeiErr) console.warn('Aviso ao atualizar IMEI no Supabase:', imeiErr);
+          // Imediatamente após o await do update, verificar se existe um error. Se houver, abortar imediatamente!
+          if (imeiErr) {
+            console.error('Falha ao atualizar filial do IMEI no Supabase:', imeiErr);
+            alert(`Falha na transferência do IMEI ${item.imei}: ${imeiErr.message || 'Erro ao atualizar filial de destino.'}`);
+            return;
+          }
         } else if (item.produto_id) {
-          const { data: origProd } = await supabase
+          const { data: origProd, error: origProdErr } = await supabase
             .from('produtos')
             .select('quantidade')
             .eq('id', item.produto_id)
             .single();
 
+          if (origProdErr) {
+            console.error('Erro ao consultar saldo do produto na origem:', origProdErr);
+            alert(`Erro ao consultar estoque do produto "${item.nome}": ${origProdErr.message}`);
+            return;
+          }
+
           if (origProd) {
             const novaQtdOrigem = Math.max(0, (origProd.quantidade || 0) - item.quantidade);
-            await supabase
+            const { error: origUpdateErr } = await supabase
               .from('produtos')
               .update({ quantidade: novaQtdOrigem })
               .eq('id', item.produto_id);
+
+            if (origUpdateErr) {
+              console.error('Falha ao debitar produto da filial de origem:', origUpdateErr);
+              alert(`Falha ao debitar produto "${item.nome}" da origem: ${origUpdateErr.message}`);
+              return;
+            }
           }
 
-          const { data: destProd } = await supabase
+          const { data: destProd, error: destProdErr } = await supabase
             .from('produtos')
             .select('id, quantidade')
             .eq('empresa_id', profile.empresa_id)
@@ -10618,33 +10635,47 @@ export default function Dashboard({ session, profileDataProps }) {
             .eq('nome', item.nome)
             .maybeSingle();
 
+          if (destProdErr) {
+            console.error('Erro ao buscar produto na filial de destino:', destProdErr);
+            alert(`Erro ao buscar produto na filial de destino: ${destProdErr.message}`);
+            return;
+          }
+
           if (destProd) {
-            await supabase
+            const { error: destUpdateErr } = await supabase
               .from('produtos')
               .update({ quantidade: (destProd.quantidade || 0) + item.quantidade })
               .eq('id', destProd.id);
-          }
-        }
 
-        // 2. Inserir no histórico de transferências / audit log
-        try {
-          await supabase.from('historico_transferencias').insert([{
-            empresa_id: profile.empresa_id,
-            produto_id: item.produto_id,
-            imei: item.imei || null,
-            codigo_barras: item.codigo_barras || null,
-            filial_origem_id: finalOrigemId,
-            filial_destino_id: transfDestinoId,
-            quantidade: item.quantidade || 1,
-            usuario_id: session?.user?.id || profile?.id,
-            created_at: new Date().toISOString()
-          }]);
-        } catch (hErr) {
-          console.warn('Histórico em historico_transferencias ignorado:', hErr);
+            if (destUpdateErr) {
+              console.error('Falha ao creditar produto na filial de destino:', destUpdateErr);
+              alert(`Falha ao creditar produto "${item.nome}" no destino: ${destUpdateErr.message}`);
+              return;
+            }
+          }
         }
       }
 
-      // Tentar RPC de romaneio de envio para compatibilidade com relatórios existentes
+      // 2. Apenas e exclusivamente se as atualizações retornarem sucesso, registrar histórico na tabela de auditoria
+      for (const item of transfItens) {
+        const { error: histErr } = await supabase.from('historico_transferencias').insert([{
+          empresa_id: profile.empresa_id,
+          produto_id: item.produto_id,
+          imei: item.imei || null,
+          codigo_barras: item.codigo_barras || null,
+          filial_origem_id: finalOrigemId,
+          filial_destino_id: transfDestinoId,
+          quantidade: item.quantidade || 1,
+          usuario_id: session?.user?.id || profile?.id,
+          created_at: new Date().toISOString()
+        }]);
+
+        if (histErr) {
+          console.warn('Aviso: Registro em historico_transferencias não pôde ser gravado:', histErr);
+        }
+      }
+
+      // 3. Tentar RPC de romaneio de envio para compatibilidade e comprovante
       try {
         const { data } = await supabase.rpc('registrar_transferencia_saida', {
           p_empresa_id: profile.empresa_id,
@@ -10673,7 +10704,7 @@ export default function Dashboard({ session, profileDataProps }) {
         console.log('RPC registrar_transferencia_saida omitido ou já processado:', rpcErr);
       }
 
-      // Registrar entrada no histórico de auditoria exibido na tela
+      // 4. Registrar entrada no histórico visual de auditoria exibido na tela
       const auditLog = {
         id: Date.now(),
         created_at: new Date().toISOString(),
@@ -10694,7 +10725,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (activeFilialId) fetchTransferencias(activeFilialId, profile.empresa_id);
     } catch (error) {
-      console.error(error);
+      console.error('Erro ao processar transferência de estoque:', error);
       alert('Erro ao registrar transferência: ' + error.message);
     } finally {
       setLoadingTransferencias(false);
