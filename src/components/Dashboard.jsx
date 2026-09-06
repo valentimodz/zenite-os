@@ -6205,62 +6205,71 @@ export default function Dashboard({ session, profileDataProps }) {
         showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
       } else if (isEditMode && targetId) {
         // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE E PRODUTOS FÍSICOS
-        const payloadUpdate = {
-          ...payload,
+        // 1. Sanitizar payload exclusivo para produtos_catalogo
+        const payloadCatalogo = {
+          nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
-          categoria: categoriaProduto
+          categoria: categoriaProduto,
+          preco: parseFloat(precoProduto || 0)
         };
+        if (targetEmpresaId) payloadCatalogo.empresa_id = targetEmpresaId;
+        if (codigoBarrasFinal) payloadCatalogo.codigo_barras = codigoBarrasFinal;
+        if (skuProduto && skuProduto.trim()) payloadCatalogo.sku = skuProduto.trim();
+        if (corCatalogoProduto && corCatalogoProduto.trim()) payloadCatalogo.cor = corCatalogoProduto.trim();
+        if (condicaoProduto) payloadCatalogo.condicao = condicaoProduto;
+        if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role) && precoCustoProduto !== '') {
+          payloadCatalogo.preco_custo = parseFloat(precoCustoProduto || 0);
+        }
 
         let updateSuccess = false;
 
-        // 1. Atualizar na tabela 'produtos_catalogo'
+        // Atualizar na tabela 'produtos_catalogo'
         let { error: catErr } = await dbClient
           .from('produtos_catalogo')
-          .update(payloadUpdate)
+          .update(payloadCatalogo)
           .eq('id', targetId);
 
-        if (catErr && (catErr.code === 'PGRST204' || catErr.message?.includes('could not find the column') || catErr.message?.includes('does not exist'))) {
+        // Se falhou por coluna inexistente (PGRST204 ou code 42703 ou mensagem sobre coluna desconhecida)
+        if (catErr && (catErr.code === 'PGRST204' || catErr.code === '42703' || catErr.message?.includes('could not find the column') || catErr.message?.includes('does not exist'))) {
+          console.warn('[Catálogo] Retentando com payload estrito mínimo:', catErr.message);
           const strictPayload = {
-            empresa_id: targetEmpresaId,
-            nome: nomeProduto.trim(),
+            nome: String(nomeProduto || '').trim(),
             tipo: tipoProduto,
             categoria: categoriaProduto,
-            preco: parseFloat(precoProduto || 0),
-            codigo_barras: codigoBarrasFinal
+            preco: parseFloat(precoProduto || 0)
           };
+          if (targetEmpresaId) strictPayload.empresa_id = targetEmpresaId;
           const { error: retryErr } = await dbClient
             .from('produtos_catalogo')
             .update(strictPayload)
             .eq('id', targetId);
 
-          if (retryErr) {
-            console.error('[Catálogo] Erro no retry do produtos_catalogo:', retryErr);
-            alert(`Erro ao atualizar catálogo mestre: ${retryErr.message || JSON.stringify(retryErr)}`);
-            throw retryErr;
+          if (!retryErr) {
+            updateSuccess = true;
+            catErr = null;
+          } else {
+            console.error('[Catálogo] Erro detalhado no retry produtos_catalogo:', retryErr);
+            catErr = retryErr;
           }
-          updateSuccess = true;
-        } else if (catErr) {
-          console.warn('[Catálogo] Aviso/Erro ao atualizar em produtos_catalogo:', catErr);
-          // Caso o item selecionado não esteja em produtos_catalogo, pode ser um item da tabela produtos
-        } else {
+        } else if (!catErr) {
           updateSuccess = true;
         }
 
-        // 2. Atualizar ou sincronizar na tabela física 'produtos' (onde o estoque e vitrine leem)
+        // 2. Atualizar ou sincronizar na tabela física 'produtos' (isolado e com colunas sanitizadas)
         const payloadFisico = {
-          nome: nomeProduto.trim(),
+          nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
           categoria: categoriaProduto,
-          preco: parseFloat(precoProduto || 0),
-          codigo_barras: codigoBarrasFinal,
-          sku: skuProduto.trim() || null,
-          cor: corCatalogoProduto.trim() || null
+          preco: parseFloat(precoProduto || 0)
         };
+        if (codigoBarrasFinal) payloadFisico.codigo_barras = codigoBarrasFinal;
+        if (skuProduto && skuProduto.trim()) payloadFisico.sku = skuProduto.trim();
+        if (corCatalogoProduto && corCatalogoProduto.trim()) payloadFisico.cor = corCatalogoProduto.trim();
         if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role) && precoCustoProduto !== '') {
           payloadFisico.preco_custo = parseFloat(precoCustoProduto || 0);
         }
 
-        // Atualiza na tabela produtos pelo id direto
+        // 2.1 Atualiza na tabela produtos se targetId for o ID direto de um produto
         const { error: prodIdErr } = await dbClient
           .from('produtos')
           .update(payloadFisico)
@@ -6270,44 +6279,69 @@ export default function Dashboard({ session, profileDataProps }) {
           updateSuccess = true;
         }
 
-        // Atualiza na tabela produtos por catalogo_id ou por nome na mesma empresa
+        // 2.2 Sincronização resiliente por catalogo_id (com tratamento caso a coluna não exista)
         if (targetEmpresaId) {
-          const { error: prodCatErr } = await dbClient
-            .from('produtos')
-            .update(payloadFisico)
-            .eq('empresa_id', targetEmpresaId)
-            .eq('catalogo_id', targetId);
+          try {
+            const { error: prodCatErr } = await dbClient
+              .from('produtos')
+              .update(payloadFisico)
+              .eq('empresa_id', targetEmpresaId)
+              .eq('catalogo_id', targetId);
 
-          if (!prodCatErr) {
-            updateSuccess = true;
+            if (!prodCatErr) {
+              updateSuccess = true;
+            } else {
+              console.warn('[Catálogo] Sincronização por catalogo_id em produtos (esperado se coluna não existir):', prodCatErr.message || prodCatErr);
+            }
+          } catch (e) {
+            console.warn('[Catálogo] Exceção ao sincronizar por catalogo_id:', e);
           }
 
-          // Atualizar também correspondentes pelo nome original e novo nome para manter coerência total multiloja
+          // 2.3 Atualizar correspondentes pelo nome original e novo nome para garantir coerência multiloja
           const nomeOriginal = editingCatalogoProduto?.nome || nomeProduto;
           const nomesParaSincronizar = Array.from(new Set([nomeOriginal?.trim(), nomeProduto?.trim()].filter(Boolean)));
           for (const n of nomesParaSincronizar) {
-            await dbClient
-              .from('produtos')
-              .update({
-                categoria: categoriaProduto,
-                tipo: tipoProduto,
-                preco: parseFloat(precoProduto || 0),
-                ...(skuProduto?.trim() ? { sku: skuProduto.trim() } : {}),
-                ...(codigoBarrasFinal ? { codigo_barras: codigoBarrasFinal } : {})
-              })
-              .eq('empresa_id', targetEmpresaId)
-              .ilike('nome', n);
+            try {
+              const { error: syncNomeErr } = await dbClient
+                .from('produtos')
+                .update(payloadFisico)
+                .eq('empresa_id', targetEmpresaId)
+                .ilike('nome', n);
+
+              if (!syncNomeErr) {
+                updateSuccess = true;
+              } else {
+                console.warn(`[Catálogo] Falha ao sincronizar produto por nome '${n}':`, syncNomeErr.message || syncNomeErr);
+              }
+            } catch (errSync) {
+              console.warn('[Catálogo] Erro no sync por nome:', errSync);
+            }
           }
         }
 
         if (!updateSuccess && catErr) {
-          alert(`Falha ao atualizar produto no banco de dados: ${catErr.message}`);
+          const errMsg = catErr.message || 'Erro desconhecido ao atualizar catálogo';
+          const errDetail = catErr.details ? ` (${catErr.details})` : (catErr.hint ? ` - Dica: ${catErr.hint}` : '');
+          alert(`Falha ao atualizar produto no banco de dados: ${errMsg}${errDetail}`);
+          console.error('[Catálogo] Detalhes completos do erro Supabase:', catErr);
           throw catErr;
         }
 
         showToast('Produto e categoria atualizados com sucesso!', 'success');
 
-        // Reatividade local síncrona
+        // Reatividade local síncrona com campos sanitizados
+        const payloadUpdate = {
+          nome: String(nomeProduto || '').trim(),
+          tipo: tipoProduto,
+          categoria: categoriaProduto,
+          preco: parseFloat(precoProduto || 0),
+          codigo_barras: codigoBarrasFinal,
+          sku: skuProduto?.trim() || null,
+          cor: corCatalogoProduto?.trim() || null,
+          condicao: condicaoProduto,
+          ...(precoCustoProduto !== '' ? { preco_custo: parseFloat(precoCustoProduto || 0) } : {})
+        };
+
         setCatalogoProdutos(prev =>
           prev.map(item =>
             (String(item.id) === String(targetId) || String(item.nome || '').toLowerCase().trim() === String(nomeProduto).toLowerCase().trim())
