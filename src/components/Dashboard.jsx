@@ -10601,55 +10601,111 @@ export default function Dashboard({ session, profileDataProps }) {
             return;
           }
         } else if (item.produto_id) {
+          // Buscar produto completo na origem para validação e para clonagem de campos se necessário
           const { data: origProd, error: origProdErr } = await supabase
             .from('produtos')
-            .select('quantidade')
+            .select('*')
             .eq('id', item.produto_id)
-            .single();
+            .maybeSingle();
 
-          if (origProdErr) {
+          if (origProdErr || !origProd) {
             console.error('Erro ao consultar saldo do produto na origem:', origProdErr);
-            alert(`Erro ao consultar estoque do produto "${item.nome}": ${origProdErr.message}`);
+            alert(`Erro ao consultar estoque do produto "${item.nome}" na origem: ${origProdErr?.message || 'Produto não localizado.'}`);
             return;
           }
 
-          if (origProd) {
-            const novaQtdOrigem = Math.max(0, (origProd.quantidade || 0) - item.quantidade);
-            const { error: origUpdateErr } = await supabase
-              .from('produtos')
-              .update({ quantidade: novaQtdOrigem })
-              .eq('id', item.produto_id);
+          const qtdTransferir = item.quantidade || 1;
+          const saldoOrigemAtual = origProd.quantidade || 0;
 
-            if (origUpdateErr) {
-              console.error('Falha ao debitar produto da filial de origem:', origUpdateErr);
-              alert(`Falha ao debitar produto "${item.nome}" da origem: ${origUpdateErr.message}`);
+          if (saldoOrigemAtual < qtdTransferir) {
+            alert(`Saldo insuficiente na origem para "${item.nome}". Saldo atual: ${saldoOrigemAtual}, Solicitado: ${qtdTransferir}`);
+            return;
+          }
+
+          const novaQtdOrigem = Math.max(0, saldoOrigemAtual - qtdTransferir);
+          const { error: origUpdateErr } = await supabase
+            .from('produtos')
+            .update({ quantidade: novaQtdOrigem })
+            .eq('id', item.produto_id);
+
+          if (origUpdateErr) {
+            console.error('Falha ao debitar produto da filial de origem:', origUpdateErr);
+            alert(`Falha ao debitar produto "${item.nome}" da origem: ${origUpdateErr.message}`);
+            return;
+          }
+
+          // Localizar produto correspondente na filial de destino (por código de barras se existir, ou por nome insensível a maiúsculas/minúsculas)
+          let destProd = null;
+
+          if (origProd.codigo_barras || item.codigo_barras) {
+            const barcode = (origProd.codigo_barras || item.codigo_barras).trim();
+            const { data: prodByBarcode } = await supabase
+              .from('produtos')
+              .select('id, quantidade')
+              .eq('empresa_id', profile.empresa_id)
+              .eq('filial_id', transfDestinoId)
+              .eq('codigo_barras', barcode)
+              .maybeSingle();
+            if (prodByBarcode) destProd = prodByBarcode;
+          }
+
+          if (!destProd) {
+            const nomeBusca = (origProd.nome || item.nome).trim();
+            const { data: prodsByName, error: destProdErr } = await supabase
+              .from('produtos')
+              .select('id, quantidade')
+              .eq('empresa_id', profile.empresa_id)
+              .eq('filial_id', transfDestinoId)
+              .ilike('nome', nomeBusca)
+              .limit(1);
+
+            if (destProdErr) {
+              console.error('Erro ao buscar produto na filial de destino:', destProdErr);
+              alert(`Erro ao buscar produto "${item.nome}" na filial de destino: ${destProdErr.message}`);
               return;
+            }
+
+            if (prodsByName && prodsByName.length > 0) {
+              destProd = prodsByName[0];
             }
           }
 
-          const { data: destProd, error: destProdErr } = await supabase
-            .from('produtos')
-            .select('id, quantidade')
-            .eq('empresa_id', profile.empresa_id)
-            .eq('filial_id', transfDestinoId)
-            .eq('nome', item.nome)
-            .maybeSingle();
-
-          if (destProdErr) {
-            console.error('Erro ao buscar produto na filial de destino:', destProdErr);
-            alert(`Erro ao buscar produto na filial de destino: ${destProdErr.message}`);
-            return;
-          }
-
           if (destProd) {
+            // Se o produto já existe na filial de destino, incrementa a quantidade
+            const novaQtdDestino = (destProd.quantidade || 0) + qtdTransferir;
             const { error: destUpdateErr } = await supabase
               .from('produtos')
-              .update({ quantidade: (destProd.quantidade || 0) + item.quantidade })
+              .update({ quantidade: novaQtdDestino })
               .eq('id', destProd.id);
 
             if (destUpdateErr) {
               console.error('Falha ao creditar produto na filial de destino:', destUpdateErr);
               alert(`Falha ao creditar produto "${item.nome}" no destino: ${destUpdateErr.message}`);
+              return;
+            }
+          } else {
+            // Se o produto NÃO existe ainda na filial de destino, cria um novo registro de produto para essa filial
+            const novoProdutoDestino = {
+              empresa_id: profile.empresa_id,
+              filial_id: transfDestinoId,
+              nome: origProd.nome || item.nome,
+              tipo: origProd.tipo || item.tipo || 'ACESSORIO',
+              categoria: origProd.categoria || item.categoria || 'ACESSORIOS',
+              preco: origProd.preco || 0,
+              preco_custo: origProd.preco_custo || 0,
+              quantidade: qtdTransferir,
+              cor: origProd.cor || null,
+              sku: origProd.sku || null,
+              codigo_barras: origProd.codigo_barras || item.codigo_barras || null
+            };
+
+            const { error: destInsertErr } = await supabase
+              .from('produtos')
+              .insert([novoProdutoDestino]);
+
+            if (destInsertErr) {
+              console.error('Falha ao cadastrar produto na filial de destino:', destInsertErr);
+              alert(`Falha ao registrar produto "${item.nome}" no estoque da filial de destino: ${destInsertErr.message}`);
               return;
             }
           }
@@ -10723,7 +10779,19 @@ export default function Dashboard({ session, profileDataProps }) {
       setTransfObs('');
       setTransfOrigemId('');
 
-      if (activeFilialId) fetchTransferencias(activeFilialId, profile.empresa_id);
+      if (activeFilialId) {
+        fetchTransferencias(activeFilialId, profile.empresa_id);
+      }
+      if (profile?.empresa_id) {
+        fetchGerenteData(profile.empresa_id);
+      }
+      const filialParaRecarregar = filtroFilialEstoque || finalOrigemId || activeFilialId;
+      if (filialParaRecarregar) {
+        fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
+      if (activeFilialId) {
+        fetchProdutosPDV(activeFilialId);
+      }
     } catch (error) {
       console.error('Erro ao processar transferência de estoque:', error);
       alert('Erro ao registrar transferência: ' + error.message);
