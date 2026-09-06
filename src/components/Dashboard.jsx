@@ -5587,11 +5587,14 @@ export default function Dashboard({ session, profileDataProps }) {
           mapModelos.set(key, {
             ...master,
             ...p,
-            id: p.id || master.id,
-            codigo_barras: p.codigo_barras || master.codigo_barras,
-            sku: p.sku || master.sku,
-            categoria: p.categoria || master.categoria,
-            tipo: p.tipo || master.tipo
+            id: master.id || p.id,
+            nome: master.nome || p.nome,
+            codigo_barras: master.codigo_barras || p.codigo_barras,
+            sku: master.sku || p.sku,
+            categoria: master.categoria || p.categoria,
+            tipo: master.tipo || p.tipo,
+            preco: master.preco !== undefined && master.preco !== null ? master.preco : p.preco,
+            preco_custo: master.preco_custo !== undefined && master.preco_custo !== null ? master.preco_custo : p.preco_custo
           });
         }
       });
@@ -6279,14 +6282,21 @@ export default function Dashboard({ session, profileDataProps }) {
             updateSuccess = true;
           }
 
-          // Atualizar também correspondentes pelo nome original para manter coerência multiloja
+          // Atualizar também correspondentes pelo nome original e novo nome para manter coerência total multiloja
           const nomeOriginal = editingCatalogoProduto?.nome || nomeProduto;
-          if (nomeOriginal) {
+          const nomesParaSincronizar = Array.from(new Set([nomeOriginal?.trim(), nomeProduto?.trim()].filter(Boolean)));
+          for (const n of nomesParaSincronizar) {
             await dbClient
               .from('produtos')
-              .update({ categoria: categoriaProduto, tipo: tipoProduto, preco: parseFloat(precoProduto || 0) })
+              .update({
+                categoria: categoriaProduto,
+                tipo: tipoProduto,
+                preco: parseFloat(precoProduto || 0),
+                ...(skuProduto?.trim() ? { sku: skuProduto.trim() } : {}),
+                ...(codigoBarrasFinal ? { codigo_barras: codigoBarrasFinal } : {})
+              })
               .eq('empresa_id', targetEmpresaId)
-              .ilike('nome', nomeOriginal.trim());
+              .ilike('nome', n);
           }
         }
 
