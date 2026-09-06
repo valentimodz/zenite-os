@@ -5167,6 +5167,37 @@ export default function Dashboard({ session, profileDataProps }) {
         console.error('Erro ao atualizar quantidade:', err);
         showToast('Erro ao atualizar estoque: ' + err.message, 'error');
       }
+    } else if (field === 'categoria' || field === 'tipo') {
+      const valorLimpo = String(newValue || '').trim();
+      try {
+        if (produtoId && !String(produtoId).startsWith('synth_')) {
+          let q = dbClient.from('produtos').update({ [field]: valorLimpo }).eq('id', produtoId);
+          if (itemFilialId) {
+            q = q.eq('filial_id', itemFilialId);
+          }
+          const { error } = await q;
+          if (error) throw error;
+        }
+
+        if (nome) {
+          await dbClient.from('produtos_catalogo').update({ [field]: valorLimpo }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
+          await dbClient.from('produtos').update({ [field]: valorLimpo }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
+        }
+
+        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, [field]: valorLimpo } : p));
+        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, [field]: valorLimpo } : p));
+        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, [field]: valorLimpo } : c));
+        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, [field]: valorLimpo } : e));
+        showToast(`${field === 'categoria' ? 'Categoria' : 'Tipo'} de "${nome}" alterado para "${valorLimpo}" com sucesso!`, 'success');
+
+        const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
+        if (filialParaRecarregar) {
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
+        }
+      } catch (err) {
+        console.error(`Erro ao atualizar ${field}:`, err);
+        showToast(`Erro ao atualizar ${field}: ` + err.message, 'error');
+      }
     }
   };
 
@@ -6170,16 +6201,25 @@ export default function Dashboard({ session, profileDataProps }) {
         var data = { ...produtoExistenteMaster, preco: parseFloat(precoProduto || produtoExistenteMaster.preco || 0) };
         showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
       } else if (isEditMode && targetId) {
-        // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE
-        let { error } = await dbClient
+        // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE E PRODUTOS FÍSICOS
+        const payloadUpdate = {
+          ...payload,
+          tipo: tipoProduto,
+          categoria: categoriaProduto
+        };
+
+        let updateSuccess = false;
+
+        // 1. Atualizar na tabela 'produtos_catalogo'
+        let { error: catErr } = await dbClient
           .from('produtos_catalogo')
-          .update(payload)
+          .update(payloadUpdate)
           .eq('id', targetId);
 
-        if (error && (error.code === 'PGRST204' || error.message?.includes('could not find the column') || error.message?.includes('does not exist'))) {
+        if (catErr && (catErr.code === 'PGRST204' || catErr.message?.includes('could not find the column') || catErr.message?.includes('does not exist'))) {
           const strictPayload = {
             empresa_id: targetEmpresaId,
-            nome: nomeProduto,
+            nome: nomeProduto.trim(),
             tipo: tipoProduto,
             categoria: categoriaProduto,
             preco: parseFloat(precoProduto || 0),
@@ -6190,24 +6230,106 @@ export default function Dashboard({ session, profileDataProps }) {
             .update(strictPayload)
             .eq('id', targetId);
 
-          if (retryErr) throw retryErr;
-        } else if (error) {
-          throw error;
+          if (retryErr) {
+            console.error('[Catálogo] Erro no retry do produtos_catalogo:', retryErr);
+            alert(`Erro ao atualizar catálogo mestre: ${retryErr.message || JSON.stringify(retryErr)}`);
+            throw retryErr;
+          }
+          updateSuccess = true;
+        } else if (catErr) {
+          console.warn('[Catálogo] Aviso/Erro ao atualizar em produtos_catalogo:', catErr);
+          // Caso o item selecionado não esteja em produtos_catalogo, pode ser um item da tabela produtos
+        } else {
+          updateSuccess = true;
         }
 
-        showToast('Modelo do catálogo atualizado com sucesso!', 'success');
+        // 2. Atualizar ou sincronizar na tabela física 'produtos' (onde o estoque e vitrine leem)
+        const payloadFisico = {
+          nome: nomeProduto.trim(),
+          tipo: tipoProduto,
+          categoria: categoriaProduto,
+          preco: parseFloat(precoProduto || 0),
+          codigo_barras: codigoBarrasFinal,
+          sku: skuProduto.trim() || null,
+          cor: corCatalogoProduto.trim() || null
+        };
+        if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role) && precoCustoProduto !== '') {
+          payloadFisico.preco_custo = parseFloat(precoCustoProduto || 0);
+        }
 
-        // Reatividade local síncrona usando .map()
+        // Atualiza na tabela produtos pelo id direto
+        const { error: prodIdErr } = await dbClient
+          .from('produtos')
+          .update(payloadFisico)
+          .eq('id', targetId);
+
+        if (!prodIdErr) {
+          updateSuccess = true;
+        }
+
+        // Atualiza na tabela produtos por catalogo_id ou por nome na mesma empresa
+        if (targetEmpresaId) {
+          const { error: prodCatErr } = await dbClient
+            .from('produtos')
+            .update(payloadFisico)
+            .eq('empresa_id', targetEmpresaId)
+            .eq('catalogo_id', targetId);
+
+          if (!prodCatErr) {
+            updateSuccess = true;
+          }
+
+          // Atualizar também correspondentes pelo nome original para manter coerência multiloja
+          const nomeOriginal = editingCatalogoProduto?.nome || nomeProduto;
+          if (nomeOriginal) {
+            await dbClient
+              .from('produtos')
+              .update({ categoria: categoriaProduto, tipo: tipoProduto, preco: parseFloat(precoProduto || 0) })
+              .eq('empresa_id', targetEmpresaId)
+              .ilike('nome', nomeOriginal.trim());
+          }
+        }
+
+        if (!updateSuccess && catErr) {
+          alert(`Falha ao atualizar produto no banco de dados: ${catErr.message}`);
+          throw catErr;
+        }
+
+        showToast('Produto e categoria atualizados com sucesso!', 'success');
+
+        // Reatividade local síncrona
         setCatalogoProdutos(prev =>
           prev.map(item =>
-            String(item.id) === String(targetId)
-              ? { ...item, ...payload, id: targetId }
+            (String(item.id) === String(targetId) || String(item.nome || '').toLowerCase().trim() === String(nomeProduto).toLowerCase().trim())
+              ? { ...item, ...payloadUpdate, id: item.id || targetId }
               : item
           )
         );
 
-        setProdutos(prev => prev.map(p => (String(p.id) === String(targetId) || String(p.catalogo_id) === String(targetId)) ? { ...p, ...payload } : p));
-        setEstoqueConsolidadoLista(prev => prev.map(e => (String(e.id) === String(targetId) || String(e.catalogo_id) === String(targetId)) ? { ...e, ...payload } : e));
+        setProdutos(prev => prev.map(p =>
+          (String(p.id) === String(targetId) || String(p.catalogo_id) === String(targetId) || String(p.nome || '').toLowerCase().trim() === String(nomeProduto).toLowerCase().trim())
+            ? { ...p, ...payloadUpdate }
+            : p
+        ));
+
+        setEstoqueConsolidadoLista(prev => prev.map(e =>
+          (String(e.id) === String(targetId) || String(e.catalogo_id) === String(targetId) || String(e.nome || '').toLowerCase().trim() === String(nomeProduto).toLowerCase().trim())
+            ? { ...e, ...payloadUpdate }
+            : e
+        ));
+
+        // Re-fetch completo no banco de dados para garantir visualização imediata sem F5
+        if (targetEmpresaId) {
+          fetchCatalogoProdutos(targetEmpresaId);
+          fetchGerenteData(targetEmpresaId);
+        }
+        const filialParaRecarregar = filtroFilialEstoque || activeFilialId;
+        if (filialParaRecarregar) {
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+        }
+        if (activeFilialId) {
+          fetchProdutosPDV(activeFilialId);
+        }
 
         window.dispatchEvent(new Event('catalogo_updated'));
         handleResetForm();
