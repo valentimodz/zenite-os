@@ -6255,7 +6255,7 @@ export default function Dashboard({ session, profileDataProps }) {
           updateSuccess = true;
         }
 
-        // 2. Atualizar ou sincronizar na tabela física 'produtos' (isolado e com colunas sanitizadas)
+        // 2. Atualizar ou sincronizar na tabela física 'produtos' (isolado e apenas com colunas reais de produtos)
         const payloadFisico = {
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
@@ -6263,41 +6263,44 @@ export default function Dashboard({ session, profileDataProps }) {
           preco: parseFloat(precoProduto || 0)
         };
         if (codigoBarrasFinal) payloadFisico.codigo_barras = codigoBarrasFinal;
-        if (skuProduto && skuProduto.trim()) payloadFisico.sku = skuProduto.trim();
         if (corCatalogoProduto && corCatalogoProduto.trim()) payloadFisico.cor = corCatalogoProduto.trim();
-        if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role) && precoCustoProduto !== '') {
-          payloadFisico.preco_custo = parseFloat(precoCustoProduto || 0);
+
+        // 2.1 Se os registros compartilharem o mesmo ID primário:
+        if (targetId) {
+          const { error: prodIdErr } = await dbClient
+            .from('produtos')
+            .update(payloadFisico)
+            .eq('id', targetId);
+
+          if (!prodIdErr) {
+            updateSuccess = true;
+          }
         }
 
-        // 2.1 Atualiza na tabela produtos se targetId for o ID direto de um produto
-        const { error: prodIdErr } = await dbClient
-          .from('produtos')
-          .update(payloadFisico)
-          .eq('id', targetId);
-
-        if (!prodIdErr) {
-          updateSuccess = true;
-        }
-
-        // 2.2 Sincronização resiliente por catalogo_id (com tratamento caso a coluna não exista)
+        // 2.2 Sincronização por código de barras válido e por nome nas filiais da empresa
         if (targetEmpresaId) {
-          try {
-            const { error: prodCatErr } = await dbClient
-              .from('produtos')
-              .update(payloadFisico)
-              .eq('empresa_id', targetEmpresaId)
-              .eq('catalogo_id', targetId);
+          const codigoParaSincronizar = codigoBarrasFinal || editingCatalogoProduto?.codigo_barras;
 
-            if (!prodCatErr) {
-              updateSuccess = true;
-            } else {
-              console.warn('[Catálogo] Sincronização por catalogo_id em produtos (esperado se coluna não existir):', prodCatErr.message || prodCatErr);
+          // Se houver código de barras válido, sincronizar via codigo_barras
+          if (codigoParaSincronizar && String(codigoParaSincronizar).trim() !== '') {
+            try {
+              const { error: syncBarErr } = await dbClient
+                .from('produtos')
+                .update(payloadFisico)
+                .eq('empresa_id', targetEmpresaId)
+                .eq('codigo_barras', String(codigoParaSincronizar).trim());
+
+              if (!syncBarErr) {
+                updateSuccess = true;
+              } else {
+                console.warn(`[Catálogo] Falha ao sincronizar por código de barras '${codigoParaSincronizar}':`, syncBarErr.message || syncBarErr);
+              }
+            } catch (errBar) {
+              console.warn('[Catálogo] Erro no sync por código de barras:', errBar);
             }
-          } catch (e) {
-            console.warn('[Catálogo] Exceção ao sincronizar por catalogo_id:', e);
           }
 
-          // 2.3 Atualizar correspondentes pelo nome original e novo nome para garantir coerência multiloja
+          // Sincronizar também correspondentes pelo nome original e novo nome para garantir coerência de categoria em todas as filiais
           const nomeOriginal = editingCatalogoProduto?.nome || nomeProduto;
           const nomesParaSincronizar = Array.from(new Set([nomeOriginal?.trim(), nomeProduto?.trim()].filter(Boolean)));
           for (const n of nomesParaSincronizar) {
