@@ -23,11 +23,13 @@ const CORES_PADRONIZADAS = [
   'Titânio Azul'
 ];
 
+import { supabase } from '../supabaseClient';
+
 /**
  * Modal de edição de IMEI/Cor com trava de segurança de IMEI read-only
  * e dropdown fechado com padronização de cores.
  */
-export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave }) {
+export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSuccess, recarregarLista, fetchProdutos }) {
   const [corSelecionada, setCorSelecionada] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -51,10 +53,39 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave }) {
 
     setIsSaving(true);
     try {
-      await onSave(imeiObj.id, corSelecionada, imeiObj.produto_id || imeiObj.produto_catalogo_id);
+      const corTrimmed = String(corSelecionada).trim();
+
+      // 1. Executar o UPDATE na tabela 'imeis' usando o ID correto
+      const { error } = await supabase
+        .from('imeis')
+        .update({ cor: corTrimmed })
+        .eq('id', imeiObj.id);
+
+      // 2. Verificar o 'error' da requisição imediatamente. Se houver erro, alertar e NÃO fechar o modal
+      if (error) {
+        console.error("Erro ao atualizar cor do IMEI no Supabase:", error);
+        alert(`Erro ao salvar cor do aparelho: ${error.message || 'Falha na comunicação com o banco de dados.'}`);
+        return;
+      }
+
+      // 3. Se a atualização for um sucesso, fechar o modal e disparar callbacks para atualizar a tela instantaneamente
       onClose();
+
+      if (typeof onSave === 'function') {
+        await onSave(imeiObj.id, corTrimmed, imeiObj.produto_id || imeiObj.produto_catalogo_id);
+      }
+      if (typeof onSuccess === 'function') {
+        onSuccess(imeiObj.id, corTrimmed);
+      }
+      if (typeof recarregarLista === 'function') {
+        recarregarLista();
+      }
+      if (typeof fetchProdutos === 'function') {
+        fetchProdutos();
+      }
     } catch (err) {
       console.error("Erro ao salvar cor do IMEI:", err);
+      alert(`Falha inesperada ao atualizar cor: ${err.message || 'Erro interno.'}`);
     } finally {
       setIsSaving(false);
     }

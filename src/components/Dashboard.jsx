@@ -9021,7 +9021,7 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const { data, error } = await supabase
         .from('imeis')
-        .select('imei, vendido, cor, bateria_saude, observacoes, preco_compra, is_seminovo, filial_id, status')
+        .select('id, produto_id, imei, vendido, cor, bateria_saude, observacoes, preco_compra, is_seminovo, filial_id, status')
         .eq('produto_id', prodId)
         .order('vendido', { ascending: true });
 
@@ -21984,6 +21984,14 @@ export default function Dashboard({ session, profileDataProps }) {
           isOpen={isEditImeiModalOpen}
           onClose={() => setIsEditImeiModalOpen(false)}
           onSave={handleSaveImeiCor}
+          onSuccess={handleSaveImeiCor}
+          recarregarLista={() => {
+            const filialId = activeFilialId || profile?.filial_id;
+            if (filialId) fetchEstoqueConsolidado(filialId, buscaEstoque, filtroCategoriaEstoque);
+          }}
+          fetchProdutos={() => {
+            if (activeFilialId) fetchProdutosPDV(activeFilialId);
+          }}
         />
 
         {/* MODAL DE CONFIRMAÇÃO DE FINALIZAÇÃO DE CHAMADO S.O.S */}
