@@ -5587,7 +5587,9 @@ export default function Dashboard({ session, profileDataProps }) {
           mapModelos.set(key, {
             ...master,
             ...p,
-            id: master.id || p.id,
+            id: p.id || master.id,
+            produto_id: p.id,
+            catalogo_id: master.id || null,
             nome: master.nome || p.nome,
             codigo_barras: master.codigo_barras || p.codigo_barras,
             sku: master.sku || p.sku,
@@ -5691,8 +5693,11 @@ export default function Dashboard({ session, profileDataProps }) {
 
   const handleStartEditCatalogo = (p) => {
     if (!p) return;
+    console.log('[DEBUG EDIÇÃO] Produto Selecionado:', p.produto_id || p.id, p.nome);
+
+    const realId = p.produto_id || p.id || null;
     const mapped = {
-      id: p.id || null,
+      id: realId,
       nome: p.nome || '',
       tipo: p.tipo || 'ACESSORIO',
       categoria: p.categoria || '',
@@ -6205,47 +6210,56 @@ export default function Dashboard({ session, profileDataProps }) {
         showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
       } else if (isEditMode && targetId) {
         // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE E PRODUTOS FÍSICOS
+        const produtoEmEdicaoId = formData.id || editingCatalogoProduto?.id;
+        if (!produtoEmEdicaoId) {
+          console.error('[ERRO] Tentativa de update sem ID válido.');
+          alert('Erro: ID do produto não encontrado.');
+          return;
+        }
+
         // 1. UPDATE DIRETO E PRINCIPAL NA TABELA 'produtos' (ONDE FICAM OS DADOS DO ESTOQUE E VITRINE)
         const payloadProdutosFisico = {
+          categoria: categoriaProduto,
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
-          categoria: categoriaProduto,
           preco: Number(parseFloat(precoProduto || 0))
         };
         if (codigoBarrasFinal) payloadProdutosFisico.codigo_barras = codigoBarrasFinal;
         if (corCatalogoProduto && corCatalogoProduto.trim()) payloadProdutosFisico.cor = corCatalogoProduto.trim();
 
-        console.log("🔥 [UPDATE PRODUTOS] Executando update na tabela 'produtos' com id:", targetId, payloadProdutosFisico);
+        console.log("🔥 [UPDATE PRODUTOS] Executando update na tabela 'produtos' com id:", produtoEmEdicaoId, payloadProdutosFisico);
 
-        let updateSuccess = false;
-        let lastError = null;
-
-        // 1.1 Update na tabela 'produtos' pelo ID do produto em edição
-        const { data: updatedProdData, error: prodErr } = await dbClient
+        // 1.1 Update na tabela 'produtos' pelo ID exato do produto em edição com .select() para confirmar alteração
+        const { data: dataUpdated, error: errorUpdated } = await dbClient
           .from('produtos')
           .update(payloadProdutosFisico)
-          .eq('id', targetId)
+          .eq('id', produtoEmEdicaoId)
           .select();
 
-        if (prodErr) {
-          console.error('[Catálogo] Erro ao atualizar tabela produtos por ID:', prodErr);
-          lastError = prodErr;
-        } else if (updatedProdData && updatedProdData.length > 0) {
-          updateSuccess = true;
+        if (errorUpdated) {
+          console.error('[ERRO SUPABASE]', errorUpdated);
         }
 
-        // 1.2 Atualização complementar por código de barras ou nome em filiais da mesma empresa
+        if (dataUpdated && dataUpdated.length === 0) {
+          console.warn('[ALERTA] Nenhuma linha foi atualizada no banco. O ID não existe na tabela produtos:', produtoEmEdicaoId);
+        }
+
+        let updateSuccess = Boolean(dataUpdated && dataUpdated.length > 0);
+        let lastError = errorUpdated;
+
+        // 1.2 Atualização complementar por código de barras ou nome em filiais da mesma empresa (se o id direto não casou ou para manter multiloja)
         if (targetEmpresaId) {
           const codigoParaSincronizar = codigoBarrasFinal || editingCatalogoProduto?.codigo_barras;
           if (codigoParaSincronizar && String(codigoParaSincronizar).trim() !== '') {
             try {
-              const { error: syncBarErr } = await dbClient
+              const { data: syncBarData, error: syncBarErr } = await dbClient
                 .from('produtos')
                 .update(payloadProdutosFisico)
                 .eq('empresa_id', targetEmpresaId)
-                .eq('codigo_barras', String(codigoParaSincronizar).trim());
+                .eq('codigo_barras', String(codigoParaSincronizar).trim())
+                .select();
 
-              if (!syncBarErr) {
+              if (!syncBarErr && syncBarData && syncBarData.length > 0) {
                 updateSuccess = true;
               }
             } catch (errBar) {
@@ -6297,10 +6311,11 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         // 3. TRAVA DE FEEDBACK FALSO
-        if (!updateSuccess && lastError) {
-          console.error('Falha no update:', lastError);
-          showToast(`Falha ao atualizar produto: ${lastError.message || 'Erro no banco de dados'}`, 'error');
-          alert(`Falha ao atualizar produto: ${lastError.message || 'Erro no banco de dados'}`);
+        if (!updateSuccess) {
+          const msgErro = lastError ? (lastError.message || 'Erro no banco de dados') : 'Nenhuma linha correspondente foi encontrada para atualização.';
+          console.error('[ERRO SUPABASE] Falha no update:', msgErro, lastError);
+          showToast(`Falha ao atualizar produto: ${msgErro}`, 'error');
+          alert(`Falha ao atualizar produto: ${msgErro}`);
           return;
         }
 
