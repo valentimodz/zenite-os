@@ -4416,7 +4416,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Popular o mapa de tipos para inicializar os dropdowns do gerente
         const tipoMap = {};
         (metasData || []).forEach(m => {
-          tipoMap[m.vendedor_id] = m.tipo_meta || 'faturamento';
+          tipoMap[m.vendedor_id] = m.tipo_meta || 'FATURAMENTO_GERAL';
         });
         setMetaTipoMap(tipoMap);
       }
@@ -4837,13 +4837,14 @@ export default function Dashboard({ session, profileDataProps }) {
       const dataAtual = new Date();
       const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
 
-      // Garantir sanitização e tipo_meta válido (minúsculas ou fallback)
-      let validTipoMeta = String(tipoMeta || 'faturamento').toLowerCase().trim();
-      if (!['faturamento', 'quantidade', 'ativacao'].includes(validTipoMeta)) {
-        if (validTipoMeta.includes('faturamento') || validTipoMeta.includes('geral')) validTipoMeta = 'faturamento';
-        else if (validTipoMeta.includes('boleto') || validTipoMeta.includes('qtd')) validTipoMeta = 'quantidade';
-        else if (validTipoMeta.includes('ativa')) validTipoMeta = 'ativacao';
-        else validTipoMeta = 'faturamento';
+      // Garantir valores exatos exigidos pela trava metas_tipo_meta_check
+      let validTipoMeta = String(tipoMeta || 'FATURAMENTO_GERAL').trim().toUpperCase();
+      if (validTipoMeta === 'FATURAMENTO' || validTipoMeta === 'FATURAMENTO_GERAL') {
+        validTipoMeta = 'FATURAMENTO_GERAL';
+      } else if (validTipoMeta === 'BOLETO' || validTipoMeta === 'QUANTIDADE') {
+        validTipoMeta = 'BOLETO';
+      } else {
+        validTipoMeta = 'FATURAMENTO_GERAL';
       }
 
       // 1. Resolução segura do Tenant ID (Poka-Yoke)
@@ -4872,7 +4873,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // Trava de segurança (Poka-Yoke) ANTES de chamar o Supabase
       if (!targetTenantId || targetTenantId === 'MASTER' || targetTenantId === '00000000-0000-0000-0000-000000000001') {
-        alert('Erro interno: ID da empresa não identificado na sessão. Por favor, recarregue a página.');
+        showToast('Erro interno: ID da empresa não identificado na sessão. Por favor, recarregue a página.', 'error');
         return;
       }
 
@@ -4884,7 +4885,7 @@ export default function Dashboard({ session, profileDataProps }) {
         mes_referencia: mesRef
       });
 
-      // Upsert logic (checking if exists first since Supabase UPSERT might require unique constraints we want to handle safely here)
+      // Upsert logic direto com valor exato exigido pelo banco
       const { data: existing } = await supabase
         .from('metas')
         .select('id')
@@ -4912,34 +4913,6 @@ export default function Dashboard({ session, profileDataProps }) {
           .from('metas')
           .insert(insertPayload);
         dbError = error;
-      }
-
-      // Se houver erro de CHECK CONSTRAINT "metas_tipo_meta_check", tentar fallback com os tipos em maiúsculas ('FATURAMENTO_GERAL' / 'BOLETO')
-      if (dbError && (dbError.message?.includes('metas_tipo_meta_check') || dbError.details?.includes('metas_tipo_meta_check') || dbError.code === '23514')) {
-        console.warn('Detectado erro no CHECK CONSTRAINT metas_tipo_meta_check. Tentando fallback para tipos maiúsculos:', dbError.message);
-        let fallbackTipo = 'FATURAMENTO_GERAL';
-        if (validTipoMeta === 'quantidade') fallbackTipo = 'BOLETO';
-        if (validTipoMeta === 'ativacao') fallbackTipo = 'BOLETO';
-
-        if (existing) {
-          const { error: retryErr } = await supabase
-            .from('metas')
-            .update({ valor_meta: novaMeta, tipo_meta: fallbackTipo })
-            .eq('id', existing.id);
-          dbError = retryErr;
-        } else {
-          const fallbackPayload = {
-            vendedor_id: vendedorId,
-            tenant_id: targetTenantId,
-            valor_meta: novaMeta,
-            tipo_meta: fallbackTipo,
-            mes_referencia: mesRef
-          };
-          const { error: retryErr } = await supabase
-            .from('metas')
-            .insert(fallbackPayload);
-          dbError = retryErr;
-        }
       }
 
       if (dbError) throw dbError;
@@ -16846,7 +16819,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                             const dataAtual = new Date();
                                             const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
                                             const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
                                             return isUnitMetric(tipoAtual) ? 'Meta Qtd' : 'Meta R$';
                                           })()}
                                         </span>
@@ -16858,7 +16831,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                             const dataAtual = new Date();
                                             const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
                                             const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
                                             return isUnitMetric(tipoAtual) ? '90' : '15000';
                                           })()}
                                           defaultValue={(() => {
@@ -16873,7 +16846,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                             const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
                                             const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
                                             const currentVal = m ? Number(m.valor_meta) : Number(v.meta_mensal || 0);
-                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
                                             if (newVal !== currentVal) {
                                               handleUpdateMeta(v.id, newVal, tipoAtual);
                                             }
@@ -16887,7 +16860,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                             const dataAtual = new Date();
                                             const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
                                             const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            return metaTipoMap[v.id] || m?.tipo_meta || 'faturamento';
+                                            const val = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
+                                            if (val === 'faturamento' || val === 'FATURAMENTO_GERAL' || val === 'FATURAMENTO') return 'FATURAMENTO_GERAL';
+                                            if (val === 'boleto' || val === 'BOLETO' || val === 'quantidade') return 'BOLETO';
+                                            return val;
                                           })()}
                                           onChange={(e) => {
                                             const novoTipo = e.target.value;
@@ -16899,9 +16875,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                             handleUpdateMeta(v.id, valorAtual, novoTipo);
                                           }}
                                         >
-                                          <option value="faturamento">Faturamento</option>
-                                          <option value="quantidade">Boleto Vendido</option>
-                                          <option value="ativacao">Ativações</option>
+                                          <option value="FATURAMENTO_GERAL">Faturamento</option>
+                                          <option value="BOLETO">Boleto Vendido</option>
                                         </select>
                                       </div>
 
