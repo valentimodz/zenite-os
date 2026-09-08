@@ -3122,7 +3122,14 @@ export default function Dashboard({ session, profileDataProps }) {
           console.error("[Dashboard] Erro ao buscar descontos do mês:", err);
           const { data: simpleSales, error: simpleErr } = await supabase
             .from('vendas')
-            .select('*, clientes(*)')
+            .select(`
+              *,
+              clientes (
+                id,
+                nome,
+                cpf_cnpj
+              )
+            `)
             .order('created_at', { ascending: false });
           if (simpleErr) {
             console.error("[Dashboard] Erro ao buscar descontos do mês (fallback):", simpleErr);
@@ -3642,7 +3649,15 @@ export default function Dashboard({ session, profileDataProps }) {
         try {
           const { data: dbSales } = await supabase
             .from('vendas')
-            .select('*, produtos(*), clientes(*)')
+            .select(`
+              *,
+              produtos(*),
+              clientes (
+                id,
+                nome,
+                cpf_cnpj
+              )
+            `)
             .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
             .order('created_at', { ascending: false });
           if (dbSales) salesData = dbSales;
@@ -14471,10 +14486,14 @@ export default function Dashboard({ session, profileDataProps }) {
                         {/* Cliente */}
                         <td className="p-4">
                           <div className="flex flex-col">
-                            <span className="font-bold text-white text-xs">{clienteNomeResolved}</span>
-                            <span className="text-[11px] font-mono text-gray-400">CPF/CNPJ: {clienteCpfResolved}</span>
+                            <span className="font-bold text-white text-xs">
+                              {venda.clientes?.nome || clienteNomeResolved || 'Cliente não identificado'}
+                            </span>
+                            <span className="text-[11px] font-mono text-gray-400">
+                              CPF/CNPJ: {venda.clientes?.cpf_cnpj || clienteCpfResolved || '-'}
+                            </span>
                             <div className="text-[10px] text-purple-400 font-mono mt-0.5 bg-purple-950/30 border border-purple-800/40 px-1.5 py-0.5 rounded w-fit">
-                              ID no Banco: <strong className="text-purple-200">{venda.cliente_id || 'NULL'}</strong>
+                              ID no Banco: <strong className="text-purple-200">{venda.clientes?.id || venda.cliente_id || 'NULL'}</strong>
                             </div>
                           </div>
                         </td>
