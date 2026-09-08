@@ -4813,13 +4813,17 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Alternar Status de Trainee de um Vendedor (Gerente)
   const handleUpdateMeta = async (vendedorId, rawMeta, tipoMeta = 'faturamento') => {
+    console.log('[ALTERAÇÃO VENDEDOR]', { id: vendedorId, campo: 'tipo_faturamento', novoValor: tipoMeta });
+
+    // Guardar estado anterior para rollback se necessário
+    const anteriorTipo = metaTipoMap[vendedorId];
     try {
       // 0. AUDITORIA DE SESSÃO ESTREITA (Poka-Yoke)
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
       if (sessionError || !session) {
         console.error("Erro de Autenticação ao salvar meta:", sessionError);
-        alert("Sua sessão expirou ou não foi validada. Recarregue a página e faça login novamente.");
+        showToast("Sua sessão expirou ou não foi validada. Recarregue a página e faça login novamente.", 'error');
         return; // BLOQUEIA A EXECUÇÃO AQUI. Não tenta bater no banco.
       }
 
@@ -4827,7 +4831,7 @@ export default function Dashboard({ session, profileDataProps }) {
       const novaMeta = parseFloat(sanitized);
 
       if (isNaN(novaMeta)) {
-        alert('Por favor, digite um valor numérico válido.');
+        showToast('Por favor, digite um valor numérico válido.', 'error');
         return;
       }
       const dataAtual = new Date();
@@ -4940,6 +4944,17 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (dbError) throw dbError;
 
+      // Persistir também em profiles caso a coluna exista no banco
+      try {
+        await supabase
+          .from('profiles')
+          .update({ tipo_faturamento: validTipoMeta })
+          .eq('id', vendedorId);
+      } catch (profErr) {
+        // Ignorar se a coluna não existir no profiles
+        console.warn('Tentativa de sincronizar tipo_faturamento em profiles:', profErr?.message);
+      }
+
       // Update local state (valor + tipo)
       setMetas(prev => {
         const idx = prev.findIndex(m => m.vendedor_id === vendedorId && m.mes_referencia === mesRef);
@@ -4951,10 +4966,68 @@ export default function Dashboard({ session, profileDataProps }) {
         return [...prev, { vendedor_id: vendedorId, mes_referencia: mesRef, valor_meta: novaMeta, tipo_meta: validTipoMeta }];
       });
       setMetaTipoMap(prev => ({ ...prev, [vendedorId]: validTipoMeta }));
-      alert('Meta atualizada com sucesso!');
+      showToast('Alteração salva com sucesso!', 'success');
     } catch (err) {
-      console.error('Erro ao atualizar meta (detalhado):', err);
-      alert(`Falha ao atualizar meta. Motivo: ${err.message || JSON.stringify(err)}`);
+      console.error('[FALHA UPDATE VENDEDOR]:', err);
+      // Reverta o estado local para o valor anterior
+      if (anteriorTipo !== undefined) {
+        setMetaTipoMap(prev => ({ ...prev, [vendedorId]: anteriorTipo }));
+      }
+      showToast(`Falha ao salvar: ${err.message || 'Erro ao atualizar meta'}`, 'error');
+    }
+  };
+
+  const handleUpdateVendedorFilial = async (vendedorId, novaFilialId) => {
+    console.log('[ALTERAÇÃO VENDEDOR]', { id: vendedorId, campo: 'filial_id', novoValor: novaFilialId });
+
+    // Guardar valor anterior para possível reversão em caso de erro
+    const anteriorVendedor = vendedores.find(v => v.id === vendedorId);
+    const anteriorFilialId = anteriorVendedor?.filial_id || '';
+
+    // Atualização otimista na UI
+    setVendedores(prev =>
+      prev.map(v => (v.id === vendedorId ? { ...v, filial_id: novaFilialId } : v))
+    );
+    if (typeof setTeamMembers === 'function') {
+      setTeamMembers(prev =>
+        prev.map(m => (m.id === vendedorId ? { ...m, filial_id: novaFilialId } : m))
+      );
+    }
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ filial_id: novaFilialId || null })
+        .eq('id', vendedorId);
+
+      if (error) {
+        console.error('[FALHA UPDATE VENDEDOR]:', error);
+        // Reverta o estado local para o valor anterior
+        setVendedores(prev =>
+          prev.map(v => (v.id === vendedorId ? { ...v, filial_id: anteriorFilialId } : v))
+        );
+        if (typeof setTeamMembers === 'function') {
+          setTeamMembers(prev =>
+            prev.map(m => (m.id === vendedorId ? { ...m, filial_id: anteriorFilialId } : m))
+          );
+        }
+        showToast(`Falha ao salvar: ${error.message}`, 'error');
+        return;
+      }
+
+      showToast('Alteração salva com sucesso!', 'success');
+    } catch (err) {
+      console.error('[FALHA UPDATE VENDEDOR]:', err);
+      // Reverta o estado local para o valor anterior
+      setVendedores(prev =>
+        prev.map(v => (v.id === vendedorId ? { ...v, filial_id: anteriorFilialId } : v))
+      );
+      if (typeof setTeamMembers === 'function') {
+        setTeamMembers(prev =>
+          prev.map(m => (m.id === vendedorId ? { ...m, filial_id: anteriorFilialId } : m))
+        );
+      }
+      showToast(`Falha ao salvar: ${err.message || 'Erro inesperado'}`, 'error');
     }
   };
 
@@ -16840,22 +16913,33 @@ export default function Dashboard({ session, profileDataProps }) {
                                         {v.is_treinner ? 'Promover' : 'Tornar Trainee'}
                                       </button>
 
-                                      {/* Filial: Botão Gatilho para Modal de Transferência */}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setSelectedEmployeeTransfer(v.id);
-                                          setNewBranchId(v.filial_id || (filiais[0]?.id || ''));
-                                          setIsTransferModalOpen(true);
-                                        }}
-                                        title="Clique para transferir a filial do vendedor"
-                                        className={`px-3 h-10 flex items-center justify-center rounded text-xs font-semibold border whitespace-nowrap flex-shrink-0 transition-all hover:scale-[1.02] cursor-pointer ${v.filial_id
-                                          ? 'bg-[#111111] text-purple-400 border-[#222222] hover:border-purple-600/50 hover:bg-[#181818]'
-                                          : 'bg-yellow-950/20 text-yellow-500 border-yellow-900/35 hover:border-yellow-600/50 hover:bg-yellow-950/40'
-                                          }`}
-                                      >
-                                        {v.filial_id ? (filiais.find(f => f.id === v.filial_id)?.nome || 'Desconhecida') : '⚠️ Filial Pendente'}
-                                      </button>
+                                      {/* Seletor de Filial (Menu suspenso com todas as filiais ativas da empresa) */}
+                                      <div className="relative flex-shrink-0">
+                                        <select
+                                          value={v.filial_id || ''}
+                                          onChange={(e) => {
+                                            const novaFilial = e.target.value;
+                                            handleUpdateVendedorFilial(v.id, novaFilial);
+                                          }}
+                                          title="Alterar Filial do Vendedor"
+                                          className={`h-10 px-3 pr-8 rounded text-xs font-semibold border appearance-none cursor-pointer transition-all outline-none ${v.filial_id
+                                            ? 'bg-[#111111] text-purple-400 border-[#222222] hover:border-purple-600/50 hover:bg-[#181818] focus:border-purple-500'
+                                            : 'bg-yellow-950/20 text-yellow-500 border-yellow-900/35 hover:border-yellow-600/50 hover:bg-yellow-950/40 focus:border-yellow-500'
+                                            }`}
+                                        >
+                                          <option value="" disabled className="bg-[#111] text-gray-400">
+                                            ⚠️ Selecione uma filial
+                                          </option>
+                                          {filiais.map(f => (
+                                            <option key={f.id} value={f.id} className="bg-[#111] text-white">
+                                              {f.nome}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-purple-400">
+                                          <ChevronDown size={14} />
+                                        </div>
+                                      </div>
 
                                       {/* Botão Excluir (Lixeira) */}
                                       <button
