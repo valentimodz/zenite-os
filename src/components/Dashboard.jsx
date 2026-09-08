@@ -8446,12 +8446,16 @@ export default function Dashboard({ session, profileDataProps }) {
         : ((eanMestreLimpo && eanMestreLimpo !== "") ? eanMestreLimpo : null);
       const codigoBarrasFinal = (codigoBarrasCalculado === "" || !codigoBarrasCalculado) ? null : codigoBarrasCalculado;
 
+      // Filtro OBRIGATÓRIO por nome e filial_id da filial selecionada (evita vincular a produto de outra filial)
       let findQuery = supabase
         .from('produtos')
         .select('*')
-        .eq('empresa_id', targetEmpresaId)
-        .eq('filial_id', selectedFilialDestino)
-        .eq('nome', selectedProdutoMestre.nome);
+        .eq('nome', selectedProdutoMestre.nome)
+        .eq('filial_id', selectedFilialDestino);
+
+      if (targetEmpresaId) {
+        findQuery = findQuery.eq('empresa_id', targetEmpresaId);
+      }
 
       if (targetCor) {
         findQuery = findQuery.eq('cor', targetCor);
@@ -8476,7 +8480,7 @@ export default function Dashboard({ session, profileDataProps }) {
       let finalQty = qtyToAdd;
 
       if (!existingProd) {
-        // Criar o produto para a filial se não existir
+        // Se NÃO existir na filial selecionada: criar primeiro a linha na tabela produtos com a filial_id de destino
         const prodPayload = {
           empresa_id: targetEmpresaId,
           filial_id: selectedFilialDestino,
@@ -18926,6 +18930,24 @@ export default function Dashboard({ session, profileDataProps }) {
                         <p className="text-xs text-gray-500 mt-1">Selecione um modelo do catálogo e bipe os IMEIs. Validação automática em tempo real.</p>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
+                        {/* Seletor de Filial de Destino no Cabeçalho */}
+                        <div className="flex items-center gap-2 bg-black border border-[#6A0DAD]/50 px-3 py-1.5 rounded-lg shadow-sm">
+                          <Store size={14} className="text-[#6A0DAD] shrink-0" />
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hidden sm:inline">Filial Destino:</span>
+                          <select
+                            value={selectedFilialDestino}
+                            onChange={(e) => setSelectedFilialDestino(e.target.value)}
+                            className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer border-none"
+                          >
+                            <option value="" className="bg-gray-900 text-gray-400">Selecione a Filial...</option>
+                            {filiais.map(f => (
+                              <option key={f.id} value={f.id} className="bg-gray-900 text-white">
+                                {f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
                         {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'MASTER'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
                           <button
                             type="button"
