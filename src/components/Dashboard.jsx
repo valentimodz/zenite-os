@@ -26,6 +26,7 @@ import { calcularDescontoMaximo } from '../utils/descontoEngine';
 import RankingVendedores from './RankingVendedores';
 import ColorBadge from './ColorBadge';
 import ModalEditarImei from './ModalEditarImei';
+import ModalGeradorGrade from './ModalGeradorGrade';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -606,6 +607,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [catalogoPage, setCatalogoPage] = useState(0);
   const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
+  const [isModalGradeOpen, setIsModalGradeOpen] = useState(false);
   const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
   const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
   const [formData, setFormData] = useState(INITIAL_CATALOGO_FORM_DATA);
@@ -17024,14 +17026,25 @@ export default function Dashboard({ session, profileDataProps }) {
                                   Catálogo Mestre de Produtos
                                   <span className="text-[10px] bg-[#6A0DAD]/15 text-[#6A0DAD] border border-[#6A0DAD]/30 px-2 py-0.5 rounded-full font-semibold ml-1">Fonte do Poka-Yoke</span>
                                 </h3>
-                                <button
-                                  onClick={() => window.open('/caderno-pdv', '_blank')}
-                                  className="px-3 py-1.5 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#c084fc] border border-[#6A0DAD]/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
-                                  title="Abrir Caderno de PDV para Impressão de Códigos de Barras"
-                                >
-                                  <Barcode size={14} />
-                                  <span>Caderno PDV (Barcodes)</span>
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsModalGradeOpen(true)}
+                                    className="px-3 py-1.5 bg-[#6A0DAD] hover:bg-[#500885] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
+                                    title="Cadastrar grade de variações de capas e acessórios em lote"
+                                  >
+                                    <Zap size={14} />
+                                    <span>⚡ Gerador de Grade / Lote</span>
+                                  </button>
+                                  <button
+                                    onClick={() => window.open('/caderno-pdv', '_blank')}
+                                    className="px-3 py-1.5 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#c084fc] border border-[#6A0DAD]/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                                    title="Abrir Caderno de PDV para Impressão de Códigos de Barras"
+                                  >
+                                    <Barcode size={14} />
+                                    <span>Caderno PDV (Barcodes)</span>
+                                  </button>
+                                </div>
                               </div>
                               <p className="text-xs text-gray-600 mb-5">Cadastre os modelos de produtos. O módulo de Entrada de Estoque usará este catálogo para evitar erros de digitação.</p>
 
@@ -23937,6 +23950,23 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           </div>
         )}
+
+        {/* Modal Gerador de Grade / Lote de Acessórios */}
+        <ModalGeradorGrade
+          isOpen={isModalGradeOpen}
+          onClose={() => setIsModalGradeOpen(false)}
+          perfilUsuario={profile}
+          categorias={categorias}
+          onSuccess={(qtdCriada, linhaBase) => {
+            showToast(`${qtdCriada} modelos de ${linhaBase || 'capinhas'} cadastrados com sucesso!`, 'success');
+            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+            if (targetEmpresaId) {
+              fetchCatalogoProdutos(targetEmpresaId);
+              fetchGerenteData(targetEmpresaId);
+            }
+            window.dispatchEvent(new Event('catalogo_updated'));
+          }}
+        />
 
         {/* Toast Notification Container */}
         {toast && (
