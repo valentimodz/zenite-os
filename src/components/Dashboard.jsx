@@ -9487,27 +9487,31 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar taxas de cartão do banco
   const fetchTaxasCartao = async (tenantId) => {
-    if (!tenantId) return;
+    const targetEmpresaId = profile?.empresa_id || tenantId || company?.id || activeEmpresaId;
+    if (!targetEmpresaId) return;
     setIsLoadingTaxas(true);
     try {
-      const { data, error } = await supabase
+      // Busca pelo campo padrão empresa_id (com fallback para tenant_id caso necessário)
+      let query = supabase
         .from('taxas_cartao')
         .select('*')
-        .eq('tenant_id', tenantId)
-        .order('parcelas', { ascending: true });
+        .order('parcela', { ascending: true });
+
+      const { data, error } = await query.or(`empresa_id.eq.${targetEmpresaId},tenant_id.eq.${targetEmpresaId}`);
 
       if (error) {
         if (error.code === '42P01') {
           console.warn('Tabela taxas_cartao não existe ainda. Usando taxas padrão locais.');
-          const fallbackRates = Array.from({ length: 12 }, (_, i) => ({
-            tenant_id: tenantId,
+          const fallbackRates = Array.from({ length: 18 }, (_, i) => ({
+            empresa_id: targetEmpresaId,
+            parcela: i + 1,
             parcelas: i + 1,
             taxa: 1.5 + i
           }));
           setTaxasCartao(fallbackRates);
 
           const ratesMap = {};
-          for (let i = 1; i <= 12; i++) {
+          for (let i = 1; i <= 18; i++) {
             ratesMap[i] = 1.5 + (i - 1);
           }
           setTempTaxasMap(ratesMap);
@@ -9517,38 +9521,46 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       if (!data || data.length === 0) {
-        const defaultRates = Array.from({ length: 12 }, (_, i) => ({
-          tenant_id: tenantId,
+        const defaultRates = Array.from({ length: 18 }, (_, i) => ({
+          empresa_id: targetEmpresaId,
+          parcela: i + 1,
           parcelas: i + 1,
           taxa: 1.5 + i
         }));
         setTaxasCartao(defaultRates);
 
         const ratesMap = {};
-        for (let i = 1; i <= 12; i++) {
+        for (let i = 1; i <= 18; i++) {
           ratesMap[i] = 1.5 + (i - 1);
         }
         setTempTaxasMap(ratesMap);
       } else {
-        setTaxasCartao(data);
+        // Normaliza registros suportando parcela ou parcelas
+        const normalizedData = data.map(r => ({
+          ...r,
+          parcela: r.parcela ?? r.parcelas,
+          parcelas: r.parcela ?? r.parcelas
+        }));
+        setTaxasCartao(normalizedData);
         const ratesMap = {};
-        for (let i = 1; i <= 12; i++) {
-          const row = data.find(r => r.parcelas === i);
+        for (let i = 1; i <= 18; i++) {
+          const row = normalizedData.find(r => r.parcela === i || r.parcelas === i);
           ratesMap[i] = row ? row.taxa : (1.5 + (i - 1));
         }
         setTempTaxasMap(ratesMap);
       }
     } catch (err) {
       console.error('Erro ao buscar taxas de cartão:', err);
-      const fallbackRates = Array.from({ length: 12 }, (_, i) => ({
-        tenant_id: tenantId,
+      const fallbackRates = Array.from({ length: 18 }, (_, i) => ({
+        empresa_id: targetEmpresaId,
+        parcela: i + 1,
         parcelas: i + 1,
         taxa: 1.5 + i
       }));
       setTaxasCartao(fallbackRates);
 
       const ratesMap = {};
-      for (let i = 1; i <= 12; i++) {
+      for (let i = 1; i <= 18; i++) {
         ratesMap[i] = 1.5 + (i - 1);
       }
       setTempTaxasMap(ratesMap);
@@ -9557,28 +9569,32 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Salvar taxas de cartão
+  // Salvar taxas de cartão (1x a 18x) com upsert em empresa_id, parcela
   const handleSaveTaxasCartao = async (e) => {
     e.preventDefault();
-    if (!company?.id) return;
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    if (!targetEmpresaId) {
+      alert('Erro: Empresa do usuário não identificada.');
+      return;
+    }
     setIsSavingTaxas(true);
     try {
       const upsertData = [];
-      for (let i = 1; i <= 12; i++) {
+      for (let i = 1; i <= 18; i++) {
         upsertData.push({
-          tenant_id: company.id,
-          parcelas: i,
+          empresa_id: targetEmpresaId,
+          parcela: i,
           taxa: parseFloat(tempTaxasMap[i]) || 0
         });
       }
 
       const { error } = await supabase
         .from('taxas_cartao')
-        .upsert(upsertData, { onConflict: 'tenant_id, parcelas' });
+        .upsert(upsertData, { onConflict: 'empresa_id, parcela' });
 
       if (error) throw error;
 
-      await fetchTaxasCartao(company.id);
+      await fetchTaxasCartao(targetEmpresaId);
       alert('Taxas de parcelamento salvas com sucesso!');
     } catch (err) {
       console.error('Erro ao salvar taxas de cartão:', err);
@@ -10341,7 +10357,7 @@ export default function Dashboard({ session, profileDataProps }) {
     // Calcular juros/taxas do cartão se aplicável
     let feePercent = 0;
     if (isCartaoEfetivo) {
-      const feeObj = taxasCartao.find(t => t.parcelas === parcelasEfetivo);
+      const feeObj = taxasCartao.find(t => (t.parcela === parcelasEfetivo || t.parcelas === parcelasEfetivo));
       feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (parcelasEfetivo - 1));
     }
     const feeFactor = 1 + (feePercent / 100);
@@ -13942,7 +13958,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             );
                           })()}
 
-                          {/* Se for Cartão de Crédito: Parcelas (1x a 12x) */}
+                          {/* Se for Cartão de Crédito: Parcelas (1x a 18x) */}
                           {(pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') && (
                             <div className="space-y-1 animate-fadeIn">
                               <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
@@ -13957,7 +13973,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 }}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
-                                {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                                {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
                                   <option key={n} value={n}>
                                     {n}x no Cartão de Crédito
                                   </option>
@@ -18390,7 +18406,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <CreditCard size={18} className="text-[#6A0DAD]" />
                                 Taxas de Parcelamento (Cartão)
                               </h3>
-                              <p className="text-xs text-gray-500 mt-1">Defina as taxas cobradas pela máquina de cartão para cada número de parcelas (1x a 12x).</p>
+                              <p className="text-xs text-gray-500 mt-1">Defina as taxas cobradas pela máquina de cartão para cada número de parcelas (1x a 18x).</p>
                             </div>
 
                             {isLoadingTaxas ? (
@@ -18400,8 +18416,8 @@ export default function Dashboard({ session, profileDataProps }) {
                               </div>
                             ) : (
                               <form onSubmit={handleSaveTaxasCartao} className="space-y-6">
-                                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4">
-                                  {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                                  {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
                                     <div key={n} className="bg-black border border-[#222222] p-3 rounded-lg flex flex-col gap-1.5 focus-within:border-[#6A0DAD]">
                                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{n}x Parcelas</label>
                                       <div className="relative">
