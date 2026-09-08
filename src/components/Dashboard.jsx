@@ -525,6 +525,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [vendaNewQty, setVendaNewQty] = useState('');
   const [vendaNewValor, setVendaNewValor] = useState('');
   const [vendaNewComissao, setVendaNewComissao] = useState('');
+  const [vendaNewMetodoPagamento, setVendaNewMetodoPagamento] = useState('PIX');
   const [vendaJustificativa, setVendaJustificativa] = useState('');
   const [isVendaEditModalOpen, setIsVendaEditModalOpen] = useState(false);
 
@@ -7787,6 +7788,8 @@ export default function Dashboard({ session, profileDataProps }) {
     setVendaNewQty(venda.quantidade);
     setVendaNewValor(venda.valor_total);
     setVendaNewComissao(venda.comissao);
+    const metodoInicial = venda.metodo_pagamento || venda.forma_pagamento || 'PIX';
+    setVendaNewMetodoPagamento(metodoInicial);
     setVendaJustificativa('');
     setIsVendaEditModalOpen(true);
   };
@@ -7804,6 +7807,7 @@ export default function Dashboard({ session, profileDataProps }) {
     const novaQtd = Number(vendaNewQty);
     const novoValor = Number(vendaNewValor);
     const novaComissao = Number(vendaNewComissao);
+    const novoMetodo = vendaNewMetodoPagamento;
 
     try {
       const { data, error } = await supabase.rpc('corrigir_venda', {
@@ -7812,7 +7816,8 @@ export default function Dashboard({ session, profileDataProps }) {
         p_new_valor_total: novoValor,
         p_new_comissao: novaComissao,
         p_justificativa: vendaJustificativa.trim(),
-        p_new_nome_produto: novoNome
+        p_new_nome_produto: novoNome,
+        p_new_metodo_pagamento: novoMetodo
       });
 
       if (error) throw error;
@@ -7833,7 +7838,9 @@ export default function Dashboard({ session, profileDataProps }) {
             },
             quantidade: novaQtd,
             valor_total: novoValor,
-            comissao: novaComissao
+            comissao: novaComissao,
+            metodo_pagamento: novoMetodo,
+            forma_pagamento: novoMetodo
           };
         }
         return v;
@@ -7851,7 +7858,9 @@ export default function Dashboard({ session, profileDataProps }) {
             },
             quantidade: novaQtd,
             valor_total: novoValor,
-            comissao: novaComissao
+            comissao: novaComissao,
+            metodo_pagamento: novoMetodo,
+            forma_pagamento: novoMetodo
           };
         }
         return v;
@@ -19715,6 +19724,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               <th className="pb-3">Vendedor</th>
                               <th className="pb-3">Produto</th>
                               <th className="pb-3">Filial</th>
+                              <th className="pb-3">Forma de Pagamento</th>
                               <th className="pb-3 text-center">Qtd</th>
                               <th className="pb-3">Valor Total</th>
                               {['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) && (
@@ -19733,7 +19743,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               return date.getMonth() === parseInt(month, 10) - 1 && date.getFullYear() === parseInt(year, 10);
                             }).length === 0 ? (
                               <tr>
-                                <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 9 : 7} className="py-6 text-center italic text-gray-600">Nenhuma venda faturada neste mês.</td>
+                                <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 10 : 8} className="py-6 text-center italic text-gray-600">Nenhuma venda faturada neste mês.</td>
                               </tr>
                             ) : (
                               vendas.filter(sale => {
@@ -19746,6 +19756,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
                                 const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
                                 const produtoNome = sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || prodObj?.nome || (sale.produto_id ? `Produto #${String(sale.produto_id).substring(0, 6)}` : 'Produto Geral');
+                                const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
 
                                 return (
                                   <tr key={sale.id} className="hover:bg-purple-950/5 print:hover:bg-transparent transition-colors">
@@ -19756,6 +19767,11 @@ export default function Dashboard({ session, profileDataProps }) {
                                     <td className="py-3 font-semibold text-white print:text-black">{produtoNome}</td>
                                     <td className="py-3 text-gray-400">
                                       {filiais.find(f => f.id === sale.filial_id)?.nome || 'Sem filial'}
+                                    </td>
+                                    <td className="py-3 text-gray-300">
+                                      <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-[#111111] border border-[#333333] text-purple-300 uppercase">
+                                        {metodoPag}
+                                      </span>
                                     </td>
                                     <td className="py-3 text-center font-bold">{sale.quantidade}</td>
                                     <td className="py-3 font-mono font-bold text-white print:text-black">R$ {parseFloat(sale.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
@@ -23054,19 +23070,40 @@ export default function Dashboard({ session, profileDataProps }) {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                      Comissão do Vendedor (R$)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={vendaNewComissao}
-                      onChange={(e) => setVendaNewComissao(e.target.value)}
-                      required
-                      min="0"
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Comissão do Vendedor (R$)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={vendaNewComissao}
+                        onChange={(e) => setVendaNewComissao(e.target.value)}
+                        required
+                        min="0"
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        MÉTODO DE PAGAMENTO <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={vendaNewMetodoPagamento}
+                        onChange={(e) => setVendaNewMetodoPagamento(e.target.value)}
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none font-medium cursor-pointer transition-all"
+                      >
+                        <option value="PIX" className="bg-[#111] text-white">PIX</option>
+                        <option value="Cartão de Crédito" className="bg-[#111] text-white">Cartão de Crédito</option>
+                        <option value="Cartão de Débito" className="bg-[#111] text-white">Cartão de Débito</option>
+                        <option value="Dinheiro" className="bg-[#111] text-white">Dinheiro</option>
+                        <option value="Boleto" className="bg-[#111] text-white">Boleto</option>
+                        <option value="Crediário / Carnê" className="bg-[#111] text-white">Crediário / Carnê</option>
+                        <option value="Múltiplos / Outro" className="bg-[#111] text-white">Múltiplos / Outro</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div>
