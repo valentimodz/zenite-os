@@ -9502,15 +9502,18 @@ export default function Dashboard({ session, profileDataProps }) {
       if (error) {
         if (error.code === '42P01') {
           console.warn('Tabela taxas_cartao não existe ainda. Usando taxas padrão locais.');
-          const fallbackRates = Array.from({ length: 18 }, (_, i) => ({
-            empresa_id: targetEmpresaId,
-            parcela: i + 1,
-            parcelas: i + 1,
-            taxa: 1.5 + i
-          }));
+          const fallbackRates = [
+            { empresa_id: targetEmpresaId, parcela: 0, parcelas: 0, taxa: 1.0 },
+            ...Array.from({ length: 18 }, (_, i) => ({
+              empresa_id: targetEmpresaId,
+              parcela: i + 1,
+              parcelas: i + 1,
+              taxa: 1.5 + i
+            }))
+          ];
           setTaxasCartao(fallbackRates);
 
-          const ratesMap = {};
+          const ratesMap = { 0: 1.0 };
           for (let i = 1; i <= 18; i++) {
             ratesMap[i] = 1.5 + (i - 1);
           }
@@ -9521,15 +9524,18 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       if (!data || data.length === 0) {
-        const defaultRates = Array.from({ length: 18 }, (_, i) => ({
-          empresa_id: targetEmpresaId,
-          parcela: i + 1,
-          parcelas: i + 1,
-          taxa: 1.5 + i
-        }));
+        const defaultRates = [
+          { empresa_id: targetEmpresaId, parcela: 0, parcelas: 0, taxa: 1.0 },
+          ...Array.from({ length: 18 }, (_, i) => ({
+            empresa_id: targetEmpresaId,
+            parcela: i + 1,
+            parcelas: i + 1,
+            taxa: 1.5 + i
+          }))
+        ];
         setTaxasCartao(defaultRates);
 
-        const ratesMap = {};
+        const ratesMap = { 0: 1.0 };
         for (let i = 1; i <= 18; i++) {
           ratesMap[i] = 1.5 + (i - 1);
         }
@@ -9543,6 +9549,8 @@ export default function Dashboard({ session, profileDataProps }) {
         }));
         setTaxasCartao(normalizedData);
         const ratesMap = {};
+        const debitoRow = normalizedData.find(r => r.parcela === 0 || r.parcelas === 0);
+        ratesMap[0] = debitoRow ? debitoRow.taxa : 1.0;
         for (let i = 1; i <= 18; i++) {
           const row = normalizedData.find(r => r.parcela === i || r.parcelas === i);
           ratesMap[i] = row ? row.taxa : (1.5 + (i - 1));
@@ -9551,15 +9559,18 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     } catch (err) {
       console.error('Erro ao buscar taxas de cartão:', err);
-      const fallbackRates = Array.from({ length: 18 }, (_, i) => ({
-        empresa_id: targetEmpresaId,
-        parcela: i + 1,
-        parcelas: i + 1,
-        taxa: 1.5 + i
-      }));
+      const fallbackRates = [
+        { empresa_id: targetEmpresaId, parcela: 0, parcelas: 0, taxa: 1.0 },
+        ...Array.from({ length: 18 }, (_, i) => ({
+          empresa_id: targetEmpresaId,
+          parcela: i + 1,
+          parcelas: i + 1,
+          taxa: 1.5 + i
+        }))
+      ];
       setTaxasCartao(fallbackRates);
 
-      const ratesMap = {};
+      const ratesMap = { 0: 1.0 };
       for (let i = 1; i <= 18; i++) {
         ratesMap[i] = 1.5 + (i - 1);
       }
@@ -9569,7 +9580,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Salvar taxas de cartão (1x a 18x) com upsert em empresa_id, parcela
+  // Salvar taxas de cartão (Débito = 0 e Crédito de 1x a 18x) com upsert em empresa_id, parcela
   const handleSaveTaxasCartao = async (e) => {
     e.preventDefault();
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
@@ -9580,6 +9591,13 @@ export default function Dashboard({ session, profileDataProps }) {
     setIsSavingTaxas(true);
     try {
       const upsertData = [];
+      // Parcela 0: Taxa da Máquina para Débito
+      upsertData.push({
+        empresa_id: targetEmpresaId,
+        parcela: 0,
+        taxa: parseFloat(tempTaxasMap[0]) || 0
+      });
+      // Parcelas 1 a 18: Taxas para Crédito Parcelado
       for (let i = 1; i <= 18; i++) {
         upsertData.push({
           empresa_id: targetEmpresaId,
@@ -13962,7 +13980,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           {(pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') && (
                             <div className="space-y-1 animate-fadeIn">
                               <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wide">
-                                Número de Parcelas (Crédito)
+                                Opção de Parcelamento (Crédito)
                               </label>
                               <select
                                 value={pdvNovoParcelas}
@@ -13973,11 +13991,18 @@ export default function Dashboard({ session, profileDataProps }) {
                                 }}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
-                                {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
-                                  <option key={n} value={n}>
-                                    {n}x no Cartão de Crédito
-                                  </option>
-                                ))}
+                                {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => {
+                                  const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
+                                  const feeObj = taxasCartao.find(t => (t.parcela === n || t.parcelas === n));
+                                  const feePct = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (n - 1));
+                                  const totalCalc = valBase > 0 ? (valBase * (1 + (feePct / 100))) : 0;
+                                  const parcelaCalc = totalCalc > 0 ? (totalCalc / n) : 0;
+                                  return (
+                                    <option key={n} value={n}>
+                                      {n}x parcelas de R$ {parcelaCalc.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Total: R$ {totalCalc.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                                    </option>
+                                  );
+                                })}
                               </select>
                             </div>
                           )}
@@ -18416,25 +18441,63 @@ export default function Dashboard({ session, profileDataProps }) {
                               </div>
                             ) : (
                               <form onSubmit={handleSaveTaxasCartao} className="space-y-6">
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                                  {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
-                                    <div key={n} className="bg-black border border-[#222222] p-3 rounded-lg flex flex-col gap-1.5 focus-within:border-[#6A0DAD]">
-                                      <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{n}x Parcelas</label>
-                                      <div className="relative">
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          min="0"
-                                          value={tempTaxasMap[n] !== undefined ? tempTaxasMap[n] : ''}
-                                          onChange={(e) => setTempTaxasMap(prev => ({ ...prev, [n]: e.target.value }))}
-                                          className="w-full bg-transparent border-0 text-white font-bold font-mono text-sm p-0 focus:ring-0 outline-none pr-5"
-                                          placeholder="0.00"
-                                          required
-                                        />
-                                        <span className="absolute right-0 top-0.5 text-xs text-gray-500 font-bold">%</span>
-                                      </div>
+                                {/* CARD DESTACADO: TAXA DE DÉBITO (PARCELA 0) */}
+                                <div className="bg-gradient-to-r from-[#6A0DAD]/15 to-transparent border border-[#6A0DAD]/40 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2.5 py-0.5 rounded bg-[#6A0DAD] text-white text-[11px] font-black tracking-wider uppercase">
+                                        DÉBITO
+                                      </span>
+                                      <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">
+                                        (À Vista - Parcela Única)
+                                      </span>
                                     </div>
-                                  ))}
+                                    <p className="text-xs text-gray-300">
+                                      Taxa retida pela máquina de cartão nas vendas no débito (utilizada exclusivamente para conciliação líquida interna de relatórios).
+                                    </p>
+                                  </div>
+                                  <div className="bg-black border border-[#6A0DAD]/60 p-2.5 rounded-lg flex items-center gap-2 min-w-[150px] self-start sm:self-auto">
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">Taxa (%):</label>
+                                    <div className="relative flex-1">
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={tempTaxasMap[0] !== undefined ? tempTaxasMap[0] : ''}
+                                        onChange={(e) => setTempTaxasMap(prev => ({ ...prev, 0: e.target.value }))}
+                                        className="w-full bg-transparent border-0 text-white font-bold font-mono text-sm p-0 focus:ring-0 outline-none pr-5 text-right"
+                                        placeholder="0.00"
+                                        required
+                                      />
+                                      <span className="absolute right-0 top-0 text-xs text-purple-400 font-bold">%</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
+                                    Parcelamento no Cartão de Crédito (1x a 18x)
+                                  </label>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                                    {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
+                                      <div key={n} className="bg-black border border-[#222222] p-3 rounded-lg flex flex-col gap-1.5 focus-within:border-[#6A0DAD]">
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{n}x Parcelas</label>
+                                        <div className="relative">
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={tempTaxasMap[n] !== undefined ? tempTaxasMap[n] : ''}
+                                            onChange={(e) => setTempTaxasMap(prev => ({ ...prev, [n]: e.target.value }))}
+                                            className="w-full bg-transparent border-0 text-white font-bold font-mono text-sm p-0 focus:ring-0 outline-none pr-5"
+                                            placeholder="0.00"
+                                            required
+                                          />
+                                          <span className="absolute right-0 top-0.5 text-xs text-gray-500 font-bold">%</span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
 
                                 <div className="flex justify-end">
@@ -22294,53 +22357,90 @@ export default function Dashboard({ session, profileDataProps }) {
                     <span className="font-mono">- R$ {pdvReciboDados.financeiro.desconto_troca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-foreground print:text-black font-extrabold text-sm border-t border-border pt-2">
-                  <span>Total a Pagar:</span>
-                  <span className="font-mono">R$ {Number(pdvReciboDados.financeiro.saldo_pagar_original ?? pdvReciboDados.financeiro.saldo_pagar).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-gray-500 text-[10px] border-t border-[#222222]/50 pt-2">
-                  <span>Método de Pagamento:</span>
-                  <span className="font-bold uppercase text-white print:text-black">
-                    {(() => {
-                      const fin = pdvReciboDados.financeiro || {};
-                      if (fin.pagamentos && fin.pagamentos.length > 1) {
-                        return fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
-                      }
-                      if (fin.metodo === 'troca') {
-                        if (fin.saldo_pagar > 0) {
-                          const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
-                            ? `Cartão de Crédito (${fin.parcelas || 1}x)`
-                            : fin.metodo_saldo === 'cartao_debito'
-                              ? 'Cartão de Débito (À Vista)'
-                              : fin.metodo_saldo === 'pix'
-                                ? 'Pix'
-                                : fin.metodo_saldo === 'boleto'
-                                  ? 'Boleto'
-                                  : 'Dinheiro';
-                          return `Troca + ${saldoMetodo}`;
-                        }
-                        return 'Troca (Totalmente Abatido)';
-                      }
-                      const mNorm = String(fin.metodo || '').toLowerCase();
-                      if (mNorm === 'cartao_credito' || mNorm === 'cartao') {
-                        return `Cartão de Crédito (${fin.parcelas || 1}x)`;
-                      }
-                      if (mNorm === 'cartao_debito') {
-                        return 'Cartão de Débito (À Vista)';
-                      }
-                      if (mNorm === 'pix') {
-                        return 'Pix';
-                      }
-                      if (mNorm === 'dinheiro') {
-                        return 'Dinheiro';
-                      }
-                      if (mNorm === 'boleto') {
-                        return 'Boleto Parcelado';
-                      }
-                      return fin.metodo || 'Dinheiro';
-                    })()}
-                  </span>
-                </div>
+                {/* BLOCO FORMATAÇÃO ESPECÍFICA DO CUPOM TÉRMICO / RECIBO */}
+                {(() => {
+                  const fin = pdvReciboDados.financeiro || {};
+                  const totalGeral = Number(fin.saldo_pagar_original ?? fin.saldo_pagar ?? 0);
+                  const mNorm = String(fin.metodo || '').toLowerCase();
+                  const isDebito = mNorm === 'cartao_debito';
+                  const isCredito = mNorm === 'cartao_credito' || mNorm === 'cartao';
+                  const parcelasNum = fin.parcelas || 1;
+                  const valorParcela = parcelasNum > 0 ? (totalGeral / parcelasNum) : totalGeral;
+
+                  if (isDebito) {
+                    return (
+                      <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
+                          <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE DÉBITO</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black">
+                          <span>TOTAL PAGO:</span>
+                          <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (isCredito) {
+                    return (
+                      <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                        <div className="flex justify-between">
+                          <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
+                          <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE CRÉDITO</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400 font-bold uppercase">PARCELAMENTO:</span>
+                          <span className="font-extrabold text-white print:text-black">
+                            {parcelasNum}x de R$ {valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
+                          <span>TOTAL PAGO:</span>
+                          <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
+                        <span className="font-extrabold text-white print:text-black uppercase">
+                          {(() => {
+                            if (fin.pagamentos && fin.pagamentos.length > 1) {
+                              return fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
+                            }
+                            if (fin.metodo === 'troca') {
+                              if (fin.saldo_pagar > 0) {
+                                const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
+                                  ? `Cartão de Crédito (${fin.parcelas || 1}x)`
+                                  : fin.metodo_saldo === 'cartao_debito'
+                                    ? 'Cartão de Débito'
+                                    : fin.metodo_saldo === 'pix'
+                                      ? 'Pix'
+                                      : fin.metodo_saldo === 'boleto'
+                                        ? 'Boleto'
+                                        : 'Dinheiro';
+                                return `Troca + ${saldoMetodo}`;
+                              }
+                              return 'Troca (Totalmente Abatido)';
+                            }
+                            if (mNorm === 'pix') return 'PIX';
+                            if (mNorm === 'dinheiro') return 'DINHEIRO';
+                            if (mNorm === 'boleto') return 'BOLETO PARCELADO';
+                            return String(fin.metodo || 'DINHEIRO').toUpperCase();
+                          })()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black">
+                        <span>TOTAL PAGO:</span>
+                        <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Ações */}
