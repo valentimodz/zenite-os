@@ -10329,15 +10329,20 @@ export default function Dashboard({ session, profileDataProps }) {
     const subtotalCart = pdvCart.reduce((sum, item) => sum + (parseFloat(item.valorUnitario) || 0) * item.quantidade, 0);
     const valorUsadoTotal = isTrocaAtiva ? pdvUsadoList.reduce((acc, item) => acc + item.valor, 0) : 0;
 
-    // Calcular juros/taxas do cartão se aplicável
-    const metodoSaldo = isTrocaAtiva ? pdvMetodoRestante : pdvMetodoPagamento;
-    const isCartao = metodoSaldo === 'cartao';
-    const parcelas = isCartao ? parseInt(pdvCartaoParcelas, 10) : 1;
+    // Identificar método de pagamento principal e dados de parcelamento
+    const metodoEfetivo = isTrocaAtiva
+      ? 'troca'
+      : (pdvListaPagamentos.length > 0 ? pdvListaPagamentos[0].metodo : pdvMetodoPagamento);
+    const isCartaoEfetivo = metodoEfetivo === 'cartao_credito' || metodoEfetivo === 'cartao';
+    const parcelasEfetivo = isCartaoEfetivo
+      ? ((pdvListaPagamentos.length > 0 ? pdvListaPagamentos[0].parcelas : pdvCartaoParcelas) || 1)
+      : 1;
 
+    // Calcular juros/taxas do cartão se aplicável
     let feePercent = 0;
-    if (isCartao) {
-      const feeObj = taxasCartao.find(t => t.parcelas === parcelas);
-      feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (parcelas - 1));
+    if (isCartaoEfetivo) {
+      const feeObj = taxasCartao.find(t => t.parcelas === parcelasEfetivo);
+      feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (parcelasEfetivo - 1));
     }
     const feeFactor = 1 + (feePercent / 100);
 
@@ -10562,8 +10567,8 @@ export default function Dashboard({ session, profileDataProps }) {
           p_imei_novo: (item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei) ? item.imei : null,
           p_valor_total_novo: valorTotalNovo,
           p_comissao: comissaoCalculada,
-          p_metodo_pagamento: idx === 0 ? (isTrocaAtiva ? 'troca' : pdvMetodoPagamento) : (isTrocaAtiva ? pdvMetodoRestante : pdvMetodoPagamento),
-          p_parcelas: parcelas,
+          p_metodo_pagamento: idx === 0 ? metodoEfetivo : (isTrocaAtiva ? pdvMetodoRestante : metodoEfetivo),
+          p_parcelas: parcelasEfetivo,
           p_valor_desconto_troca: itemDescontoTroca,
           p_used_valor_avaliacao: itemDescontoTroca,
           p_trocas_json: itemTrocaJson,
@@ -10578,9 +10583,19 @@ export default function Dashboard({ session, profileDataProps }) {
           const resolvedClienteNome = nomeClienteFinal || 'Consumidor Final';
           const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
           const resolvedClienteId = cliente_id || clienteIdBanco || selectedPdvClienteId || null;
-          const resolvedFinanceira = (pdvMetodoPagamento === 'boleto')
+          const mapNomeMetodo = {
+            'pix': 'PIX',
+            'cartao': 'CARTÃO DE CRÉDITO',
+            'cartao_credito': 'CARTÃO DE CRÉDITO',
+            'cartao_debito': 'CARTÃO DE DÉBITO',
+            'dinheiro': 'DINHEIRO',
+            'boleto': 'BOLETO',
+            'troca': 'TROCA'
+          };
+          const metodoNomeFormatado = mapNomeMetodo[metodoEfetivo?.toLowerCase()] || (metodoEfetivo ? metodoEfetivo.toUpperCase() : 'PIX');
+          const resolvedFinanceira = (metodoEfetivo === 'boleto')
             ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
-            : (pdvMetodoPagamento ? pdvMetodoPagamento.toUpperCase() : 'ZÊNETE PDV');
+            : metodoNomeFormatado;
 
           const actualValorPago = pdvStatusPagamento === 'PAGO'
             ? valorTotalNovo
@@ -10612,6 +10627,9 @@ export default function Dashboard({ session, profileDataProps }) {
             criado_por: vendedor_id,
             vendedor_nome: profile?.nome || session?.user?.email || 'Vendedor',
             treener_id: selectedTreenerId || null,
+            metodo_pagamento: metodoEfetivo,
+            forma_pagamento: metodoEfetivo,
+            parcelas: parcelasEfetivo,
             financeira_parceira: resolvedFinanceira,
             valor_pago: actualValorPago,
             status_pagamento: pdvStatusPagamento,
@@ -10684,7 +10702,7 @@ export default function Dashboard({ session, profileDataProps }) {
                 venda_id: rpcRes.venda_id,
                 valor_pago: pag.valor,
                 metodo_pagamento: metodoResolved,
-                parcelas: pag.metodo === 'cartao_credito' ? (pag.parcelas || 1) : 1,
+                parcelas: (pag.metodo === 'cartao_credito' || pag.metodo === 'cartao') ? (pag.parcelas || 1) : 1,
                 tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
               });
             }
@@ -10694,14 +10712,15 @@ export default function Dashboard({ session, profileDataProps }) {
               'cartao': 'CARTAO_CREDITO',
               'cartao_credito': 'CARTAO_CREDITO',
               'cartao_debito': 'CARTAO_DEBITO',
-              'dinheiro': 'DINHEIRO'
+              'dinheiro': 'DINHEIRO',
+              'boleto': 'BOLETO'
             };
-            const metodoResolved = mapMetodo[pdvMetodoPagamento?.toLowerCase()] || 'DINHEIRO';
+            const metodoResolved = mapMetodo[metodoEfetivo?.toLowerCase()] || 'DINHEIRO';
             await supabase.from('vendas_pagamentos').insert({
               venda_id: rpcRes.venda_id,
               valor_pago: actualValorPago,
               metodo_pagamento: metodoResolved,
-              parcelas: pdvMetodoPagamento === 'cartao_credito' ? (pdvCartaoParcelas || 1) : 1,
+              parcelas: isCartaoEfetivo ? (parcelasEfetivo || 1) : 1,
               tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
             });
           }
@@ -10762,9 +10781,10 @@ export default function Dashboard({ session, profileDataProps }) {
           desconto_troca: valorUsadoTotal,
           saldo_pagar: finalSaldoPagar,
           saldo_pagar_original: finalSaldoPagarOriginal,
-          metodo: isTrocaAtiva ? 'troca' : pdvMetodoPagamento,
+          metodo: isTrocaAtiva ? 'troca' : metodoEfetivo,
           metodo_saldo: pdvMetodoRestante,
-          parcelas: parcelas
+          parcelas: parcelasEfetivo,
+          pagamentos: pdvListaPagamentos
         },
         trocas: pdvUsadoList
       };
@@ -13901,8 +13921,13 @@ export default function Dashboard({ session, profileDataProps }) {
                                     type="button"
                                     onClick={() => {
                                       setPdvNovoMetodo(m.value);
+                                      setPdvMetodoPagamento(m.value);
                                       if (m.value === 'cartao_debito' || m.value !== 'cartao_credito') {
                                         setPdvNovoParcelas(1);
+                                        setPdvCartaoParcelas(1);
+                                      }
+                                      if (m.value === 'cartao_credito' || m.value === 'cartao') {
+                                        setPdvCartaoParcelas(pdvNovoParcelas || 1);
                                       }
                                     }}
                                     className={`py-2 px-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
@@ -13925,7 +13950,11 @@ export default function Dashboard({ session, profileDataProps }) {
                               </label>
                               <select
                                 value={pdvNovoParcelas}
-                                onChange={(e) => setPdvNovoParcelas(parseInt(e.target.value, 10))}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  setPdvNovoParcelas(val);
+                                  setPdvCartaoParcelas(val);
+                                }}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
                                 {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
@@ -13963,7 +13992,10 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <button
                                     key={fin}
                                     type="button"
-                                    onClick={() => setPdvNovoFinanceira(fin)}
+                                    onClick={() => {
+                                      setPdvNovoFinanceira(fin);
+                                      setPdvFinanceiraParceira(fin);
+                                    }}
                                     className={`py-1.5 text-[9px] font-bold rounded-lg border transition-all cursor-pointer ${pdvNovoFinanceira === fin
                                       ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                                       : 'bg-surface text-muted-foreground border-border hover:text-foreground'
@@ -22253,19 +22285,44 @@ export default function Dashboard({ session, profileDataProps }) {
                 <div className="flex justify-between text-gray-500 text-[10px] border-t border-[#222222]/50 pt-2">
                   <span>Método de Pagamento:</span>
                   <span className="font-bold uppercase text-white print:text-black">
-                    {pdvReciboDados.financeiro.metodo === 'troca' ? (
-                      pdvReciboDados.financeiro.saldo_pagar > 0 ? (
-                        `Troca + ${pdvReciboDados.financeiro.metodo_saldo === 'cartao' ? `Cartão (${pdvReciboDados.financeiro.parcelas}x)` : pdvReciboDados.financeiro.metodo_saldo === 'pix' ? 'Pix' : 'Dinheiro'}`
-                      ) : (
-                        'Troca (Totalmente Abatido)'
-                      )
-                    ) : (
-                      pdvReciboDados.financeiro.metodo === 'cartao'
-                        ? `Cartão (${pdvReciboDados.financeiro.parcelas}x)`
-                        : pdvReciboDados.financeiro.metodo === 'pix'
-                          ? 'Pix'
-                          : 'Dinheiro'
-                    )}
+                    {(() => {
+                      const fin = pdvReciboDados.financeiro || {};
+                      if (fin.pagamentos && fin.pagamentos.length > 1) {
+                        return fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
+                      }
+                      if (fin.metodo === 'troca') {
+                        if (fin.saldo_pagar > 0) {
+                          const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
+                            ? `Cartão de Crédito (${fin.parcelas || 1}x)`
+                            : fin.metodo_saldo === 'cartao_debito'
+                              ? 'Cartão de Débito (À Vista)'
+                              : fin.metodo_saldo === 'pix'
+                                ? 'Pix'
+                                : fin.metodo_saldo === 'boleto'
+                                  ? 'Boleto'
+                                  : 'Dinheiro';
+                          return `Troca + ${saldoMetodo}`;
+                        }
+                        return 'Troca (Totalmente Abatido)';
+                      }
+                      const mNorm = String(fin.metodo || '').toLowerCase();
+                      if (mNorm === 'cartao_credito' || mNorm === 'cartao') {
+                        return `Cartão de Crédito (${fin.parcelas || 1}x)`;
+                      }
+                      if (mNorm === 'cartao_debito') {
+                        return 'Cartão de Débito (À Vista)';
+                      }
+                      if (mNorm === 'pix') {
+                        return 'Pix';
+                      }
+                      if (mNorm === 'dinheiro') {
+                        return 'Dinheiro';
+                      }
+                      if (mNorm === 'boleto') {
+                        return 'Boleto Parcelado';
+                      }
+                      return fin.metodo || 'Dinheiro';
+                    })()}
                   </span>
                 </div>
               </div>
