@@ -888,6 +888,14 @@ export default function Dashboard({ session, profileDataProps }) {
   const [transfSubTab, setTransfSubTab] = useState('enviar'); // 'enviar' | 'receber'
   const [transfObs, setTransfObs] = useState('');
 
+  // Garantir que a Filial Destino nunca seja igual à Filial Origem
+  useEffect(() => {
+    const origemAtual = transfOrigemId || activeFilialId;
+    if (origemAtual && transfDestinoId && transfDestinoId === origemAtual) {
+      setTransfDestinoId('');
+    }
+  }, [transfOrigemId, activeFilialId, transfDestinoId]);
+
   // Estado para visualização de comprovante em Modal (Gerente)
   const [modalComprovante, setModalComprovante] = useState(null);
 
@@ -10643,8 +10651,8 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    if (transfDestinoId && transfDestinoId === origemId) {
-      alert('A Filial de Destino não pode ser a mesma da Filial de Origem.');
+    if (!transfDestinoId || transfDestinoId === origemId) {
+      alert('Selecione uma filial de destino válida antes de montar o lote.');
       return;
     }
 
@@ -10659,10 +10667,10 @@ export default function Dashboard({ session, profileDataProps }) {
         .maybeSingle();
 
       if (imeiData) {
-        const isAdmin = profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN' || profile?.role === 'OWNER';
-        if (!isAdmin && imeiData.filial_id !== origemId) {
-          const filialPertencente = filiais.find(f => f.id === imeiData.filial_id)?.nome || 'outra filial';
-          alert(`Este IMEI pertence ao estoque da filial "${filialPertencente}", e não à filial de origem selecionada.`);
+        if (imeiData.filial_id !== origemId) {
+          const filialPertencente = filiais.find(f => f.id === imeiData.filial_id)?.nome || 'Outra Filial';
+          const filialOrigemNome = filiais.find(f => f.id === origemId)?.nome || 'Origem';
+          alert(`Este item pertence à filial ${filialPertencente} e não pode ser transferido a partir de ${filialOrigemNome}.`);
           return;
         }
 
