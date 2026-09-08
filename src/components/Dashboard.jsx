@@ -8283,15 +8283,16 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       if (isCelular) {
         // 1. Verificar se IMEI é único no banco
-        const { data: existente, error: checkErr } = await supabase
+        const imeiInputLimpo = imei;
+        const { data: imeiExistente, error: checkErr } = await supabase
           .from('imeis')
-          .select('imei')
-          .eq('imei', imei)
+          .select('imei, status, filiais(nome)')
+          .eq('imei', imeiInputLimpo)
           .maybeSingle();
 
         if (checkErr) throw checkErr;
-        if (existente) {
-          alert('Este IMEI já está registrado no sistema.');
+        if (imeiExistente) {
+          showToast(`O IMEI ${imeiInputLimpo} já está cadastrado na filial "${imeiExistente.filiais?.nome || 'Outra Filial'}" com status "${imeiExistente.status}". Use a tela de Transferência para movê-lo.`, 'error');
           setLoadingEntrada(false);
           return;
         }
@@ -8534,14 +8535,14 @@ export default function Dashboard({ session, profileDataProps }) {
         const imeiStrings = imeisValidos.map(i => i.imei);
         const { data: existingImeis, error: existErr } = await supabase
           .from('imeis')
-          .select('imei')
-          .in('imei', imeiStrings)
-          .eq('empresa_id', company.id);
+          .select('imei, status, filiais(nome)')
+          .in('imei', imeiStrings);
 
         if (existErr) throw existErr;
 
         if (existingImeis && existingImeis.length > 0) {
-          setToast({ message: 'Erro: Este IMEI já está registrado no sistema.', type: 'error' });
+          const primeiroDuplicado = existingImeis[0];
+          showToast(`O IMEI ${primeiroDuplicado.imei} já está cadastrado na filial "${primeiroDuplicado.filiais?.nome || 'Outra Filial'}" com status "${primeiroDuplicado.status}". Use a tela de Transferência para movê-lo.`, 'error');
           setLoadingEntrada(false);
           return;
         }
