@@ -855,6 +855,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isLoadingCaixa, setIsLoadingCaixa] = useState(false);
   const [isModalAbrirCaixaOpen, setIsModalAbrirCaixaOpen] = useState(false);
   const [fundoTrocoInput, setFundoTrocoInput] = useState('');
+  const [depositoInicialInput, setDepositoInicialInput] = useState('');
   const [obsAberturaInput, setObsAberturaInput] = useState('');
   const [isSubmittingAbertura, setIsSubmittingAbertura] = useState(false);
 
@@ -3341,7 +3342,9 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    const saldoInicialNum = parseFloat(fundoTrocoInput.replace(/\./g, '').replace(',', '.')) || 0;
+    const saldoInicialNum = parseFloat(String(fundoTrocoInput).replace(/\./g, '').replace(',', '.')) || 0;
+    const depositoInicialNum = parseFloat(String(depositoInicialInput).replace(/\./g, '').replace(',', '.')) || 0;
+    const obsAberturaStr = obsAberturaInput.trim() || null;
     setIsSubmittingAbertura(true);
 
     try {
@@ -3350,7 +3353,9 @@ export default function Dashboard({ session, profileDataProps }) {
         filial_id: targetFilialId,
         operador_id: operadorId,
         saldo_inicial: saldoInicialNum,
-        observacoes_abertura: obsAberturaInput.trim() || null,
+        deposito_inicial: depositoInicialNum,
+        observacao_abertura: obsAberturaStr,
+        observacoes_abertura: obsAberturaStr,
         status: 'aberto',
         data_abertura: new Date().toISOString(),
         data_fechamento: null
@@ -3364,12 +3369,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (error) {
         console.error('Erro ao abrir caixa no Supabase (tentando fallback):', error);
+        // Fallback defensivo caso colunas novas ainda não existam no schema
         const fallbackPayload = {
           empresa_id: targetEmpresaId,
           filial_id: targetFilialId,
           operador_id: operadorId,
           saldo_inicial: saldoInicialNum,
-          observacoes_abertura: obsAberturaInput.trim() || null,
+          observacoes_abertura: obsAberturaStr ? `Depósito: R$ ${depositoInicialNum.toFixed(2)} | ${obsAberturaStr}` : (depositoInicialNum > 0 ? `Depósito: R$ ${depositoInicialNum.toFixed(2)}` : null),
           status: 'aberto',
           data_abertura: new Date().toISOString(),
           data_fechamento: null
@@ -3383,8 +3389,12 @@ export default function Dashboard({ session, profileDataProps }) {
       setIsCaixaAberto(true);
       setIsModalAbrirCaixaOpen(false);
       setFundoTrocoInput('');
+      setDepositoInicialInput('');
       setObsAberturaInput('');
-      showToast(`Caixa aberto com sucesso! Fundo inicial: R$ ${saldoInicialNum.toFixed(2)}`, 'success');
+      const msgSucesso = depositoInicialNum > 0
+        ? `Caixa aberto com sucesso! Fundo: R$ ${saldoInicialNum.toFixed(2)} | Depósito: R$ ${depositoInicialNum.toFixed(2)}`
+        : `Caixa aberto com sucesso! Fundo inicial: R$ ${saldoInicialNum.toFixed(2)}`;
+      showToast(msgSucesso, 'success');
       fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
     } catch (err) {
       console.error('Falha crítica ao abrir caixa:', err);
@@ -19638,8 +19648,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       {/* Resumo de KPIs do Mês */}
                       {(() => {
+                        const isCaixaFechado = (cx) => !!(cx.fechado_em || cx.data_fechamento || String(cx.status || '').toUpperCase() === 'FECHADO');
+
                         const sessoesMes = sessoesCaixas.filter(cx => {
-                          const rawDate = cx.data_abertura || cx.created_at;
+                          const rawDate = cx.aberto_em || cx.data_abertura || cx.created_at;
                           let matchMes = true;
                           if (filtroMes) {
                             if (typeof rawDate === 'string' && rawDate.startsWith(filtroMes)) {
@@ -19657,8 +19669,8 @@ export default function Dashboard({ session, profileDataProps }) {
                           return matchMes && matchFilial;
                         });
 
-                        const totalAbertos = sessoesMes.filter(c => String(c.status || '').toLowerCase() === 'aberto').length;
-                        const totalFechados = sessoesMes.filter(c => String(c.status || '').toLowerCase() === 'fechado').length;
+                        const totalAbertos = sessoesMes.filter(c => !isCaixaFechado(c)).length;
+                        const totalFechados = sessoesMes.filter(c => isCaixaFechado(c)).length;
                         const somaFundoTroco = sessoesMes.reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
                         const somaVendasFechadas = sessoesMes.reduce((acc, c) => {
                           const totalVendas = Number(c.total_vendas || (Number(c.total_dinheiro || 0) + Number(c.total_cartao || 0) + Number(c.total_pix || 0)) || c.saldo_final || 0);
@@ -19712,8 +19724,16 @@ export default function Dashboard({ session, profileDataProps }) {
                           </thead>
                           <tbody className="divide-y divide-[#222222]/50">
                             {(() => {
+                              const formatarData = (dataStr) => {
+                                if (!dataStr) return '-';
+                                const d = new Date(dataStr);
+                                return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                              };
+
+                              const isCaixaFechado = (c) => !!(c.fechado_em || c.data_fechamento || String(c.status || '').toUpperCase() === 'FECHADO');
+
                               const sessoesFiltradas = sessoesCaixas.filter(cx => {
-                                const rawDate = cx.data_abertura || cx.created_at;
+                                const rawDate = cx.aberto_em || cx.data_abertura || cx.created_at;
                                 let matchMes = true;
                                 if (filtroMes) {
                                   if (typeof rawDate === 'string' && rawDate.startsWith(filtroMes)) {
@@ -19728,7 +19748,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                   }
                                 }
                                 const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || String(cx.filial_id) === String(filtroFilialCaixa);
-                                const matchStatus = !filtroStatusCaixa || filtroStatusCaixa === 'TODOS' || String(cx.status || '').toLowerCase() === filtroStatusCaixa.toLowerCase();
+
+                                const fechado = isCaixaFechado(cx);
+                                let matchStatus = true;
+                                if (filtroStatusCaixa === 'ABERTO') {
+                                  matchStatus = !fechado;
+                                } else if (filtroStatusCaixa === 'FECHADO') {
+                                  matchStatus = fechado;
+                                }
                                 return matchMes && matchFilial && matchStatus;
                               });
 
@@ -19786,11 +19813,13 @@ export default function Dashboard({ session, profileDataProps }) {
                               }
 
                               return sessoesFiltradas.map((cx) => {
-                                console.log("RAIO-X DO CAIXA:", cx);
-                                const isAberto = cx.status === 'aberto';
+                                const fechado = isCaixaFechado(cx);
+                                const isAberto = !fechado;
                                 const filialNome = cx.filial_nome || cx.filiais?.nome || filiais.find(f => String(f.id) === String(cx.filial_id))?.nome || 'Filial';
                                 const operadorNome = cx.operador_nome || cx.profiles?.nome || vendedores?.find(c => String(c.id) === String(cx.operador_id))?.nome || 'Operador';
                                 const totalVendasCalc = Number(cx.total_vendas || (Number(cx.total_dinheiro || 0) + Number(cx.total_cartao || 0) + Number(cx.total_pix || 0)) || cx.saldo_final || 0);
+                                const dataAberturaFormatada = formatarData(cx.aberto_em || cx.data_abertura || cx.created_at);
+                                const dataFechamentoFormatada = formatarData(cx.fechado_em || cx.data_fechamento);
 
                                 return (
                                   <tr key={cx.id} className="hover:bg-purple-950/10 transition-colors">
@@ -19822,24 +19851,29 @@ export default function Dashboard({ session, profileDataProps }) {
                                       </div>
                                     </td>
 
-                                    {/* Abertura & Fundo de Troco */}
+                                    {/* Abertura & Fundo de Troco / Depósito */}
                                     <td className="py-3.5 pr-4">
                                       <div className="flex flex-col gap-0.5">
                                         <span className="text-gray-400 font-mono text-[11px]">
-                                          {new Date(cx.data_abertura).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                          {dataAberturaFormatada}
                                         </span>
                                         <span className="text-green-400 font-mono font-extrabold text-xs">
                                           Fundo: R$ {Number(cx.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </span>
+                                        {Number(cx.deposito_inicial || 0) > 0 && (
+                                          <span className="text-purple-400 font-mono font-semibold text-[11px]">
+                                            Depósito: R$ {Number(cx.deposito_inicial).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          </span>
+                                        )}
                                       </div>
                                     </td>
 
                                     {/* Fechamento */}
                                     <td className="py-3.5 pr-4">
-                                      {cx.data_fechamento ? (
+                                      {fechado ? (
                                         <div className="flex flex-col gap-0.5">
                                           <span className="text-gray-300 font-mono text-[11px]">
-                                            {new Date(cx.data_fechamento).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                            {dataFechamentoFormatada}
                                           </span>
                                           <span className="text-gray-500 text-[10px]">Turno encerrado</span>
                                         </div>
@@ -21353,16 +21387,21 @@ export default function Dashboard({ session, profileDataProps }) {
                   <div className="p-2.5 rounded-xl bg-primary/15 border border-primary/30 text-primary">
                     <Store size={22} />
                   </div>
-                  <div>
+              {(() => {
+                const isDetalheFechado = !!(modalDetalheCaixa.data_fechamento || modalDetalheCaixa.fechado_em || String(modalDetalheCaixa.status || '').toUpperCase() === 'FECHADO');
+                const isDetalheAberto = !isDetalheFechado;
+                return (
+                  <>
                     <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
                       Sessão de Caixa
-                      {modalDetalheCaixa.status === 'aberto' ? (
+                      {isDetalheAberto ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                           ABERTO
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border">
+                          <Lock size={10} />
                           FECHADO
                         </span>
                       )}
@@ -21370,7 +21409,9 @@ export default function Dashboard({ session, profileDataProps }) {
                     <p className="text-xs text-muted-foreground">
                       {modalDetalheCaixa.filiais?.nome || modalDetalheCaixa.filial_nome || filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome || 'Filial'}
                     </p>
-                  </div>
+                  </>
+                );
+              })()}
                 </div>
                 <button
                   onClick={() => {
@@ -21405,7 +21446,14 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                   <div>
                     <span className="text-gray-500 text-[10px] block">Data / Hora Abertura</span>
-                    <span className="text-gray-300 font-mono text-xs">{new Date(modalDetalheCaixa.data_abertura).toLocaleString('pt-BR')}</span>
+                    <span className="text-gray-300 font-mono text-xs">
+                      {(() => {
+                        const raw = modalDetalheCaixa.aberto_em || modalDetalheCaixa.data_abertura || modalDetalheCaixa.created_at;
+                        if (!raw) return '-';
+                        const d = new Date(raw);
+                        return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                      })()}
+                    </span>
                   </div>
                   <div>
                     <span className="text-gray-500 text-[10px] block">Fundo de Troco Inicial</span>
@@ -21414,96 +21462,116 @@ export default function Dashboard({ session, profileDataProps }) {
                     </span>
                   </div>
                   <div>
-                    <span className="text-gray-500 text-[10px] block">Observações de Abertura</span>
-                    <span className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_abertura || 'Nenhuma'}</span>
+                    <span className="text-gray-500 text-[10px] block">Depósito / Suprimento</span>
+                    <span className="text-purple-300 font-mono font-extrabold text-sm">
+                      {Number(modalDetalheCaixa.deposito_inicial || 0) > 0
+                        ? `R$ ${Number(modalDetalheCaixa.deposito_inicial).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                        : '-'}
+                    </span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-gray-500 text-[10px] block">Observações / Ref. Depósito</span>
+                    <span className="text-gray-300 italic text-xs">
+                      {modalDetalheCaixa.observacao_abertura || modalDetalheCaixa.observacoes_abertura || 'Nenhuma'}
+                    </span>
                   </div>
                 </div>
               </div>
 
               {/* Informações de Fechamento / Vendas */}
-              <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
-                <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
-                  {modalDetalheCaixa.status === 'aberto' ? 'Status Atual do Turno' : 'Fechamento & Valores Reportados'}
-                </span>
-                {modalDetalheCaixa.status === 'aberto' ? (
-                  <div className="space-y-3 text-xs">
-                    <div className="text-xs text-amber-300/90 flex items-center gap-2 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg">
-                      <Clock size={16} className="animate-spin text-amber-400 shrink-0" />
-                      <span>Este caixa continua aberto em operação no PDV.</span>
+              {(() => {
+                const isDetalheFechado = !!(modalDetalheCaixa.data_fechamento || modalDetalheCaixa.fechado_em || String(modalDetalheCaixa.status || '').toUpperCase() === 'FECHADO');
+                const isDetalheAberto = !isDetalheFechado;
+                return (
+                  <>
+                    <div className="space-y-3 bg-[#111111]/70 border border-[#222] p-4 rounded-xl">
+                      <span className="text-[11px] font-black text-purple-400 uppercase tracking-wider block">
+                        {isDetalheAberto ? 'Status Atual do Turno' : 'Fechamento & Valores Reportados'}
+                      </span>
+                      {isDetalheAberto ? (
+                        <div className="space-y-3 text-xs">
+                          <div className="text-xs text-amber-300/90 flex items-center gap-2 bg-amber-950/20 border border-amber-800/30 p-2.5 rounded-lg">
+                            <Clock size={16} className="animate-spin text-amber-400 shrink-0" />
+                            <span>Este caixa continua aberto em operação no PDV.</span>
+                          </div>
+
+                          {/* Resumo ao vivo das vendas do turno */}
+                          <div className="bg-black/50 border border-[#222] p-3 rounded-lg space-y-2">
+                            <div className="flex items-center justify-between border-b border-[#222] pb-2">
+                              <span className="text-[11px] font-bold text-gray-400">Total Vendas Acumuladas:</span>
+                              <span className="text-sm font-mono font-black text-white">
+                                R$ {totaisVendasSessaoDetalhe.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
+                              <div className="bg-[#161616] border border-[#262626] p-2 rounded">
+                                <span className="text-[10px] text-gray-500 block">Dinheiro</span>
+                                <span className="text-xs text-gray-200 font-bold">R$ {totaisVendasSessaoDetalhe.dinheiro.toFixed(2)}</span>
+                              </div>
+                              <div className="bg-[#161616] border border-[#262626] p-2 rounded">
+                                <span className="text-[10px] text-gray-500 block">PIX</span>
+                                <span className="text-xs text-purple-300 font-bold">R$ {totaisVendasSessaoDetalhe.pix.toFixed(2)}</span>
+                              </div>
+                              <div className="bg-[#161616] border border-[#262626] p-2 rounded">
+                                <span className="text-[10px] text-gray-500 block">Cartão</span>
+                                <span className="text-xs text-blue-300 font-bold">R$ {totaisVendasSessaoDetalhe.cartao.toFixed(2)}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between pt-1 text-[11px] text-gray-400">
+                              <span>Dinheiro Esperado na Gaveta:</span>
+                              <strong className="text-emerald-400 font-mono">
+                                R$ {(Number(modalDetalheCaixa.saldo_inicial || 0) + totaisVendasSessaoDetalhe.dinheiro).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5 text-xs">
+                          <div className="grid grid-cols-2 gap-3 pb-2 border-b border-[#222]">
+                            <div>
+                              <span className="text-gray-500 text-[10px] block">Data / Hora Fechamento</span>
+                              <span className="text-gray-300 font-mono text-xs">
+                                {(() => {
+                                  const rawFech = modalDetalheCaixa.fechado_em || modalDetalheCaixa.data_fechamento;
+                                  if (!rawFech) return '-';
+                                  const d = new Date(rawFech);
+                                  return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                                })()}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 text-[10px] block">Total Consolidado</span>
+                              <span className="text-white font-mono font-black text-sm">
+                                R$ {Number(modalDetalheCaixa.total_vendas || (Number(modalDetalheCaixa.total_dinheiro || 0) + Number(modalDetalheCaixa.total_cartao || 0) + Number(modalDetalheCaixa.total_pix || 0)) || modalDetalheCaixa.saldo_final || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
+                            <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                              <span className="text-[10px] text-gray-500 block">Dinheiro</span>
+                              <span className="text-xs text-gray-200 font-bold">R$ {Number(modalDetalheCaixa.total_dinheiro || 0).toFixed(2)}</span>
+                            </div>
+                            <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                              <span className="text-[10px] text-gray-500 block">PIX</span>
+                              <span className="text-xs text-purple-300 font-bold">R$ {Number(modalDetalheCaixa.total_pix || 0).toFixed(2)}</span>
+                            </div>
+                            <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
+                              <span className="text-[10px] text-gray-500 block">Cartão</span>
+                              <span className="text-xs text-blue-300 font-bold">R$ {Number(modalDetalheCaixa.total_cartao || 0).toFixed(2)}</span>
+                            </div>
+                          </div>
+                          {modalDetalheCaixa.observacoes_fechamento && (
+                            <div className="pt-1">
+                              <span className="text-gray-500 text-[10px] block">Observações do Fechamento</span>
+                              <p className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_fechamento}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Resumo ao vivo das vendas do turno */}
-                    <div className="bg-black/50 border border-[#222] p-3 rounded-lg space-y-2">
-                      <div className="flex items-center justify-between border-b border-[#222] pb-2">
-                        <span className="text-[11px] font-bold text-gray-400">Total Vendas Acumuladas:</span>
-                        <span className="text-sm font-mono font-black text-white">
-                          R$ {totaisVendasSessaoDetalhe.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
-                        <div className="bg-[#161616] border border-[#262626] p-2 rounded">
-                          <span className="text-[10px] text-gray-500 block">Dinheiro</span>
-                          <span className="text-xs text-gray-200 font-bold">R$ {totaisVendasSessaoDetalhe.dinheiro.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-[#161616] border border-[#262626] p-2 rounded">
-                          <span className="text-[10px] text-gray-500 block">PIX</span>
-                          <span className="text-xs text-purple-300 font-bold">R$ {totaisVendasSessaoDetalhe.pix.toFixed(2)}</span>
-                        </div>
-                        <div className="bg-[#161616] border border-[#262626] p-2 rounded">
-                          <span className="text-[10px] text-gray-500 block">Cartão</span>
-                          <span className="text-xs text-blue-300 font-bold">R$ {totaisVendasSessaoDetalhe.cartao.toFixed(2)}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between pt-1 text-[11px] text-gray-400">
-                        <span>Dinheiro Esperado na Gaveta:</span>
-                        <strong className="text-emerald-400 font-mono">
-                          R$ {(Number(modalDetalheCaixa.saldo_inicial || 0) + totaisVendasSessaoDetalhe.dinheiro).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5 text-xs">
-                    <div className="grid grid-cols-2 gap-3 pb-2 border-b border-[#222]">
-                      <div>
-                        <span className="text-gray-500 text-[10px] block">Data / Hora Fechamento</span>
-                        <span className="text-gray-300 font-mono text-xs">
-                          {modalDetalheCaixa.data_fechamento ? new Date(modalDetalheCaixa.data_fechamento).toLocaleString('pt-BR') : '-'}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 text-[10px] block">Total Consolidado</span>
-                        <span className="text-white font-mono font-black text-sm">
-                          R$ {Number(modalDetalheCaixa.total_vendas || (Number(modalDetalheCaixa.total_dinheiro || 0) + Number(modalDetalheCaixa.total_cartao || 0) + Number(modalDetalheCaixa.total_pix || 0)) || modalDetalheCaixa.saldo_final || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
-                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
-                        <span className="text-[10px] text-gray-500 block">Dinheiro</span>
-                        <span className="text-xs text-gray-200 font-bold">R$ {Number(modalDetalheCaixa.total_dinheiro || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
-                        <span className="text-[10px] text-gray-500 block">PIX</span>
-                        <span className="text-xs text-purple-300 font-bold">R$ {Number(modalDetalheCaixa.total_pix || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="bg-black/60 border border-[#222] p-2 rounded-lg">
-                        <span className="text-[10px] text-gray-500 block">Cartão</span>
-                        <span className="text-xs text-blue-300 font-bold">R$ {Number(modalDetalheCaixa.total_cartao || 0).toFixed(2)}</span>
-                      </div>
-                    </div>
-                    {modalDetalheCaixa.observacoes_fechamento && (
-                      <div className="pt-1">
-                        <span className="text-gray-500 text-[10px] block">Observações do Fechamento</span>
-                        <p className="text-gray-300 italic text-xs">{modalDetalheCaixa.observacoes_fechamento}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Seção de Formulário de Encerramento Gerencial */}
-              {modalDetalheCaixa.status === 'aberto' && isConfirmingFecharCaixaGerencial && (
+                    {/* Seção de Formulário de Encerramento Gerencial */}
+                    {isDetalheAberto && isConfirmingFecharCaixaGerencial && (
                 <div className="bg-rose-950/20 border border-rose-800/40 rounded-xl p-4 space-y-3 animate-fadeIn">
                   <div className="flex items-center gap-2 text-rose-400 font-extrabold text-xs">
                     <AlertTriangle size={16} className="text-rose-400 shrink-0" />
@@ -21601,6 +21669,9 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 </div>
               )}
+            </>
+          );
+        })()}
 
               {/* Seção de Comprovantes Anexados */}
               {(() => {
@@ -21791,17 +21862,21 @@ export default function Dashboard({ session, profileDataProps }) {
                     Fechar Detalhes
                   </button>
 
-                  {modalDetalheCaixa.status === 'aberto' && (
-                    <button
-                      type="button"
-                      onClick={handleIniciarFechamentoGerencial}
-                      className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40 border border-rose-500/30"
-                      title="Encerrar este caixa manualmente caso o vendedor esteja com dificuldades"
-                    >
-                      <Lock size={14} />
-                      Fechar Caixa (Gerência)
-                    </button>
-                  )}
+                  {(() => {
+                    const isDetalheFechado = !!(modalDetalheCaixa.data_fechamento || modalDetalheCaixa.fechado_em || String(modalDetalheCaixa.status || '').toUpperCase() === 'FECHADO');
+                    if (isDetalheFechado) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={handleIniciarFechamentoGerencial}
+                        className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/40 border border-rose-500/30"
+                        title="Encerrar este caixa manualmente caso o vendedor esteja com dificuldades"
+                      >
+                        <Lock size={14} />
+                        Fechar Caixa (Gerência)
+                      </button>
+                    );
+                  })()}
                 </div>
               ) : null}
             </div>
@@ -21986,16 +22061,39 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 </div>
 
-                {/* Observação de Abertura */}
+                {/* Campo Depósito / Suprimento Inicial (R$) Opcional */}
                 <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5">
-                    Observações de Abertura (Opcional)
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                    <span>Depósito / Suprimento Inicial (R$)</span>
+                    <span className="text-[10px] text-purple-400 font-normal">Opcional</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-purple-400 font-mono">
+                      R$
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={depositoInicialInput}
+                      onChange={(e) => setDepositoInicialInput(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-black border border-[#333] focus:border-purple-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Observação / Referência do Depósito / Abertura */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                    <span>Observação / Referência do Depósito</span>
+                    <span className="text-[10px] text-gray-500 font-normal">Opcional</span>
                   </label>
                   <input
                     type="text"
                     value={obsAberturaInput}
                     onChange={(e) => setObsAberturaInput(e.target.value)}
-                    placeholder="Ex: Turno da manhã, troco conferido..."
+                    placeholder="Ex: Reforço de troco, sangria devolvida, notas miúdas..."
                     className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-xl px-3.5 py-2 text-xs text-white outline-none transition-all"
                   />
                 </div>
