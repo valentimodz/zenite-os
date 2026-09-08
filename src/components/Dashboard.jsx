@@ -212,12 +212,31 @@ function ProductTableRow({
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
-              {isCelular ? (
-                <button type="button" onClick={e => { e.stopPropagation(); toggleVerImeis(p.id); }} className="text-[#6A0DAD] font-bold underline cursor-pointer flex items-center gap-1">
-                  <span>{(p.imeis_count || 0)} (IMEIs)</span>
-                  <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180' : ''} />
-                </button>
-              ) : (
+              {isCelular ? (() => {
+                const imeisArray = (p.imeis && p.imeis.length > 0)
+                  ? p.imeis
+                  : (p.imeis_db && p.imeis_db.length > 0)
+                    ? p.imeis_db
+                    : (productImeisMap[p.id] && productImeisMap[p.id].length > 0)
+                      ? productImeisMap[p.id]
+                      : (disponiveisImeis || []);
+
+                const imeisValidos = (imeisArray || []).filter(i => 
+                  (!p.filial_id || String(i.filial_id) === String(p.filial_id)) &&
+                  (i.status?.toLowerCase().startsWith('dispon') || !i.status) &&
+                  !i.vendido
+                );
+                const totalExibido = imeisValidos.length > 0 
+                  ? imeisValidos.length 
+                  : (p.imeis_count !== undefined && p.imeis_count !== null && p.imeis_count > 0 ? p.imeis_count : (p.quantidade || 0));
+
+                return (
+                  <button type="button" onClick={e => { e.stopPropagation(); toggleVerImeis(p.id, p.filial_id); }} className="text-[#6A0DAD] font-bold underline cursor-pointer flex items-center gap-1">
+                    <span>{totalExibido} (IMEIs)</span>
+                    <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180' : ''} />
+                  </button>
+                );
+              })() : (
                 <span className="font-bold text-gray-300">{p.quantidade || 0} unids</span>
               )}
               {!isCelular && <button onClick={e => startEdit(e, 'quantidade', p.quantidade)} className="text-gray-500 hover:text-[#6A0DAD]"><Edit2 size={11} /></button>}
@@ -234,8 +253,11 @@ function ProductTableRow({
         <tr className="bg-black">
           <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
             <div className="bg-[#050505] border border-[#1A1A1A] p-3 rounded-xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-              {productImeisMap[p.id]?.map((im, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-2.5 rounded-lg text-xs font-mono gap-2 transition-all group">
+              {((productImeisMap[p.id] || p.imeis || p.imeis_db || []).filter(im => 
+                (!im.produto_id || String(im.produto_id) === String(p.id)) &&
+                (!p.filial_id || !im.filial_id || String(im.filial_id) === String(p.filial_id))
+              )).map((im, idx) => (
+                <div key={im.id || im.imei || idx} className="flex items-center justify-between bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-2.5 rounded-lg text-xs font-mono gap-2 transition-all group">
                   <span className="text-gray-200 font-bold tracking-wide">{im.imei}</span>
                   <div className="flex items-center gap-1.5">
                     <ColorBadge cor={im.cor} />
@@ -9417,18 +9439,23 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   // Expandir e visualizar IMEIs cadastrados de um celular (Gerente)
-  const toggleVerImeis = async (prodId) => {
+  const toggleVerImeis = async (prodId, filialId = null) => {
     if (expandedProductImeis[prodId]) {
       setExpandedProductImeis(prev => ({ ...prev, [prodId]: false }));
       return;
     }
 
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('imeis')
         .select('id, produto_id, imei, vendido, cor, bateria_saude, observacoes, preco_compra, is_seminovo, filial_id, status')
-        .eq('produto_id', prodId)
-        .order('vendido', { ascending: true });
+        .eq('produto_id', prodId);
+
+      if (filialId) {
+        query = query.eq('filial_id', filialId);
+      }
+
+      const { data, error } = await query.order('vendido', { ascending: true });
 
       if (error) throw error;
       setProductImeisMap(prev => ({ ...prev, [prodId]: data || [] }));
