@@ -8482,6 +8482,22 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // 3. Inserir registro na tabela imeis se for celular
       if (isCelular) {
+        // Validação estrita de consistência de Filial:
+        // Nunca permitir que um IMEI receba o filial_id de uma loja enquanto seu 'produto_id' aponta para produto de outra loja
+        const { data: prodCheck, error: prodCheckErr } = await supabase
+          .from('produtos')
+          .select('id, filial_id')
+          .eq('id', targetProdutoId)
+          .maybeSingle();
+
+        if (prodCheckErr || !prodCheck) {
+          throw new Error('Produto de destino não encontrado para vinculação do IMEI.');
+        }
+
+        if (String(prodCheck.filial_id) !== String(selectedFilialDestino)) {
+          throw new Error(`Inconsistência de filial detectada: o produto ${targetProdutoId} pertence à filial ${prodCheck.filial_id}, mas a filial de destino selecionada é ${selectedFilialDestino}.`);
+        }
+
         const payloadImei = {
           produto_id: targetProdutoId,
           empresa_id: targetEmpresaId,
@@ -8609,27 +8625,58 @@ export default function Dashboard({ session, profileDataProps }) {
       const qtd = isCelular ? imeisValidos.length : parseInt(entradaQtdAcessorio || 1, 10);
       const preco = parseFloat(entradaProdutoSelecionado.preco || 0);
 
-      // 1. Inserir produto no estoque
-      const { data: prodData, error: prodErr } = await supabase
-        .from('produtos')
-        .insert({
-          empresa_id: company.id,
-          filial_id: entradaFilial,
-          nome: entradaProdutoSelecionado.nome,
-          tipo: entradaProdutoSelecionado.tipo,
-          categoria: entradaProdutoSelecionado.categoria,
-          preco: preco,
-          quantidade: qtd
-        })
-        .select()
-        .single();
+      // 1. Buscar se já existe uma linha em 'produtos' com o mesmo nome/modelo vinculado àquela 'filial_id'
+      let targetProdutoId = null;
+      let finalProdQty = qtd;
 
-      if (prodErr) throw prodErr;
+      const { data: existingProds, error: findProdErr } = await supabase
+        .from('produtos')
+        .select('*')
+        .eq('empresa_id', company.id)
+        .eq('filial_id', entradaFilial)
+        .eq('nome', entradaProdutoSelecionado.nome);
+
+      if (findProdErr) {
+        console.warn("Aviso na busca de produto existente na filial:", findProdErr);
+      }
+
+      const existingProd = (existingProds && existingProds.length > 0) ? existingProds[0] : null;
+
+      if (existingProd) {
+        // Se existir: usar o ID desse produto e incrementar a coluna 'quantidade'
+        targetProdutoId = existingProd.id;
+        finalProdQty = (existingProd.quantidade || 0) + qtd;
+
+        const { error: updErr } = await supabase
+          .from('produtos')
+          .update({ quantidade: finalProdQty })
+          .eq('id', existingProd.id);
+
+        if (updErr) throw updErr;
+      } else {
+        // Se NÃO existir: criar primeiro uma linha na tabela 'produtos' com a 'filial_id' de destino
+        const { data: newProdData, error: prodErr } = await supabase
+          .from('produtos')
+          .insert({
+            empresa_id: company.id,
+            filial_id: entradaFilial,
+            nome: entradaProdutoSelecionado.nome,
+            tipo: entradaProdutoSelecionado.tipo,
+            categoria: entradaProdutoSelecionado.categoria,
+            preco: preco,
+            quantidade: qtd
+          })
+          .select()
+          .single();
+
+        if (prodErr) throw prodErr;
+        targetProdutoId = newProdData.id;
+      }
 
       // 2. Se celular, inserir IMEIs válidos
       if (isCelular && imeisValidos.length > 0) {
-        if (!prodData?.id) {
-          throw new Error('ID do produto não retornado após inserção.');
+        if (!targetProdutoId) {
+          throw new Error('ID do produto não retornado ou localizado na filial.');
         }
         if (!entradaFilial) {
           throw new Error('Filial de entrada não especificada.');
@@ -8638,8 +8685,24 @@ export default function Dashboard({ session, profileDataProps }) {
           throw new Error('ID da empresa não identificado.');
         }
 
+        // Validação estrita de consistência de Filial:
+        // Nunca permitir que um IMEI receba o filial_id de uma loja enquanto seu 'produto_id' aponta para produto de outra loja
+        const { data: prodCheck, error: prodCheckErr } = await supabase
+          .from('produtos')
+          .select('id, filial_id')
+          .eq('id', targetProdutoId)
+          .maybeSingle();
+
+        if (prodCheckErr || !prodCheck) {
+          throw new Error('Produto de destino não encontrado para validação de filial.');
+        }
+
+        if (String(prodCheck.filial_id) !== String(entradaFilial)) {
+          throw new Error(`Inconsistência de filial detectada: o produto ${targetProdutoId} pertence à filial ${prodCheck.filial_id}, mas a filial de destino informada é ${entradaFilial}.`);
+        }
+
         const imeisData = imeisValidos.map(({ imei, cor, bateria_saude, observacoes, preco_compra, is_seminovo }) => ({
-          produto_id: prodData.id,
+          produto_id: targetProdutoId,
           empresa_id: company.id,
           filial_id: entradaFilial,
           imei: String(imei).trim(),
