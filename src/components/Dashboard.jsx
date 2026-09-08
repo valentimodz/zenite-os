@@ -22056,7 +22056,7 @@ export default function Dashboard({ session, profileDataProps }) {
         {/* MODAL DE RECIBO DE VENDA CONSOLIDADO */}
         {pdvReciboAtivo && pdvReciboDados && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
-            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-xl w-full p-6 space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black">
+            <div id="area-cupom-impressao" className="bg-card text-card-foreground border border-border rounded-2xl max-w-xl w-full p-6 space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black">
 
               {/* Botão de Fechar no topo */}
               <button

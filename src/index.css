@@ -132,12 +132,49 @@ html.light textarea:focus {
   outline: none;
 }
 
-/* Regras de Impressão de Alta Fidelidade para Logos e Comprovantes */
+/* Regras de Impressão de Alta Fidelidade para Logos e Comprovantes / Térmica 80mm Elgin i9 */
 @media print {
-  body {
+  @page {
+    size: 80mm auto !important; /* Força o navegador a selecionar o rolo contínuo de 80mm em vez de A4 */
+    margin: 0 !important;
+  }
+
+  html, body {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
+  }
+
+  /* Esconde todo o layout do sistema (telas, modais, menus, botões) */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Exibe estritamente o contêiner do cupom */
+  #area-cupom-impressao, #area-cupom-impressao * {
+    visibility: visible;
+  }
+
+  #area-cupom-impressao {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 72mm !important; /* 72mm é a largura útil de impressão da Elgin i9 */
+    margin: 0 auto !important;
+    padding: 2mm !important;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
   }
 
   .recibo-logo-container {
@@ -145,13 +182,13 @@ html.light textarea:focus {
     justify-content: center !important;
     align-items: center !important;
     width: 100% !important;
-    margin-top: 8px !important;
-    margin-bottom: 12px !important;
+    margin-top: 4px !important;
+    margin-bottom: 8px !important;
   }
 
   .recibo-logo-img {
-    max-width: 160px !important;
-    max-height: 90px !important;
+    max-width: 140px !important;
+    max-height: 80px !important;
     width: auto !important;
     height: auto !important;
     object-fit: contain !important;
