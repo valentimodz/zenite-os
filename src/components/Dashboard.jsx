@@ -522,6 +522,7 @@ export default function Dashboard({ session, profileDataProps }) {
   // Estados para Correção de Vendas com Auditoria
   const [editingVenda, setEditingVenda] = useState(null);
   const [vendaNewNomeProduto, setVendaNewNomeProduto] = useState('');
+  const [vendaNewCategoria, setVendaNewCategoria] = useState('Celulares');
   const [vendaNewQty, setVendaNewQty] = useState('');
   const [vendaNewValor, setVendaNewValor] = useState('');
   const [vendaNewComissao, setVendaNewComissao] = useState('');
@@ -7785,6 +7786,8 @@ export default function Dashboard({ session, profileDataProps }) {
     setEditingVenda(venda);
     const prodNomeInicial = venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || '';
     setVendaNewNomeProduto(prodNomeInicial);
+    const categoriaInicial = venda.categoria || venda.produtos?.categoria || 'Celulares';
+    setVendaNewCategoria(categoriaInicial);
     setVendaNewQty(venda.quantidade);
     setVendaNewValor(venda.valor_total);
     setVendaNewComissao(venda.comissao);
@@ -7804,21 +7807,40 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const vendaId = editingVenda.id;
     const novoNome = vendaNewNomeProduto.trim();
+    const novaCategoria = vendaNewCategoria || 'Celulares';
     const novaQtd = Number(vendaNewQty);
     const novoValor = Number(vendaNewValor);
     const novaComissao = Number(vendaNewComissao);
     const novoMetodo = vendaNewMetodoPagamento;
 
     try {
-      const { data, error } = await supabase.rpc('corrigir_venda', {
+      // Tenta chamar a RPC passando p_new_categoria conforme solicitado
+      let { data, error } = await supabase.rpc('corrigir_venda', {
         p_venda_id: vendaId,
         p_new_qty: novaQtd,
         p_new_valor_total: novoValor,
         p_new_comissao: novaComissao,
         p_justificativa: vendaJustificativa.trim(),
         p_new_nome_produto: novoNome,
-        p_new_metodo_pagamento: novoMetodo
+        p_new_metodo_pagamento: novoMetodo,
+        p_new_categoria: novaCategoria
       });
+
+      // Se a function no banco não tiver a coluna/parâmetro categoria, faz fallback transparente
+      if (error && (error.message?.includes('p_new_categoria') || error.message?.includes('categoria') || error.code === '42883')) {
+        console.warn('RPC com p_new_categoria não encontrada ou sem suporte a categoria no banco, usando fallback:', error.message);
+        const retry = await supabase.rpc('corrigir_venda', {
+          p_venda_id: vendaId,
+          p_new_qty: novaQtd,
+          p_new_valor_total: novoValor,
+          p_new_comissao: novaComissao,
+          p_justificativa: vendaJustificativa.trim(),
+          p_new_nome_produto: novoNome,
+          p_new_metodo_pagamento: novoMetodo
+        });
+        error = retry.error;
+        data = retry.data;
+      }
 
       if (error) throw error;
 
@@ -7832,9 +7854,11 @@ export default function Dashboard({ session, profileDataProps }) {
           return {
             ...v,
             produto_nome: novoNome || v.produto_nome,
+            categoria: novaCategoria,
             produtos: {
               ...(v.produtos || {}),
-              nome: novoNome || v.produtos?.nome
+              nome: novoNome || v.produtos?.nome,
+              categoria: novaCategoria
             },
             quantidade: novaQtd,
             valor_total: novoValor,
@@ -7852,9 +7876,11 @@ export default function Dashboard({ session, profileDataProps }) {
           return {
             ...v,
             produto_nome: novoNome || v.produto_nome,
+            categoria: novaCategoria,
             produtos: {
               ...(v.produtos || {}),
-              nome: novoNome || v.produtos?.nome
+              nome: novoNome || v.produtos?.nome,
+              categoria: novaCategoria
             },
             quantidade: novaQtd,
             valor_total: novoValor,
@@ -20404,7 +20430,9 @@ export default function Dashboard({ session, profileDataProps }) {
                           <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl">
                             <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Objetivo Mensal</span>
                             <span className="text-2xl font-black text-gray-400 mt-2 block font-mono">
-                              {formatMetaValue(metasInfo.metaObjetivo, metasInfo.tipoMeta)}
+                              {getNormalizedMetaTipo(metasInfo.tipoMeta) === 'boleto'
+                                ? `${Math.round(metasInfo.totalVendas)} de ${Math.round(metasInfo.metaObjetivo)} boletos`
+                                : formatMetaValue(metasInfo.metaObjetivo, metasInfo.tipoMeta)}
                             </span>
                             {/* Badge de tipo */}
                             <span className={`mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${isUnitMetric(metasInfo.tipoMeta)
@@ -23038,6 +23066,23 @@ export default function Dashboard({ session, profileDataProps }) {
                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-medium transition-all"
                     />
                     <p className="text-[11px] text-gray-500 font-mono pt-0.5">ID da Venda: {editingVenda.id}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      CATEGORIA <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={vendaNewCategoria}
+                      onChange={(e) => setVendaNewCategoria(e.target.value)}
+                      required
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none font-medium cursor-pointer transition-all"
+                    >
+                      <option value="Celulares" className="bg-[#111] text-white">Celulares</option>
+                      <option value="Acessórios" className="bg-[#111] text-white">Acessórios</option>
+                      <option value="Cabos" className="bg-[#111] text-white">Cabos</option>
+                      <option value="Serviços" className="bg-[#111] text-white">Serviços</option>
+                    </select>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
