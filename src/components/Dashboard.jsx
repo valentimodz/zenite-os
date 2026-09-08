@@ -521,6 +521,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Estados para Correção de Vendas com Auditoria
   const [editingVenda, setEditingVenda] = useState(null);
+  const [vendaNewNomeProduto, setVendaNewNomeProduto] = useState('');
   const [vendaNewQty, setVendaNewQty] = useState('');
   const [vendaNewValor, setVendaNewValor] = useState('');
   const [vendaNewComissao, setVendaNewComissao] = useState('');
@@ -7735,6 +7736,8 @@ export default function Dashboard({ session, profileDataProps }) {
   // Prepara modal de edição de venda corrigida
   const handleOpenEditVenda = (venda) => {
     setEditingVenda(venda);
+    const prodNomeInicial = venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || '';
+    setVendaNewNomeProduto(prodNomeInicial);
     setVendaNewQty(venda.quantidade);
     setVendaNewValor(venda.valor_total);
     setVendaNewComissao(venda.comissao);
@@ -7750,13 +7753,20 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
+    const vendaId = editingVenda.id;
+    const novoNome = vendaNewNomeProduto.trim();
+    const novaQtd = Number(vendaNewQty);
+    const novoValor = Number(vendaNewValor);
+    const novaComissao = Number(vendaNewComissao);
+
     try {
-      const { error } = await supabase.rpc('corrigir_venda', {
-        p_venda_id: editingVenda.id,
-        p_new_qty: parseInt(vendaNewQty),
-        p_new_valor_total: parseFloat(vendaNewValor),
-        p_new_comissao: parseFloat(vendaNewComissao),
-        p_justificativa: vendaJustificativa.trim()
+      const { data, error } = await supabase.rpc('corrigir_venda', {
+        p_venda_id: vendaId,
+        p_new_qty: novaQtd,
+        p_new_valor_total: novoValor,
+        p_new_comissao: novaComissao,
+        p_justificativa: vendaJustificativa.trim(),
+        p_new_nome_produto: novoNome
       });
 
       if (error) throw error;
@@ -7764,6 +7774,44 @@ export default function Dashboard({ session, profileDataProps }) {
       alert('Venda corrigida com sucesso e log de auditoria gravado!');
       setIsVendaEditModalOpen(false);
       setEditingVenda(null);
+
+      // Re-renderização imediata na tabela local de vendas
+      setVendas(prev => prev.map(v => {
+        if (v.id === vendaId) {
+          return {
+            ...v,
+            produto_nome: novoNome || v.produto_nome,
+            produtos: {
+              ...(v.produtos || {}),
+              nome: novoNome || v.produtos?.nome
+            },
+            quantidade: novaQtd,
+            valor_total: novoValor,
+            comissao: novaComissao
+          };
+        }
+        return v;
+      }));
+
+      // Re-renderização imediata também na lista de vendas do vendedor se aplicável
+      setVendasVendedor(prev => prev.map(v => {
+        if (v.id === vendaId) {
+          return {
+            ...v,
+            produto_nome: novoNome || v.produto_nome,
+            produtos: {
+              ...(v.produtos || {}),
+              nome: novoNome || v.produtos?.nome
+            },
+            quantidade: novaQtd,
+            valor_total: novoValor,
+            comissao: novaComissao
+          };
+        }
+        return v;
+      }));
+
+      // Re-fetch dos dados consolidados
       fetchGerenteData(company?.id || profile?.empresa_id);
     } catch (err) {
       console.error('Erro ao corrigir venda:', err);
@@ -22839,10 +22887,19 @@ export default function Dashboard({ session, profileDataProps }) {
               </div>
               <form onSubmit={handleSaveVendaEdit}>
                 <div className="p-5 space-y-4">
-                  <div className="bg-purple-950/10 border border-purple-900/20 p-3 rounded-lg text-xs">
-                    <p className="text-gray-400 font-semibold mb-1">Produto original:</p>
-                    <p className="text-white font-bold">{editingVenda.produtos?.nome || 'Produto Removido'}</p>
-                    <p className="text-gray-550 font-mono mt-1">ID da Venda: {editingVenda.id}</p>
+                  <div className="space-y-1.5">
+                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                      PRODUTO / DESCRIÇÃO <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={vendaNewNomeProduto}
+                      onChange={(e) => setVendaNewNomeProduto(e.target.value)}
+                      required
+                      placeholder="Descrição ou nome do produto vendido..."
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-medium transition-all"
+                    />
+                    <p className="text-[11px] text-gray-500 font-mono pt-0.5">ID da Venda: {editingVenda.id}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
