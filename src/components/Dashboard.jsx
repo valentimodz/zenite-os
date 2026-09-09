@@ -24571,8 +24571,10 @@ export default function Dashboard({ session, profileDataProps }) {
           onClose={() => setIsModalGradeOpen(false)}
           perfilUsuario={profile}
           categorias={categorias}
-          onSuccess={(qtdCriada, linhaBase) => {
-            showToast(`${qtdCriada} modelos de ${linhaBase || 'capinhas'} cadastrados com sucesso!`, 'success');
+          filiais={filiais}
+          onSuccess={(qtdCriada, linhaBase, nomeFilialDest) => {
+            const msgFilial = nomeFilialDest ? ` e estocadas com sucesso na filial ${nomeFilialDest}!` : '!';
+            showToast(`${qtdCriada} variações cadastradas${msgFilial}`, 'success');
             const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
             if (targetEmpresaId) {
               fetchCatalogoProdutos(targetEmpresaId);
