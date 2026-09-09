@@ -65,18 +65,15 @@ export default function ModalGeradorGrade({
 
   const [categoria, setCategoria] = useState(defaultCategoria);
 
-  // Modelos de Aparelho Compatíveis (Tags / Chips)
-  const [modelosAparelho, setModelosAparelho] = useState([
+  const [modelosSelecionados, setModelosSelecionados] = useState([
     'iPhone 13',
     'iPhone 14',
     'iPhone 15'
   ]);
   const [novoModeloInput, setNovoModeloInput] = useState('');
 
-  // Lista geral de cores disponíveis (Padrão + Salvas no Supabase)
   const [coresDisponiveis, setCoresDisponiveis] = useState(CORES_SUGERIDAS_PADRAO);
 
-  // Cores Selecionadas para geração da grade
   const [coresSelecionadas, setCoresSelecionadas] = useState([
     'Preto',
     'Transparente',
@@ -85,11 +82,11 @@ export default function ModalGeradorGrade({
   const [novaCorInput, setNovaCorInput] = useState('');
   const [isSalvandoCor, setIsSalvandoCor] = useState(false);
 
-  // Loading do salvamento
+  const [gradeAcumulada, setGradeAcumulada] = useState([]);
+
   const [isSaving, setIsSaving] = useState(false);
   const [erroMsg, setErroMsg] = useState(null);
 
-  // Buscar cores cadastradas da empresa ao abrir o modal
   useEffect(() => {
     if (!isOpen) return;
 
@@ -112,7 +109,6 @@ export default function ModalGeradorGrade({
         const { data, error } = await query;
         if (!error && Array.isArray(data) && data.length > 0) {
           const nomesBanco = data.map(c => c.nome).filter(Boolean);
-          // Unir com a lista padrão sem duplicatas
           setCoresDisponiveis(prev => {
             const set = new Set([...CORES_SUGERIDAS_PADRAO, ...prev, ...nomesBanco]);
             return Array.from(set);
@@ -126,7 +122,6 @@ export default function ModalGeradorGrade({
     carregarCoresBanco();
   }, [isOpen, perfilUsuario?.empresa_id, perfilUsuario?.empresaId]);
 
-  // Manipulação de Linha Base Pré-definida
   const handleSelectLinhaBase = (val) => {
     setSelectedLinhaBase(val);
     const predef = MODELOS_BASE_PREDEFINIDOS.find(m => m.nome === val);
@@ -139,34 +134,29 @@ export default function ModalGeradorGrade({
     ? (customLinhaBase.trim() || 'Case')
     : selectedLinhaBase;
 
-  // Adicionar Modelo
   const handleAddModelo = (mod) => {
     const limpo = mod.trim();
     if (!limpo) return;
-    if (!modelosAparelho.some(m => m.toLowerCase() === limpo.toLowerCase())) {
-      setModelosAparelho(prev => [...prev, limpo]);
+    if (!modelosSelecionados.some(m => m.toLowerCase() === limpo.toLowerCase())) {
+      setModelosSelecionados(prev => [...prev, limpo]);
     }
     setNovoModeloInput('');
   };
 
-  // Remover Modelo
   const handleRemoveModelo = (mod) => {
-    setModelosAparelho(prev => prev.filter(m => m !== mod));
+    setModelosSelecionados(prev => prev.filter(m => m !== mod));
   };
 
-  // Toggle de Cor
   const handleToggleCor = (cor) => {
     setCoresSelecionadas(prev => 
       prev.includes(cor) ? prev.filter(c => c !== cor) : [...prev, cor]
     );
   };
 
-  // Limpar todas as cores selecionadas
   const handleLimparCores = () => {
     setCoresSelecionadas([]);
   };
 
-  // Adicionar e persistir nova cor no Supabase ('cores_catalogo')
   const handleAddCustomCor = async () => {
     const limpa = novaCorInput.trim();
     if (!limpa) return;
@@ -182,7 +172,6 @@ export default function ModalGeradorGrade({
         }
       }
 
-      // 1. Salvar no Supabase na tabela cores_catalogo
       if (empresaId) {
         const { error } = await supabase
           .from('cores_catalogo')
@@ -198,13 +187,11 @@ export default function ModalGeradorGrade({
       setIsSalvandoCor(false);
     }
 
-    // 2. Adicionar imediatamente à lista de botões de CORES DISPONÍVEIS
     setCoresDisponiveis(prev => {
       if (prev.some(c => c.toLowerCase() === limpa.toLowerCase())) return prev;
       return [...prev, limpa];
     });
 
-    // 3. Marcar automaticamente como selecionada (com fundo roxo/ativo)
     setCoresSelecionadas(prev => {
       if (prev.some(c => c.toLowerCase() === limpa.toLowerCase())) return prev;
       return [...prev, limpa];
@@ -213,32 +200,39 @@ export default function ModalGeradorGrade({
     setNovaCorInput('');
   };
 
-  // Remover variação específica da pré-visualização e desmarcar a respectiva cor do estado selecionado
-  const handleRemoverVariacao = (item) => {
-    if (!item?.cor) return;
-    setCoresSelecionadas(prev => prev.filter(c => c.toLowerCase() !== item.cor.toLowerCase()));
-  };
+  const handleAdicionarAFila = () => {
+    setErroMsg(null);
 
-  // Cálculo da grade (Preview)
-  const variacoesGeradas = useMemo(() => {
-    const list = [];
-    if (!linhaBaseFinal || modelosAparelho.length === 0 || coresSelecionadas.length === 0) {
-      return list;
+    if (modelosSelecionados.length === 0) {
+      setErroMsg('Selecione ou adicione ao menos um modelo de aparelho para incluir na fila.');
+      return;
     }
 
-    let seed = 0;
-    const baseTime = Date.now().toString().slice(-7);
+    if (coresSelecionadas.length === 0) {
+      setErroMsg('Selecione ao menos uma cor para incluir na fila.');
+      return;
+    }
 
-    for (const mod of modelosAparelho) {
+    const valorVendaNum = parseFloat(precoVenda || 0);
+    if (isNaN(valorVendaNum) || valorVendaNum <= 0) {
+      setErroMsg('Informe um preço de venda válido maior que zero.');
+      return;
+    }
+
+    let seed = gradeAcumulada.length;
+    const baseTime = Date.now().toString().slice(-7);
+    const novosItens = [];
+
+    for (const mod of modelosSelecionados) {
       for (const cor of coresSelecionadas) {
         seed += 1;
         const seqNum = String(seed).padStart(3, '0');
         const rand = Math.floor(100 + Math.random() * 900);
-        const barcodeSeq = `${baseTime}${seqNum}${rand}`; // 13 dígitos
+        const barcodeSeq = `${baseTime}${seqNum}${rand}`;
         const nomeFormatado = `${linhaBaseFinal} - ${mod} (${cor})`;
 
-        list.push({
-          idTemp: `${mod}-${cor}`,
+        novosItens.push({
+          idTemp: `${mod}-${cor}-${Date.now()}-${Math.random()}`,
           nome: nomeFormatado,
           linhaBase: linhaBaseFinal,
           modelo: mod,
@@ -251,21 +245,26 @@ export default function ModalGeradorGrade({
         });
       }
     }
-    return list;
-  }, [linhaBaseFinal, modelosAparelho, coresSelecionadas, categoria, precoVenda, precoCusto]);
 
-  // Salvar Todas as Variações em Lote
+    setGradeAcumulada(prev => [...prev, ...novosItens]);
+
+    setModelosSelecionados([]);
+    setCoresSelecionadas([]);
+  };
+
+  const handleRemoverDaFila = (index) => {
+    setGradeAcumulada(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleLimparFilaInteira = () => {
+    setGradeAcumulada([]);
+  };
+
   const handleSalvarTodas = async () => {
     setErroMsg(null);
 
-    if (variacoesGeradas.length === 0) {
-      setErroMsg('Configure ao menos um modelo de aparelho e uma cor para gerar a grade.');
-      return;
-    }
-
-    const valorVendaNum = parseFloat(precoVenda || 0);
-    if (isNaN(valorVendaNum) || valorVendaNum <= 0) {
-      setErroMsg('Informe um preço de venda válido maior que zero.');
+    if (gradeAcumulada.length === 0) {
+      setErroMsg('A fila acumuladora está vazia. Adicione variações à fila antes de salvar.');
       return;
     }
 
@@ -290,11 +289,7 @@ export default function ModalGeradorGrade({
     setIsSaving(true);
 
     try {
-      // Usar cliente com sessão autenticada para satisfazer políticas RLS (auth.uid() e get_user_empresa_id())
-      const dbClient = supabase;
-
-      // Montar array de objetos para produtos_catalogo garantindo empresa_id, tipo e categoria em CADA item
-      const arrayDeProdutos = variacoesGeradas.map(v => ({
+      const arrayDeProdutos = gradeAcumulada.map(v => ({
         empresa_id: empresaId,
         nome: v.nome,
         tipo: 'ACESSORIO',
@@ -306,18 +301,15 @@ export default function ModalGeradorGrade({
         codigo_barras: v.codigo_barras
       }));
 
-      // Disparar inserção única em lote
-      const { data, error } = await dbClient
+      const { data, error } = await supabase
         .from('produtos_catalogo')
         .insert(arrayDeProdutos)
         .select();
 
       if (error) {
-        // Se a coluna preco_custo não existir ou der PGRST204, tentar sem ela como fallback mantendo empresa_id, tipo e categoria
         if (error.code === 'PGRST204' || error.message?.includes('could not find the column') || error.message?.includes('does not exist')) {
-          console.warn('Retentando insert em produtos_catalogo com schema estrito:', error.message);
           const arrayEstrito = arrayDeProdutos.map(p => ({
-            empresa_id: p.empresa_id || empresaId,
+            empresa_id: p.empresa_id,
             nome: p.nome,
             tipo: 'ACESSORIO',
             categoria: p.categoria || 'Acessórios',
@@ -327,28 +319,22 @@ export default function ModalGeradorGrade({
             codigo_barras: p.codigo_barras
           }));
 
-          const { data: retryData, error: retryErr } = await dbClient
+          const { data: retryData, error: retryErr } = await supabase
             .from('produtos_catalogo')
             .insert(arrayEstrito)
             .select();
 
-          if (retryErr) {
-            throw retryErr;
-          }
-
+          if (retryErr) throw retryErr;
           finalizarSucesso(retryData?.length || arrayDeProdutos.length);
           return;
         }
-
         throw error;
       }
 
       finalizarSucesso(data?.length || arrayDeProdutos.length);
     } catch (err) {
       console.error('Erro ao cadastrar variações em lote:', err);
-      const detalhe = err?.message || JSON.stringify(err);
-      setErroMsg(`Falha ao salvar variações: ${detalhe}`);
-      alert(`Falha ao cadastrar variações no catálogo:\n\n${detalhe}`);
+      setErroMsg(`Falha ao salvar: ${err?.message || 'Erro desconhecido'}`);
     } finally {
       setIsSaving(false);
     }
@@ -358,6 +344,7 @@ export default function ModalGeradorGrade({
     if (onSuccess) {
       onSuccess(qtdCriada, linhaBaseFinal);
     }
+    setGradeAcumulada([]);
     onClose();
   };
 
@@ -367,50 +354,47 @@ export default function ModalGeradorGrade({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
       <div className="bg-[#0D0D0D] border border-[#262626] w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         
-        {/* Header do Modal */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#222222] bg-gradient-to-r from-[#140026] via-[#0D0D0D] to-[#0D0D0D]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/50 flex items-center justify-center text-[#c084fc] shadow-lg shadow-[#6A0DAD]/10">
-              <Zap size={22} className="animate-pulse" />
+            <div className="w-10 h-10 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 flex items-center justify-center text-[#c084fc] shadow-lg shadow-[#6A0DAD]/10">
+              <Sparkles size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
-                Gerador de Grade de Acessórios
-                <span className="text-[10px] bg-[#6A0DAD]/20 text-[#c084fc] border border-[#6A0DAD]/40 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                  Lote Express
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-extrabold text-white tracking-wide">
+                  Gerador de Grade de Acessórios
+                </h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-[#6A0DAD]/30 text-[#c084fc] border border-[#6A0DAD]/40">
+                  Lote Pro
                 </span>
-              </h2>
-              <p className="text-xs text-gray-400">
-                Cadastre dezenas de variações de capas e acessórios no catálogo mestre em segundos
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Monte a grade por modelos e cores acumulando variações sem perder as anteriores
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            disabled={isSaving}
             className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        {/* Corpo com scroll */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          
-          {erroMsg && (
-            <div className="bg-red-950/40 border border-red-800/60 p-3.5 rounded-xl flex items-start gap-3 text-red-300 text-xs">
-              <AlertCircle size={18} className="shrink-0 text-red-400 mt-0.5" />
-              <div className="flex-1">
-                <strong className="block font-bold">Atenção ao salvar lote:</strong>
-                <span>{erroMsg}</span>
-              </div>
-            </div>
-          )}
+        {erroMsg && (
+          <div className="mx-6 mt-4 p-3 bg-red-950/40 border border-red-800/50 rounded-xl flex items-center gap-2.5 text-red-300 text-xs">
+            <AlertCircle size={16} className="shrink-0 text-red-400" />
+            <span className="flex-1 font-medium">{erroMsg}</span>
+            <button type="button" onClick={() => setErroMsg(null)} className="text-red-400 hover:text-red-200">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
-          {/* Configuração Principal: Linha Base e Preços */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-[#141414] border border-[#222222] p-4 rounded-xl">
-            {/* Linha / Modelo Base */}
+        <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
+          
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
             <div className="md:col-span-5 space-y-1.5">
               <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
                 Linha / Modelo Base <span className="text-red-400">*</span>
@@ -420,26 +404,22 @@ export default function ModalGeradorGrade({
                 onChange={(e) => handleSelectLinhaBase(e.target.value)}
                 className="w-full bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-sm text-white font-medium outline-none cursor-pointer"
               >
-                {MODELOS_BASE_PREDEFINIDOS.map(opt => (
-                  <option key={opt.nome} value={opt.nome}>
-                    {opt.label}
-                  </option>
+                {MODELOS_BASE_PREDEFINIDOS.map(m => (
+                  <option key={m.nome} value={m.nome}>{m.label}</option>
                 ))}
                 <option value="OUTRO">Outro (Digitar Linha Personalizada...)</option>
               </select>
-
               {selectedLinhaBase === 'OUTRO' && (
                 <input
                   type="text"
                   value={customLinhaBase}
                   onChange={(e) => setCustomLinhaBase(e.target.value)}
-                  placeholder="Ex: Case Carteira Couro, Case Magnética MagSafe..."
-                  className="w-full mt-2 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-sm text-white outline-none"
+                  placeholder="Nome do Modelo Base (Ex: Case Magnética Slim)"
+                  className="w-full mt-2 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-1.5 text-xs text-white outline-none"
                 />
               )}
             </div>
 
-            {/* Categoria */}
             <div className="md:col-span-3 space-y-1.5">
               <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
                 Categoria <span className="text-[9px] text-[#c084fc] font-normal">(Travada)</span>
@@ -449,11 +429,10 @@ export default function ModalGeradorGrade({
                 value={categoria}
                 onChange={(e) => setCategoria(e.target.value)}
                 className="w-full bg-[#1c1c1c] border border-[#333333] rounded-lg px-3 py-2 text-sm text-gray-200 font-semibold outline-none"
-                placeholder="Capinhas"
+                placeholder="Acessórios"
               />
             </div>
 
-            {/* Preço de Venda */}
             <div className="md:col-span-2 space-y-1.5">
               <label className="block text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
                 Preço Venda (R$) <span className="text-red-400">*</span>
@@ -469,7 +448,6 @@ export default function ModalGeradorGrade({
               />
             </div>
 
-            {/* Preço de Custo */}
             <div className="md:col-span-2 space-y-1.5">
               <label className="block text-[11px] font-bold text-amber-400/90 uppercase tracking-wider">
                 Custo (R$) <span className="text-[9px] text-gray-400 font-normal">(Opc.)</span>
@@ -486,23 +464,20 @@ export default function ModalGeradorGrade({
             </div>
           </div>
 
-          {/* Modelos de Aparelhos Compatíveis */}
           <div className="space-y-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
-                  Modelos de Aparelho Compatíveis ({modelosAparelho.length})
+                  Modelos de Aparelho para este Lote ({modelosSelecionados.length})
                 </label>
                 <p className="text-[11px] text-gray-400">
-                  Adicione os aparelhos suportados para multiplicar a grade
+                  Adicione os aparelhos compatíveis que deseja cruzar com as cores abaixo
                 </p>
               </div>
-
-              {/* Sugestões rápidas de modelos */}
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-[10px] text-gray-500 font-bold uppercase mr-1">Rápidos:</span>
                 {MODELOS_RAPIDOS_SUGERIDOS.map(sug => {
-                  const jaTem = modelosAparelho.some(m => m.toLowerCase() === sug.toLowerCase());
+                  const jaTem = modelosSelecionados.some(m => m.toLowerCase() === sug.toLowerCase());
                   return (
                     <button
                       key={sug}
@@ -510,9 +485,7 @@ export default function ModalGeradorGrade({
                       onClick={() => handleAddModelo(sug)}
                       disabled={jaTem}
                       className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-all ${
-                        jaTem 
-                          ? 'bg-gray-800/40 text-gray-600 border border-transparent cursor-default'
-                          : 'bg-[#222222] hover:bg-[#6A0DAD]/30 text-gray-300 hover:text-white border border-[#333333] hover:border-[#6A0DAD]/50 cursor-pointer'
+                        jaTem ? 'bg-gray-800/40 text-gray-600' : 'bg-[#222222] hover:bg-[#6A0DAD]/30 text-gray-300'
                       }`}
                     >
                       +{sug}
@@ -521,57 +494,37 @@ export default function ModalGeradorGrade({
                 })}
               </div>
             </div>
-
-            {/* Input de adição de modelo */}
             <div className="flex gap-2">
               <input
                 type="text"
                 value={novoModeloInput}
                 onChange={(e) => setNovoModeloInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddModelo(novoModeloInput);
-                  }
-                }}
-                placeholder="Digite o modelo (Ex: iPhone 16 Pro, Galaxy S24, Moto G84...) e aperte Enter"
-                className="flex-1 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-sm text-white outline-none placeholder-gray-600"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddModelo(novoModeloInput); } }}
+                placeholder="Digite o modelo e aperte Enter"
+                className="flex-1 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-sm text-white outline-none"
               />
               <button
                 type="button"
                 onClick={() => handleAddModelo(novoModeloInput)}
-                className="px-4 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                className="px-4 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1"
               >
                 <Plus size={14} /> Adicionar
               </button>
             </div>
-
-            {/* Chips de Modelos Adicionados */}
             <div className="flex flex-wrap gap-2 pt-1 min-h-[38px]">
-              {modelosAparelho.length === 0 ? (
-                <span className="text-xs text-gray-600 italic">Nenhum modelo de aparelho adicionado ainda.</span>
+              {modelosSelecionados.length === 0 ? (
+                <span className="text-xs text-gray-600 italic">Nenhum modelo selecionado para o lote atual.</span>
               ) : (
-                modelosAparelho.map(mod => (
-                  <span
-                    key={mod}
-                    className="inline-flex items-center gap-1.5 bg-[#1F1F1F] border border-[#333333] text-gray-200 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-sm"
-                  >
+                modelosSelecionados.map(mod => (
+                  <span key={mod} className="inline-flex items-center gap-1.5 bg-[#1F1F1F] border border-[#333333] text-gray-200 px-2.5 py-1 rounded-lg text-xs font-semibold">
                     <span>{mod}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveModelo(mod)}
-                      className="text-gray-400 hover:text-red-400 p-0.5 rounded transition-colors cursor-pointer"
-                      title={`Remover ${mod}`}
-                    >
-                      <X size={12} />
-                    </button>
+                    <button type="button" onClick={() => handleRemoveModelo(mod)} className="text-gray-400 hover:text-red-400"><X size={12} /></button>
                   </span>
                 ))
               )}
             </div>
           </div>
 
-          {/* Cores Disponíveis (Toggle e Custom) */}
           <div className="space-y-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -579,21 +532,12 @@ export default function ModalGeradorGrade({
                   Cores Disponíveis ({coresSelecionadas.length})
                 </label>
                 {coresSelecionadas.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleLimparCores}
-                    className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold cursor-pointer transition-colors"
-                  >
+                  <button type="button" onClick={handleLimparCores} className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold cursor-pointer">
                     Limpar Todas
                   </button>
                 )}
               </div>
-              <p className="text-[11px] text-gray-400">
-                Selecione as cores que serão produzidas para cada modelo
-              </p>
             </div>
-
-            {/* Chips com toggle de cores (Padrão + cadastradas do banco) */}
             <div className="flex flex-wrap gap-2">
               {coresDisponiveis.map(cor => {
                 const isSelected = coresSelecionadas.some(c => c.toLowerCase() === cor.toLowerCase());
@@ -602,10 +546,8 @@ export default function ModalGeradorGrade({
                     key={cor}
                     type="button"
                     onClick={() => handleToggleCor(cor)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#6A0DAD] border-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/30'
-                        : 'bg-black border-[#333333] text-gray-400 hover:text-gray-200 hover:border-[#555555]'
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                      isSelected ? 'bg-[#6A0DAD] border-[#6A0DAD] text-white' : 'bg-black border-[#333333] text-gray-400'
                     }`}
                   >
                     {isSelected && <Check size={12} />}
@@ -614,27 +556,20 @@ export default function ModalGeradorGrade({
                 );
               })}
             </div>
-
-            {/* Inserir cor personalizada */}
             <div className="flex gap-2 pt-2 border-t border-[#222222]/80">
               <input
                 type="text"
                 value={novaCorInput}
                 onChange={(e) => setNovaCorInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddCustomCor();
-                  }
-                }}
-                placeholder="Outra cor específica (Ex: Lilás, Verde Militar, Fibra de Carbono...)"
-                className="flex-1 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-1.5 text-xs text-white outline-none placeholder-gray-600"
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomCor(); } }}
+                placeholder="Outra cor específica..."
+                className="flex-1 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-1.5 text-xs text-white outline-none"
               />
               <button
                 type="button"
                 onClick={handleAddCustomCor}
                 disabled={isSalvandoCor || !novaCorInput.trim()}
-                className="px-3 py-1.5 bg-[#222222] hover:bg-[#333333] text-gray-200 border border-[#333333] rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 bg-[#222222] hover:bg-[#333333] text-gray-200 border border-[#333333] rounded-lg text-xs font-bold transition-all flex items-center gap-1"
               >
                 {isSalvandoCor ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
                 Incluir Cor
@@ -642,69 +577,68 @@ export default function ModalGeradorGrade({
             </div>
           </div>
 
-          {/* Pré-visualização Dinâmica (Preview) */}
+          <div className="flex justify-center py-1">
+            <button
+              type="button"
+              onClick={handleAdicionarAFila}
+              className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] hover:from-[#5b0b94] hover:to-[#7822c9] text-white rounded-xl text-sm font-extrabold transition-all shadow-lg shadow-[#6A0DAD]/25 flex items-center justify-center gap-2"
+            >
+              <Plus size={18} />
+              <span>+ Adicionar Variações à Fila</span>
+              {(modelosSelecionados.length > 0 && coresSelecionadas.length > 0) && (
+                <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-white/20 font-mono">
+                  +{modelosSelecionados.length * coresSelecionadas.length}
+                </span>
+              )}
+            </button>
+          </div>
+
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sparkles size={16} className="text-[#c084fc]" />
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Pré-visualização da Grade
+                  Pré-visualização da Grade Acumulada
                 </h3>
                 <span className="text-[11px] bg-[#6A0DAD]/20 text-[#c084fc] border border-[#6A0DAD]/30 px-2 py-0.5 rounded-md font-mono font-bold">
-                  {variacoesGeradas.length} variação(ões)
-                </span>
-                <span className="text-[10px] text-gray-500">
-                  ({modelosAparelho.length} modelo(s) × {coresSelecionadas.length} cor(es))
+                  {gradeAcumulada.length} na fila
                 </span>
               </div>
+              {gradeAcumulada.length > 0 && (
+                <button type="button" onClick={handleLimparFilaInteira} className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold">
+                  Limpar Fila Inteira
+                </button>
+              )}
             </div>
 
-            {variacoesGeradas.length === 0 ? (
+            {gradeAcumulada.length === 0 ? (
               <div className="border border-dashed border-[#262626] rounded-xl p-8 text-center text-gray-500 text-xs">
-                Adicione ao menos um modelo de aparelho e uma cor para ver as variações calculadas.
+                Nenhuma variação adicionada à fila ainda.
               </div>
             ) : (
               <div className="border border-[#222222] rounded-xl overflow-hidden bg-[#0A0A0A]">
-                <div className="max-h-56 overflow-y-auto divide-y divide-[#1A1A1A]">
+                <div className="max-h-60 overflow-y-auto divide-y divide-[#1A1A1A]">
                   <table className="w-full text-left text-xs text-gray-300">
                     <thead className="bg-[#141414] text-[10px] font-bold text-gray-400 uppercase tracking-wider sticky top-0">
                       <tr>
                         <th className="py-2.5 px-3">#</th>
-                        <th className="py-2.5 px-3">Nome Formatado da Variação</th>
+                        <th className="py-2.5 px-3">Nome da Variação</th>
                         <th className="py-2.5 px-3">Cor</th>
-                        <th className="py-2.5 px-3">Preço Venda</th>
-                        <th className="py-2.5 px-3">Código de Barras (EAN-13)</th>
+                        <th className="py-2.5 px-3">Preço</th>
+                        <th className="py-2.5 px-3">Código</th>
                         <th className="py-2.5 px-3 text-right">Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#181818]">
-                      {variacoesGeradas.map((item, idx) => (
-                        <tr key={item.idTemp || idx} className="hover:bg-white/[0.02] transition-colors">
+                      {gradeAcumulada.map((item, idx) => (
+                        <tr key={item.idTemp || idx} className="hover:bg-white/[0.02]">
                           <td className="py-2 px-3 font-mono text-[10px] text-gray-600">{idx + 1}</td>
-                          <td className="py-2 px-3 font-medium text-white">
-                            {item.nome}
-                          </td>
-                          <td className="py-2 px-3 text-gray-300">
-                            <span className="inline-block px-2 py-0.5 rounded bg-[#1C1C1C] border border-[#333333] text-[10px] font-semibold">
-                              {item.cor}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 font-mono font-bold text-emerald-400">
-                            R$ {item.preco.toFixed(2)}
-                          </td>
-                          <td className="py-2 px-3 font-mono text-[11px] text-purple-300 flex items-center gap-1.5">
-                            <Barcode size={13} className="text-gray-500" />
-                            {item.codigo_barras}
-                          </td>
+                          <td className="py-2 px-3 font-medium text-white">{item.nome}</td>
+                          <td className="py-2 px-3">{item.cor}</td>
+                          <td className="py-2 px-3 font-mono text-emerald-400">R$ {item.preco.toFixed(2)}</td>
+                          <td className="py-2 px-3 font-mono text-[11px] text-purple-300">{item.codigo_barras}</td>
                           <td className="py-2 px-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleRemoverVariacao(item)}
-                              className="p-1 text-gray-500 hover:text-red-400 hover:bg-red-950/30 rounded transition-colors cursor-pointer"
-                              title={`Remover variação (${item.cor})`}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            <button type="button" onClick={() => handleRemoverDaFila(idx)} className="text-gray-500 hover:text-red-400"><Trash2 size={13} /></button>
                           </td>
                         </tr>
                       ))}
@@ -714,46 +648,27 @@ export default function ModalGeradorGrade({
               </div>
             )}
           </div>
-
         </div>
 
-        {/* Rodapé de Ações */}
         <div className="p-4 bg-[#111111] border-t border-[#222222] flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="text-xs text-gray-400 text-center sm:text-left">
-            Total a ser inserido no catálogo mestre:{' '}
-            <strong className="text-white font-mono">{variacoesGeradas.length}</strong> produtos
+          <div className="text-xs text-gray-400">
+            Total na fila: <strong className="text-white font-mono">{gradeAcumulada.length}</strong>
           </div>
-
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSaving}
-              className="flex-1 sm:flex-none px-4 py-2.5 bg-[#1F1F1F] hover:bg-[#2A2A2A] text-gray-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
-            >
+            <button type="button" onClick={onClose} disabled={isSaving} className="flex-1 px-4 py-2.5 bg-[#1F1F1F] text-gray-300 rounded-xl text-xs font-bold">
               Cancelar
             </button>
             <button
               type="button"
               onClick={handleSalvarTodas}
-              disabled={isSaving || variacoesGeradas.length === 0}
-              className="flex-1 sm:flex-none px-6 py-2.5 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-[#6A0DAD]/20 flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSaving || gradeAcumulada.length === 0}
+              className="flex-1 px-6 py-2.5 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-[#6A0DAD]/20 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
             >
-              {isSaving ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  <span>Cadastrando {variacoesGeradas.length} variações...</span>
-                </>
-              ) : (
-                <>
-                  <Zap size={16} />
-                  <span>Salvar Todas as Variações ({variacoesGeradas.length})</span>
-                </>
-              )}
+              {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+              <span>Salvar Todas as Variações ({gradeAcumulada.length})</span>
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );
