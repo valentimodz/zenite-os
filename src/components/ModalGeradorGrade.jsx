@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { X, Zap, Plus, Check, Loader2, Sparkles, AlertCircle, Barcode, Trash2 } from 'lucide-react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
@@ -8,7 +8,7 @@ const MODELOS_BASE_PREDEFINIDOS = [
   { label: 'Case Premium (R$ 219,99)', nome: 'Case Premium', preco: '219.99' },
 ];
 
-const CORES_SUGERIDAS = [
+const CORES_SUGERIDAS_PADRAO = [
   'Preto',
   'Transparente',
   'Fumê',
@@ -73,17 +73,58 @@ export default function ModalGeradorGrade({
   ]);
   const [novoModeloInput, setNovoModeloInput] = useState('');
 
-  // Cores Disponíveis (Selecionadas)
+  // Lista geral de cores disponíveis (Padrão + Salvas no Supabase)
+  const [coresDisponiveis, setCoresDisponiveis] = useState(CORES_SUGERIDAS_PADRAO);
+
+  // Cores Selecionadas para geração da grade
   const [coresSelecionadas, setCoresSelecionadas] = useState([
     'Preto',
     'Transparente',
     'Fumê'
   ]);
   const [novaCorInput, setNovaCorInput] = useState('');
+  const [isSalvandoCor, setIsSalvandoCor] = useState(false);
 
   // Loading do salvamento
   const [isSaving, setIsSaving] = useState(false);
   const [erroMsg, setErroMsg] = useState(null);
+
+  // Buscar cores cadastradas da empresa ao abrir o modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const carregarCoresBanco = async () => {
+      try {
+        let empresaId = perfilUsuario?.empresa_id || perfilUsuario?.empresaId;
+        if (!empresaId) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: prof } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).maybeSingle();
+            empresaId = prof?.empresa_id;
+          }
+        }
+
+        let query = supabase.from('cores_catalogo').select('nome');
+        if (empresaId) {
+          query = query.or(`empresa_id.eq.${empresaId},empresa_id.is.null`);
+        }
+
+        const { data, error } = await query;
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const nomesBanco = data.map(c => c.nome).filter(Boolean);
+          // Unir com a lista padrão sem duplicatas
+          setCoresDisponiveis(prev => {
+            const set = new Set([...CORES_SUGERIDAS_PADRAO, ...prev, ...nomesBanco]);
+            return Array.from(set);
+          });
+        }
+      } catch (err) {
+        console.warn('[Cores] Aviso ao carregar cores do catálogo:', err);
+      }
+    };
+
+    carregarCoresBanco();
+  }, [isOpen, perfilUsuario?.empresa_id, perfilUsuario?.empresaId]);
 
   // Manipulação de Linha Base Pré-definida
   const handleSelectLinhaBase = (val) => {
@@ -120,14 +161,62 @@ export default function ModalGeradorGrade({
     );
   };
 
-  // Adicionar Cor customizada
-  const handleAddCustomCor = () => {
+  // Limpar todas as cores selecionadas
+  const handleLimparCores = () => {
+    setCoresSelecionadas([]);
+  };
+
+  // Adicionar e persistir nova cor no Supabase ('cores_catalogo')
+  const handleAddCustomCor = async () => {
     const limpa = novaCorInput.trim();
     if (!limpa) return;
-    if (!coresSelecionadas.includes(limpa)) {
-      setCoresSelecionadas(prev => [...prev, limpa]);
+
+    setIsSalvandoCor(true);
+    try {
+      let empresaId = perfilUsuario?.empresa_id || perfilUsuario?.empresaId;
+      if (!empresaId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: prof } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).maybeSingle();
+          empresaId = prof?.empresa_id;
+        }
+      }
+
+      // 1. Salvar no Supabase na tabela cores_catalogo
+      if (empresaId) {
+        const { error } = await supabase
+          .from('cores_catalogo')
+          .insert([{ empresa_id: empresaId, nome: limpa }]);
+        
+        if (error) {
+          console.warn('[Cores] Aviso ao salvar cor no banco:', error.message);
+        }
+      }
+    } catch (err) {
+      console.warn('[Cores] Erro ao persistir nova cor:', err);
+    } finally {
+      setIsSalvandoCor(false);
     }
+
+    // 2. Adicionar imediatamente à lista de botões de CORES DISPONÍVEIS
+    setCoresDisponiveis(prev => {
+      if (prev.some(c => c.toLowerCase() === limpa.toLowerCase())) return prev;
+      return [...prev, limpa];
+    });
+
+    // 3. Marcar automaticamente como selecionada (com fundo roxo/ativo)
+    setCoresSelecionadas(prev => {
+      if (prev.some(c => c.toLowerCase() === limpa.toLowerCase())) return prev;
+      return [...prev, limpa];
+    });
+
     setNovaCorInput('');
+  };
+
+  // Remover variação específica da pré-visualização e desmarcar a respectiva cor do estado selecionado
+  const handleRemoverVariacao = (item) => {
+    if (!item?.cor) return;
+    setCoresSelecionadas(prev => prev.filter(c => c.toLowerCase() !== item.cor.toLowerCase()));
   };
 
   // Cálculo da grade (Preview)
@@ -149,6 +238,7 @@ export default function ModalGeradorGrade({
         const nomeFormatado = `${linhaBaseFinal} - ${mod} (${cor})`;
 
         list.push({
+          idTemp: `${mod}-${cor}`,
           nome: nomeFormatado,
           linhaBase: linhaBaseFinal,
           modelo: mod,
@@ -484,20 +574,29 @@ export default function ModalGeradorGrade({
           {/* Cores Disponíveis (Toggle e Custom) */}
           <div className="space-y-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="flex items-center gap-3">
                 <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
                   Cores Disponíveis ({coresSelecionadas.length})
                 </label>
-                <p className="text-[11px] text-gray-400">
-                  Selecione as cores que serão produzidas para cada modelo
-                </p>
+                {coresSelecionadas.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleLimparCores}
+                    className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold cursor-pointer transition-colors"
+                  >
+                    Limpar Todas
+                  </button>
+                )}
               </div>
+              <p className="text-[11px] text-gray-400">
+                Selecione as cores que serão produzidas para cada modelo
+              </p>
             </div>
 
-            {/* Chips com toggle de cores padrão */}
+            {/* Chips com toggle de cores (Padrão + cadastradas do banco) */}
             <div className="flex flex-wrap gap-2">
-              {CORES_SUGERIDAS.map(cor => {
-                const isSelected = coresSelecionadas.includes(cor);
+              {coresDisponiveis.map(cor => {
+                const isSelected = coresSelecionadas.some(c => c.toLowerCase() === cor.toLowerCase());
                 return (
                   <button
                     key={cor}
@@ -534,9 +633,11 @@ export default function ModalGeradorGrade({
               <button
                 type="button"
                 onClick={handleAddCustomCor}
-                className="px-3 py-1.5 bg-[#222222] hover:bg-[#333333] text-gray-200 border border-[#333333] rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                disabled={isSalvandoCor || !novaCorInput.trim()}
+                className="px-3 py-1.5 bg-[#222222] hover:bg-[#333333] text-gray-200 border border-[#333333] rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Plus size={12} /> Incluir Cor
+                {isSalvandoCor ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                Incluir Cor
               </button>
             </div>
           </div>
@@ -573,11 +674,12 @@ export default function ModalGeradorGrade({
                         <th className="py-2.5 px-3">Cor</th>
                         <th className="py-2.5 px-3">Preço Venda</th>
                         <th className="py-2.5 px-3">Código de Barras (EAN-13)</th>
+                        <th className="py-2.5 px-3 text-right">Ação</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#181818]">
                       {variacoesGeradas.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
+                        <tr key={item.idTemp || idx} className="hover:bg-white/[0.02] transition-colors">
                           <td className="py-2 px-3 font-mono text-[10px] text-gray-600">{idx + 1}</td>
                           <td className="py-2 px-3 font-medium text-white">
                             {item.nome}
@@ -593,6 +695,16 @@ export default function ModalGeradorGrade({
                           <td className="py-2 px-3 font-mono text-[11px] text-purple-300 flex items-center gap-1.5">
                             <Barcode size={13} className="text-gray-500" />
                             {item.codigo_barras}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoverVariacao(item)}
+                              className="p-1 text-gray-500 hover:text-red-400 hover:bg-red-950/30 rounded transition-colors cursor-pointer"
+                              title={`Remover variação (${item.cor})`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </td>
                         </tr>
                       ))}

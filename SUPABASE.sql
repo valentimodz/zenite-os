@@ -639,5 +639,28 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- =========================================================================
+-- TABELA DE CORES DO CATÁLOGO DE ACESSÓRIOS (cores_catalogo)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.cores_catalogo (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid REFERENCES public.companies(id) ON DELETE CASCADE,
+  nome text NOT NULL,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
 
+ALTER TABLE public.cores_catalogo ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Permitir tudo para autenticados em cores_catalogo" ON public.cores_catalogo;
+CREATE POLICY "Permitir tudo para autenticados em cores_catalogo"
+ON public.cores_catalogo
+FOR ALL
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+DROP TRIGGER IF EXISTS trg_cores_catalogo_empresa_id ON public.cores_catalogo;
+CREATE TRIGGER trg_cores_catalogo_empresa_id
+BEFORE INSERT ON public.cores_catalogo
+FOR EACH ROW
+EXECUTE FUNCTION public.fn_auto_fill_empresa_id();
