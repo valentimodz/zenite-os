@@ -350,21 +350,43 @@ CREATE TABLE IF NOT EXISTS public.produtos_catalogo (
 );
 ALTER TABLE public.produtos_catalogo ENABLE ROW LEVEL SECURITY;
 
+-- 1. Remove qualquer política restritiva anterior da tabela produtos_catalogo
 DROP POLICY IF EXISTS "Usuários podem ver catálogo da empresa" ON public.produtos_catalogo;
-CREATE POLICY "Usuários podem ver catálogo da empresa" ON public.produtos_catalogo
-  FOR SELECT TO authenticated
-  USING (
-    empresa_id = public.get_user_empresa_id()
-    OR public.get_user_role() = 'ADMIN'
-  );
-
 DROP POLICY IF EXISTS "Gerentes podem gerenciar catálogo" ON public.produtos_catalogo;
-CREATE POLICY "Gerentes podem gerenciar catálogo" ON public.produtos_catalogo
-  FOR ALL TO authenticated
-  USING (
-    empresa_id = public.get_user_empresa_id() AND public.get_user_role() = 'GERENTE'
-    OR public.get_user_role() = 'ADMIN'
-  );
+DROP POLICY IF EXISTS "Usuários autenticados podem ver produtos_catalogo" ON public.produtos_catalogo;
+DROP POLICY IF EXISTS "Usuários autenticados podem inserir produtos_catalogo" ON public.produtos_catalogo;
+DROP POLICY IF EXISTS "Gestores podem gerenciar produtos_catalogo" ON public.produtos_catalogo;
+DROP POLICY IF EXISTS "Permitir tudo para autenticados em produtos_catalogo" ON public.produtos_catalogo;
+
+-- 2. Trigger para auto-injetar empresa_id caso o frontend envie nulo
+CREATE OR REPLACE FUNCTION public.fn_auto_fill_empresa_id()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.empresa_id IS NULL THEN
+    SELECT empresa_id INTO NEW.empresa_id 
+    FROM public.profiles 
+    WHERE id = auth.uid();
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_produtos_catalogo_empresa_id ON public.produtos_catalogo;
+CREATE TRIGGER trg_produtos_catalogo_empresa_id
+BEFORE INSERT ON public.produtos_catalogo
+FOR EACH ROW
+EXECUTE FUNCTION public.fn_auto_fill_empresa_id();
+
+-- 3. Cria política unificada e garantida para leitura e escrita
+CREATE POLICY "Permitir tudo para autenticados em produtos_catalogo"
+ON public.produtos_catalogo
+FOR ALL
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+-- 4. Notifica o PostgREST para limpar o cache de regras
+NOTIFY pgrst, 'reload schema';
 
 -- =========================================================================
 -- CORREÇÕES DE RLS: Permitir Vendedores atualizarem IMEIs e Produtos (PDV)
