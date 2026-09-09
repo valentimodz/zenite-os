@@ -154,7 +154,7 @@ export default function ModalGeradorGrade({
           modelo: mod,
           cor: cor,
           tipo: 'ACESSORIO',
-          categoria: categoria || 'Capinhas',
+          categoria: categoria || 'Acessórios',
           preco: parseFloat(precoVenda || 0),
           custo: parseFloat(precoCusto || 0),
           codigo_barras: barcodeSeq
@@ -179,7 +179,19 @@ export default function ModalGeradorGrade({
       return;
     }
 
-    const empresaId = perfilUsuario?.empresa_id;
+    let empresaId = perfilUsuario?.empresa_id || perfilUsuario?.empresaId;
+    if (!empresaId) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: prof } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).maybeSingle();
+          empresaId = prof?.empresa_id;
+        }
+      } catch (errEmp) {
+        console.warn('Erro ao obter empresa_id da sessão ativa:', errEmp);
+      }
+    }
+
     if (!empresaId) {
       setErroMsg('ID da empresa não identificado na sessão do usuário.');
       return;
@@ -188,16 +200,15 @@ export default function ModalGeradorGrade({
     setIsSaving(true);
 
     try {
-      const dbClient = (['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(String(perfilUsuario?.role).toUpperCase()) && supabaseAdmin)
-        ? supabaseAdmin
-        : supabase;
+      // Usar cliente com sessão autenticada para satisfazer políticas RLS (auth.uid() e get_user_empresa_id())
+      const dbClient = supabase;
 
-      // Montar array de objetos para produtos_catalogo
+      // Montar array de objetos para produtos_catalogo garantindo empresa_id, tipo e categoria em CADA item
       const arrayDeProdutos = variacoesGeradas.map(v => ({
         empresa_id: empresaId,
         nome: v.nome,
         tipo: 'ACESSORIO',
-        categoria: v.categoria || 'Capinhas',
+        categoria: v.categoria || 'Acessórios',
         preco: Number(v.preco),
         preco_custo: Number(v.custo || 0),
         cor: v.cor,
@@ -212,16 +223,17 @@ export default function ModalGeradorGrade({
         .select();
 
       if (error) {
-        // Se a coluna preco_custo não existir ou der PGRST204, tentar sem ela como fallback
+        // Se a coluna preco_custo não existir ou der PGRST204, tentar sem ela como fallback mantendo empresa_id, tipo e categoria
         if (error.code === 'PGRST204' || error.message?.includes('could not find the column') || error.message?.includes('does not exist')) {
           console.warn('Retentando insert em produtos_catalogo com schema estrito:', error.message);
           const arrayEstrito = arrayDeProdutos.map(p => ({
-            empresa_id: p.empresa_id,
+            empresa_id: p.empresa_id || empresaId,
             nome: p.nome,
-            tipo: p.tipo,
-            categoria: p.categoria,
+            tipo: 'ACESSORIO',
+            categoria: p.categoria || 'Acessórios',
             preco: p.preco,
             cor: p.cor,
+            condicao: 'NOVO',
             codigo_barras: p.codigo_barras
           }));
 
