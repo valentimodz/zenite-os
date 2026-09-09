@@ -1,24 +1,14 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { X, Zap, Plus, Check, Loader2, Sparkles, AlertCircle, Barcode, Trash2 } from 'lucide-react';
-import { supabase, supabaseAdmin } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 
-const MODELOS_BASE_PREDEFINIDOS = [
-  { label: 'Case Padrão (R$ 49,99)', nome: 'Case Padrão', preco: '49.99' },
-  { label: 'Case Monkey Shop (R$ 149,99)', nome: 'Case Monkey Shop', preco: '149.99' },
-  { label: 'Case Premium (R$ 219,99)', nome: 'Case Premium', preco: '219.99' },
-];
-
-const CORES_SUGERIDAS_PADRAO = [
-  'Preto',
-  'Transparente',
-  'Fumê',
-  'Azul',
-  'Rosa',
-  'Dourado',
-  'Branco',
-  'Vermelho',
-  'Verde',
-  'Roxo'
+const TIPOS_CASE_PADRAO = [
+  'Padrão',
+  'Premium',
+  'Monkey Shop',
+  'Silicone Aveludada',
+  'Anti-Impacto Transparente',
+  'Couro / Carteira'
 ];
 
 const MODELOS_RAPIDOS_SUGERIDOS = [
@@ -32,10 +22,11 @@ const MODELOS_RAPIDOS_SUGERIDOS = [
 ];
 
 // Gerador de código de barras 13 dígitos numéricos válidos (com timestamp + random)
-const gerarCodigoBarras13 = () => {
-  const timeSlice = Date.now().toString().slice(-8); // 8 dígitos
-  const randomSlice = Math.floor(10000 + Math.random() * 90000).toString(); // 5 dígitos
-  return `${timeSlice}${randomSlice}`; // 13 dígitos
+const gerarCodigoBarras13 = (seed = 0) => {
+  const timeSlice = Date.now().toString().slice(-7);
+  const seq = String(seed % 1000).padStart(3, '0');
+  const rand = Math.floor(100 + Math.random() * 900).toString();
+  return `${timeSlice}${seq}${rand}`.slice(0, 13);
 };
 
 export default function ModalGeradorGrade({
@@ -45,9 +36,7 @@ export default function ModalGeradorGrade({
   categorias = [],
   onSuccess
 }) {
-  // Estado Linha / Modelo Base
-  const [selectedLinhaBase, setSelectedLinhaBase] = useState('Case Padrão');
-  const [customLinhaBase, setCustomLinhaBase] = useState('');
+  // Preço e Custo
   const [precoVenda, setPrecoVenda] = useState('49.99');
   const [precoCusto, setPrecoCusto] = useState('0');
 
@@ -65,6 +54,7 @@ export default function ModalGeradorGrade({
 
   const [categoria, setCategoria] = useState(defaultCategoria);
 
+  // Modelos de Aparelho
   const [modelosSelecionados, setModelosSelecionados] = useState([
     'iPhone 13',
     'iPhone 14',
@@ -72,67 +62,19 @@ export default function ModalGeradorGrade({
   ]);
   const [novoModeloInput, setNovoModeloInput] = useState('');
 
-  const [coresDisponiveis, setCoresDisponiveis] = useState(CORES_SUGERIDAS_PADRAO);
-
-  const [coresSelecionadas, setCoresSelecionadas] = useState([
-    'Preto',
-    'Transparente',
-    'Fumê'
+  // Linhas / Tipos de Case
+  const [tiposDisponiveis, setTiposDisponiveis] = useState(TIPOS_CASE_PADRAO);
+  const [tiposSelecionados, setTiposSelecionados] = useState([
+    'Padrão',
+    'Premium'
   ]);
-  const [novaCorInput, setNovaCorInput] = useState('');
-  const [isSalvandoCor, setIsSalvandoCor] = useState(false);
+  const [novoTipoInput, setNovoTipoInput] = useState('');
 
+  // Fila de variações acumuladas
   const [gradeAcumulada, setGradeAcumulada] = useState([]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [erroMsg, setErroMsg] = useState(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const carregarCoresBanco = async () => {
-      try {
-        let empresaId = perfilUsuario?.empresa_id || perfilUsuario?.empresaId;
-        if (!empresaId) {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            const { data: prof } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).maybeSingle();
-            empresaId = prof?.empresa_id;
-          }
-        }
-
-        let query = supabase.from('cores_catalogo').select('nome');
-        if (empresaId) {
-          query = query.or(`empresa_id.eq.${empresaId},empresa_id.is.null`);
-        }
-
-        const { data, error } = await query;
-        if (!error && Array.isArray(data) && data.length > 0) {
-          const nomesBanco = data.map(c => c.nome).filter(Boolean);
-          setCoresDisponiveis(prev => {
-            const set = new Set([...CORES_SUGERIDAS_PADRAO, ...prev, ...nomesBanco]);
-            return Array.from(set);
-          });
-        }
-      } catch (err) {
-        console.warn('[Cores] Aviso ao carregar cores do catálogo:', err);
-      }
-    };
-
-    carregarCoresBanco();
-  }, [isOpen, perfilUsuario?.empresa_id, perfilUsuario?.empresaId]);
-
-  const handleSelectLinhaBase = (val) => {
-    setSelectedLinhaBase(val);
-    const predef = MODELOS_BASE_PREDEFINIDOS.find(m => m.nome === val);
-    if (predef) {
-      setPrecoVenda(predef.preco);
-    }
-  };
-
-  const linhaBaseFinal = selectedLinhaBase === 'OUTRO' 
-    ? (customLinhaBase.trim() || 'Case')
-    : selectedLinhaBase;
 
   const handleAddModelo = (mod) => {
     const limpo = mod.trim();
@@ -147,69 +89,43 @@ export default function ModalGeradorGrade({
     setModelosSelecionados(prev => prev.filter(m => m !== mod));
   };
 
-  const handleToggleCor = (cor) => {
-    setCoresSelecionadas(prev => 
-      prev.includes(cor) ? prev.filter(c => c !== cor) : [...prev, cor]
+  const handleToggleTipo = (tipo) => {
+    setTiposSelecionados(prev =>
+      prev.includes(tipo) ? prev.filter(t => t !== tipo) : [...prev, tipo]
     );
   };
 
-  const handleLimparCores = () => {
-    setCoresSelecionadas([]);
+  const handleLimparTipos = () => {
+    setTiposSelecionados([]);
   };
 
-  const handleAddCustomCor = async () => {
-    const limpa = novaCorInput.trim();
-    if (!limpa) return;
+  const handleAddCustomTipo = () => {
+    const limpo = novoTipoInput.trim();
+    if (!limpo) return;
 
-    setIsSalvandoCor(true);
-    try {
-      let empresaId = perfilUsuario?.empresa_id || perfilUsuario?.empresaId;
-      if (!empresaId) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: prof } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).maybeSingle();
-          empresaId = prof?.empresa_id;
-        }
-      }
-
-      if (empresaId) {
-        const { error } = await supabase
-          .from('cores_catalogo')
-          .insert([{ empresa_id: empresaId, nome: limpa }]);
-        
-        if (error) {
-          console.warn('[Cores] Aviso ao salvar cor no banco:', error.message);
-        }
-      }
-    } catch (err) {
-      console.warn('[Cores] Erro ao persistir nova cor:', err);
-    } finally {
-      setIsSalvandoCor(false);
-    }
-
-    setCoresDisponiveis(prev => {
-      if (prev.some(c => c.toLowerCase() === limpa.toLowerCase())) return prev;
-      return [...prev, limpa];
+    setTiposDisponiveis(prev => {
+      if (prev.some(t => t.toLowerCase() === limpo.toLowerCase())) return prev;
+      return [...prev, limpo];
     });
 
-    setCoresSelecionadas(prev => {
-      if (prev.some(c => c.toLowerCase() === limpa.toLowerCase())) return prev;
-      return [...prev, limpa];
+    setTiposSelecionados(prev => {
+      if (prev.some(t => t.toLowerCase() === limpo.toLowerCase())) return prev;
+      return [...prev, limpo];
     });
 
-    setNovaCorInput('');
+    setNovoTipoInput('');
   };
 
   const handleAdicionarAFila = () => {
     setErroMsg(null);
 
-    if (modelosSelecionados.length === 0) {
-      setErroMsg('Selecione ou adicione ao menos um modelo de aparelho para incluir na fila.');
+    if (tiposSelecionados.length === 0) {
+      setErroMsg('Selecione ao menos uma Linha / Tipo de Case para incluir na fila.');
       return;
     }
 
-    if (coresSelecionadas.length === 0) {
-      setErroMsg('Selecione ao menos uma cor para incluir na fila.');
+    if (modelosSelecionados.length === 0) {
+      setErroMsg('Selecione ou adicione ao menos um modelo de aparelho para incluir na fila.');
       return;
     }
 
@@ -220,25 +136,23 @@ export default function ModalGeradorGrade({
     }
 
     let seed = gradeAcumulada.length;
-    const baseTime = Date.now().toString().slice(-7);
     const novosItens = [];
 
-    for (const mod of modelosSelecionados) {
-      for (const cor of coresSelecionadas) {
+    for (const tipo of tiposSelecionados) {
+      for (const mod of modelosSelecionados) {
         seed += 1;
-        const seqNum = String(seed).padStart(3, '0');
-        const rand = Math.floor(100 + Math.random() * 900);
-        const barcodeSeq = `${baseTime}${seqNum}${rand}`;
-        const nomeFormatado = `${linhaBaseFinal} - ${mod} (${cor})`;
+        const barcodeSeq = gerarCodigoBarras13(seed);
+        // Padrão solicitado: Case ${tipo} - ${modelo} (Ex: "Case Premium - Realme C78")
+        const nomeFormatado = `Case ${tipo} - ${mod}`;
 
         novosItens.push({
-          idTemp: `${mod}-${cor}-${Date.now()}-${Math.random()}`,
+          idTemp: `${tipo}-${mod}-${Date.now()}-${Math.random()}`,
           nome: nomeFormatado,
-          linhaBase: linhaBaseFinal,
+          linhaTipo: tipo,
           modelo: mod,
-          cor: cor,
+          cor: null,
           tipo: 'ACESSORIO',
-          categoria: categoria || 'Acessórios',
+          categoria: categoria || 'Capinhas',
           preco: parseFloat(precoVenda || 0),
           custo: parseFloat(precoCusto || 0),
           codigo_barras: barcodeSeq
@@ -248,8 +162,9 @@ export default function ModalGeradorGrade({
 
     setGradeAcumulada(prev => [...prev, ...novosItens]);
 
+    // Limpar seleções ativas para novo agrupamento
     setModelosSelecionados([]);
-    setCoresSelecionadas([]);
+    setTiposSelecionados([]);
   };
 
   const handleRemoverDaFila = (index) => {
@@ -293,10 +208,10 @@ export default function ModalGeradorGrade({
         empresa_id: empresaId,
         nome: v.nome,
         tipo: 'ACESSORIO',
-        categoria: v.categoria || 'Acessórios',
+        categoria: v.categoria || 'Capinhas',
         preco: Number(v.preco),
         preco_custo: Number(v.custo || 0),
-        cor: v.cor,
+        cor: null,
         condicao: 'NOVO',
         codigo_barras: v.codigo_barras
       }));
@@ -312,9 +227,9 @@ export default function ModalGeradorGrade({
             empresa_id: p.empresa_id,
             nome: p.nome,
             tipo: 'ACESSORIO',
-            categoria: p.categoria || 'Acessórios',
+            categoria: p.categoria || 'Capinhas',
             preco: p.preco,
-            cor: p.cor,
+            cor: null,
             condicao: 'NOVO',
             codigo_barras: p.codigo_barras
           }));
@@ -342,7 +257,7 @@ export default function ModalGeradorGrade({
 
   const finalizarSucesso = (qtdCriada) => {
     if (onSuccess) {
-      onSuccess(qtdCriada, linhaBaseFinal);
+      onSuccess(qtdCriada, 'Capinhas');
     }
     setGradeAcumulada([]);
     onClose();
@@ -354,6 +269,7 @@ export default function ModalGeradorGrade({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
       <div className="bg-[#0D0D0D] border border-[#262626] w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         
+        {/* Top Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#222222] bg-gradient-to-r from-[#140026] via-[#0D0D0D] to-[#0D0D0D]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 flex items-center justify-center text-[#c084fc] shadow-lg shadow-[#6A0DAD]/10">
@@ -369,7 +285,7 @@ export default function ModalGeradorGrade({
                 </span>
               </div>
               <p className="text-xs text-gray-400 mt-0.5">
-                Monte a grade por modelos e cores acumulando variações sem perder as anteriores
+                Gere variações por Linha/Tipo de Case e Modelo do Aparelho acumulando na fila
               </p>
             </div>
           </div>
@@ -382,11 +298,12 @@ export default function ModalGeradorGrade({
           </button>
         </div>
 
+        {/* Mensagem de Erro */}
         {erroMsg && (
           <div className="mx-6 mt-4 p-3 bg-red-950/40 border border-red-800/50 rounded-xl flex items-center gap-2.5 text-red-300 text-xs">
             <AlertCircle size={16} className="shrink-0 text-red-400" />
             <span className="flex-1 font-medium">{erroMsg}</span>
-            <button type="button" onClick={() => setErroMsg(null)} className="text-red-400 hover:text-red-200">
+            <button type="button" onClick={() => setErroMsg(null)} className="text-red-400 hover:text-red-200 cursor-pointer">
               <X size={14} />
             </button>
           </div>
@@ -394,46 +311,22 @@ export default function ModalGeradorGrade({
 
         <div className="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
           
+          {/* Seção 1: Configurações Gerais (Categoria, Preço Venda, Custo) */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
-            <div className="md:col-span-5 space-y-1.5">
+            <div className="md:col-span-6 space-y-1.5">
               <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
-                Linha / Modelo Base <span className="text-red-400">*</span>
-              </label>
-              <select
-                value={selectedLinhaBase}
-                onChange={(e) => handleSelectLinhaBase(e.target.value)}
-                className="w-full bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-sm text-white font-medium outline-none cursor-pointer"
-              >
-                {MODELOS_BASE_PREDEFINIDOS.map(m => (
-                  <option key={m.nome} value={m.nome}>{m.label}</option>
-                ))}
-                <option value="OUTRO">Outro (Digitar Linha Personalizada...)</option>
-              </select>
-              {selectedLinhaBase === 'OUTRO' && (
-                <input
-                  type="text"
-                  value={customLinhaBase}
-                  onChange={(e) => setCustomLinhaBase(e.target.value)}
-                  placeholder="Nome do Modelo Base (Ex: Case Magnética Slim)"
-                  className="w-full mt-2 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-                />
-              )}
-            </div>
-
-            <div className="md:col-span-3 space-y-1.5">
-              <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
-                Categoria <span className="text-[9px] text-[#c084fc] font-normal">(Travada)</span>
+                Categoria
               </label>
               <input
                 type="text"
                 value={categoria}
                 onChange={(e) => setCategoria(e.target.value)}
-                className="w-full bg-[#1c1c1c] border border-[#333333] rounded-lg px-3 py-2 text-sm text-gray-200 font-semibold outline-none"
-                placeholder="Acessórios"
+                className="w-full bg-[#1c1c1c] border border-[#333333] rounded-lg px-3 py-2 text-sm text-gray-200 font-semibold outline-none focus:border-[#6A0DAD]"
+                placeholder="Capinhas"
               />
             </div>
 
-            <div className="md:col-span-2 space-y-1.5">
+            <div className="md:col-span-3 space-y-1.5">
               <label className="block text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
                 Preço Venda (R$) <span className="text-red-400">*</span>
               </label>
@@ -448,7 +341,7 @@ export default function ModalGeradorGrade({
               />
             </div>
 
-            <div className="md:col-span-2 space-y-1.5">
+            <div className="md:col-span-3 space-y-1.5">
               <label className="block text-[11px] font-bold text-amber-400/90 uppercase tracking-wider">
                 Custo (R$) <span className="text-[9px] text-gray-400 font-normal">(Opc.)</span>
               </label>
@@ -464,6 +357,63 @@ export default function ModalGeradorGrade({
             </div>
           </div>
 
+          {/* Seção 2: Linhas / Tipos de Case */}
+          <div className="space-y-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
+                  LINHAS / TIPOS DISPONÍVEIS ({tiposSelecionados.length} selecionados)
+                </label>
+                {tiposSelecionados.length > 0 && (
+                  <button type="button" onClick={handleLimparTipos} className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold cursor-pointer">
+                    Limpar Todos
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400">
+              Selecione as linhas de case que deseja gerar para os aparelhos:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {tiposDisponiveis.map(tipo => {
+                const isSelected = tiposSelecionados.some(t => t.toLowerCase() === tipo.toLowerCase());
+                return (
+                  <button
+                    key={tipo}
+                    type="button"
+                    onClick={() => handleToggleTipo(tipo)}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                      isSelected ? 'bg-[#6A0DAD] border-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/30' : 'bg-black border-[#333333] text-gray-400 hover:border-gray-500 hover:text-gray-200'
+                    }`}
+                  >
+                    {isSelected && <Check size={12} />}
+                    {tipo}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex gap-2 pt-2 border-t border-[#222222]/80">
+              <input
+                type="text"
+                value={novoTipoInput}
+                onChange={(e) => setNovoTipoInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomTipo(); } }}
+                placeholder="Outro tipo de case customizado (Ex: MagSafe Carbono)..."
+                className="flex-1 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+              />
+              <button
+                type="button"
+                onClick={handleAddCustomTipo}
+                disabled={!novoTipoInput.trim()}
+                className="px-3.5 py-1.5 bg-[#222222] hover:bg-[#333333] disabled:opacity-50 text-gray-200 border border-[#333333] rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <Plus size={12} />
+                + Incluir Linha
+              </button>
+            </div>
+          </div>
+
+          {/* Seção 3: Modelos de Aparelho */}
           <div className="space-y-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
@@ -471,7 +421,7 @@ export default function ModalGeradorGrade({
                   Modelos de Aparelho para este Lote ({modelosSelecionados.length})
                 </label>
                 <p className="text-[11px] text-gray-400">
-                  Adicione os aparelhos compatíveis que deseja cruzar com as cores abaixo
+                  Adicione os aparelhos compatíveis que deseja cruzar com as linhas de case
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -484,8 +434,8 @@ export default function ModalGeradorGrade({
                       type="button"
                       onClick={() => handleAddModelo(sug)}
                       disabled={jaTem}
-                      className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-all ${
-                        jaTem ? 'bg-gray-800/40 text-gray-600' : 'bg-[#222222] hover:bg-[#6A0DAD]/30 text-gray-300'
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-all cursor-pointer ${
+                        jaTem ? 'bg-gray-800/40 text-gray-600 cursor-not-allowed' : 'bg-[#222222] hover:bg-[#6A0DAD]/30 text-gray-300'
                       }`}
                     >
                       +{sug}
@@ -500,99 +450,49 @@ export default function ModalGeradorGrade({
                 value={novoModeloInput}
                 onChange={(e) => setNovoModeloInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddModelo(novoModeloInput); } }}
-                placeholder="Digite o modelo e aperte Enter"
+                placeholder="Digite o modelo (Ex: Realme C78) e aperte Enter"
                 className="flex-1 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-sm text-white outline-none"
               />
               <button
                 type="button"
                 onClick={() => handleAddModelo(novoModeloInput)}
-                className="px-4 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1"
+                className="px-4 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
               >
                 <Plus size={14} /> Adicionar
               </button>
             </div>
             <div className="flex flex-wrap gap-2 pt-1 min-h-[38px]">
               {modelosSelecionados.length === 0 ? (
-                <span className="text-xs text-gray-600 italic">Nenhum modelo selecionado para o lote atual.</span>
+                <span className="text-xs text-gray-600 italic">Nenhum modelo de aparelho selecionado no lote atual.</span>
               ) : (
                 modelosSelecionados.map(mod => (
                   <span key={mod} className="inline-flex items-center gap-1.5 bg-[#1F1F1F] border border-[#333333] text-gray-200 px-2.5 py-1 rounded-lg text-xs font-semibold">
                     <span>{mod}</span>
-                    <button type="button" onClick={() => handleRemoveModelo(mod)} className="text-gray-400 hover:text-red-400"><X size={12} /></button>
+                    <button type="button" onClick={() => handleRemoveModelo(mod)} className="text-gray-400 hover:text-red-400 cursor-pointer"><X size={12} /></button>
                   </span>
                 ))
               )}
             </div>
           </div>
 
-          <div className="space-y-3 bg-[#141414] border border-[#222222] p-4 rounded-xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
-                  Cores Disponíveis ({coresSelecionadas.length})
-                </label>
-                {coresSelecionadas.length > 0 && (
-                  <button type="button" onClick={handleLimparCores} className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold cursor-pointer">
-                    Limpar Todas
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {coresDisponiveis.map(cor => {
-                const isSelected = coresSelecionadas.some(c => c.toLowerCase() === cor.toLowerCase());
-                return (
-                  <button
-                    key={cor}
-                    type="button"
-                    onClick={() => handleToggleCor(cor)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 ${
-                      isSelected ? 'bg-[#6A0DAD] border-[#6A0DAD] text-white' : 'bg-black border-[#333333] text-gray-400'
-                    }`}
-                  >
-                    {isSelected && <Check size={12} />}
-                    {cor}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-2 pt-2 border-t border-[#222222]/80">
-              <input
-                type="text"
-                value={novaCorInput}
-                onChange={(e) => setNovaCorInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomCor(); } }}
-                placeholder="Outra cor específica..."
-                className="flex-1 bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleAddCustomCor}
-                disabled={isSalvandoCor || !novaCorInput.trim()}
-                className="px-3 py-1.5 bg-[#222222] hover:bg-[#333333] text-gray-200 border border-[#333333] rounded-lg text-xs font-bold transition-all flex items-center gap-1"
-              >
-                {isSalvandoCor ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-                Incluir Cor
-              </button>
-            </div>
-          </div>
-
+          {/* Botão de Adicionar à Fila */}
           <div className="flex justify-center py-1">
             <button
               type="button"
               onClick={handleAdicionarAFila}
-              className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] hover:from-[#5b0b94] hover:to-[#7822c9] text-white rounded-xl text-sm font-extrabold transition-all shadow-lg shadow-[#6A0DAD]/25 flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-8 py-3 bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] hover:from-[#5b0b94] hover:to-[#7822c9] text-white rounded-xl text-sm font-extrabold transition-all shadow-lg shadow-[#6A0DAD]/25 flex items-center justify-center gap-2 cursor-pointer"
             >
               <Plus size={18} />
               <span>+ Adicionar Variações à Fila</span>
-              {(modelosSelecionados.length > 0 && coresSelecionadas.length > 0) && (
+              {(modelosSelecionados.length > 0 && tiposSelecionados.length > 0) && (
                 <span className="ml-1 px-2 py-0.5 rounded-full text-xs bg-white/20 font-mono">
-                  +{modelosSelecionados.length * coresSelecionadas.length}
+                  +{modelosSelecionados.length * tiposSelecionados.length}
                 </span>
               )}
             </button>
           </div>
 
+          {/* Seção 4: Tabela de Pré-visualização da Grade Acumulada */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -605,7 +505,7 @@ export default function ModalGeradorGrade({
                 </span>
               </div>
               {gradeAcumulada.length > 0 && (
-                <button type="button" onClick={handleLimparFilaInteira} className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold">
+                <button type="button" onClick={handleLimparFilaInteira} className="text-xs text-red-400 hover:text-red-300 hover:underline font-semibold cursor-pointer">
                   Limpar Fila Inteira
                 </button>
               )}
@@ -613,7 +513,7 @@ export default function ModalGeradorGrade({
 
             {gradeAcumulada.length === 0 ? (
               <div className="border border-dashed border-[#262626] rounded-xl p-8 text-center text-gray-500 text-xs">
-                Nenhuma variação adicionada à fila ainda.
+                Nenhuma variação adicionada à fila ainda. Selecione os tipos de case e modelos de aparelho acima e clique em "+ Adicionar Variações à Fila".
               </div>
             ) : (
               <div className="border border-[#222222] rounded-xl overflow-hidden bg-[#0A0A0A]">
@@ -623,7 +523,7 @@ export default function ModalGeradorGrade({
                       <tr>
                         <th className="py-2.5 px-3">#</th>
                         <th className="py-2.5 px-3">Nome da Variação</th>
-                        <th className="py-2.5 px-3">Cor</th>
+                        <th className="py-2.5 px-3">LINHA / TIPO</th>
                         <th className="py-2.5 px-3">Preço</th>
                         <th className="py-2.5 px-3">Código</th>
                         <th className="py-2.5 px-3 text-right">Ação</th>
@@ -634,11 +534,22 @@ export default function ModalGeradorGrade({
                         <tr key={item.idTemp || idx} className="hover:bg-white/[0.02]">
                           <td className="py-2 px-3 font-mono text-[10px] text-gray-600">{idx + 1}</td>
                           <td className="py-2 px-3 font-medium text-white">{item.nome}</td>
-                          <td className="py-2 px-3">{item.cor}</td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded bg-[#6A0DAD]/20 text-[#c084fc] border border-[#6A0DAD]/30 text-[11px] font-semibold">
+                              {item.linhaTipo}
+                            </span>
+                          </td>
                           <td className="py-2 px-3 font-mono text-emerald-400">R$ {item.preco.toFixed(2)}</td>
                           <td className="py-2 px-3 font-mono text-[11px] text-purple-300">{item.codigo_barras}</td>
                           <td className="py-2 px-3 text-right">
-                            <button type="button" onClick={() => handleRemoverDaFila(idx)} className="text-gray-500 hover:text-red-400"><Trash2 size={13} /></button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoverDaFila(idx)}
+                              className="text-gray-500 hover:text-red-400 p-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
+                              title="Remover da fila"
+                            >
+                              ✕
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -650,12 +561,18 @@ export default function ModalGeradorGrade({
           </div>
         </div>
 
+        {/* Rodapé / Botões de Ação */}
         <div className="p-4 bg-[#111111] border-t border-[#222222] flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-xs text-gray-400">
             Total na fila: <strong className="text-white font-mono">{gradeAcumulada.length}</strong>
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <button type="button" onClick={onClose} disabled={isSaving} className="flex-1 px-4 py-2.5 bg-[#1F1F1F] text-gray-300 rounded-xl text-xs font-bold">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="flex-1 px-4 py-2.5 bg-[#1F1F1F] hover:bg-[#2a2a2a] text-gray-300 rounded-xl text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+            >
               Cancelar
             </button>
             <button
@@ -673,3 +590,4 @@ export default function ModalGeradorGrade({
     </div>
   );
 }
+
