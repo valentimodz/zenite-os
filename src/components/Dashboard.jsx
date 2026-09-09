@@ -3223,13 +3223,17 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // Busca os caixas de forma resiliente
+      // Busca os caixas com joins de filiais e operador (profiles) ordenados estritamente por data_abertura desc
       let query = supabase
         .from('caixas')
-        .select('*')
+        .select(`
+          *,
+          filiais ( id, nome ),
+          profiles:operador_id ( id, nome )
+        `)
         .order('data_abertura', { ascending: false });
 
-      // Filtro de filial apenas se houver uma filial específica selecionada
+      // Filtro de filial apenas se houver uma filial específica selecionada (não filtrar quando "todas", "ALL" ou vazio)
       if (filialId && filialId !== 'todas' && filialId !== 'ALL' && filialId !== '') {
         query = query.eq('filial_id', filialId);
       }
@@ -3240,21 +3244,7 @@ export default function Dashboard({ session, profileDataProps }) {
         query = query.or(`empresa_id.eq.${targetEmpresaId},empresa_id.is.null`);
       }
 
-      let { data, error } = await query;
-      console.error('DADOS CRUS DO BANCO:', data, error);
-
-      console.log('Produtos Carregados:', data);
-      console.log('Empresa ID enviado:', empresaId);
-
-      // Verificação de Tenant (Fallback de catálogo se empresa_id filtrar excessivamente)
-      if ((!data || data.length === 0) && empresaId) {
-        console.warn('Nenhum produto retornado para a empresa ID:', empresaId, '- Executando busca de fallback no catálogo...');
-        const retryRes = await supabase.from('produtos').select('*').limit(200);
-        if (retryRes.data && retryRes.data.length > 0) {
-          console.log('Produtos recuperados via Fallback:', retryRes.data);
-          data = retryRes.data;
-        }
-      }
+      const { data, error } = await query;
 
       if (error) {
         console.error('[Caixas] ⚠️ Erro na consulta do Supabase:', error);
@@ -3263,7 +3253,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       if (Array.isArray(data)) {
-        // Enriquecer dados de forma defensiva mapeando nomes de filiais e operadores disponíveis em memória
+        // Enriquecer dados de forma defensiva mapeando nomes de filiais e operadores
         const sessoesMapeadas = data.map(cx => {
           const filialEncontrada = filiais.find(f => String(f.id) === String(cx.filial_id));
           const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(cx.operador_id)) ||
@@ -3271,10 +3261,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
           return {
             ...cx,
-            filial_nome: cx.filial_nome || filialEncontrada?.nome || 'Filial',
-            filiais: cx.filiais || (filialEncontrada ? { nome: filialEncontrada.nome } : null),
-            operador_nome: cx.operador_nome || vendedorEncontrado?.nome || 'Operador PDV',
-            profiles: cx.profiles || (vendedorEncontrado ? { nome: vendedorEncontrado.nome } : null)
+            filial_nome: cx.filial_nome || cx.filiais?.nome || filialEncontrada?.nome || 'Filial',
+            filiais: cx.filiais || (filialEncontrada ? { id: filialEncontrada.id, nome: filialEncontrada.nome } : null),
+            operador_nome: cx.operador_nome || cx.profiles?.nome || vendedorEncontrado?.nome || 'Operador PDV',
+            profiles: cx.profiles || (vendedorEncontrado ? { id: vendedorEncontrado.id, nome: vendedorEncontrado.nome } : null)
           };
         });
 
@@ -19667,7 +19657,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       {/* Resumo de KPIs do Mês */}
                       {(() => {
-                        const isCaixaFechado = (cx) => !!(cx.fechado_em || cx.data_fechamento || String(cx.status || '').toUpperCase() === 'FECHADO');
+                        const checkCaixaAberto = (cx) => cx.status?.toLowerCase() === 'aberto' && !cx.data_fechamento && !cx.fechado_em;
 
                         const sessoesMes = sessoesCaixas.filter(cx => {
                           const rawDate = cx.aberto_em || cx.data_abertura || cx.created_at;
@@ -19688,8 +19678,8 @@ export default function Dashboard({ session, profileDataProps }) {
                           return matchMes && matchFilial;
                         });
 
-                        const totalAbertos = sessoesMes.filter(c => !isCaixaFechado(c)).length;
-                        const totalFechados = sessoesMes.filter(c => isCaixaFechado(c)).length;
+                        const totalAbertos = sessoesMes.filter(c => checkCaixaAberto(c)).length;
+                        const totalFechados = sessoesMes.filter(c => !checkCaixaAberto(c)).length;
                         const somaFundoTroco = sessoesMes.reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
                         const somaVendasFechadas = sessoesMes.reduce((acc, c) => {
                           const totalVendas = Number(c.total_vendas || (Number(c.total_dinheiro || 0) + Number(c.total_cartao || 0) + Number(c.total_pix || 0)) || c.saldo_final || 0);
@@ -19749,7 +19739,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                               };
 
-                              const isCaixaFechado = (c) => !!(c.fechado_em || c.data_fechamento || String(c.status || '').toUpperCase() === 'FECHADO');
+                              const checkCaixaAberto = (c) => c.status?.toLowerCase() === 'aberto' && !c.data_fechamento && !c.fechado_em;
 
                               const sessoesFiltradas = sessoesCaixas.filter(cx => {
                                 const rawDate = cx.aberto_em || cx.data_abertura || cx.created_at;
@@ -19768,12 +19758,12 @@ export default function Dashboard({ session, profileDataProps }) {
                                 }
                                 const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || String(cx.filial_id) === String(filtroFilialCaixa);
 
-                                const fechado = isCaixaFechado(cx);
+                                const isAberto = checkCaixaAberto(cx);
                                 let matchStatus = true;
                                 if (filtroStatusCaixa === 'ABERTO') {
-                                  matchStatus = !fechado;
+                                  matchStatus = isAberto;
                                 } else if (filtroStatusCaixa === 'FECHADO') {
-                                  matchStatus = fechado;
+                                  matchStatus = !isAberto;
                                 }
                                 return matchMes && matchFilial && matchStatus;
                               });
@@ -19832,8 +19822,8 @@ export default function Dashboard({ session, profileDataProps }) {
                               }
 
                               return sessoesFiltradas.map((cx) => {
-                                const fechado = isCaixaFechado(cx);
-                                const isAberto = !fechado;
+                                const isAberto = checkCaixaAberto(cx);
+                                const fechado = !isAberto;
                                 const filialNome = cx.filial_nome || cx.filiais?.nome || filiais.find(f => String(f.id) === String(cx.filial_id))?.nome || 'Filial';
                                 const operadorNome = cx.operador_nome || cx.profiles?.nome || vendedores?.find(c => String(c.id) === String(cx.operador_id))?.nome || 'Operador';
                                 const totalVendasCalc = Number(cx.total_vendas || (Number(cx.total_dinheiro || 0) + Number(cx.total_cartao || 0) + Number(cx.total_pix || 0)) || cx.saldo_final || 0);
