@@ -3223,17 +3223,13 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // Busca os caixas com joins de filiais e operador (profiles) ordenados estritamente por data_abertura desc
+      // 1. Busca segura dos caixas sem joins forçados que possam disparar PGRST200 caso a FK não exista ou esteja nomeada diferentemente
       let query = supabase
         .from('caixas')
-        .select(`
-          *,
-          filiais ( id, nome ),
-          profiles:operador_id ( id, nome )
-        `)
+        .select('*')
         .order('data_abertura', { ascending: false });
 
-      // Filtro de filial apenas se houver uma filial específica selecionada (não filtrar quando "todas", "ALL" ou vazio)
+      // Filtro de filial apenas se uma filial específica estiver selecionada
       if (filialId && filialId !== 'todas' && filialId !== 'ALL' && filialId !== '') {
         query = query.eq('filial_id', filialId);
       }
@@ -3253,18 +3249,34 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       if (Array.isArray(data)) {
-        // Enriquecer dados de forma defensiva mapeando nomes de filiais e operadores
+        // Obter lista de filiais atualizada (das props/estado ou consulta direta defensiva se filiais estiver vazio)
+        let listaFiliais = Array.isArray(filiais) ? filiais : [];
+        if (listaFiliais.length === 0) {
+          try {
+            const { data: filiaisData } = await supabase.from('filiais').select('id, nome');
+            if (Array.isArray(filiaisData)) {
+              listaFiliais = filiaisData;
+            }
+          } catch (fErr) {
+            console.warn('[Caixas] Aviso ao buscar filiais para cruzamento:', fErr);
+          }
+        }
+
+        // Cruzar dados em memória com filiais e profiles de forma totalmente segura contra nulos
         const sessoesMapeadas = data.map(cx => {
-          const filialEncontrada = filiais.find(f => String(f.id) === String(cx.filial_id));
+          const filialEncontrada = listaFiliais.find(f => String(f.id) === String(cx.filial_id));
           const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(cx.operador_id)) ||
             (teamMembers || []).find(t => String(t.id) === String(cx.operador_id));
 
+          const filialNome = cx.filial_nome || filialEncontrada?.nome || 'Filial não encontrada';
+          const operadorNome = cx.operador_nome || vendedorEncontrado?.nome || 'Operador PDV';
+
           return {
             ...cx,
-            filial_nome: cx.filial_nome || cx.filiais?.nome || filialEncontrada?.nome || 'Filial',
-            filiais: cx.filiais || (filialEncontrada ? { id: filialEncontrada.id, nome: filialEncontrada.nome } : null),
-            operador_nome: cx.operador_nome || cx.profiles?.nome || vendedorEncontrado?.nome || 'Operador PDV',
-            profiles: cx.profiles || (vendedorEncontrado ? { id: vendedorEncontrado.id, nome: vendedorEncontrado.nome } : null)
+            filial_nome: filialNome,
+            filiais: filialEncontrada ? { id: filialEncontrada.id, nome: filialEncontrada.nome } : (cx.filiais || { nome: filialNome }),
+            operador_nome: operadorNome,
+            profiles: vendedorEncontrado ? { id: vendedorEncontrado.id, nome: vendedorEncontrado.nome } : (cx.profiles || { nome: operadorNome })
           };
         });
 
@@ -19655,11 +19667,11 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
                       </div>
 
-                      {/* Resumo de KPIs do Mês */}
+                      {/* Resumo de KPIs */}
                       {(() => {
                         const checkCaixaAberto = (cx) => cx.status?.toLowerCase() === 'aberto' && !cx.data_fechamento && !cx.fechado_em;
 
-                        const sessoesMes = sessoesCaixas.filter(cx => {
+                        const sessoesFiltradasGerais = sessoesCaixas.filter(cx => {
                           const rawDate = cx.aberto_em || cx.data_abertura || cx.created_at;
                           let matchMes = true;
                           if (filtroMes) {
@@ -19674,14 +19686,22 @@ export default function Dashboard({ session, profileDataProps }) {
                               }
                             }
                           }
-                          const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || String(cx.filial_id) === String(filtroFilialCaixa);
+
+                          // Filtro operacional por filial:
+                          // Quando em "Todas as Filiais", traz tudo sem restrição.
+                          // Quando uma filial específica está selecionada, compara com filial_id ou nome da filial.
+                          const isTodasFiliais = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || filtroFilialCaixa === '';
+                          const matchFilial = isTodasFiliais || 
+                            String(cx.filial_id) === String(filtroFilialCaixa) ||
+                            (cx.filial_nome && filiais.find(f => String(f.id) === String(filtroFilialCaixa))?.nome?.toLowerCase() === cx.filial_nome?.toLowerCase());
+
                           return matchMes && matchFilial;
                         });
 
-                        const totalAbertos = sessoesMes.filter(c => checkCaixaAberto(c)).length;
-                        const totalFechados = sessoesMes.filter(c => !checkCaixaAberto(c)).length;
-                        const somaFundoTroco = sessoesMes.reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
-                        const somaVendasFechadas = sessoesMes.reduce((acc, c) => {
+                        const totalAbertos = sessoesFiltradasGerais.filter(c => checkCaixaAberto(c)).length;
+                        const totalFechados = sessoesFiltradasGerais.filter(c => !checkCaixaAberto(c)).length;
+                        const somaFundoTroco = sessoesFiltradasGerais.reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
+                        const somaVendasFechadas = sessoesFiltradasGerais.reduce((acc, c) => {
                           const totalVendas = Number(c.total_vendas || (Number(c.total_dinheiro || 0) + Number(c.total_cartao || 0) + Number(c.total_pix || 0)) || c.saldo_final || 0);
                           return acc + totalVendas;
                         }, 0);
@@ -19756,7 +19776,11 @@ export default function Dashboard({ session, profileDataProps }) {
                                     }
                                   }
                                 }
-                                const matchFilial = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || String(cx.filial_id) === String(filtroFilialCaixa);
+
+                                const isTodasFiliais = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || filtroFilialCaixa === '';
+                                const matchFilial = isTodasFiliais || 
+                                  String(cx.filial_id) === String(filtroFilialCaixa) ||
+                                  (cx.filial_nome && filiais.find(f => String(f.id) === String(filtroFilialCaixa))?.nome?.toLowerCase() === cx.filial_nome?.toLowerCase());
 
                                 const isAberto = checkCaixaAberto(cx);
                                 let matchStatus = true;
@@ -19815,7 +19839,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <tr>
                                     <td colSpan="6" className="py-12 text-center italic text-gray-500 bg-black/30 rounded-xl">
                                       <Store size={28} className="text-gray-700 mx-auto mb-2 opacity-50" />
-                                      Nenhuma sessão de caixa registrada neste mês.
+                                      Nenhuma sessão de caixa encontrada para os filtros selecionados.
                                     </td>
                                   </tr>
                                 );
