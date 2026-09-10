@@ -27,6 +27,7 @@ import RankingVendedores from './RankingVendedores';
 import ColorBadge from './ColorBadge';
 import ModalEditarImei from './ModalEditarImei';
 import ModalGeradorGrade from './ModalGeradorGrade';
+import ModalEntradaAparelhosLote from './ModalEntradaAparelhosLote';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -633,6 +634,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
   const [isModalGradeOpen, setIsModalGradeOpen] = useState(false);
+  const [isModalAparelhosLoteOpen, setIsModalAparelhosLoteOpen] = useState(false);
   const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
   const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
   const [formData, setFormData] = useState(INITIAL_CATALOGO_FORM_DATA);
@@ -17369,11 +17371,20 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <div className="flex items-center gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => setIsModalGradeOpen(true)}
+                                    onClick={() => setIsModalAparelhosLoteOpen(true)}
                                     className="px-3 py-1.5 bg-[#6A0DAD] hover:bg-[#500885] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
+                                    title="Entrada rápida de aparelhos por IMEI em lote"
+                                  >
+                                    <Smartphone size={14} />
+                                    <span>📱 Lote Aparelhos (IMEIs)</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsModalGradeOpen(true)}
+                                    className="px-3 py-1.5 bg-[#1F1F1F] hover:bg-[#2A2A2A] text-gray-200 border border-[#333333] rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
                                     title="Cadastrar grade de variações de capas e acessórios em lote"
                                   >
-                                    <Zap size={14} />
+                                    <Zap size={14} className="text-[#c084fc]" />
                                     <span>⚡ Gerador de Grade / Lote</span>
                                   </button>
                                   <button
@@ -19133,6 +19144,15 @@ export default function Dashboard({ session, profileDataProps }) {
                             <span>Distribuir Estoque Matriz</span>
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => setIsModalAparelhosLoteOpen(true)}
+                          className="px-3.5 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md shrink-0 cursor-pointer"
+                          title="Entrada rápida de celulares com lista de IMEIs em lote"
+                        >
+                          <Smartphone size={14} />
+                          <span>📱 Entrada de Aparelhos em Lote</span>
+                        </button>
                         <div className="flex items-center gap-2 text-xs text-gray-600 border border-[#222222] px-4 py-2 rounded-lg">
                           <span className="w-2 h-2 rounded-full bg-[#6A0DAD] animate-pulse"></span>
                           Scanner Mode Ativo
@@ -24581,6 +24601,25 @@ export default function Dashboard({ session, profileDataProps }) {
               fetchGerenteData(targetEmpresaId);
             }
             window.dispatchEvent(new Event('catalogo_updated'));
+          }}
+        />
+
+        {/* Modal Entrada Rápida de Aparelhos em Lote */}
+        <ModalEntradaAparelhosLote
+          isOpen={isModalAparelhosLoteOpen}
+          onClose={() => setIsModalAparelhosLoteOpen(false)}
+          perfilUsuario={profile}
+          filiais={filiais}
+          onSuccess={(qtdCriada) => {
+            showToast(`${qtdCriada} aparelhos cadastrados com sucesso no estoque!`, 'success');
+            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+            if (targetEmpresaId) {
+              fetchProdutos(targetEmpresaId);
+              fetchGerenteData(targetEmpresaId);
+              fetchCatalogoProdutos(targetEmpresaId);
+            }
+            window.dispatchEvent(new Event('catalogo_updated'));
+            window.dispatchEvent(new Event('estoque_updated'));
           }}
         />
 
