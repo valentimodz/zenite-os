@@ -936,6 +936,9 @@ export default function Dashboard({ session, profileDataProps }) {
   // Recibo Modal
   const [pdvReciboAtivo, setPdvReciboAtivo] = useState(false);
   const [pdvReciboDados, setPdvReciboDados] = useState(null);
+  const [tipoReciboAtual, setTipoReciboAtual] = useState('DETALHADO'); // 'AVISTA' | 'DETALHADO'
+  const [modalSucessoVenda, setModalSucessoVenda] = useState(null); // { venda, dadosRecibo }
+  const [modalEscolhaRecibo, setModalEscolhaRecibo] = useState(null); // venda a reimprimir
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [hasPrinted, setHasPrinted] = useState(false);
 
@@ -11002,8 +11005,7 @@ export default function Dashboard({ session, profileDataProps }) {
         } catch (e) { }
       }
 
-      setPdvReciboDados(dadosRecibo);
-      setPdvReciboAtivo(true);
+      setModalSucessoVenda({ venda: createdVendaIds, dadosRecibo });
       showToast('Venda registrada com sucesso!', 'success');
 
       // Limpar estados do PDV
@@ -11664,8 +11666,30 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // --- REIMPRESSÃO DE RECIBO / CUPOM DE VENDA ---
-  const imprimirReciboVenda = (venda) => {
+  // --- IMPRESSÃO / REIMPRESSÃO DE RECIBO DE VENDA (À VISTA OU DETALHADO) ---
+  const imprimirReciboPDV = (vendaOuDados, tipo = 'DETALHADO') => {
+    let dados = null;
+
+    if (modalSucessoVenda && modalSucessoVenda.dadosRecibo && (vendaOuDados === modalSucessoVenda.venda || !vendaOuDados || vendaOuDados === modalSucessoVenda.dadosRecibo)) {
+      dados = JSON.parse(JSON.stringify(modalSucessoVenda.dadosRecibo));
+    } else if (vendaOuDados && vendaOuDados.itens && vendaOuDados.financeiro) {
+      dados = JSON.parse(JSON.stringify(vendaOuDados));
+    } else if (vendaOuDados) {
+      return imprimirReciboVenda(vendaOuDados, tipo);
+    }
+
+    if (!dados) return;
+
+    dados.tipo_recibo = tipo;
+    setTipoReciboAtual(tipo);
+    setHasPrinted(false);
+    setPdvReciboDados(dados);
+    setPdvReciboAtivo(true);
+    setModalSucessoVenda(null);
+    setModalEscolhaRecibo(null);
+  };
+
+  const imprimirReciboVenda = (venda, tipo = 'DETALHADO') => {
     if (!venda) return;
 
     const sellerObj = teamMembers.find(m => String(m.id) === String(venda.vendedor_id));
@@ -11679,17 +11703,21 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const metodoPag = venda.metodo_pagamento || venda.forma_pagamento || 'N/A';
     const valorTotalNum = parseFloat(venda.valor_total || venda.valor || 0);
+    const precoOriginalNum = parseFloat(venda.preco_original || venda.valor_original || venda.valor_tabela || valorTotalNum);
     const qtdNum = parseInt(venda.quantidade || 1, 10);
     const precoUnitarioNum = qtdNum > 0 ? (valorTotalNum / qtdNum) : valorTotalNum;
+    const precoUnitarioOriginal = qtdNum > 0 ? (precoOriginalNum / qtdNum) : precoOriginalNum;
 
     const dadosRecibo = {
       venda_id: venda.id,
+      tipo_recibo: tipo,
       data: venda.created_at || new Date().toISOString(),
       vendedor_nome: vendedorNome,
       filial_nome: filialNome,
       filial_logo: filialObj?.logo_url || null,
       filial_endereco: filialObj?.endereco || 'Endereço não informado',
       filial_cnpj: filialObj?.cnpj || 'CNPJ não informado',
+      filial_telefone: filialObj?.telefone || '',
       cliente_nome: (typeof venda.cliente_nome === 'string' && venda.cliente_nome)
         || (typeof venda.cliente === 'string' && venda.cliente)
         || venda.cliente?.nome
@@ -11716,28 +11744,34 @@ export default function Dashboard({ session, profileDataProps }) {
           quantidade: qtdNum,
           valor_unitario: precoUnitarioNum,
           valor_total: valorTotalNum,
-          valor_total_original: valorTotalNum
+          preco_original: precoUnitarioOriginal,
+          valor_total_original: precoOriginalNum
         }
       ],
       financeiro: {
         total_novo: valorTotalNum,
-        total_novo_original: valorTotalNum,
+        total_novo_original: precoOriginalNum,
         desconto_troca: 0,
         saldo_pagar: valorTotalNum,
-        saldo_pagar_original: valorTotalNum,
+        saldo_pagar_original: precoOriginalNum,
         metodo: metodoPag,
+        parcelas: venda.parcelas || 1,
         pagamentos: [
           {
             metodo: metodoPag,
-            valor: valorTotalNum
+            valor: valorTotalNum,
+            parcelas: venda.parcelas || 1
           }
         ]
       },
       trocas: []
     };
 
+    setTipoReciboAtual(tipo);
+    setHasPrinted(false);
     setPdvReciboDados(dadosRecibo);
     setPdvReciboAtivo(true);
+    setModalEscolhaRecibo(null);
   };
 
   // --- CALCULADOR DE COMISSÃO DINÂMICA POR ITEM ---
@@ -20294,9 +20328,9 @@ export default function Dashboard({ session, profileDataProps }) {
                                       <div className="flex justify-end items-center gap-1.5">
                                         <button
                                           type="button"
-                                          onClick={() => imprimirReciboVenda(sale)}
+                                          onClick={() => setModalEscolhaRecibo(sale)}
                                           className="p-1.5 text-gray-400 hover:text-purple-400 hover:bg-purple-950/20 rounded transition-colors cursor-pointer"
-                                          title="Reimprimir Cupom/Recibo"
+                                          title="Reimprimir Cupom/Recibo (À Vista / Detalhado)"
                                         >
                                           <Printer size={14} />
                                         </button>
@@ -20988,12 +21022,13 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <th className="pb-3 text-center">Quantidade</th>
                                   <th className="pb-3">Total Bruto</th>
                                   <th className="pb-3 text-right">Sua Comissão</th>
+                                  <th className="pb-3 text-right">Ações</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-[#222222]/50">
                                 {metasInfo.historico.length === 0 ? (
                                   <tr>
-                                    <td colSpan="6" className="py-6 text-center italic text-gray-600">Você ainda não registrou nenhuma venda neste mês.</td>
+                                    <td colSpan="7" className="py-6 text-center italic text-gray-600">Você ainda não registrou nenhuma venda neste mês.</td>
                                   </tr>
                                 ) : (
                                   metasInfo.historico.map(sale => {
@@ -21015,6 +21050,16 @@ export default function Dashboard({ session, profileDataProps }) {
                                         <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                                         <td className="py-3 text-right font-mono font-bold text-emerald-400">
                                           R$ {calcularComissaoItem(sale).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-3 text-right">
+                                          <button
+                                            type="button"
+                                            onClick={() => setModalEscolhaRecibo(sale)}
+                                            className="p-1.5 text-gray-400 hover:text-purple-400 hover:bg-purple-950/20 rounded transition-colors cursor-pointer"
+                                            title="Reimprimir Cupom/Recibo (À Vista / Detalhado)"
+                                          >
+                                            <Printer size={14} />
+                                          </button>
                                         </td>
                                       </tr>
                                     );
@@ -22578,8 +22623,14 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* Cabeçalho */}
               <div className="text-center space-y-1">
-                <span className="text-[10px] bg-primary/15 text-primary border border-primary/30 px-2 py-0.5 rounded-full font-bold uppercase print:hidden">
-                  Recibo de Venda Consolidado
+                <span className={`text-[10px] border px-2.5 py-0.5 rounded-full font-bold uppercase print:hidden ${
+                  pdvReciboDados.tipo_recibo === 'AVISTA'
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    : 'bg-primary/15 text-primary border-primary/30'
+                }`}>
+                  {pdvReciboDados.tipo_recibo === 'AVISTA'
+                    ? 'Recibo de Venda À Vista (Simplificado)'
+                    : 'Recibo de Venda Detalhado'}
                 </span>
                 {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
                   <div className="recibo-logo-container w-full flex justify-center items-center my-2">
@@ -22674,8 +22725,9 @@ export default function Dashboard({ session, profileDataProps }) {
                 <div className="space-y-3 divide-y divide-[#222222]/50 print:divide-gray-200">
                   {pdvReciboDados.itens && pdvReciboDados.itens.length > 0 ? (
                     pdvReciboDados.itens.map((item, idx) => {
-                      const itemPrecoUnitario = Number(item.preco_original ?? item.valor_unitario ?? 0);
-                      const itemSubtotal = Number(item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1)));
+                      const isAvista = pdvReciboDados.tipo_recibo === 'AVISTA';
+                      const itemPrecoUnitario = Number((isAvista ? (item.preco_original ?? item.valor_unitario) : (item.valor_unitario ?? item.preco_original)) ?? 0);
+                      const itemSubtotal = Number((isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1))) : (item.valor_total ?? (itemPrecoUnitario * Number(item.quantidade || 1)))) ?? 0);
                       return (
                         <div key={idx} className={`flex justify-between items-start ${idx > 0 ? 'pt-2' : ''}`}>
                           <div>
@@ -22746,98 +22798,136 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* Resumo Financeiro */}
               <div className="space-y-2 text-xs">
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Subtotal (Novo):</span>
-                  <span className="font-mono text-foreground font-bold">R$ {Number(pdvReciboDados.financeiro.total_novo_original ?? pdvReciboDados.financeiro.total_novo).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                </div>
-                {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                  <div className="flex justify-between text-primary print:text-black font-bold">
-                    <span>Abatimento por Troca:</span>
-                    <span className="font-mono">- R$ {pdvReciboDados.financeiro.desconto_troca.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                {/* BLOCO FORMATAÇÃO ESPECÍFICA DO CUPOM TÉRMICO / RECIBO */}
                 {(() => {
+                  const isAvista = pdvReciboDados.tipo_recibo === 'AVISTA';
                   const fin = pdvReciboDados.financeiro || {};
-                  const totalGeral = Number(fin.saldo_pagar_original ?? fin.saldo_pagar ?? 0);
-                  const mNorm = String(fin.metodo || '').toLowerCase();
-                  const isDebito = mNorm === 'cartao_debito';
-                  const isCredito = mNorm === 'cartao_credito' || mNorm === 'cartao';
-                  const parcelasNum = fin.parcelas || 1;
-                  const valorParcela = parcelasNum > 0 ? (totalGeral / parcelasNum) : totalGeral;
-
-                  if (isDebito) {
-                    return (
-                      <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
-                        <div className="flex justify-between">
-                          <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
-                          <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE DÉBITO</span>
-                        </div>
-                        <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black">
-                          <span>TOTAL PAGO:</span>
-                          <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (isCredito) {
-                    return (
-                      <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
-                        <div className="flex justify-between">
-                          <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
-                          <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE CRÉDITO</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-400 font-bold uppercase">PARCELAMENTO:</span>
-                          <span className="font-extrabold text-white print:text-black">
-                            {parcelasNum}x de R$ {valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
-                          <span>TOTAL PAGO:</span>
-                          <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                        </div>
-                      </div>
-                    );
-                  }
+                  const subtotalExibido = isAvista
+                    ? Number(fin.total_novo_original ?? fin.total_novo ?? 0)
+                    : Number(fin.total_novo ?? fin.total_novo_original ?? 0);
+                  const totalGeral = isAvista
+                    ? Number(fin.saldo_pagar_original ?? fin.saldo_pagar ?? 0)
+                    : Number(fin.saldo_pagar ?? fin.saldo_pagar_original ?? 0);
 
                   return (
-                    <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
-                        <span className="font-extrabold text-white print:text-black uppercase">
-                          {(() => {
-                            if (fin.pagamentos && fin.pagamentos.length > 1) {
-                              return fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
-                            }
-                            if (fin.metodo === 'troca') {
-                              if (fin.saldo_pagar > 0) {
-                                const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
-                                  ? `Cartão de Crédito (${fin.parcelas || 1}x)`
-                                  : fin.metodo_saldo === 'cartao_debito'
-                                    ? 'Cartão de Débito'
-                                    : fin.metodo_saldo === 'pix'
-                                      ? 'Pix'
-                                      : fin.metodo_saldo === 'boleto'
-                                        ? 'Boleto'
-                                        : 'Dinheiro';
-                                return `Troca + ${saldoMetodo}`;
-                              }
-                              return 'Troca (Totalmente Abatido)';
-                            }
-                            if (mNorm === 'pix') return 'PIX';
-                            if (mNorm === 'dinheiro') return 'DINHEIRO';
-                            if (mNorm === 'boleto') return 'BOLETO PARCELADO';
-                            return String(fin.metodo || 'DINHEIRO').toUpperCase();
-                          })()}
+                    <>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Subtotal (Itens):</span>
+                        <span className="font-mono text-foreground font-bold">
+                          R$ {subtotalExibido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
-                      <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black">
-                        <span>TOTAL PAGO:</span>
-                        <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      </div>
-                    </div>
+                      {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
+                        <div className="flex justify-between text-primary print:text-black font-bold">
+                          <span>Abatimento por Troca:</span>
+                          <span className="font-mono">- R$ {Number(fin.desconto_troca || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+
+                      {/* MODO RECIBO À VISTA (SIMPLIFICADO) */}
+                      {isAvista ? (
+                        <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                          <div className="flex justify-between">
+                            <span className="text-gray-400 font-bold uppercase">CONDIÇÃO:</span>
+                            <span className="font-extrabold text-emerald-400 print:text-black uppercase">À VISTA (VALOR NOMINAL)</span>
+                          </div>
+                          <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
+                            <span>TOTAL PAGO:</span>
+                            <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        /* MODO RECIBO DETALHADO (COM TAXAS, CARTÕES E PARCELAS) */
+                        (() => {
+                          const mNorm = String(fin.metodo || '').toLowerCase();
+                          const isDebito = mNorm === 'cartao_debito';
+                          const isCredito = mNorm === 'cartao_credito' || mNorm === 'cartao';
+                          const parcelasNum = fin.parcelas || 1;
+                          const valorParcela = parcelasNum > 0 ? (totalGeral / parcelasNum) : totalGeral;
+
+                          if (isDebito) {
+                            return (
+                              <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
+                                  <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE DÉBITO</span>
+                                </div>
+                                <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
+                                  <span>TOTAL PAGO:</span>
+                                  <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (isCredito) {
+                            return (
+                              <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
+                                  <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE CRÉDITO</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400 font-bold uppercase">PARCELAMENTO:</span>
+                                  <span className="font-extrabold text-white print:text-black">
+                                    {parcelasNum}x de R$ {valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
+                                  <span>TOTAL PAGO:</span>
+                                  <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                              <div className="flex justify-between">
+                                <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
+                                <span className="font-extrabold text-white print:text-black uppercase">
+                                  {(() => {
+                                    if (fin.pagamentos && fin.pagamentos.length > 1) {
+                                      return fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
+                                    }
+                                    if (fin.metodo === 'troca') {
+                                      if (fin.saldo_pagar > 0) {
+                                        const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
+                                          ? `Cartão de Crédito (${fin.parcelas || 1}x)`
+                                          : fin.metodo_saldo === 'cartao_debito'
+                                            ? 'Cartão de Débito'
+                                            : fin.metodo_saldo === 'pix'
+                                              ? 'Pix'
+                                              : fin.metodo_saldo === 'boleto'
+                                                ? 'Boleto'
+                                                : 'Dinheiro';
+                                        return `Troca + ${saldoMetodo}`;
+                                      }
+                                      return 'Troca (Totalmente Abatido)';
+                                    }
+                                    if (mNorm === 'pix') return 'PIX';
+                                    if (mNorm === 'dinheiro') return 'DINHEIRO';
+                                    if (mNorm === 'boleto') return 'BOLETO PARCELADO';
+                                    return String(fin.metodo || 'DINHEIRO').toUpperCase();
+                                  })()}
+                                </span>
+                              </div>
+                              {fin.parcelas > 1 && (
+                                <div className="flex justify-between">
+                                  <span className="text-gray-400 font-bold uppercase">PARCELAS:</span>
+                                  <span className="font-extrabold text-white print:text-black">
+                                    {fin.parcelas}x de R$ {(totalGeral / fin.parcelas).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
+                                <span>TOTAL PAGO:</span>
+                                <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              </div>
+                            </div>
+                          );
+                        })()
+                      )}
+                    </>
                   );
                 })()}
               </div>
@@ -22899,6 +22989,176 @@ export default function Dashboard({ session, profileDataProps }) {
                     Fechar e Novo Pedido
                   </button>
                 </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE SUCESSO DA VENDA (COM ESCOLHA DO TIPO DE RECIBO) */}
+        {modalSucessoVenda && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn font-sans">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-lg w-full p-6 sm:p-7 space-y-6 shadow-2xl relative animate-scaleIn">
+              
+              {/* Botão de Fechar */}
+              <button
+                onClick={() => setModalSucessoVenda(null)}
+                className="absolute right-4 top-4 p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <X size={16} />
+              </button>
+
+              {/* Cabeçalho de Sucesso */}
+              <div className="text-center space-y-2">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-950/30">
+                  <CheckCircle2 size={32} />
+                </div>
+                <h3 className="text-xl font-extrabold text-foreground tracking-tight">
+                  Venda Concluída com Sucesso!
+                </h3>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                  A transação foi devidamente registrada e baixada no estoque. Escolha abaixo o modelo de recibo que deseja imprimir:
+                </p>
+              </div>
+
+              {/* Botões de Escolha de Recibo */}
+              <div className="space-y-3 pt-2">
+                
+                {/* Botão 1: Recibo À Vista (Simplificado) */}
+                <button
+                  type="button"
+                  onClick={() => imprimirReciboPDV(modalSucessoVenda.dadosRecibo, 'AVISTA')}
+                  className="w-full text-left p-4 rounded-xl border border-border hover:border-emerald-500/50 bg-surface hover:bg-emerald-500/5 transition-all group cursor-pointer flex items-start gap-3.5 shadow-sm"
+                >
+                  <div className="p-3 rounded-xl bg-surface-elevated border border-border group-hover:border-emerald-500/40 group-hover:bg-emerald-500/15 text-muted-foreground group-hover:text-emerald-400 transition-colors shrink-0">
+                    <FileText size={22} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-foreground group-hover:text-emerald-400 transition-colors">
+                        Emitir Recibo À Vista (Simplificado)
+                      </h4>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        À Vista
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 leading-snug">
+                      Mostra apenas os produtos e o valor nominal à vista, sem discriminar acréscimos ou juros de máquina.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Botão 2: Recibo Detalhado (Com Taxas e Parcelas) */}
+                <button
+                  type="button"
+                  onClick={() => imprimirReciboPDV(modalSucessoVenda.dadosRecibo, 'DETALHADO')}
+                  className="w-full text-left p-4 rounded-xl border border-[#6A0DAD]/40 hover:border-[#6A0DAD] bg-surface hover:bg-[#6A0DAD]/10 transition-all group cursor-pointer flex items-start gap-3.5 shadow-md shadow-[#6A0DAD]/10"
+                >
+                  <div className="p-3 rounded-xl bg-[#6A0DAD]/15 border border-[#6A0DAD]/30 text-[#A78BFA] group-hover:bg-[#6A0DAD] group-hover:text-white transition-all shrink-0">
+                    <CreditCard size={22} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-foreground group-hover:text-[#A78BFA] transition-colors flex items-center gap-1.5">
+                        Emitir Recibo Detalhado (Com Taxas e Parcelas)
+                      </h4>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#6A0DAD]/20 text-[#A78BFA] border border-[#6A0DAD]/40">
+                        Completo
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 leading-snug">
+                      Discrimina parcelamento, valor total no crédito, split de pagamentos e todas as formas de pagamento.
+                    </p>
+                  </div>
+                </button>
+
+              </div>
+
+              {/* Botão Pular / Nova Venda */}
+              <div className="pt-2 border-t border-border flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setModalSucessoVenda(null)}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-surface hover:bg-surface-elevated border border-border text-foreground font-bold text-xs rounded-xl transition-all cursor-pointer text-center"
+                >
+                  Pular / Nova Venda &rarr;
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* MINI MODAL / DIALOG DE ESCOLHA DE TIPO DE RECIBO NA REIMPRESSÃO */}
+        {modalEscolhaRecibo && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn font-sans">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl relative animate-scaleIn">
+              
+              <button
+                onClick={() => setModalEscolhaRecibo(null)}
+                className="absolute right-4 top-4 p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <X size={16} />
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-primary/15 border border-primary/30 text-primary">
+                  <Printer size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-foreground">Reimprimir Recibo de Venda</h3>
+                  <p className="text-xs text-muted-foreground">Selecione o formato desejado para a impressão:</p>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 pt-1">
+                {/* Opção À Vista */}
+                <button
+                  type="button"
+                  onClick={() => imprimirReciboVenda(modalEscolhaRecibo, 'AVISTA')}
+                  className="w-full text-left p-3.5 rounded-xl border border-border hover:border-emerald-500/50 bg-surface hover:bg-emerald-500/5 transition-all flex items-center justify-between group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-surface-elevated text-muted-foreground group-hover:text-emerald-400">
+                      <FileText size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-foreground group-hover:text-emerald-400">Recibo À Vista</h4>
+                      <p className="text-[11px] text-muted-foreground">Valor nominal à vista sem parcelamento</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-emerald-400">Selecionar &rarr;</span>
+                </button>
+
+                {/* Opção Detalhado */}
+                <button
+                  type="button"
+                  onClick={() => imprimirReciboVenda(modalEscolhaRecibo, 'DETALHADO')}
+                  className="w-full text-left p-3.5 rounded-xl border border-[#6A0DAD]/40 hover:border-[#6A0DAD] bg-surface hover:bg-[#6A0DAD]/10 transition-all flex items-center justify-between group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-[#6A0DAD]/15 text-[#A78BFA] group-hover:bg-[#6A0DAD] group-hover:text-white transition-colors">
+                      <CreditCard size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-foreground group-hover:text-[#A78BFA]">Recibo Detalhado (Com Cartão/Parcelas)</h4>
+                      <p className="text-[11px] text-muted-foreground">Com taxas, parcelamento e meios de pagamento</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-[#A78BFA]">Selecionar &rarr;</span>
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-border flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setModalEscolhaRecibo(null)}
+                  className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-border text-foreground font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
               </div>
 
             </div>
