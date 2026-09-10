@@ -11640,9 +11640,78 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // --- REIMPRESSÃO DE RECIBO / CUPOM DE VENDA ---
+  const imprimirReciboVenda = (venda) => {
+    if (!venda) return;
+
+    const sellerObj = teamMembers.find(m => String(m.id) === String(venda.vendedor_id));
+    const vendedorNome = venda.vendedor_nome || venda.vendedor?.nome || venda.profiles?.nome || sellerObj?.nome || 'Vendedor';
+
+    const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(venda.produto_id));
+    const produtoNome = venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || prodObj?.nome || 'Produto';
+
+    const filialObj = filiais.find(f => String(f.id) === String(venda.filial_id));
+    const filialNome = filialObj?.nome || venda.filial_nome || 'Filial';
+
+    const metodoPag = venda.metodo_pagamento || venda.forma_pagamento || 'N/A';
+    const valorTotalNum = parseFloat(venda.valor_total || venda.valor || 0);
+    const qtdNum = parseInt(venda.quantidade || 1, 10);
+    const precoUnitarioNum = qtdNum > 0 ? (valorTotalNum / qtdNum) : valorTotalNum;
+
+    const dadosRecibo = {
+      venda_id: venda.id,
+      data: venda.created_at || new Date().toISOString(),
+      vendedor_nome: vendedorNome,
+      filial_nome: filialNome,
+      filial_logo: filialObj?.logo_url || null,
+      filial_endereco: filialObj?.endereco || 'Endereço não informado',
+      filial_cnpj: filialObj?.cnpj || 'CNPJ não informado',
+      filial_telefone: filialObj?.telefone || 'Telefone não informado',
+      cliente_nome: venda.cliente_nome || venda.cliente || 'Consumidor Final',
+      cliente_cpf_cnpj: venda.cliente_cpf_cnpj || venda.cpf_cliente || '',
+      cliente_email: venda.cliente_email || '',
+      cliente_telefone: venda.cliente_telefone || '',
+      obs_garantia: venda.obs_garantia || venda.observacoes || '',
+      itens: [
+        {
+          nome: produtoNome,
+          imei: venda.imei || venda.imeis || null,
+          quantidade: qtdNum,
+          valor_unitario: precoUnitarioNum,
+          valor_total: valorTotalNum,
+          valor_total_original: valorTotalNum
+        }
+      ],
+      financeiro: {
+        total_novo: valorTotalNum,
+        total_novo_original: valorTotalNum,
+        desconto_troca: 0,
+        saldo_pagar: valorTotalNum,
+        saldo_pagar_original: valorTotalNum,
+        metodo: metodoPag,
+        pagamentos: [
+          {
+            metodo: metodoPag,
+            valor: valorTotalNum
+          }
+        ]
+      },
+      trocas: []
+    };
+
+    setPdvReciboDados(dadosRecibo);
+    setPdvReciboAtivo(true);
+  };
+
   // --- CALCULADOR DE COMISSÃO DINÂMICA POR ITEM ---
   const calcularComissaoItem = (sale) => {
     if (!sale) return 0;
+    
+    // 1. Se já estiver gravada no banco na coluna 'comissao' (ou variantes), prioriza o valor gravado
+    if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
+      const val = parseFloat(sale.comissao);
+      if (!isNaN(val) && val > 0) return val;
+    }
     if (sale.valor_comissao !== undefined && sale.valor_comissao !== null && sale.valor_comissao !== '') {
       const val = parseFloat(sale.valor_comissao);
       if (!isNaN(val) && val > 0) return val;
@@ -11651,24 +11720,39 @@ export default function Dashboard({ session, profileDataProps }) {
       const val = parseFloat(sale.comissao_vendedor);
       if (!isNaN(val) && val > 0) return val;
     }
-    if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
-      const val = parseFloat(sale.comissao);
-      if (!isNaN(val) && val > 0) return val;
-    }
 
+    // 2. Se não estiver gravada ou for 0, calcula dinamicamente no frontend
     const totalBruto = parseFloat(sale.valor_total || sale.valor || sale.preco || 0);
+    const qtd = parseInt(sale.quantidade || 1, 10);
     if (totalBruto <= 0) return 0;
 
     const cat = (sale.produtos?.categoria || sale.categoria || '').toUpperCase();
+    const tipo = (sale.produtos?.tipo || sale.tipo || '').toUpperCase();
+    const nomeProd = (sale.produto_nome || sale.produtos?.nome || '').toUpperCase();
     const isTreinner = profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee;
 
-    if (cat === 'SERVICO') {
+    // Regra A: Serviços
+    if (cat === 'SERVICO' || tipo === 'SERVICO') {
       return totalBruto * (isTreinner ? 0.02 : 0.03);
-    } else if (cat.includes('ACESSORIO') || cat.includes('CAPA') || cat.includes('PELICULA')) {
-      return totalBruto * 0.05;
-    } else {
-      return totalBruto * 0.02; // taxa padrão celular / geral
     }
+    
+    // Regra B: Acessórios (taxa fixa de 2,5% conforme regra operacional)
+    if (tipo === 'ACESSORIO' || cat.includes('ACESSORIO') || cat.includes('CAPA') || cat.includes('PELICULA') || cat.includes('FONE')) {
+      return totalBruto * 0.025;
+    }
+
+    // Regra C: Celulares e Aparelhos (Android, Apple, iOS, Seminovo ou Geral)
+    const isCelular = tipo === 'CELULAR' || cat === 'ANDROID' || cat === 'IOS' || cat.includes('CELULAR') || cat === 'APPLE_JBL_CONSOLE' || !!sale.imei;
+    if (isCelular) {
+      if (cat === 'IOS' || cat === 'APPLE_JBL_CONSOLE' || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE')) {
+        return Math.max(30 * qtd, totalBruto * 0.02); // R$ 30 fixo por aparelho ou 2%
+      }
+      // Demais celulares (Android / Outros): taxa padrão de 2% sobre o valor da venda
+      return totalBruto * 0.02;
+    }
+
+    // Regra D: Fallback Geral (garante que nunca retorne 0 se houver valor faturado)
+    return totalBruto * 0.02;
   };
 
   // --- HELPERS DE METAS DINÂMICAS & REBRANDING ---
@@ -20088,9 +20172,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <th className="pb-3">Autorizado Por</th>
                               )}
                               <th className="pb-3 text-right">Comissão</th>
-                              {(profile?.role === 'SUPER_ADMIN' || profile?.role === 'GERENTE') && (
-                                <th className="pb-3 text-right print:hidden">Ações</th>
-                              )}
+                              <th className="pb-3 text-right print:hidden">Ações</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#222222]/50">
@@ -20100,7 +20182,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               return date.getMonth() === parseInt(month, 10) - 1 && date.getFullYear() === parseInt(year, 10);
                             }).length === 0 ? (
                               <tr>
-                                <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 10 : 8} className="py-6 text-center italic text-gray-600">Nenhuma venda faturada neste mês.</td>
+                                <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 10 : 9} className="py-6 text-center italic text-gray-600">Nenhuma venda faturada neste mês.</td>
                               </tr>
                             ) : (
                               vendas.filter(sale => {
@@ -20114,6 +20196,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
                                 const produtoNome = sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || prodObj?.nome || (sale.produto_id ? `Produto #${String(sale.produto_id).substring(0, 6)}` : 'Produto Geral');
                                 const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
+                                const comissaoFinal = calcularComissaoItem(sale);
 
                                 return (
                                   <tr key={sale.id} className="hover:bg-purple-950/5 print:hover:bg-transparent transition-colors">
@@ -20137,27 +20220,41 @@ export default function Dashboard({ session, profileDataProps }) {
                                         {sale.autorizador?.nome || sale.desconto_autorizado_por || '-'}
                                       </td>
                                     )}
-                                    <td className="py-3 font-mono font-bold text-[#6A0DAD] print:text-black text-right">R$ {parseFloat(sale.comissao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                                    {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER'].includes(profile?.role) && (
-                                      <td className="py-3 text-right print:hidden">
-                                        <div className="flex justify-end items-center gap-1.5">
-                                          <button
-                                            onClick={() => handleOpenEditVenda(sale)}
-                                            className="p-1.5 text-gray-600 hover:text-[#6A0DAD] hover:bg-[#6A0DAD]/10 rounded transition-colors"
-                                            title="Editar Venda"
-                                          >
-                                            <Edit2 size={14} />
-                                          </button>
-                                          <button
-                                            onClick={() => handleEstornarVenda(sale.id)}
-                                            className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-950/20 rounded transition-colors"
-                                            title="Estornar Venda"
-                                          >
-                                            <Trash2 size={14} />
-                                          </button>
-                                        </div>
-                                      </td>
-                                    )}
+                                    <td className="py-3 font-mono font-bold text-[#6A0DAD] print:text-black text-right">
+                                      R$ {Number(comissaoFinal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="py-3 text-right print:hidden">
+                                      <div className="flex justify-end items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => imprimirReciboVenda(sale)}
+                                          className="p-1.5 text-gray-400 hover:text-purple-400 hover:bg-purple-950/20 rounded transition-colors cursor-pointer"
+                                          title="Reimprimir Cupom/Recibo"
+                                        >
+                                          <Printer size={14} />
+                                        </button>
+                                        {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER'].includes(profile?.role) && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleOpenEditVenda(sale)}
+                                              className="p-1.5 text-gray-600 hover:text-[#6A0DAD] hover:bg-[#6A0DAD]/10 rounded transition-colors cursor-pointer"
+                                              title="Editar Venda"
+                                            >
+                                              <Edit2 size={14} />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleEstornarVenda(sale.id)}
+                                              className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-950/20 rounded transition-colors cursor-pointer"
+                                              title="Estornar Venda"
+                                            >
+                                              <Trash2 size={14} />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </td>
                                   </tr>
                                 );
                               })
