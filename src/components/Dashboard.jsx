@@ -3734,7 +3734,8 @@ export default function Dashboard({ session, profileDataProps }) {
                 id,
                 nome,
                 cpf_cnpj
-              )
+              ),
+              vendas_pagamentos (*)
             `)
             .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
             .order('created_at', { ascending: false });
@@ -21021,6 +21022,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <th className="pb-3">Categoria</th>
                                   <th className="pb-3 text-center">Quantidade</th>
                                   <th className="pb-3">Total Bruto</th>
+                                  <th className="pb-3 text-center">Pagamento</th>
                                   <th className="pb-3 text-right">Sua Comissão</th>
                                   <th className="pb-3 text-right">Ações</th>
                                 </tr>
@@ -21028,12 +21030,95 @@ export default function Dashboard({ session, profileDataProps }) {
                               <tbody className="divide-y divide-[#222222]/50">
                                 {metasInfo.historico.length === 0 ? (
                                   <tr>
-                                    <td colSpan="7" className="py-6 text-center italic text-gray-600">Você ainda não registrou nenhuma venda neste mês.</td>
+                                    <td colSpan="8" className="py-6 text-center italic text-gray-600">Você ainda não registrou nenhuma venda neste mês.</td>
                                   </tr>
                                 ) : (
                                   metasInfo.historico.map(sale => {
                                     const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
                                     const produtoNome = sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || prodObj?.nome || 'Produto Geral';
+
+                                    // Renderizador de Badge de Pagamento
+                                    const renderPagamentoBadge = () => {
+                                      const pags = Array.isArray(sale.vendas_pagamentos) ? sale.vendas_pagamentos : [];
+                                      if (pags.length > 1) {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-400 border border-purple-800/60 uppercase">
+                                            Misto ({pags.length})
+                                          </span>
+                                        );
+                                      }
+
+                                      const metodoRaw = String(
+                                        sale.forma_pagamento ||
+                                        sale.metodo_pagamento ||
+                                        (pags[0]?.metodo_pagamento) ||
+                                        'N/A'
+                                      ).toLowerCase().trim();
+
+                                      const parcelas = parseInt(sale.parcelas || pags[0]?.parcelas || 1, 10);
+
+                                      if (metodoRaw === 'pix') {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/60 uppercase">
+                                            PIX
+                                          </span>
+                                        );
+                                      }
+
+                                      if (metodoRaw === 'dinheiro') {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-950 text-green-400 border border-green-800/60 uppercase">
+                                            DINHEIRO
+                                          </span>
+                                        );
+                                      }
+
+                                      if (metodoRaw.includes('credito') || metodoRaw === 'cartao' || metodoRaw === 'cartao_credito') {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-400 border border-blue-800/60 uppercase">
+                                            CRÉDITO{parcelas > 1 ? ` ${parcelas}x` : ''}
+                                          </span>
+                                        );
+                                      }
+
+                                      if (metodoRaw.includes('debito') || metodoRaw === 'cartao_debito') {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950 text-cyan-400 border border-cyan-800/60 uppercase">
+                                            DÉBITO
+                                          </span>
+                                        );
+                                      }
+
+                                      if (metodoRaw.includes('misto') || metodoRaw.includes('dividido')) {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-400 border border-purple-800/60 uppercase">
+                                            Misto
+                                          </span>
+                                        );
+                                      }
+
+                                      if (metodoRaw.includes('boleto')) {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800/60 uppercase">
+                                            BOLETO
+                                          </span>
+                                        );
+                                      }
+
+                                      if (metodoRaw.includes('troca')) {
+                                        return (
+                                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-400 border border-purple-800/60 uppercase">
+                                            TROCA
+                                          </span>
+                                        );
+                                      }
+
+                                      return (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#111111] text-gray-300 border border-[#333333] uppercase">
+                                          {metodoRaw.toUpperCase()}
+                                        </span>
+                                      );
+                                    };
 
                                     return (
                                       <tr key={sale.id} className="hover:bg-purple-950/5 transition-colors">
@@ -21048,6 +21133,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                         </td>
                                         <td className="py-3 text-center font-bold text-gray-300">{sale.quantidade}</td>
                                         <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                        <td className="py-3 text-center">{renderPagamentoBadge()}</td>
                                         <td className="py-3 text-right font-mono font-bold text-emerald-400">
                                           R$ {calcularComissaoItem(sale).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </td>
