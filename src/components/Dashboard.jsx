@@ -21022,7 +21022,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <th className="pb-3">Categoria</th>
                                   <th className="pb-3 text-center">Quantidade</th>
                                   <th className="pb-3">Total Bruto</th>
-                                  <th className="pb-3 text-center">Pagamento</th>
+                                  <th className="pb-3 text-center">PAGAMENTO</th>
                                   <th className="pb-3 text-right">Sua Comissão</th>
                                   <th className="pb-3 text-right">Ações</th>
                                 </tr>
