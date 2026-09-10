@@ -149,6 +149,27 @@ function ProductTableRow({
   const saveEdit = async (e) => {
     if (e) e.stopPropagation();
     if (!editingField || isSaving) return;
+
+    if (editingField === 'preco') {
+      const novoValor = parseFloat(String(editValue).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
+      if (isNaN(novoValor) || novoValor < 0) {
+        return;
+      }
+      setIsSaving(true);
+      try {
+        await onUpdateProdutoField(p.id, p.nome, 'preco', novoValor, p.filial_id);
+        p.preco = novoValor;
+        p.preco_venda = novoValor;
+        setEditingField(null);
+        setEditValue('');
+      } catch (err) {
+        console.error('Erro ao salvar preço no componente:', err);
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setIsSaving(true);
     try {
       await onUpdateProdutoField(p.id, p.nome, editingField, editValue, p.filial_id);
@@ -5285,11 +5306,11 @@ export default function Dashboard({ session, profileDataProps }) {
         showToast('Erro ao atualizar cor: ' + err.message, 'error');
       }
     } else if (field === 'preco' || field === 'preco_venda') {
-      // Limpa qualquer caractere não-numérico mantendo apenas dígitos e ponto decimal
-      const sanitized = String(newValue || '').replace(/[^\d.,]/g, '').replace(',', '.');
-      const novoPreco = parseFloat(sanitized);
+      const novoValor = typeof newValue === 'number'
+        ? newValue
+        : parseFloat(String(newValue || '').replace('R$', '').replace(/\s/g, '').replace(',', '.'));
 
-      if (isNaN(novoPreco) || novoPreco < 0) {
+      if (isNaN(novoValor) || novoValor < 0) {
         console.error('Valor de preço inválido informado:', newValue);
         showToast('Por favor, informe um preço numérico válido.', 'error');
         return;
@@ -5297,9 +5318,14 @@ export default function Dashboard({ session, profileDataProps }) {
 
       try {
         if (produtoId && !String(produtoId).startsWith('synth_')) {
-          // Atualiza tanto preco_venda quanto preco para garantir retrocompatibilidade total com o schema
-          let updatePayload = { preco_venda: novoPreco, preco: novoPreco };
-          let q = dbClient.from('produtos').update(updatePayload).eq('id', produtoId);
+          let q = dbClient
+            .from('produtos')
+            .update({
+              preco: novoValor,
+              preco_venda: novoValor
+            })
+            .eq('id', produtoId);
+
           if (itemFilialId) {
             q = q.eq('filial_id', itemFilialId);
           }
@@ -5308,14 +5334,14 @@ export default function Dashboard({ session, profileDataProps }) {
           // Se a coluna preco_venda não existir em alguma migration antiga, tenta apenas com preco
           if (error && (error.message?.includes('preco_venda') || error.details?.includes('preco_venda'))) {
             console.warn('Aviso: coluna preco_venda ausente em produtos, tentando update apenas com preco:', error);
-            const retryRes = await dbClient.from('produtos').update({ preco: novoPreco }).eq('id', produtoId);
+            const retryRes = await dbClient.from('produtos').update({ preco: novoValor }).eq('id', produtoId);
             error = retryRes.error;
           }
 
           if (error) {
-            console.error('Erro no update do produto no Supabase:', error);
-            showToast(`Erro ao salvar preço no Supabase: ${error.message || 'Falha na requisição'}`, 'error');
-            throw error;
+            console.error('Erro ao atualizar preço:', error);
+            showToast('Erro ao salvar preço: ' + error.message, 'error');
+            return;
           }
         }
 
@@ -5323,27 +5349,27 @@ export default function Dashboard({ session, profileDataProps }) {
           try {
             await dbClient
               .from('produtos_catalogo')
-              .update({ preco: novoPreco, preco_venda: novoPreco })
+              .update({ preco: novoValor, preco_venda: novoValor })
               .eq('empresa_id', targetEmpresaId)
               .ilike('nome', nome.trim());
           } catch (catErr) {
             // Fallback caso a tabela produtos_catalogo use apenas preco
             await dbClient
               .from('produtos_catalogo')
-              .update({ preco: novoPreco })
+              .update({ preco: novoValor })
               .eq('empresa_id', targetEmpresaId)
               .ilike('nome', nome.trim());
           }
         }
 
-        // Atualização imediata do estado local (sem necessidade de dar F5)
-        const updatedItemProps = { preco: novoPreco, preco_venda: novoPreco };
+        // Atualização imediata do estado local: produto.preco = novoValor e produto.preco_venda = novoValor
+        const updatedItemProps = { preco: novoValor, preco_venda: novoValor };
         setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p));
         setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p));
         setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, ...updatedItemProps } : c));
         setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, ...updatedItemProps } : e));
 
-        showToast(`Preço de "${nome || 'Produto'}" atualizado para R$ ${novoPreco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} com sucesso!`, 'success');
+        showToast('Preço atualizado com sucesso!', 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
         if (filialParaRecarregar) {
@@ -5351,7 +5377,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       } catch (err) {
         console.error('Erro ao atualizar preço:', err);
-        showToast(err.message || 'Erro ao atualizar preço no Supabase.', 'error');
+        showToast('Erro ao salvar preço: ' + (err.message || 'Falha ao atualizar'), 'error');
       }
     } else if (field === 'quantidade') {
       const novaQtd = parseInt(newValue, 10);
