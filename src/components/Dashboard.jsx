@@ -254,30 +254,76 @@ function ProductTableRow({
       {expandedProductImeis[p.id] && (
         <tr className="bg-black">
           <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
-            <div className="bg-[#050505] border border-[#1A1A1A] p-3 rounded-xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-              {((productImeisMap[p.id] || p.imeis || p.imeis_db || []).filter(im => 
-                (!im.produto_id || String(im.produto_id) === String(p.id)) &&
-                (!p.filial_id || !im.filial_id || String(im.filial_id) === String(p.filial_id))
-              )).map((im, idx) => (
-                <div key={im.id || im.imei || idx} className="flex items-center justify-between bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-2.5 rounded-lg text-xs font-mono gap-2 transition-all group">
-                  <span className="text-gray-200 font-bold tracking-wide">{im.imei}</span>
-                  <div className="flex items-center gap-1.5">
-                    <ColorBadge cor={im.cor} />
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (onOpenEditImeiModal) onOpenEditImeiModal(im);
-                      }}
-                      className="text-gray-500 hover:text-[#6A0DAD] p-1 rounded hover:bg-purple-950/30 transition-colors cursor-pointer"
-                      title="Editar Cor deste IMEI"
-                    >
-                      <Edit2 size={12} />
-                    </button>
+            {(() => {
+              const obterImeisDoProduto = (prod) => {
+                // Caso 0: mapa de IMEIs carregados sob demanda
+                if (Array.isArray(productImeisMap[prod?.id]) && productImeisMap[prod?.id].length > 0) {
+                  return productImeisMap[prod?.id];
+                }
+                // Caso 1: array de objetos ou strings já existente
+                if (Array.isArray(prod?.imeis) && prod.imeis.length > 0) return prod.imeis;
+                if (Array.isArray(prod?.imeis_db) && prod.imeis_db.length > 0) return prod.imeis_db;
+                if (Array.isArray(prod?.lista_imeis) && prod.lista_imeis.length > 0) return prod.lista_imeis;
+                if (Array.isArray(prod?.produtos_imeis) && prod.produtos_imeis.length > 0) return prod.produtos_imeis;
+                
+                // Caso 2: coluna única 'imei' na própria linha do produto
+                if (prod?.imei) {
+                  return [{ imei: prod.imei, cor: prod.cor, status: prod.status || 'DISPONÍVEL' }];
+                }
+                
+                return [];
+              };
+
+              const imeisParaExibir = obterImeisDoProduto(p);
+              
+              if (imeisParaExibir.length === 0) {
+                return (
+                  <div className="py-2 px-4 text-xs text-zinc-500 italic">
+                    Nenhum IMEI registrado para este item.
                   </div>
+                );
+              }
+
+              return (
+                <div className="flex flex-wrap gap-2 p-3 bg-zinc-950/60 rounded border border-purple-900/30">
+                  {imeisParaExibir.map((item, idx) => {
+                    const valorImei = typeof item === 'string' ? item : (item.imei || item.numero || item.codigo);
+                    const statusImei = item.status || 'DISPONÍVEL';
+                    const corImei = typeof item === 'object' ? (item.cor || p.cor) : p.cor;
+                    return (
+                      <div 
+                        key={item.id || valorImei || idx} 
+                        className="inline-flex items-center gap-2 bg-[#121218] border border-purple-800/40 px-3 py-1.5 rounded text-xs"
+                      >
+                        <span className="text-zinc-400 font-mono">IMEI:</span>
+                        <span className="text-purple-300 font-mono font-semibold tracking-wider">
+                          {valorImei || 'Sem número'}
+                        </span>
+                        {corImei && (
+                          <ColorBadge cor={corImei} />
+                        )}
+                        <span className="bg-emerald-950 text-emerald-400 text-[10px] px-1.5 py-0.5 rounded border border-emerald-800 font-medium">
+                          {statusImei}
+                        </span>
+                        {typeof item === 'object' && onOpenEditImeiModal && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenEditImeiModal(item.id ? item : { ...item, produto_id: p.id });
+                            }}
+                            className="text-gray-500 hover:text-[#6A0DAD] p-1 rounded hover:bg-purple-950/30 transition-colors cursor-pointer ml-0.5"
+                            title="Editar Cor deste IMEI"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </td>
         </tr>
       )}
