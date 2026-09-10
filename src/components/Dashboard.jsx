@@ -7683,6 +7683,30 @@ export default function Dashboard({ session, profileDataProps }) {
         complemento: clienteComplemento.trim() || null
       };
 
+      // Verificação preventiva de duplicidade de CPF na mesma empresa
+      if (clienteCpfCnpj.trim()) {
+        const cpfLimpo = clienteCpfCnpj.trim();
+        let queryCpf = supabase
+          .from('clientes')
+          .select('id, nome, cpf_cnpj')
+          .eq('empresa_id', currentEmpresaId)
+          .eq('cpf_cnpj', cpfLimpo);
+
+        if (editingCliente?.id) {
+          queryCpf = queryCpf.neq('id', editingCliente.id);
+        }
+
+        const { data: clienteDuplicado } = await queryCpf.maybeSingle();
+
+        if (clienteDuplicado) {
+          const nomeDuplicado = typeof clienteDuplicado.nome === 'string' ? clienteDuplicado.nome : '';
+          const avisoCpf = `CPF já cadastrado para o cliente: ${nomeDuplicado || 'Outro cliente'}`;
+          showToast(avisoCpf, 'error');
+          alert(avisoCpf);
+          return;
+        }
+      }
+
       console.log("📦 Payload enviado para o banco (Cliente Form):", payload);
 
       if (editingCliente) {
@@ -11666,11 +11690,24 @@ export default function Dashboard({ session, profileDataProps }) {
       filial_logo: filialObj?.logo_url || null,
       filial_endereco: filialObj?.endereco || 'Endereço não informado',
       filial_cnpj: filialObj?.cnpj || 'CNPJ não informado',
-      filial_telefone: filialObj?.telefone || 'Telefone não informado',
-      cliente_nome: venda.cliente_nome || venda.cliente || 'Consumidor Final',
-      cliente_cpf_cnpj: venda.cliente_cpf_cnpj || venda.cpf_cliente || '',
-      cliente_email: venda.cliente_email || '',
-      cliente_telefone: venda.cliente_telefone || '',
+      cliente_nome: (typeof venda.cliente_nome === 'string' && venda.cliente_nome)
+        || (typeof venda.cliente === 'string' && venda.cliente)
+        || venda.cliente?.nome
+        || venda.clientes?.nome
+        || 'Consumidor Final',
+      cliente_cpf_cnpj: (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj)
+        || (typeof venda.cpf_cliente === 'string' && venda.cpf_cliente)
+        || venda.cliente?.cpf_cnpj
+        || venda.clientes?.cpf_cnpj
+        || '',
+      cliente_email: (typeof venda.cliente_email === 'string' && venda.cliente_email)
+        || venda.cliente?.email
+        || venda.clientes?.email
+        || '',
+      cliente_telefone: (typeof venda.cliente_telefone === 'string' && venda.cliente_telefone)
+        || venda.cliente?.telefone
+        || venda.clientes?.telefone
+        || '',
       obs_garantia: venda.obs_garantia || venda.observacoes || '',
       itens: [
         {
@@ -14382,7 +14419,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Helper visual Poka-Yoke de Status de Crédito
   const getStatusBadge = (status) => {
-    const norm = (status || 'EM DIA').toUpperCase();
+    const rawStatus = (typeof status === 'object' && status !== null)
+      ? (status.status_credito || status.status || 'EM DIA')
+      : status;
+    const norm = (typeof rawStatus === 'string' ? rawStatus : 'EM DIA').toUpperCase();
     switch (norm) {
       case 'INADIMPLENTE':
         return (
@@ -14462,13 +14502,26 @@ export default function Dashboard({ session, profileDataProps }) {
 
     // Mapear vendas e enriquecer com o status do cliente
     const vendasAuditadas = vendas.map(sale => {
-      const clienteCorrespondente = clientes.find(c => c.id === sale.cliente_id) || sale.clientes || {};
-      const statusCredito = clienteCorrespondente.status_credito || 'EM DIA';
+      const clienteCorrespondente = clientes.find(c => c.id === sale.cliente_id)
+        || (Array.isArray(sale.clientes) ? sale.clientes[0] : sale.clientes)
+        || (Array.isArray(sale.cliente) ? sale.cliente[0] : sale.cliente)
+        || {};
+      const statusCredito = typeof clienteCorrespondente.status_credito === 'string'
+        ? clienteCorrespondente.status_credito
+        : (typeof sale.status_credito === 'string' ? sale.status_credito : 'EM DIA');
+
+      const nomeClienteFinal = (typeof sale.cliente_nome === 'string' && sale.cliente_nome)
+        || (typeof clienteCorrespondente.nome === 'string' && clienteCorrespondente.nome)
+        || 'Consumidor Final';
+
+      const cpfClienteFinal = (typeof sale.cliente_cpf_cnpj === 'string' && sale.cliente_cpf_cnpj)
+        || (typeof clienteCorrespondente.cpf_cnpj === 'string' && clienteCorrespondente.cpf_cnpj)
+        || 'Não Informado';
 
       return {
         ...sale,
-        cliente_nome: sale.cliente_nome || clienteCorrespondente.nome || 'Consumidor Final',
-        cliente_cpf_cnpj: sale.cliente_cpf_cnpj || clienteCorrespondente.cpf_cnpj || 'Não Informado',
+        cliente_nome: nomeClienteFinal,
+        cliente_cpf_cnpj: cpfClienteFinal,
         status_credito: statusCredito,
         cliente_id_real: sale.cliente_id || clienteCorrespondente.id || null,
         financeira: sale.financeira_parceira || (sale.metodo_pagamento === 'boleto' ? 'PayJoy' : sale.metodo_pagamento ? sale.metodo_pagamento.toUpperCase() : 'N/A')
@@ -14618,15 +14671,19 @@ export default function Dashboard({ session, profileDataProps }) {
                     const imeiTextResolved = venda.imei_novo || venda.imei || venda.used_imei || (imeiObj?.imei) || '-';
 
                     // Resolução Dinâmica de Cliente (Cruzando JOIN do Supabase ou lista de clientes)
-                    const clienteObj = venda.clientes || clientes.find(c =>
+                    const clienteJoined = (Array.isArray(venda.clientes) ? venda.clientes[0] : venda.clientes)
+                      || (Array.isArray(venda.cliente) ? venda.cliente[0] : venda.cliente);
+                    const clienteObj = clienteJoined || clientes.find(c =>
                       (venda.cliente_id && String(c.id) === String(venda.cliente_id)) ||
                       (venda.cliente_cpf_cnpj && c.cpf_cnpj && c.cpf_cnpj.trim() === String(venda.cliente_cpf_cnpj).trim())
                     );
-                    const clienteNomeResolved = (venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null)
-                      || clienteObj?.nome
+                    const clienteNomeResolved = (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null)
+                      || (typeof clienteJoined?.nome === 'string' ? clienteJoined.nome : null)
+                      || (typeof clienteObj?.nome === 'string' ? clienteObj.nome : null)
                       || (venda.cliente_id ? 'Cliente Cadastrado' : 'Consumidor Final');
-                    const clienteCpfResolved = (venda.cliente_cpf_cnpj && venda.cliente_cpf_cnpj !== 'Não Informado' ? venda.cliente_cpf_cnpj : null)
-                      || clienteObj?.cpf_cnpj
+                    const clienteCpfResolved = (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj && venda.cliente_cpf_cnpj !== 'Não Informado' ? venda.cliente_cpf_cnpj : null)
+                      || (typeof clienteJoined?.cpf_cnpj === 'string' ? clienteJoined.cpf_cnpj : null)
+                      || (typeof clienteObj?.cpf_cnpj === 'string' ? clienteObj.cpf_cnpj : null)
                       || 'Não Informado';
                     const financeiraResolved = venda.financeira_parceira || venda.financeira || (venda.metodo_pagamento ? venda.metodo_pagamento.toUpperCase() : 'PDV');
 
@@ -14646,13 +14703,13 @@ export default function Dashboard({ session, profileDataProps }) {
                         <td className="p-4">
                           <div className="flex flex-col">
                             <span className="font-bold text-white text-xs">
-                              {venda.clientes?.nome || clienteNomeResolved || 'Cliente não identificado'}
+                              {clienteNomeResolved || 'Cliente não identificado'}
                             </span>
                             <span className="text-[11px] font-mono text-gray-400">
-                              CPF/CNPJ: {venda.clientes?.cpf_cnpj || clienteCpfResolved || '-'}
+                              CPF/CNPJ: {clienteCpfResolved || '-'}
                             </span>
                             <div className="text-[10px] text-purple-400 font-mono mt-0.5 bg-purple-950/30 border border-purple-800/40 px-1.5 py-0.5 rounded w-fit">
-                              ID no Banco: <strong className="text-purple-200">{venda.clientes?.id || venda.cliente_id || 'NULL'}</strong>
+                              ID no Banco: <strong className="text-purple-200">{clienteJoined?.id || clienteObj?.id || venda.cliente_id || 'NULL'}</strong>
                             </div>
                           </div>
                         </td>
@@ -14792,7 +14849,12 @@ export default function Dashboard({ session, profileDataProps }) {
                       Auditoria de Crédito do Cliente
                     </h3>
                     <p className="text-xs text-gray-400 mt-1">
-                      Altere a adimplência de <strong className="text-white">{selectedAuditVenda.cliente_nome}</strong>
+                      Altere a adimplência de <strong className="text-white">
+                        {(typeof selectedAuditVenda.cliente_nome === 'string' && selectedAuditVenda.cliente_nome)
+                          || selectedAuditVenda.cliente?.nome
+                          || selectedAuditVenda.clientes?.nome
+                          || 'Cliente'}
+                      </strong>
                     </p>
                   </div>
                   <button
@@ -14810,7 +14872,12 @@ export default function Dashboard({ session, profileDataProps }) {
                   <div className="bg-black/60 border border-[#222222] p-3.5 rounded-xl space-y-1.5">
                     <div className="flex justify-between">
                       <span className="text-gray-500">CPF/CNPJ:</span>
-                      <span className="font-mono text-white font-bold">{selectedAuditVenda.cliente_cpf_cnpj}</span>
+                      <span className="font-mono text-white font-bold">
+                        {(typeof selectedAuditVenda.cliente_cpf_cnpj === 'string' && selectedAuditVenda.cliente_cpf_cnpj)
+                          || selectedAuditVenda.cliente?.cpf_cnpj
+                          || selectedAuditVenda.clientes?.cpf_cnpj
+                          || 'Não Informado'}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Última Venda:</span>

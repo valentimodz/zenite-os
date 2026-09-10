@@ -4,10 +4,25 @@ import { X, Receipt, User, Smartphone, Calendar, DollarSign, FileText } from 'lu
 export default function ModalDetalhesVenda({ venda, onClose, onEmitirNfe }) {
     if (!venda) return null;
 
-    // Blindagem e mapeamento para garantir que NUNCA fique vazio
-    const clienteNome = venda.cliente_nome || venda.cliente || 'Cliente não informado';
-    const clienteCpf = venda.cliente_cpf_cnpj || venda.cpf || venda.cnpj || 'Não informado';
-    const clienteEmail = venda.cliente_email || venda.email || 'Não informado';
+    // Blindagem e mapeamento para garantir que NUNCA fique vazio e NUNCA renderize um objeto direto
+    const clienteNome = (typeof venda.cliente_nome === 'string' && venda.cliente_nome)
+        || (typeof venda.cliente === 'string' && venda.cliente)
+        || venda.cliente?.nome
+        || venda.clientes?.nome
+        || 'Cliente não informado';
+
+    const clienteCpf = (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj)
+        || (typeof venda.cpf === 'string' && venda.cpf)
+        || (typeof venda.cnpj === 'string' && venda.cnpj)
+        || venda.cliente?.cpf_cnpj
+        || venda.clientes?.cpf_cnpj
+        || 'Não informado';
+
+    const clienteEmail = (typeof venda.cliente_email === 'string' && venda.cliente_email)
+        || (typeof venda.email === 'string' && venda.email)
+        || venda.cliente?.email
+        || venda.clientes?.email
+        || 'Não informado';
 
     const produtoNome = venda.produto_nome || venda.produtos_descricao || venda.descricao_produto || 'Produto não especificado';
     const imeiProduto = venda.imei || venda.imei_novo || venda.numero_imei || 'Sem IMEI';
@@ -24,10 +39,7 @@ export default function ModalDetalhesVenda({ venda, onClose, onEmitirNfe }) {
                 <div className="p-4 border-b border-[#222] flex justify-between items-center bg-[#111]">
                     <h2 className="text-white font-bold flex items-center gap-2">
                         <Receipt className="text-[#6A0DAD]" />
-                        <h2 className="text-white font-bold flex items-center gap-2">
-                            <Receipt className="text-[#6A0DAD]" />
-                            Detalhes da Venda #{venda.numero_venda || venda.codigo || venda.id?.substring(0, 8)}
-                        </h2>
+                        Detalhes da Venda #{venda.numero_venda || venda.codigo || (typeof venda.id === 'string' ? venda.id.substring(0, 8) : venda.id)}
                     </h2>
                     <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
                         <X size={20} />
