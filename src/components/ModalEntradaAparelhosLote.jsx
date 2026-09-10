@@ -213,7 +213,8 @@ export default function ModalEntradaAparelhosLote({
     const novosItens = [];
     const duplicadosFila = [];
 
-    const nomeFormatado = `${modeloLimpo} ${armazenamento || ''} ${corSelecionada || ''}`.replace(/\s+/g, ' ').trim();
+    // Formatar nome apenas com Modelo e Armazenamento (sem a cor)
+    const nomeFormatado = `${modeloLimpo} ${armazenamento ? armazenamento.trim() : ''}`.trim();
 
     imeisValidos.forEach(imeiFormatado => {
       if (imeisJaNaFila.has(imeiFormatado)) {
@@ -224,8 +225,8 @@ export default function ModalEntradaAparelhosLote({
           idTemp: `${imeiFormatado}-${Date.now()}-${Math.random()}`,
           nome: nomeFormatado,
           modelo: modeloLimpo,
-          armazenamento: armazenamento || '',
-          cor: corSelecionada || '',
+          armazenamento: armazenamento ? armazenamento.trim() : '',
+          cor: corSelecionada ? corSelecionada.trim() : '',
           imei: imeiFormatado,
           filial_id: filialSelecionada.id,
           filial_nome: filialSelecionada.nome,
@@ -698,7 +699,7 @@ export default function ModalEntradaAparelhosLote({
                     <thead className="bg-[#141414] text-[10px] font-bold text-gray-400 uppercase tracking-wider sticky top-0">
                       <tr>
                         <th className="py-2.5 px-3 w-10">#</th>
-                        <th className="py-2.5 px-3">Aparelho Completo</th>
+                        <th className="py-2.5 px-3">Aparelho</th>
                         <th className="py-2.5 px-3">Filial</th>
                         <th className="py-2.5 px-3">IMEI</th>
                         <th className="py-2.5 px-3">Preço Venda</th>
@@ -709,7 +710,16 @@ export default function ModalEntradaAparelhosLote({
                       {filaAparelhos.map((item, idx) => (
                         <tr key={item.idTemp || idx} className="hover:bg-white/[0.02]">
                           <td className="py-2 px-3 font-mono text-[10px] text-gray-600">{idx + 1}</td>
-                          <td className="py-2 px-3 font-medium text-white">{item.nome}</td>
+                          <td className="py-2 px-3 font-medium text-white">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span>{item.nome}</span>
+                              {item.cor && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-purple-950/60 text-purple-300 border border-purple-800/50">
+                                  {item.cor}
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="py-2 px-3">
                             <span className="px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 border border-neutral-700 text-[10px] font-medium truncate max-w-[120px] inline-block">
                               {item.filial_nome || 'Filial'}
