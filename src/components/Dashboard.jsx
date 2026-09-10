@@ -196,13 +196,45 @@ function ProductTableRow({
         <td className="py-2.5 font-mono font-bold text-white text-[11px]">
           {editingField === 'preco' ? (
             <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-              <input type="number" step="0.01" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown} className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none" />
-              <button type="button" onClick={saveEdit} className="text-emerald-400"><Check size={12} /></button>
+              <input
+                type="text"
+                autoFocus
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="0,00"
+                className="w-24 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono"
+              />
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={isSaving}
+                className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors cursor-pointer"
+                title="Confirmar novo preço"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={isSaving}
+                className="text-gray-500 hover:text-gray-400 p-0.5 transition-colors cursor-pointer"
+                title="Cancelar"
+              >
+                <X size={12} />
+              </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <span>R$ {parseFloat(p.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-              <button onClick={e => startEdit(e, 'preco', p.preco)} className="text-gray-500 hover:text-[#6A0DAD]"><Edit2 size={12} /></button>
+              <span>R$ {parseFloat(p.preco || p.preco_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              <button
+                type="button"
+                onClick={e => startEdit(e, 'preco', p.preco ?? p.preco_venda)}
+                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
+                title="Editar Preço"
+              >
+                <Edit2 size={12} />
+              </button>
             </div>
           )}
         </td>
@@ -5252,43 +5284,74 @@ export default function Dashboard({ session, profileDataProps }) {
         console.error('Erro ao atualizar cor:', err);
         showToast('Erro ao atualizar cor: ' + err.message, 'error');
       }
-    } else if (field === 'preco') {
-      const sanitized = String(newValue).replace(/[^\d.,]/g, '').replace(',', '.');
+    } else if (field === 'preco' || field === 'preco_venda') {
+      // Limpa qualquer caractere não-numérico mantendo apenas dígitos e ponto decimal
+      const sanitized = String(newValue || '').replace(/[^\d.,]/g, '').replace(',', '.');
       const novoPreco = parseFloat(sanitized);
 
       if (isNaN(novoPreco) || novoPreco < 0) {
+        console.error('Valor de preço inválido informado:', newValue);
         showToast('Por favor, informe um preço numérico válido.', 'error');
         return;
       }
 
       try {
         if (produtoId && !String(produtoId).startsWith('synth_')) {
-          let q = dbClient.from('produtos').update({ preco: novoPreco }).eq('id', produtoId);
+          // Atualiza tanto preco_venda quanto preco para garantir retrocompatibilidade total com o schema
+          let updatePayload = { preco_venda: novoPreco, preco: novoPreco };
+          let q = dbClient.from('produtos').update(updatePayload).eq('id', produtoId);
           if (itemFilialId) {
             q = q.eq('filial_id', itemFilialId);
           }
-          const { error } = await q;
-          if (error) throw error;
+          let { error } = await q;
+
+          // Se a coluna preco_venda não existir em alguma migration antiga, tenta apenas com preco
+          if (error && (error.message?.includes('preco_venda') || error.details?.includes('preco_venda'))) {
+            console.warn('Aviso: coluna preco_venda ausente em produtos, tentando update apenas com preco:', error);
+            const retryRes = await dbClient.from('produtos').update({ preco: novoPreco }).eq('id', produtoId);
+            error = retryRes.error;
+          }
+
+          if (error) {
+            console.error('Erro no update do produto no Supabase:', error);
+            showToast(`Erro ao salvar preço no Supabase: ${error.message || 'Falha na requisição'}`, 'error');
+            throw error;
+          }
         }
 
         if (nome) {
-          await dbClient.from('produtos_catalogo').update({ preco: novoPreco }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
+          try {
+            await dbClient
+              .from('produtos_catalogo')
+              .update({ preco: novoPreco, preco_venda: novoPreco })
+              .eq('empresa_id', targetEmpresaId)
+              .ilike('nome', nome.trim());
+          } catch (catErr) {
+            // Fallback caso a tabela produtos_catalogo use apenas preco
+            await dbClient
+              .from('produtos_catalogo')
+              .update({ preco: novoPreco })
+              .eq('empresa_id', targetEmpresaId)
+              .ilike('nome', nome.trim());
+          }
         }
 
-        // Imutabilidade estrita (Deep object copy com spread operator + nova referência de objeto)
-        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, preco: novoPreco } : p));
-        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, preco: novoPreco } : p));
-        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, preco: novoPreco } : c));
-        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, preco: novoPreco } : e));
-        showToast(`Preço de "${nome}" atualizado para R$ ${novoPreco.toFixed(2)} com sucesso!`, 'success');
+        // Atualização imediata do estado local (sem necessidade de dar F5)
+        const updatedItemProps = { preco: novoPreco, preco_venda: novoPreco };
+        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p));
+        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p));
+        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, ...updatedItemProps } : c));
+        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, ...updatedItemProps } : e));
+
+        showToast(`Preço de "${nome || 'Produto'}" atualizado para R$ ${novoPreco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} com sucesso!`, 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
         if (filialParaRecarregar) {
-          await fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque consolidado:', e));
         }
       } catch (err) {
         console.error('Erro ao atualizar preço:', err);
-        showToast('Erro ao atualizar preço: ' + err.message, 'error');
+        showToast(err.message || 'Erro ao atualizar preço no Supabase.', 'error');
       }
     } else if (field === 'quantidade') {
       const novaQtd = parseInt(newValue, 10);
