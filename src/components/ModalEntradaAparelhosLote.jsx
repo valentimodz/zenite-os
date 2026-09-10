@@ -22,7 +22,10 @@ export default function ModalEntradaAparelhosLote({
   // Campos do Formulário
   const [modelo, setModelo] = useState('');
   const [armazenamento, setArmazenamento] = useState('128GB');
-  const [cor, setCor] = useState('Preto');
+  const [listaCores, setListaCores] = useState(CORES_PADRAO);
+  const [corSelecionada, setCorSelecionada] = useState('Preto');
+  const [novaCorInput, setNovaCorInput] = useState('');
+  const [isSavingCor, setIsSavingCor] = useState(false);
   const [precoCusto, setPrecoCusto] = useState('');
   const [precoVenda, setPrecoVenda] = useState('');
   const [listaImeisTexto, setListaImeisTexto] = useState('');
@@ -85,6 +88,65 @@ export default function ModalEntradaAparelhosLote({
 
     carregarFiliais();
   }, [isOpen, perfilUsuario?.empresa_id, perfilUsuario?.filial_id]);
+
+  // Carregar Cores Customizadas
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const carregarCores = async () => {
+      try {
+        const { data, error } = await supabase.from('cores_aparelhos').select('nome');
+        if (!error && data) {
+          const customizadas = data.map(c => c.nome).filter(Boolean);
+          setListaCores(Array.from(new Set([...CORES_PADRAO, ...customizadas])));
+        }
+      } catch (err) {
+        console.warn('[ModalEntradaAparelhosLote] Erro ao carregar cores:', err);
+      }
+    };
+
+    carregarCores();
+  }, [isOpen]);
+
+  // Adicionar e Salvar Nova Cor Customizada
+  const handleAdicionarNovaCor = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const corLimpa = novaCorInput.trim();
+    if (!corLimpa) return;
+
+    setIsSavingCor(true);
+    try {
+      let empresaId = perfilUsuario?.empresa_id || perfilUsuario?.empresaId;
+      if (!empresaId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('empresa_id')
+            .eq('id', user.id)
+            .maybeSingle();
+          empresaId = prof?.empresa_id;
+        }
+      }
+
+      await supabase.from('cores_aparelhos').insert([{
+        nome: corLimpa,
+        empresa_id: empresaId || null
+      }]);
+
+      setListaCores(prev => Array.from(new Set([...prev, corLimpa])));
+      setCorSelecionada(corLimpa);
+      setNovaCorInput('');
+    } catch (err) {
+      console.error('[ModalEntradaAparelhosLote] Erro ao salvar nova cor:', err);
+      // Mesmo se houver aviso/erro no banco, adicionar à lista local para não travar o fluxo
+      setListaCores(prev => Array.from(new Set([...prev, corLimpa])));
+      setCorSelecionada(corLimpa);
+      setNovaCorInput('');
+    } finally {
+      setIsSavingCor(false);
+    }
+  };
 
   // Filial Selecionada Objeto
   const filialSelecionada = useMemo(() => {
@@ -151,7 +213,7 @@ export default function ModalEntradaAparelhosLote({
     const novosItens = [];
     const duplicadosFila = [];
 
-    const nomeFormatado = `${modeloLimpo} ${armazenamento || ''} ${cor || ''}`.replace(/\s+/g, ' ').trim();
+    const nomeFormatado = `${modeloLimpo} ${armazenamento || ''} ${corSelecionada || ''}`.replace(/\s+/g, ' ').trim();
 
     imeisValidos.forEach(imeiFormatado => {
       if (imeisJaNaFila.has(imeiFormatado)) {
@@ -163,7 +225,7 @@ export default function ModalEntradaAparelhosLote({
           nome: nomeFormatado,
           modelo: modeloLimpo,
           armazenamento: armazenamento || '',
-          cor: cor || '',
+          cor: corSelecionada || '',
           imei: imeiFormatado,
           filial_id: filialSelecionada.id,
           filial_nome: filialSelecionada.nome,
@@ -469,23 +531,23 @@ export default function ModalEntradaAparelhosLote({
                 </div>
               </div>
 
-              {/* Cor (Input + Chips Rápidos) */}
+              {/* Cor (Chips Rápidos + Inclusão Inline) */}
               <div className="md:col-span-6 space-y-1.5">
                 <label className="block text-[11px] font-bold text-gray-300 uppercase tracking-wider">
                   Cor
                 </label>
-                <div className="flex flex-wrap gap-1 mb-1.5">
-                  {CORES_PADRAO.map(c => {
-                    const isSelected = cor.toLowerCase() === c.toLowerCase();
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {listaCores.map(c => {
+                    const isSelected = corSelecionada.trim().toLowerCase() === c.trim().toLowerCase();
                     return (
                       <button
                         key={c}
                         type="button"
-                        onClick={() => setCor(c)}
-                        className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-all cursor-pointer ${
+                        onClick={() => setCorSelecionada(c)}
+                        className={`px-3 py-1 rounded-lg text-xs transition-all cursor-pointer ${
                           isSelected
-                            ? 'bg-purple-900/60 border-[#6A0DAD] text-white'
-                            : 'bg-black/60 border-[#2b2b2b] text-gray-400 hover:text-gray-200'
+                            ? 'bg-purple-600 text-white font-bold shadow-md shadow-purple-900/40'
+                            : 'bg-[#1a1a24] text-gray-300 hover:text-white hover:bg-[#252533]'
                         }`}
                       >
                         {c}
@@ -493,13 +555,39 @@ export default function ModalEntradaAparelhosLote({
                     );
                   })}
                 </div>
-                <input
-                  type="text"
-                  value={cor}
-                  onChange={(e) => setCor(e.target.value)}
-                  placeholder="Ou digite outra cor..."
-                  className="w-full bg-black border border-[#333333] focus:border-[#6A0DAD] rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-                />
+                
+                {/* Formulário Inline para Adicionar Nova Cor */}
+                <form
+                  onSubmit={handleAdicionarNovaCor}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    type="text"
+                    value={novaCorInput}
+                    onChange={(e) => setNovaCorInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAdicionarNovaCor(e);
+                      }
+                    }}
+                    placeholder="Outra cor (ex: Roxo Noturno, Amarelo, Estelar...)"
+                    className="flex-1 bg-black border border-[#333333] focus:border-purple-500 rounded-lg px-3 py-1.5 text-xs text-white outline-none transition-colors"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAdicionarNovaCor}
+                    disabled={isSavingCor || !novaCorInput.trim()}
+                    className="shrink-0 px-3 py-1.5 bg-purple-600/90 hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    {isSavingCor ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Plus size={13} />
+                    )}
+                    + Adicionar Cor
+                  </button>
+                </form>
               </div>
 
             </div>
