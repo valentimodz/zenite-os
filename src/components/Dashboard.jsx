@@ -2145,13 +2145,33 @@ export default function Dashboard({ session, profileDataProps }) {
     fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque);
   }, [filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque, activeFilialId]);
 
-  // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios ou alterar filtros
+  // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios ou alterar filtros, com Supabase Realtime
   useEffect(() => {
     if (activeTab === 'fechamentos' || activeTab === 'gestao') {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+
+      // Inscrição em Tempo Real para refletir aberturas e fechamentos de qualquer PDV instantaneamente
+      const canalCaixas = supabase
+        .channel('realtime-caixas')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'caixas'
+          },
+          () => {
+            fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(canalCaixas);
+      };
     }
-  }, [activeTab, filtroFilialCaixa, filtroMes, profile?.empresa_id, company?.id, activeEmpresaId]);
+  }, [activeTab, filtroFilialCaixa, filtroStatusCaixa, filtroMes, profile?.empresa_id, company?.id, activeEmpresaId]);
 
   const fetchTenantSettings = async () => {
     try {
@@ -3273,7 +3293,7 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // 1. Busca segura dos caixas sem joins forçados que possam disparar PGRST200 caso a FK não exista ou esteja nomeada diferentemente
+      // 1. Busca limpa dos caixas sem joins relacionais (elimina PGRST200)
       let query = supabase
         .from('caixas')
         .select('*')
@@ -3290,43 +3310,46 @@ export default function Dashboard({ session, profileDataProps }) {
         query = query.or(`empresa_id.eq.${targetEmpresaId},empresa_id.is.null`);
       }
 
-      const { data, error } = await query;
+      // Execução paralela: caixas, filiais e profiles cadastrados
+      const [
+        { data: listaCaixas, error: errorCaixas },
+        { data: filiaisData },
+        { data: profilesData }
+      ] = await Promise.all([
+        query,
+        supabase.from('filiais').select('id, nome'),
+        supabase.from('profiles').select('id, nome')
+      ]);
 
-      if (error) {
-        console.error('[Caixas] ⚠️ Erro na consulta do Supabase:', error);
-        setErrorSessoesCaixas(error.message || 'Erro ao carregar sessões de caixa.');
+      if (errorCaixas) {
+        console.error('[Caixas] ⚠️ Erro na consulta de caixas do Supabase:', errorCaixas);
+        setErrorSessoesCaixas(errorCaixas.message || 'Erro ao carregar sessões de caixa.');
         return;
       }
 
-      if (Array.isArray(data)) {
-        // Obter lista de filiais atualizada (das props/estado ou consulta direta defensiva se filiais estiver vazio)
-        let listaFiliais = Array.isArray(filiais) ? filiais : [];
-        if (listaFiliais.length === 0) {
-          try {
-            const { data: filiaisData } = await supabase.from('filiais').select('id, nome');
-            if (Array.isArray(filiaisData)) {
-              listaFiliais = filiaisData;
-            }
-          } catch (fErr) {
-            console.warn('[Caixas] Aviso ao buscar filiais para cruzamento:', fErr);
-          }
-        }
+      if (Array.isArray(listaCaixas)) {
+        const todasFiliais = Array.isArray(filiaisData) && filiaisData.length > 0 
+          ? filiaisData 
+          : (Array.isArray(filiais) ? filiais : []);
 
-        // Cruzar dados em memória com filiais e profiles de forma totalmente segura contra nulos
-        const sessoesMapeadas = data.map(cx => {
-          const filialEncontrada = listaFiliais.find(f => String(f.id) === String(cx.filial_id));
-          const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(cx.operador_id)) ||
-            (teamMembers || []).find(t => String(t.id) === String(cx.operador_id));
+        const todosProfiles = Array.isArray(profilesData) && profilesData.length > 0
+          ? profilesData
+          : (Array.isArray(vendedores) ? vendedores : (Array.isArray(teamMembers) ? teamMembers : []));
 
-          const filialNome = cx.filial_nome || filialEncontrada?.nome || 'Filial não encontrada';
-          const operadorNome = cx.operador_nome || vendedorEncontrado?.nome || 'Operador PDV';
+        // Cruzar dados em memória no frontend
+        const sessoesMapeadas = listaCaixas.map(cx => {
+          const filialEncontrada = todasFiliais.find(f => String(f.id) === String(cx.filial_id));
+          const profileEncontrado = todosProfiles.find(p => String(p.id) === String(cx.operador_id));
+
+          const filialNome = cx.filial_nome || filialEncontrada?.nome || 'Sem Filial';
+          const operadorNome = cx.operador_nome || profileEncontrado?.nome || 'Operador PDV';
 
           return {
             ...cx,
             filial_nome: filialNome,
-            filiais: filialEncontrada ? { id: filialEncontrada.id, nome: filialEncontrada.nome } : (cx.filiais || { nome: filialNome }),
+            filiais: filialEncontrada ? { id: filialEncontrada.id, nome: filialEncontrada.nome } : { nome: filialNome },
             operador_nome: operadorNome,
-            profiles: vendedorEncontrado ? { id: vendedorEncontrado.id, nome: vendedorEncontrado.nome } : (cx.profiles || { nome: operadorNome })
+            profiles: profileEncontrado ? { id: profileEncontrado.id, nome: profileEncontrado.nome } : { nome: operadorNome }
           };
         });
 
@@ -3336,7 +3359,7 @@ export default function Dashboard({ session, profileDataProps }) {
         setSessoesCaixas([]);
       }
     } catch (err) {
-      console.error('[Caixas] ❌ Falha crítica ao carregar sessões de caixa:', err);
+      console.error('[Caixas] ❌ Falha ao carregar sessões de caixa:', err);
       setErrorSessoesCaixas(err.message || 'Erro ao carregar sessões de caixa. Verifique a conexão ou contate o suporte.');
     } finally {
       setLoadingSessoesCaixas(false);
@@ -19859,12 +19882,16 @@ export default function Dashboard({ session, profileDataProps }) {
                                   String(cx.filial_id) === String(filtroFilialCaixa) ||
                                   (cx.filial_nome && filiais.find(f => String(f.id) === String(filtroFilialCaixa))?.nome?.toLowerCase() === cx.filial_nome?.toLowerCase());
 
-                                const isAberto = checkCaixaAberto(cx);
+                                const statusStr = String(cx.status || '').trim().toLowerCase();
+                                const temFechamento = !!(cx.data_fechamento || cx.fechado_em);
+                                const isAberto = statusStr === 'aberto' && !temFechamento;
+                                const isFechado = statusStr === 'fechado' || temFechamento;
+
                                 let matchStatus = true;
                                 if (filtroStatusCaixa === 'ABERTO') {
                                   matchStatus = isAberto;
                                 } else if (filtroStatusCaixa === 'FECHADO') {
-                                  matchStatus = !isAberto;
+                                  matchStatus = isFechado;
                                 }
                                 return matchMes && matchFilial && matchStatus;
                               });
