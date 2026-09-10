@@ -27,6 +27,7 @@ import RankingVendedores from './RankingVendedores';
 import ColorBadge from './ColorBadge';
 import ModalEditarImei from './ModalEditarImei';
 import ModalGeradorGrade from './ModalGeradorGrade';
+import ModalGeradorPeliculas from './ModalGeradorPeliculas';
 import ModalEntradaAparelhosLote from './ModalEntradaAparelhosLote';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -634,6 +635,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [categoriaCatalogoMestre, setCategoriaCatalogoMestre] = useState('TODAS');
   const [editingCatalogoProduto, setEditingCatalogoProduto] = useState(null);
   const [isModalGradeOpen, setIsModalGradeOpen] = useState(false);
+  const [isModalPeliculasOpen, setIsModalPeliculasOpen] = useState(false);
   const [isModalAparelhosLoteOpen, setIsModalAparelhosLoteOpen] = useState(false);
   const [isProdutoExistenteCatalogo, setIsProdutoExistenteCatalogo] = useState(false);
   const [produtoExistenteMaster, setProdutoExistenteMaster] = useState(null);
@@ -17385,7 +17387,16 @@ export default function Dashboard({ session, profileDataProps }) {
                                     title="Cadastrar grade de variações de capas e acessórios em lote"
                                   >
                                     <Zap size={14} className="text-[#c084fc]" />
-                                    <span>⚡ Gerador de Grade / Lote</span>
+                                    <span>⚡ Gerador de Capas / Grade</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsModalPeliculasOpen(true)}
+                                    className="px-3 py-1.5 bg-[#002b20] hover:bg-[#003d2e] text-emerald-400 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                                    title="Gerador de Grade de Películas (Lote Express)"
+                                  >
+                                    <Shield size={14} className="text-emerald-400" />
+                                    <span>🛡️ Lote Películas Express</span>
                                   </button>
                                   <button
                                     onClick={() => window.open('/caderno-pdv', '_blank')}
@@ -24595,6 +24606,25 @@ export default function Dashboard({ session, profileDataProps }) {
           onSuccess={(qtdCriada, linhaBase, nomeFilialDest) => {
             const msgFilial = nomeFilialDest ? ` e estocadas com sucesso na filial ${nomeFilialDest}!` : '!';
             showToast(`${qtdCriada} variações cadastradas${msgFilial}`, 'success');
+            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+            if (targetEmpresaId) {
+              fetchCatalogoProdutos(targetEmpresaId);
+              fetchGerenteData(targetEmpresaId);
+            }
+            window.dispatchEvent(new Event('catalogo_updated'));
+          }}
+        />
+
+        {/* Modal Gerador de Grade de Películas (Lote Express) */}
+        <ModalGeradorPeliculas
+          isOpen={isModalPeliculasOpen}
+          onClose={() => setIsModalPeliculasOpen(false)}
+          perfilUsuario={profile}
+          categorias={categorias}
+          filiais={filiais}
+          onSuccess={(qtdCriada, nomeFilialDest) => {
+            const msgFilial = nomeFilialDest ? ` e estocadas com sucesso na filial ${nomeFilialDest}!` : '!';
+            showToast(`${qtdCriada} películas cadastradas${msgFilial}`, 'success');
             const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
             if (targetEmpresaId) {
               fetchCatalogoProdutos(targetEmpresaId);
