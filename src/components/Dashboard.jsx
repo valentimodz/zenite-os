@@ -19911,6 +19911,8 @@ export default function Dashboard({ session, profileDataProps }) {
                     filiais={filiais}
                     filtroMes={filtroMes}
                     setFiltroMes={setFiltroMes}
+                    empresaId={profile?.empresa_id || company?.id || activeEmpresaId}
+                    fetchGerenteData={fetchGerenteData}
                   />
                 )}
 
