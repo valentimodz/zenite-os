@@ -2493,15 +2493,21 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   const fetchAuditoriaDescontos = async (empresaId) => {
-    const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
+    const raw = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
+    const targetEmpresaId = (raw && raw !== 'MASTER' && raw !== 'undefined' && raw !== 'null') ? raw : null;
     setIsLoadingDescontos(true);
     try {
       const allDiscountLogs = [];
 
       // 1. Buscar da tabela 'itens_venda' usando select('*') puro (sem joins frágeis)
       try {
-        let qItens = supabase.from('itens_venda').select('*').order('created_at', { ascending: false });
-        if (targetEmpresaId && targetEmpresaId !== 'MASTER') {
+        let qItens = supabase
+          .from('itens_venda')
+          .select('*')
+          .gte('created_at', '2026-09-01T00:00:00')
+          .lte('created_at', '2026-09-30T23:59:59')
+          .order('created_at', { ascending: false });
+        if (targetEmpresaId) {
           qItens = qItens.eq('empresa_id', targetEmpresaId);
         }
         const { data: itensData, error: itensErr } = await qItens;
@@ -2547,8 +2553,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // 2. Buscar da tabela 'auditoria_descontos' usando select('*') puro
       try {
-        let qAudit = supabase.from('auditoria_descontos').select('*').order('created_at', { ascending: false });
-        if (targetEmpresaId && targetEmpresaId !== 'MASTER') {
+        let qAudit = supabase
+          .from('auditoria_descontos')
+          .select('*')
+          .gte('created_at', '2026-09-01T00:00:00')
+          .lte('created_at', '2026-09-30T23:59:59')
+          .order('created_at', { ascending: false });
+        if (targetEmpresaId) {
           qAudit = qAudit.eq('empresa_id', targetEmpresaId);
         }
         const { data: auditData, error: auditErr } = await qAudit;
@@ -2580,13 +2591,34 @@ export default function Dashboard({ session, profileDataProps }) {
         console.warn('[Dashboard] Aviso ao buscar auditoria_descontos:', errAudit);
       }
 
-      // 3. Buscar da tabela 'vendas' usando select('*') puro e comparar com catálogo/preços
+      // 3. Buscar da tabela 'vendas' usando select('*') puro no período e comparar com catálogo/preços
       try {
-        let qVendas = supabase.from('vendas').select('*').order('created_at', { ascending: false });
-        if (targetEmpresaId && targetEmpresaId !== 'MASTER') {
+        let qVendas = supabase
+          .from('vendas')
+          .select('*')
+          .gte('created_at', '2026-09-01T00:00:00')
+          .lte('created_at', '2026-09-30T23:59:59')
+          .order('created_at', { ascending: false });
+        if (targetEmpresaId) {
           qVendas = qVendas.eq('empresa_id', targetEmpresaId);
         }
-        const { data: vendasData, error: vendasErr } = await qVendas;
+        let { data: vendasData, error: vendasErr } = await qVendas;
+
+        // Se filtro com empresa retornar vazio ou der erro, buscar sem empresa como fallback
+        if ((!vendasData || vendasData.length === 0) && targetEmpresaId) {
+          const { data: fallbackVendas } = await supabase
+            .from('vendas')
+            .select('*')
+            .gte('created_at', '2026-09-01T00:00:00')
+            .lte('created_at', '2026-09-30T23:59:59')
+            .order('created_at', { ascending: false });
+          if (fallbackVendas && fallbackVendas.length > 0) {
+            vendasData = fallbackVendas;
+          }
+        }
+
+        console.log('Vendas encontradas:', vendasData || []);
+
         if (!vendasErr && Array.isArray(vendasData) && vendasData.length > 0) {
           vendasData.forEach(v => {
             const qtd = Number(v.quantidade || 1);
@@ -3383,11 +3415,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const fetchSales = async () => {
         try {
-          if (token) {
+          if (token && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
             const { ok, data: resData } = await safeFetchJson(`/api/vendas?empresa_id=${empresaId}`, {
               headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (ok && resData && resData.success && Array.isArray(resData.data)) {
+            if (ok && resData && resData.success && Array.isArray(resData.data) && resData.data.length > 0) {
+              console.log('Vendas encontradas (API):', resData.data);
               return resData.data;
             }
           }
@@ -3422,41 +3455,73 @@ export default function Dashboard({ session, profileDataProps }) {
                 id,
                 nome,
                 tipo,
-                categoria
+                categoria,
+                preco_custo
               )
             `)
+            .gte('created_at', '2026-09-01T00:00:00')
+            .lte('created_at', '2026-09-30T23:59:59')
             .order('created_at', { ascending: false });
 
-          if (empresaId && empresaId !== 'MASTER') {
+          // Eliminar qualquer filtro estrito de empresa_id ou tenant_id que esteja vindo como undefined/null
+          if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
             q = q.eq('empresa_id', empresaId);
           }
 
           const { data: dbSales, error: dbErr } = await q;
 
           if (dbErr) {
-            console.error("[Dashboard] Erro ao buscar descontos do mês (query principal):", dbErr);
+            console.error("[Dashboard] Erro na query principal de vendas:", dbErr);
             throw dbErr;
           }
 
-          console.log("🔥 [RAW DATA - PRIMEIRA VENDA]:", dbSales && dbSales.length > 0 ? dbSales[0] : "NENHUMA VENDA");
+          console.log('Vendas encontradas:', dbSales);
+          if (dbSales && dbSales.length > 0) return dbSales;
 
-          if (dbSales) return dbSales;
-        } catch (err) {
-          console.error("[Dashboard] Erro ao buscar descontos do mês:", err);
-          const { data: simpleSales, error: simpleErr } = await supabase
+          // Se não houver vendas com filtro de empresa ou se retornou vazio, buscar global do mês
+          const { data: globalMonthSales, error: gErr } = await supabase
             .from('vendas')
             .select(`
               *,
+              vendedor:profiles!vendedor_id(id, nome),
+              filial:filiais!filial_id(id, nome),
               clientes (
                 id,
                 nome,
                 cpf_cnpj
               )
             `)
+            .gte('created_at', '2026-09-01T00:00:00')
+            .lte('created_at', '2026-09-30T23:59:59')
             .order('created_at', { ascending: false });
-          if (simpleErr) {
-            console.error("[Dashboard] Erro ao buscar descontos do mês (fallback):", simpleErr);
+
+          if (!gErr && Array.isArray(globalMonthSales)) {
+            console.log('Vendas encontradas (global setembro):', globalMonthSales);
+            return globalMonthSales;
           }
+
+          return dbSales || [];
+        } catch (err) {
+          console.error("[Dashboard] Erro ao buscar vendas no Supabase (tentando busca simples):", err);
+          let simpleQ = supabase
+            .from('vendas')
+            .select('*')
+            .gte('created_at', '2026-09-01T00:00:00')
+            .lte('created_at', '2026-09-30T23:59:59')
+            .order('created_at', { ascending: false });
+
+          if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+            simpleQ = simpleQ.eq('empresa_id', empresaId);
+          }
+
+          const { data: simpleSales, error: simpleErr } = await simpleQ;
+          if (simpleErr) {
+            console.error("[Dashboard] Erro ao buscar vendas simples (fallback final):", simpleErr);
+            const { data: allSales } = await supabase.from('vendas').select('*').order('created_at', { ascending: false }).limit(200);
+            console.log('Vendas encontradas:', allSales || []);
+            return allSales || [];
+          }
+          console.log('Vendas encontradas:', simpleSales);
           return simpleSales || [];
         }
       };
@@ -17897,8 +17962,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
 
-                    {/* AREA CATÁLOGO E TORRE DE CONTROLO (EXCLUSIVO ESTRITAMENTE PARA ADMIN E MASTER) */}
-                    {['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
+                    {/* AREA CATÁLOGO E TORRE DE CONTROLO (EXCLUSIVO ESTRITAMENTE PARA ADMIN E MASTER OPERACIONAL - OCULTO PARA DONO) */}
+                    {['ADMIN', 'MASTER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (profile?.role !== 'DONO') && (
                       <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl overflow-hidden">
                         <div className="flex border-b border-[#222222]">
                           <button
