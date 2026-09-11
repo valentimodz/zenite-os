@@ -13,7 +13,12 @@ export default function ModalDetalheRelatorio({
 }) {
   const [listaFiliais, setListaFiliais] = useState(filiais || []);
   const [filialSelecionada, setFilialSelecionada] = useState('todas');
-  const [filtroMes, setFiltroMes] = useState(() => new Date().toISOString().substring(0, 7)); // YYYY-MM
+  
+  // Padrão inicial: data de hoje YYYY-MM-DD
+  const hojeStr = useMemo(() => new Date().toISOString().substring(0, 10), []);
+  const [dataInicio, setDataInicio] = useState(hojeStr);
+  const [dataFim, setDataFim] = useState(hojeStr);
+
   const [loading, setLoading] = useState(false);
   const [vendas, setVendas] = useState([]);
   const [caixas, setCaixas] = useState([]);
@@ -41,35 +46,54 @@ export default function ModalDetalheRelatorio({
     const carregarDadosFinanceiros = async () => {
       setLoading(true);
       try {
-        // 1. Buscar vendas com filtros
+        // 1. Buscar vendas com filtros no range de datas
         let queryVendas = supabase
           .from('vendas')
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (filtroMes) {
-          const [ano, mes] = filtroMes.split('-');
-          const dataInicio = `${ano}-${mes}-01T00:00:00.000Z`;
-          // Próximo mês
-          const proxAno = parseInt(mes, 10) === 12 ? parseInt(ano, 10) + 1 : parseInt(ano, 10);
-          const proxMes = parseInt(mes, 10) === 12 ? '01' : String(parseInt(mes, 10) + 1).padStart(2, '0');
-          const dataFim = `${proxAno}-${proxMes}-01T00:00:00.000Z`;
-
-          queryVendas = queryVendas.gte('created_at', dataInicio).lt('created_at', dataFim);
+        if (dataInicio) {
+          queryVendas = queryVendas.gte('created_at', `${dataInicio}T00:00:00`);
+        }
+        if (dataFim) {
+          queryVendas = queryVendas.lte('created_at', `${dataFim}T23:59:59`);
         }
 
         if (filialSelecionada && filialSelecionada !== 'todas') {
           queryVendas = queryVendas.eq('filial_id', filialSelecionada);
         }
 
-        const [resVendas, resCaixas, resProfiles] = await Promise.all([
+        // 2. Buscar caixas com filtros no range de datas
+        let queryCaixas = supabase
+          .from('caixas')
+          .select('*')
+          .order('data_abertura', { ascending: false });
+
+        if (dataInicio) {
+          queryCaixas = queryCaixas.gte('created_at', `${dataInicio}T00:00:00`);
+        }
+        if (dataFim) {
+          queryCaixas = queryCaixas.lte('created_at', `${dataFim}T23:59:59`);
+        }
+
+        if (filialSelecionada && filialSelecionada !== 'todas') {
+          queryCaixas = queryCaixas.eq('filial_id', filialSelecionada);
+        }
+
+        const [resVendas, resCaixas, resProfiles, resFiliais] = await Promise.all([
           queryVendas,
-          supabase.from('caixas').select('*').order('data_abertura', { ascending: false }),
-          supabase.from('profiles').select('id, nome')
+          queryCaixas,
+          supabase.from('profiles').select('id, nome'),
+          supabase.from('filiais').select('id, nome')
         ]);
 
         const profilesMap = (resProfiles.data || []).reduce((acc, p) => {
           acc[p.id] = p.nome;
+          return acc;
+        }, {});
+
+        const filiaisMap = (resFiliais.data || []).reduce((acc, f) => {
+          acc[f.id] = f.nome;
           return acc;
         }, {});
 
@@ -80,15 +104,19 @@ export default function ModalDetalheRelatorio({
 
         setVendas(vendasFormatadas);
 
-        // Filtrar caixas pelo mês e filial selecionada
-        const caixasFiltrados = (resCaixas.data || []).filter(cx => {
-          const dt = cx.data_abertura || cx.created_at;
-          const matchMes = !filtroMes || (dt && dt.startsWith(filtroMes));
-          const matchFilial = filialSelecionada === 'todas' || String(cx.filial_id) === String(filialSelecionada);
-          return matchMes && matchFilial;
+        // Mapear sessões de caixa com nomes reais de vendedor e filial
+        const caixasFormatados = (resCaixas.data || []).map(cx => {
+          const filialNome = cx.filial_nome || filiaisMap[cx.filial_id] || 'Loja';
+          const vendedorNome = cx.vendedor_nome || cx.operador_nome || profilesMap[cx.operador_id] || profilesMap[cx.vendedor_id] || 'Vendedor';
+
+          return {
+            ...cx,
+            filial_nome: filialNome,
+            vendedor_nome: vendedorNome
+          };
         });
 
-        setCaixas(caixasFiltrados);
+        setCaixas(caixasFormatados);
       } catch (err) {
         console.error('Erro ao carregar relatório financeiro:', err);
       } finally {
@@ -97,7 +125,7 @@ export default function ModalDetalheRelatorio({
     };
 
     carregarDadosFinanceiros();
-  }, [isOpen, filtroMes, filialSelecionada]);
+  }, [isOpen, dataInicio, dataFim, filialSelecionada]);
 
   // Cálculos consolidados
   const metricas = useMemo(() => {
@@ -207,14 +235,26 @@ export default function ModalDetalheRelatorio({
         {/* Barra de Filtros Rápidos */}
         <div className="p-4 bg-[#0E0E0E] border-b border-[#222222] flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            {/* Filtro Mês */}
+            {/* Filtro Data Inicial */}
             <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
               <Calendar size={14} className="text-[#6A0DAD]" />
-              <span className="text-gray-400 font-semibold">Mês:</span>
+              <span className="text-gray-400 font-semibold">De:</span>
               <input
-                type="month"
-                value={filtroMes}
-                onChange={(e) => setFiltroMes(e.target.value)}
+                type="date"
+                value={dataInicio}
+                onChange={(e) => setDataInicio(e.target.value)}
+                className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
+              />
+            </div>
+
+            {/* Filtro Data Final */}
+            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
+              <Calendar size={14} className="text-[#6A0DAD]" />
+              <span className="text-gray-400 font-semibold">Até:</span>
+              <input
+                type="date"
+                value={dataFim}
+                onChange={(e) => setDataFim(e.target.value)}
                 className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
               />
             </div>
@@ -385,7 +425,7 @@ export default function ModalDetalheRelatorio({
                   <div className="bg-[#111111] border border-[#222222] rounded-xl p-5 space-y-4">
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
                       <Store size={16} className="text-purple-400" />
-                      Sessões de Caixa no Mês ({caixas.length})
+                      Sessões de Caixa no Período ({caixas.length})
                     </h3>
                     <div className="space-y-2">
                       {caixas.length === 0 ? (
@@ -397,7 +437,7 @@ export default function ModalDetalheRelatorio({
                             <div key={cx.id} className="p-3 bg-black/50 border border-[#222222] rounded-lg flex items-center justify-between text-xs">
                               <div>
                                 <span className="font-bold text-white block">
-                                  {cx.filial_nome || 'Filial'} • {cx.operador_nome || 'Operador'}
+                                  {cx.filial_nome || cx.filiais?.nome || 'Loja'} • {cx.vendedor_nome || cx.profiles?.nome || 'Vendedor'}
                                 </span>
                                 <span className="text-[10px] text-gray-500">
                                   {cx.data_abertura ? new Date(cx.data_abertura).toLocaleDateString('pt-BR') : '-'}
