@@ -2196,9 +2196,13 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id, profile?.role, profile?.cargo, activeTab, currentView]);
 
-  // Carregar Estoque Consolidado dinamicamente ao alterar filtros ou filial
+  // Carregar Estoque Consolidado dinamicamente com debounce ao alterar busca, filtros ou filial
   useEffect(() => {
-    fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque);
+    const handler = setTimeout(() => {
+      fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque);
+    }, 300);
+
+    return () => clearTimeout(handler);
   }, [filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque, activeFilialId]);
 
   // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios ou alterar filtros, com Supabase Realtime
@@ -3632,109 +3636,68 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar produtos do Estoque Consolidado isolando por filial ativa do usuário/seletor com Join restrito em IMEIs
+  // Buscar produtos do Estoque Consolidado com consulta otimizada (sem N+1, limit 100, timeout 6s)
   const fetchEstoqueConsolidado = async (filialSelecionadaId, termoBusca = '', categoriaFiltro = '') => {
-    try {
-      // Cleanup imediato para zerar visualmente a lista antes de buscar novos dados
-      setEstoqueConsolidadoLista([]);
+    setLoadingProdutos(true);
+    let timeoutId = null;
 
-      const targetFilialId = (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '')
+    try {
+      const filialFiltro = (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '')
         ? filialSelecionadaId
         : (activeFilialId || profile?.filial_id || '');
 
       let query = supabase
         .from('produtos')
-        .select(`
-          *,
-          imeis!inner(
-            id,
-            imei,
-            cor,
-            status,
-            vendido,
-            filial_id,
-            produto_id
-          )
-        `);
+        .select('id, nome, filial_id, categoria, cor, preco, preco_venda, preco_custo, quantidade, imei, status, codigo_barras')
+        .order('created_at', { ascending: false })
+        .limit(100);
 
-      if (targetFilialId) {
-        query = query
-          .eq('filial_id', targetFilialId)
-          .eq('imeis.filial_id', targetFilialId)
-          .eq('imeis.vendido', false);
-      } else {
-        query = query.eq('imeis.vendido', false);
+      if (filialFiltro && filialFiltro !== 'TODAS' && filialFiltro !== 'todas' && filialFiltro !== 'all') {
+        query = query.eq('filial_id', filialFiltro);
       }
 
-      // Filtra por termo de busca se houver
+      if (categoriaFiltro && categoriaFiltro !== 'TODAS' && categoriaFiltro !== 'todas' && categoriaFiltro !== 'all' && categoriaFiltro !== 'Todas as Categorias (Geral)') {
+        query = query.eq('categoria', categoriaFiltro);
+      }
+
       if (termoBusca && termoBusca.trim() !== '') {
         query = query.ilike('nome', `%${termoBusca.trim()}%`);
       }
 
-      // Filtra por categoria se não for o padrão geral
-      if (categoriaFiltro && categoriaFiltro !== 'Todas as Categorias (Geral)' && categoriaFiltro !== 'todas' && categoriaFiltro !== 'all' && categoriaFiltro !== '') {
-        query = query.eq('categoria', categoriaFiltro);
-      }
+      // Promise com timeout de 6 segundos
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('TIMEOUT_6S'));
+        }, 6000);
+      });
 
-      let { data: produtosComImeis, error } = await query;
+      const { data, error } = await Promise.race([query, timeoutPromise]);
 
-      // Se houver erro no !inner (ex: acessórios que não possuem linhas na tabela imeis), fazemos a consulta secundária de acessórios isolados por filial
       if (error) {
-        let fallbackQuery = supabase.from('produtos').select('*');
-
-        if (termoBusca && termoBusca.trim() !== '') {
-          fallbackQuery = fallbackQuery.ilike('nome', `%${termoBusca.trim()}%`);
-        }
-        if (categoriaFiltro && categoriaFiltro !== 'Todas as Categorias (Geral)' && categoriaFiltro !== 'todas' && categoriaFiltro !== 'all' && categoriaFiltro !== '') {
-          fallbackQuery = fallbackQuery.eq('categoria', categoriaFiltro);
-        }
-        const { data: prodsFallback } = await fallbackQuery;
-
-        // Para os produtos de celular, buscamos os imeis estritamente filtrados pela filial
-        let imeisQuery = supabase
-          .from('imeis')
-          .select('id, imei, cor, status, vendido, filial_id, produto_id')
-          .eq('vendido', false);
-
-        if (targetFilialId) {
-          imeisQuery = imeisQuery.eq('filial_id', targetFilialId);
-        }
-
-        const { data: imeisLoja } = await imeisQuery;
-
-        const imeisMapByProd = {};
-        (imeisLoja || []).forEach(im => {
-          if (!imeisMapByProd[im.produto_id]) imeisMapByProd[im.produto_id] = [];
-          imeisMapByProd[im.produto_id].push(im);
-        });
-
-        const listaConsolidada = (prodsFallback || []).map(p => {
-          const imeisDoProduto = (imeisMapByProd[p.id] || []).filter(im => !targetFilialId || String(im.filial_id) === String(targetFilialId));
-          const isCelular = p.tipo === 'CELULAR';
-          return {
-            ...p,
-            imeis_db: imeisDoProduto,
-            imeis_count: isCelular ? imeisDoProduto.length : Number(p.quantidade || 0)
-          };
-        });
-
-        setEstoqueConsolidadoLista(listaConsolidada);
+        console.error("Erro na consulta do estoque consolidado:", error);
+        toast.error("Erro ao carregar estoque: " + (error.message || 'Falha na consulta'));
         return;
       }
 
-      const listaConsolidada = (produtosComImeis || []).map(p => {
-        const imeisFiltrados = (p.imeis || []).filter(im => !targetFilialId || String(im.filial_id) === String(targetFilialId));
-        const isCelular = p.tipo === 'CELULAR';
-        return {
-          ...p,
-          imeis_db: imeisFiltrados,
-          imeis_count: isCelular ? imeisFiltrados.length : Number(p.quantidade || 0)
-        };
-      });
+      // Converte os produtos retornados garantindo a estrutura correta para exibição
+      const prodsFormatados = (data || []).map(p => ({
+        ...p,
+        imeis_db: p.imei ? [{ imei: p.imei, status: p.status || 'DISPONIVEL' }] : [],
+        imeis_count: Number(p.quantidade || 0)
+      }));
 
-      setEstoqueConsolidadoLista(listaConsolidada);
+      setEstoqueConsolidadoLista(prodsFormatados);
     } catch (err) {
-      console.error("Erro ao executar fetchEstoqueConsolidado:", err);
+      if (err?.message === 'TIMEOUT_6S') {
+        console.warn("Timeout de 6 segundos atingido ao carregar estoque consolidado.");
+        toast.error("A consulta do estoque demorou muito e foi interrompida. Tente refinar os filtros.");
+      } else {
+        console.error("Erro fatal ao executar fetchEstoqueConsolidado:", err);
+      }
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      setLoadingProdutos(false);
+      setLoadingDados(false);
     }
   };
 
@@ -19826,11 +19789,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                 <input
                                   type="text"
                                   value={buscaEstoque}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setBuscaEstoque(val);
-                                    fetchEstoqueConsolidado(filtroFilialEstoque, val, filtroCategoriaEstoque);
-                                  }}
+                                  onChange={(e) => setBuscaEstoque(e.target.value)}
                                   placeholder="Nome, SKU, IMEI, EAN, Cor..."
                                   className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-8 pr-4 py-2 text-xs outline-none transition-all"
                                 />
@@ -19845,11 +19804,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               </button>
                               <select
                                 value={filtroFilialEstoque}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setFiltroFilialEstoque(val);
-                                  fetchEstoqueConsolidado(val, buscaEstoque, filtroCategoriaEstoque);
-                                }}
+                                onChange={(e) => setFiltroFilialEstoque(e.target.value)}
                                 className="bg-black border border-[#222222] rounded-md text-white px-3 py-2 text-xs outline-none focus:border-[#6A0DAD] min-w-[120px]"
                               >
                                 <option value="">Todas as Filiais</option>
@@ -19859,11 +19814,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               </select>
                               <select
                                 value={filtroCategoriaEstoque}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setFiltroCategoriaEstoque(val);
-                                  fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, val);
-                                }}
+                                onChange={(e) => setFiltroCategoriaEstoque(e.target.value)}
                                 className="bg-black border border-[#222222] rounded-md text-white px-3 py-2 text-xs outline-none focus:border-[#6A0DAD] min-w-[120px]"
                               >
                                 <option value="">Todas as Categorias</option>
@@ -19888,7 +19839,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               ? estoqueConsolidadoLista
                               : filteredProdutosEstoque;
 
-                            if (loadingDados) {
+                            if (loadingProdutos || loadingDados) {
                               return (
                                 <div className="flex flex-col items-center justify-center py-16 gap-3">
                                   <div className="w-7 h-7 border-3 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
