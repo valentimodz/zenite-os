@@ -583,7 +583,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [loading, setLoading] = useState(profileDataProps ? false : true);
   const [error, setError] = useState('');
 
-  const [toast, setToast] = useState(null); // { message: '', type: 'success' | 'error' | 'info' }
+  const [toast, setToast] = useState(null); // { message: '', type: 'success' | 'error' | 'warning' | 'info' }
 
   const showToast = (message, type = 'success') => {
     if (type === 'error') {
@@ -595,6 +595,14 @@ export default function Dashboard({ session, profileDataProps }) {
       setToast(prev => (prev && prev.message === message ? null : prev));
     }, 4000);
   };
+
+  // Helper de toast com métodos semânticos
+  const toastHelper = useMemo(() => ({
+    success: (msg) => showToast(msg, 'success'),
+    error: (msg) => showToast(msg, 'error'),
+    warning: (msg) => showToast(msg, 'warning'),
+    info: (msg) => showToast(msg, 'info')
+  }), []);
 
   // Override window.alert to show our custom Toast instead
   useEffect(() => {
@@ -852,6 +860,11 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isSavingAuditStatus, setIsSavingAuditStatus] = useState(false);
   const [pdvFinanceiraParceira, setPdvFinanceiraParceira] = useState('PayJoy');
   const [pdvFinanceiraCustomInput, setPdvFinanceiraCustomInput] = useState('');
+
+  // Modal para Vincular Cliente a Venda (Auditoria de Vendas & Crédito)
+  const [vendaParaVincularCliente, setVendaParaVincularCliente] = useState(null);
+  const [buscaVincularClienteInput, setBuscaVincularClienteInput] = useState('');
+  const [isSalvandoVinculoCliente, setIsSalvandoVinculoCliente] = useState(false);
 
   // Estados para Navegação via Sidebar Retrátil
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -10876,6 +10889,55 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
+    // 1.1 Regra de Negócio: Validação de Cliente Obrigatório para Boleto/Crediário/Financeiras
+    const metodosParaVerificar = [
+      pdvMetodoPagamento,
+      pdvNovoMetodo,
+      ...(pdvListaPagamentos || []).map(p => p.metodo),
+      ...(pdvListaPagamentos || []).map(p => p.label),
+      pdvFinanceiraParceira,
+      pdvNovoFinanceira
+    ].map(m => String(m || '').trim().toUpperCase());
+
+    const isBoletoCrediarioOuFinanceira = metodosParaVerificar.some(m =>
+      m.includes('BOLETO') ||
+      m.includes('CREDIARIO') ||
+      m.includes('CREDIÁRIO') ||
+      m.includes('CARNE') ||
+      m.includes('CARNÊ') ||
+      m.includes('PAYJOY') ||
+      m.includes('WATU') ||
+      m.includes('UMA') ||
+      m.includes('PARCELAMENTO PRÓPRIO') ||
+      m.includes('PARCELAMENTO PROPRIO') ||
+      m.includes('FINANCIAMENTO')
+    );
+
+    if (isBoletoCrediarioOuFinanceira) {
+      const nomeClienteRaw = (pdvClienteNome || pdvClienteSearchInput || '').trim();
+      const cpfClienteRaw = (pdvClienteCpfCnpj || '').replace(/\D/g, '');
+      const isConsumidorFinal = !nomeClienteRaw || nomeClienteRaw.toLowerCase() === 'consumidor final';
+      const temClienteIdentificado = (selectedPdvClienteId !== null && selectedPdvClienteId !== undefined && String(selectedPdvClienteId).trim() !== '') || (!isConsumidorFinal && nomeClienteRaw.length >= 2);
+      const temCpfValido = cpfClienteRaw.length === 11 || cpfClienteRaw.length === 14;
+
+      if (!temClienteIdentificado || isConsumidorFinal || !temCpfValido) {
+        const msgAviso = "Identificação obrigatória: Vendas no Boleto/Crediário exigem cadastro completo do cliente (Nome e CPF).";
+        toastHelper.warning(msgAviso);
+        // Focar no input de cliente ou abrir o dropdown para agilizar a identificação
+        setTimeout(() => {
+          const nomeInput = document.getElementById('pdv-cliente-busca-input');
+          const cpfInput = document.getElementById('pdv-cliente-cpf-input');
+          if (isConsumidorFinal || !temClienteIdentificado) {
+            nomeInput?.focus();
+            setIsPdvClienteDropdownOpen(true);
+          } else if (!temCpfValido) {
+            cpfInput?.focus();
+          }
+        }, 100);
+        return;
+      }
+    }
+
     if (!pdvClienteNome.trim() || !pdvClienteCpfCnpj.trim() || !pdvClienteTelefone.trim() || !pdvClienteDataNascimento.trim() || !pdvClienteEmail.trim()) {
       const msg = 'Todos os campos do cliente são obrigatórios (Nome, CPF/CNPJ, Telefone, Data de Nascimento e E-mail).';
       showToast(msg, 'error');
@@ -14941,6 +15003,64 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // Vinculação de Cliente a uma Venda existente na Auditoria de Crédito
+  const handleConfirmarVinculoClienteVenda = async (clienteSelecionado) => {
+    if (!vendaParaVincularCliente || !clienteSelecionado) return;
+
+    setIsSalvandoVinculoCliente(true);
+    try {
+      const vendaId = vendaParaVincularCliente.id;
+      const novoClienteId = clienteSelecionado.id;
+      const novoClienteNome = clienteSelecionado.nome || 'Cliente';
+      const novoClienteCpf = clienteSelecionado.cpf_cnpj || null;
+      const novoClienteTelefone = clienteSelecionado.telefone || null;
+      const novoClienteEmail = clienteSelecionado.email || null;
+
+      const { error: updateErr } = await supabase
+        .from('vendas')
+        .update({
+          cliente_id: novoClienteId,
+          cliente_nome: novoClienteNome,
+          cliente_cpf_cnpj: novoClienteCpf,
+          cliente_telefone: novoClienteTelefone,
+          cliente_email: novoClienteEmail
+        })
+        .eq('id', vendaId);
+
+      if (updateErr) throw updateErr;
+
+      // Atualiza o estado local 'vendas' para refletir a alteração imediatamente
+      setVendas(prev => prev.map(v => {
+        if (v.id === vendaId) {
+          return {
+            ...v,
+            cliente_id: novoClienteId,
+            cliente_nome: novoClienteNome,
+            cliente_cpf_cnpj: novoClienteCpf,
+            cliente_telefone: novoClienteTelefone,
+            cliente_email: novoClienteEmail,
+            clientes: {
+              id: novoClienteId,
+              nome: novoClienteNome,
+              cpf_cnpj: novoClienteCpf,
+              status_credito: clienteSelecionado.status_credito || 'EM DIA'
+            }
+          };
+        }
+        return v;
+      }));
+
+      showToast(`Cliente "${novoClienteNome}" vinculado à venda com sucesso!`, 'success');
+      setVendaParaVincularCliente(null);
+      setBuscaVincularClienteInput('');
+    } catch (err) {
+      console.error('Erro ao vincular cliente à venda:', err);
+      showToast('Erro ao vincular cliente: ' + (err.message || 'Falha na atualização'), 'error');
+    } finally {
+      setIsSalvandoVinculoCliente(false);
+    }
+  };
+
   // Componente da Tela: Auditoria de Vendas & Crédito
   const renderAuditoriaCredito = () => {
     const isGerenteOrAdmin = ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role);
@@ -15183,10 +15303,29 @@ export default function Dashboard({ session, profileDataProps }) {
 
                         {/* Cliente */}
                         <td className="p-4">
-                          <div className="flex flex-col">
-                            <span className="font-bold text-white text-xs">
-                              {clienteNomeResolved || 'Cliente não identificado'}
-                            </span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-white text-xs">
+                                {clienteNomeResolved || 'Cliente não identificado'}
+                              </span>
+
+                              {/* Se o cliente for nulo ou 'Consumidor Final', exibir botão [ Vincular Cliente ] */}
+                              {(isGerenteOrAdmin || true) && (!venda.cliente_id || clienteNomeResolved === 'Consumidor Final' || !clienteJoined?.id) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setVendaParaVincularCliente(venda);
+                                    setBuscaVincularClienteInput('');
+                                  }}
+                                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#6A0DAD] hover:bg-[#8318cd] text-white transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                                  title="Pesquisar e vincular um cliente cadastrado a esta venda"
+                                >
+                                  <UserPlus size={11} />
+                                  <span>Vincular Cliente</span>
+                                </button>
+                              )}
+                            </div>
+
                             <span className="text-[11px] font-mono text-gray-400">
                               CPF/CNPJ: {clienteCpfResolved || '-'}
                             </span>
@@ -15576,6 +15715,139 @@ export default function Dashboard({ session, profileDataProps }) {
                     </button>
                   </div>
                 </form>
+              </div>
+            </div>
+          )
+        }
+        {/* MODAL DE VINCULAR CLIENTE A UMA VENDA EXISTENTE */}
+        {
+          vendaParaVincularCliente && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+              <div className="bg-[#0A0A0A] border border-[#6A0DAD]/50 rounded-2xl p-6 w-full max-w-lg space-y-5 shadow-2xl">
+                <div className="flex justify-between items-start border-b border-[#222222] pb-4">
+                  <div>
+                    <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                      <UserPlus size={20} className="text-[#6A0DAD]" />
+                      Vincular Cliente à Venda
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Associe um cliente cadastrado à venda <strong className="text-white">#{String(vendaParaVincularCliente.id).substring(0, 8)}</strong>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVendaParaVincularCliente(null);
+                      setBuscaVincularClienteInput('');
+                    }}
+                    className="text-gray-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Resumo da Venda */}
+                <div className="bg-black/60 border border-[#222222] p-3 rounded-xl space-y-1 text-xs font-mono">
+                  <div className="flex justify-between text-gray-400">
+                    <span>Produto:</span>
+                    <span className="text-gray-200 font-bold">{vendaParaVincularCliente.produtos?.nome || vendaParaVincularCliente.produto_nome || 'Produto Geral'}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-400">
+                    <span>Valor Total:</span>
+                    <span className="text-emerald-400 font-bold">R$ {parseFloat(vendaParaVincularCliente.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-400">
+                    <span>Data da Venda:</span>
+                    <span className="text-gray-300">{vendaParaVincularCliente.created_at ? new Date(vendaParaVincularCliente.created_at).toLocaleString('pt-BR') : '-'}</span>
+                  </div>
+                </div>
+
+                {/* Campo de Busca de Clientes */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider">
+                    Pesquisar Cliente Cadastrado (Nome, CPF ou Telefone):
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={buscaVincularClienteInput}
+                      onChange={(e) => setBuscaVincularClienteInput(e.target.value)}
+                      placeholder="Digite o nome, CPF ou telefone do cliente..."
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg pl-9 pr-4 py-2.5 text-xs text-white outline-none font-sans"
+                    />
+                    <Search size={15} className="absolute left-3 top-3 text-gray-500" />
+                  </div>
+                </div>
+
+                {/* Lista de Resultados de Clientes */}
+                <div className="border border-[#222222] rounded-xl max-h-64 overflow-y-auto divide-y divide-[#1A1A1A] bg-black/40">
+                  {(() => {
+                    const q = buscaVincularClienteInput.toLowerCase().trim();
+                    const resultados = clientes.filter(c => {
+                      if (!q) return true;
+                      const nome = String(c.nome || '').toLowerCase();
+                      const cpf = String(c.cpf_cnpj || '').replace(/\D/g, '');
+                      const tel = String(c.telefone || '').replace(/\D/g, '');
+                      const qClean = q.replace(/\D/g, '');
+                      return nome.includes(q) || (qClean && cpf.includes(qClean)) || (qClean && tel.includes(qClean));
+                    }).slice(0, 15);
+
+                    if (resultados.length === 0) {
+                      return (
+                        <div className="p-6 text-center text-gray-500 text-xs">
+                          Nenhum cliente encontrado com o termo "{buscaVincularClienteInput}".
+                        </div>
+                      );
+                    }
+
+                    return resultados.map((c) => (
+                      <div
+                        key={c.id}
+                        className="p-3 hover:bg-white/5 flex items-center justify-between transition-colors gap-3"
+                      >
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-bold text-white text-xs truncate">{c.nome}</span>
+                          <span className="text-[10px] text-gray-400 font-mono">
+                            CPF: {c.cpf_cnpj || 'Não informado'} | Tel: {c.telefone || 'Não informado'}
+                          </span>
+                          {c.status_credito && (
+                            <span className="text-[9px] mt-0.5 w-fit">
+                              {getStatusBadge(c.status_credito)}
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={isSalvandoVinculoCliente}
+                          onClick={() => handleConfirmarVinculoClienteVenda(c)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#6A0DAD] hover:bg-[#8318cd] text-white disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer shrink-0 shadow-md"
+                        >
+                          {isSalvandoVinculoCliente ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <Check size={13} />
+                          )}
+                          <span>Selecionar e Vincular</span>
+                        </button>
+                      </div>
+                    ));
+                  })()}
+                </div>
+
+                <div className="flex justify-end pt-2 border-t border-[#222222]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVendaParaVincularCliente(null);
+                      setBuscaVincularClienteInput('');
+                    }}
+                    className="bg-[#111111] hover:bg-[#1A1A1A] text-gray-300 border border-[#333333] font-bold py-2 px-4 rounded-xl text-xs transition-all cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
               </div>
             </div>
           )
@@ -25745,12 +26017,16 @@ export default function Dashboard({ session, profileDataProps }) {
           <div className="fixed top-4 right-4 z-50 animate-fadeIn print:hidden">
             <div className={`flex items-center gap-3 px-4 py-3 rounded-lg border text-sm shadow-xl backdrop-blur-md transition-all duration-300 max-w-sm ${toast.type === 'success'
               ? 'bg-black/95 border-green-800 text-green-400 shadow-green-950/20'
-              : toast.type === 'error'
-                ? 'bg-black/95 border-red-800 text-red-400 shadow-red-950/20'
-                : 'bg-black/95 border-[#6A0DAD] text-purple-350 shadow-purple-950/20'
+              : toast.type === 'warning'
+                ? 'bg-black/95 border-amber-600 text-amber-300 shadow-amber-950/30'
+                : toast.type === 'error'
+                  ? 'bg-black/95 border-red-800 text-red-400 shadow-red-950/20'
+                  : 'bg-black/95 border-[#6A0DAD] text-purple-350 shadow-purple-950/20'
               }`}>
               {toast.type === 'success' ? (
                 <CheckCircle2 size={18} className="shrink-0 text-green-500" />
+              ) : toast.type === 'warning' ? (
+                <AlertTriangle size={18} className="shrink-0 text-amber-400" />
               ) : toast.type === 'error' ? (
                 <AlertCircle size={18} className="shrink-0 text-red-500" />
               ) : (
