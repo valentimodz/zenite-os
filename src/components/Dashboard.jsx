@@ -3557,39 +3557,64 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       };
 
-      const [prodsRes, salesData, fechRes, imeisRes, allImeisRes] = await Promise.all([
-        supabase.from('produtos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }).catch(err => {
-          console.warn('[Dashboard] Falha na query de produtos:', err);
-          return { data: [], error: null };
-        }),
-        fetchSales().catch(err => {
-          console.warn('[Dashboard] Falha na query de vendas:', err);
-          return [];
-        }),
-        supabase.from('fechamentos').select('*, profiles!vendedor_id(*), filiais(*)').eq('empresa_id', empresaId).order('created_at', { ascending: false }).catch(err => {
-          console.warn('[Dashboard] Falha na query de fechamentos:', err);
-          return { data: [], error: null };
-        }),
-        supabase.from('imeis')
+      // Consultas estruturadas com try/catch padrão (sem .catch encadeado no Supabase builder)
+      let prodsRes = { data: [], error: null };
+      try {
+        const res = await supabase
+          .from('produtos')
+          .select('*')
+          .eq('empresa_id', empresaId)
+          .order('created_at', { ascending: false });
+        prodsRes = res || { data: [], error: null };
+      } catch (err) {
+        console.warn('[Dashboard] Falha na query de produtos:', err);
+      }
+
+      let salesData = [];
+      try {
+        salesData = await fetchSales();
+      } catch (err) {
+        console.warn('[Dashboard] Falha na query de vendas:', err);
+      }
+
+      let fechRes = { data: [], error: null };
+      try {
+        const res = await supabase
+          .from('fechamentos')
+          .select('*, profiles!vendedor_id(*), filiais(*)')
+          .eq('empresa_id', empresaId)
+          .order('created_at', { ascending: false });
+        fechRes = res || { data: [], error: null };
+      } catch (err) {
+        console.warn('[Dashboard] Falha na query de fechamentos:', err);
+      }
+
+      let imeisRes = { data: [], error: null };
+      try {
+        const res = await supabase
+          .from('imeis')
           .select('id, imei, cor, status, created_at, filial_id, produto_id, produtos(nome)')
           .eq('empresa_id', empresaId)
           .order('created_at', { ascending: false })
-          .limit(10)
-          .catch(err => {
-            console.warn('[Dashboard] Falha na query de ultimos imeis:', err);
-            return { data: [], error: null };
-          }),
-        supabase.from('imeis')
+          .limit(10);
+        imeisRes = res || { data: [], error: null };
+      } catch (err) {
+        console.warn('[Dashboard] Falha na query de ultimos imeis:', err);
+      }
+
+      let allImeisRes = { data: [], error: null };
+      try {
+        const res = await supabase
+          .from('imeis')
           .select('id, produto_id, filial_id, status, vendido, imei, created_at, produtos(nome)')
           .eq('empresa_id', empresaId)
           .eq('vendido', false)
           .order('created_at', { ascending: false })
-          .limit(5000)
-          .catch(err => {
-            console.warn('[Dashboard] Falha na query de imeis disponiveis:', err);
-            return { data: [], error: null };
-          })
-      ]);
+          .limit(5000);
+        allImeisRes = res || { data: [], error: null };
+      } catch (err) {
+        console.warn('[Dashboard] Falha na query de imeis disponiveis:', err);
+      }
 
       const baseProdutos = (prodsRes && !prodsRes.error && Array.isArray(prodsRes.data)) ? prodsRes.data : [];
       const baseImeis = (allImeisRes && !allImeisRes.error && Array.isArray(allImeisRes.data)) ? allImeisRes.data : [];
@@ -14938,18 +14963,48 @@ export default function Dashboard({ session, profileDataProps }) {
         || (typeof clienteCorrespondente.cpf_cnpj === 'string' && clienteCorrespondente.cpf_cnpj)
         || 'Não Informado';
 
+      const mpRaw = String(sale.metodo_pagamento || sale.forma_pagamento || '').toLowerCase();
+      const finRaw = String(sale.financeira_parceira || sale.financeira || '').trim();
+
+      // Identificar financeira associada (PayJoy, Watu, Uma, Boleto Próprio, etc.)
+      let resolvedFin = finRaw;
+      if (!resolvedFin || resolvedFin.toLowerCase() === 'pdv' || resolvedFin.toLowerCase() === 'n/a') {
+        if (mpRaw.includes('payjoy')) resolvedFin = 'PayJoy';
+        else if (mpRaw.includes('watu')) resolvedFin = 'Watu';
+        else if (mpRaw.includes('uma')) resolvedFin = 'Uma';
+        else if (mpRaw.includes('boleto') || mpRaw.includes('carne') || mpRaw.includes('crediario')) resolvedFin = 'Boleto';
+        else if (mpRaw.includes('cartao') || mpRaw.includes('credito')) resolvedFin = 'Cartao';
+        else if (mpRaw.includes('pix') || mpRaw.includes('dinheiro')) resolvedFin = 'Pix';
+        else resolvedFin = sale.metodo_pagamento ? sale.metodo_pagamento.toUpperCase() : 'Boleto';
+      }
+
+      // Flag para identificar se a venda envolve crédito / crediário / boleto / financeiras
+      const isVendaCreditoOuFinanceira = Boolean(
+        finRaw ||
+        ['boleto', 'carne', 'payjoy', 'watu', 'uma', 'financiamento', 'credsystem', 'crediario', 'crediário'].some(k => mpRaw.includes(k)) ||
+        sale.is_credito ||
+        sale.plano_meses ||
+        sale.valor_parcela
+      );
+
       return {
         ...sale,
         cliente_nome: nomeClienteFinal,
         cliente_cpf_cnpj: cpfClienteFinal,
         status_credito: statusCredito,
         cliente_id_real: sale.cliente_id || clienteCorrespondente.id || null,
-        financeira: sale.financeira_parceira || (sale.metodo_pagamento === 'boleto' ? 'PayJoy' : sale.metodo_pagamento ? sale.metodo_pagamento.toUpperCase() : 'N/A')
+        financeira: resolvedFin,
+        is_credito_ou_financeira: isVendaCreditoOuFinanceira
       };
     });
 
+    // Vendas base da auditoria: prioriza vendas que envolvem crédito/crediário/financeiras (fallback para todas se base for pequena)
+    const baseAuditVendas = vendasAuditadas.some(s => s.is_credito_ou_financeira)
+      ? vendasAuditadas.filter(s => s.is_credito_ou_financeira)
+      : vendasAuditadas;
+
     // Aplicar Filtros (Busca por Nome/CPF/IMEI, Status de Crédito, Parceiro Financeiro)
-    const filteredVendas = vendasAuditadas.filter(sale => {
+    const filteredVendas = baseAuditVendas.filter(sale => {
       const q = buscaAuditoriaCredito.toLowerCase().trim();
       const matchSearch = !q ||
         (sale.cliente_nome && sale.cliente_nome.toLowerCase().includes(q)) ||
@@ -14958,10 +15013,17 @@ export default function Dashboard({ session, profileDataProps }) {
         (sale.produtos?.nome && sale.produtos.nome.toLowerCase().includes(q)) ||
         (sale.financeira && sale.financeira.toLowerCase().includes(q));
 
-      const matchStatus = filtroStatusCredito === 'TODOS' || sale.status_credito === filtroStatusCredito;
+      // Filtro de status: só aplica se não for 'TODOS', 'TODAS' ou 'Todos os Status'
+      const statusFiltroUpper = String(filtroStatusCredito || '').trim().toUpperCase();
+      const isTodosStatus = !statusFiltroUpper || statusFiltroUpper === 'TODOS' || statusFiltroUpper === 'TODAS' || statusFiltroUpper === 'TODOS OS STATUS';
+      const matchStatus = isTodosStatus || String(sale.status_credito || '').toUpperCase() === statusFiltroUpper;
 
-      const matchFin = filtroFinanceira === 'TODOS' ||
-        (sale.financeira || '').toLowerCase().includes(filtroFinanceira.toLowerCase());
+      // Filtro de financeira: só aplica se não for 'TODOS', 'TODAS' ou 'Todas as Financeiras'
+      const finFiltroUpper = String(filtroFinanceira || '').trim().toUpperCase();
+      const isTodasFinanceiras = !finFiltroUpper || finFiltroUpper === 'TODOS' || finFiltroUpper === 'TODAS' || finFiltroUpper === 'TODAS AS FINANCEIRAS';
+      const matchFin = isTodasFinanceiras ||
+        String(sale.financeira || '').toUpperCase().includes(finFiltroUpper) ||
+        String(sale.metodo_pagamento || '').toUpperCase().includes(finFiltroUpper);
 
       return matchSearch && matchStatus && matchFin;
     });
