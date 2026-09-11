@@ -1,0 +1,555 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  X, BarChart3, Calendar, Building2, DollarSign, TrendingUp, 
+  ArrowUpRight, ArrowDownRight, CreditCard, Layers, Store, 
+  User, PieChart, RefreshCw, Printer, Download, Filter, Eye
+} from 'lucide-react';
+import { supabase } from '../supabaseClient';
+
+export default function ModalDetalheRelatorio({
+  isOpen,
+  onClose,
+  filiais = []
+}) {
+  const [listaFiliais, setListaFiliais] = useState(filiais || []);
+  const [filialSelecionada, setFilialSelecionada] = useState('todas');
+  const [filtroMes, setFiltroMes] = useState(() => new Date().toISOString().substring(0, 7)); // YYYY-MM
+  const [loading, setLoading] = useState(false);
+  const [vendas, setVendas] = useState([]);
+  const [caixas, setCaixas] = useState([]);
+  const [tabAtiva, setTabAtiva] = useState('visao_geral'); // 'visao_geral' | 'metodos' | 'filiais' | 'vendedores'
+
+  // Sincronizar filiais caso receba novas props ou buscar do Supabase
+  useEffect(() => {
+    if (Array.isArray(filiais) && filiais.length > 0) {
+      setListaFiliais(filiais);
+    } else if (isOpen) {
+      supabase
+        .from('filiais')
+        .select('id, nome')
+        .order('nome', { ascending: true })
+        .then(({ data }) => {
+          if (data) setListaFiliais(data);
+        });
+    }
+  }, [filiais, isOpen]);
+
+  // Carregar dados financeiros consolidados quando abrir ou mudar filtros
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const carregarDadosFinanceiros = async () => {
+      setLoading(true);
+      try {
+        // 1. Buscar vendas com filtros
+        let queryVendas = supabase
+          .from('vendas')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (filtroMes) {
+          const [ano, mes] = filtroMes.split('-');
+          const dataInicio = `${ano}-${mes}-01T00:00:00.000Z`;
+          // Próximo mês
+          const proxAno = parseInt(mes, 10) === 12 ? parseInt(ano, 10) + 1 : parseInt(ano, 10);
+          const proxMes = parseInt(mes, 10) === 12 ? '01' : String(parseInt(mes, 10) + 1).padStart(2, '0');
+          const dataFim = `${proxAno}-${proxMes}-01T00:00:00.000Z`;
+
+          queryVendas = queryVendas.gte('created_at', dataInicio).lt('created_at', dataFim);
+        }
+
+        if (filialSelecionada && filialSelecionada !== 'todas') {
+          queryVendas = queryVendas.eq('filial_id', filialSelecionada);
+        }
+
+        const [resVendas, resCaixas, resProfiles] = await Promise.all([
+          queryVendas,
+          supabase.from('caixas').select('*').order('data_abertura', { ascending: false }),
+          supabase.from('profiles').select('id, nome')
+        ]);
+
+        const profilesMap = (resProfiles.data || []).reduce((acc, p) => {
+          acc[p.id] = p.nome;
+          return acc;
+        }, {});
+
+        const vendasFormatadas = (resVendas.data || []).map(v => ({
+          ...v,
+          vendedor_nome: v.vendedor_nome || profilesMap[v.vendedor_id] || 'Vendedor'
+        }));
+
+        setVendas(vendasFormatadas);
+
+        // Filtrar caixas pelo mês e filial selecionada
+        const caixasFiltrados = (resCaixas.data || []).filter(cx => {
+          const dt = cx.data_abertura || cx.created_at;
+          const matchMes = !filtroMes || (dt && dt.startsWith(filtroMes));
+          const matchFilial = filialSelecionada === 'todas' || String(cx.filial_id) === String(filialSelecionada);
+          return matchMes && matchFilial;
+        });
+
+        setCaixas(caixasFiltrados);
+      } catch (err) {
+        console.error('Erro ao carregar relatório financeiro:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    carregarDadosFinanceiros();
+  }, [isOpen, filtroMes, filialSelecionada]);
+
+  // Cálculos consolidados
+  const metricas = useMemo(() => {
+    let faturamentoTotal = 0;
+    let totalCusto = 0;
+    let totalComissoes = 0;
+    let qtdItens = 0;
+
+    const porMetodo = {};
+    const porFilial = {};
+    const porVendedor = {};
+
+    vendas.forEach(v => {
+      const valor = Number(v.valor_total || v.valor || v.valor_pago || 0);
+      const custo = Number(v.preco_custo || 0) * Number(v.quantidade || 1);
+      const comissao = Number(v.comissao || 0);
+      const qtd = Number(v.quantidade || 1);
+
+      faturamentoTotal += valor;
+      totalCusto += custo;
+      totalComissoes += comissao;
+      qtdItens += qtd;
+
+      // Por método
+      const metodo = (v.metodo_pagamento || v.forma_pagamento || 'OUTROS').toUpperCase();
+      if (!porMetodo[metodo]) porMetodo[metodo] = { valor: 0, count: 0 };
+      porMetodo[metodo].valor += valor;
+      porMetodo[metodo].count += 1;
+
+      // Por filial
+      const filialNome = listaFiliais.find(f => String(f.id) === String(v.filial_id))?.nome || v.filial_nome || 'Matriz';
+      if (!porFilial[filialNome]) porFilial[filialNome] = { valor: 0, count: 0 };
+      porFilial[filialNome].valor += valor;
+      porFilial[filialNome].count += 1;
+
+      // Por vendedor
+      const vendedor = v.vendedor_nome || 'Vendedor Padrão';
+      if (!porVendedor[vendedor]) porVendedor[vendedor] = { valor: 0, count: 0, comissao: 0 };
+      porVendedor[vendedor].valor += valor;
+      porVendedor[vendedor].count += 1;
+      porVendedor[vendedor].comissao += comissao;
+    });
+
+    const lucroBrutoEstimado = faturamentoTotal - totalCusto;
+    const margemBruta = faturamentoTotal > 0 ? (lucroBrutoEstimado / faturamentoTotal) * 100 : 0;
+    const ticketMedio = vendas.length > 0 ? faturamentoTotal / vendas.length : 0;
+
+    return {
+      faturamentoTotal,
+      totalCusto,
+      totalComissoes,
+      lucroBrutoEstimado,
+      margemBruta,
+      ticketMedio,
+      qtdVendas: vendas.length,
+      qtdItens,
+      porMetodo,
+      porFilial,
+      porVendedor
+    };
+  }, [vendas, listaFiliais]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6 animate-fadeIn">
+      <div className="bg-[#0A0A0A] border border-[#222222] rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl shadow-purple-950/20 overflow-hidden">
+        
+        {/* Cabeçalho do Modal */}
+        <div className="p-5 border-b border-[#222222] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#111111]">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0 shadow-inner">
+              <BarChart3 size={22} />
+            </div>
+            <div>
+              <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
+                Detalhamento do Relatório Financeiro
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-purple-950 text-purple-300 border border-purple-800">
+                  Consolidado
+                </span>
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Métricas detalhadas de faturamento, canais de pagamento, lucro e desempenho por filial.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="p-2 text-gray-400 hover:text-white hover:bg-[#222222] rounded-lg transition-colors cursor-pointer"
+              title="Imprimir Relatório"
+            >
+              <Printer size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-white hover:bg-[#222222] rounded-lg transition-colors cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Barra de Filtros Rápidos */}
+        <div className="p-4 bg-[#0E0E0E] border-b border-[#222222] flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Filtro Mês */}
+            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
+              <Calendar size={14} className="text-[#6A0DAD]" />
+              <span className="text-gray-400 font-semibold">Mês:</span>
+              <input
+                type="month"
+                value={filtroMes}
+                onChange={(e) => setFiltroMes(e.target.value)}
+                className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
+              />
+            </div>
+
+            {/* Filtro Filial */}
+            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
+              <Building2 size={14} className="text-[#6A0DAD]" />
+              <span className="text-gray-400 font-semibold">Filial:</span>
+              <select
+                value={filialSelecionada}
+                onChange={(e) => setFilialSelecionada(e.target.value)}
+                className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="todas">🏢 Todas as Filiais</option>
+                {listaFiliais.map(f => (
+                  <option key={f.id} value={f.id}>{f.nome}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Abas Internas */}
+          <div className="flex items-center bg-black border border-[#222222] p-1 rounded-xl text-xs gap-1">
+            <button
+              onClick={() => setTabAtiva('visao_geral')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                tabAtiva === 'visao_geral'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Visão Geral
+            </button>
+            <button
+              onClick={() => setTabAtiva('metodos')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                tabAtiva === 'metodos'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Formas de Pagamento
+            </button>
+            <button
+              onClick={() => setTabAtiva('filiais')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                tabAtiva === 'filiais'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Por Filial
+            </button>
+            <button
+              onClick={() => setTabAtiva('vendedores')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                tabAtiva === 'vendedores'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Vendedores
+            </button>
+          </div>
+        </div>
+
+        {/* Conteúdo com Scroll */}
+        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+          {loading ? (
+            <div className="py-20 flex flex-col items-center justify-center gap-3 text-gray-500">
+              <RefreshCw size={28} className="animate-spin text-purple-500" />
+              <span className="text-sm font-semibold">Calculando dados financeiros em tempo real...</span>
+            </div>
+          ) : (
+            <>
+              {/* KPIs Principais em Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-[#111111] border border-[#222222] p-4 rounded-xl flex flex-col gap-1">
+                  <div className="flex items-center justify-between text-gray-400 text-xs font-semibold">
+                    <span>Faturamento Total</span>
+                    <DollarSign size={16} className="text-emerald-400" />
+                  </div>
+                  <span className="text-xl font-extrabold text-white font-mono mt-1">
+                    {metricas.faturamentoTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    {metricas.qtdVendas} vendas faturadas
+                  </span>
+                </div>
+
+                <div className="bg-[#111111] border border-[#222222] p-4 rounded-xl flex flex-col gap-1">
+                  <div className="flex items-center justify-between text-gray-400 text-xs font-semibold">
+                    <span>Ticket Médio</span>
+                    <TrendingUp size={16} className="text-purple-400" />
+                  </div>
+                  <span className="text-xl font-extrabold text-purple-300 font-mono mt-1">
+                    {metricas.ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    Média por venda realizada
+                  </span>
+                </div>
+
+                <div className="bg-[#111111] border border-[#222222] p-4 rounded-xl flex flex-col gap-1">
+                  <div className="flex items-center justify-between text-gray-400 text-xs font-semibold">
+                    <span>Lucro Bruto Estimado</span>
+                    <ArrowUpRight size={16} className="text-green-400" />
+                  </div>
+                  <span className="text-xl font-extrabold text-green-400 font-mono mt-1">
+                    {metricas.lucroBrutoEstimado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  <span className="text-[11px] text-emerald-500/80 font-medium">
+                    Margem bruta ~{metricas.margemBruta.toFixed(1)}%
+                  </span>
+                </div>
+
+                <div className="bg-[#111111] border border-[#222222] p-4 rounded-xl flex flex-col gap-1">
+                  <div className="flex items-center justify-between text-gray-400 text-xs font-semibold">
+                    <span>Comissões Totais</span>
+                    <User size={16} className="text-amber-400" />
+                  </div>
+                  <span className="text-xl font-extrabold text-amber-300 font-mono mt-1">
+                    {metricas.totalComissoes.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    Rateio a pagar à equipe
+                  </span>
+                </div>
+              </div>
+
+              {/* ABA 1: Visão Geral */}
+              {tabAtiva === 'visao_geral' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Resumo por Forma de Pagamento */}
+                  <div className="bg-[#111111] border border-[#222222] rounded-xl p-5 space-y-4">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <CreditCard size={16} className="text-purple-400" />
+                      Participação por Forma de Pagamento
+                    </h3>
+                    <div className="space-y-3">
+                      {Object.keys(metricas.porMetodo).length === 0 ? (
+                        <p className="text-xs text-gray-500 italic py-4">Sem dados no período.</p>
+                      ) : (
+                        Object.entries(metricas.porMetodo).map(([metodo, dados]) => {
+                          const percentual = metricas.faturamentoTotal > 0 ? (dados.valor / metricas.faturamentoTotal) * 100 : 0;
+                          return (
+                            <div key={metodo} className="space-y-1">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-gray-300">{metodo} ({dados.count}x)</span>
+                                <span className="font-mono text-white font-extrabold">
+                                  {dados.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} ({percentual.toFixed(1)}%)
+                                </span>
+                              </div>
+                              <div className="w-full bg-[#222222] h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="bg-gradient-to-r from-purple-600 to-[#8A2BE2] h-full rounded-full transition-all duration-500"
+                                  style={{ width: `${percentual}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Resumo de Caixas no Período */}
+                  <div className="bg-[#111111] border border-[#222222] rounded-xl p-5 space-y-4">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Store size={16} className="text-purple-400" />
+                      Sessões de Caixa no Mês ({caixas.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {caixas.length === 0 ? (
+                        <p className="text-xs text-gray-500 italic py-4">Nenhuma sessão de caixa encontrada.</p>
+                      ) : (
+                        caixas.slice(0, 5).map(cx => {
+                          const isAberto = String(cx.status || '').toLowerCase() === 'aberto' && !cx.data_fechamento;
+                          return (
+                            <div key={cx.id} className="p-3 bg-black/50 border border-[#222222] rounded-lg flex items-center justify-between text-xs">
+                              <div>
+                                <span className="font-bold text-white block">
+                                  {cx.filial_nome || 'Filial'} • {cx.operador_nome || 'Operador'}
+                                </span>
+                                <span className="text-[10px] text-gray-500">
+                                  {cx.data_abertura ? new Date(cx.data_abertura).toLocaleDateString('pt-BR') : '-'}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isAberto ? 'bg-green-950 text-green-400 border border-green-800' : 'bg-zinc-900 text-gray-400'
+                                }`}>
+                                  {isAberto ? 'Aberto' : 'Fechado'}
+                                </span>
+                                <span className="font-mono text-white font-bold block mt-1">
+                                  Fundo: R$ {Number(cx.saldo_inicial || 0).toFixed(2)}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ABA 2: Formas de Pagamento Detalhadas */}
+              {tabAtiva === 'metodos' && (
+                <div className="bg-[#111111] border border-[#222222] rounded-xl p-5">
+                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                    <CreditCard size={16} className="text-purple-400" />
+                    Detalhamento Financeiro por Método
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase text-[10px]">
+                          <th className="pb-3">Método / Bandeira</th>
+                          <th className="pb-3 text-center">Transações</th>
+                          <th className="pb-3 text-right">Volume Total</th>
+                          <th className="pb-3 text-right">Ticket Médio</th>
+                          <th className="pb-3 text-right">Participação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#222222]">
+                        {Object.entries(metricas.porMetodo).map(([metodo, dados]) => {
+                          const part = metricas.faturamentoTotal > 0 ? (dados.valor / metricas.faturamentoTotal) * 100 : 0;
+                          const tMedio = dados.count > 0 ? dados.valor / dados.count : 0;
+                          return (
+                            <tr key={metodo} className="hover:bg-purple-950/5">
+                              <td className="py-3 font-bold text-white uppercase">{metodo}</td>
+                              <td className="py-3 text-center font-mono text-gray-300">{dados.count}</td>
+                              <td className="py-3 text-right font-mono font-bold text-emerald-400">
+                                {dados.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </td>
+                              <td className="py-3 text-right font-mono text-gray-300">
+                                {tMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </td>
+                              <td className="py-3 text-right font-bold text-purple-300">
+                                {part.toFixed(1)}%
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ABA 3: Por Filial */}
+              {tabAtiva === 'filiais' && (
+                <div className="bg-[#111111] border border-[#222222] rounded-xl p-5">
+                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                    <Building2 size={16} className="text-purple-400" />
+                    Desempenho Financeiro por Filial
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    {Object.entries(metricas.porFilial).map(([filial, dados]) => {
+                      const part = metricas.faturamentoTotal > 0 ? (dados.valor / metricas.faturamentoTotal) * 100 : 0;
+                      return (
+                        <div key={filial} className="bg-black/60 border border-[#222222] p-4 rounded-xl flex flex-col gap-2">
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <Store size={14} className="text-purple-400" />
+                            {filial}
+                          </span>
+                          <span className="text-lg font-extrabold text-white font-mono">
+                            {dados.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </span>
+                          <div className="flex justify-between text-[11px] text-gray-400 border-t border-[#222222] pt-2">
+                            <span>{dados.count} vendas</span>
+                            <span className="text-purple-300 font-bold">{part.toFixed(1)}% do total</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ABA 4: Por Vendedor */}
+              {tabAtiva === 'vendedores' && (
+                <div className="bg-[#111111] border border-[#222222] rounded-xl p-5">
+                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                    <User size={16} className="text-purple-400" />
+                    Performance e Comissões por Vendedor
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase text-[10px]">
+                          <th className="pb-3">Vendedor</th>
+                          <th className="pb-3 text-center">Vendas</th>
+                          <th className="pb-3 text-right">Faturamento</th>
+                          <th className="pb-3 text-right">Comissão Devida</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#222222]">
+                        {Object.entries(metricas.porVendedor).map(([vend, dados]) => (
+                          <tr key={vend} className="hover:bg-purple-950/5">
+                            <td className="py-3 font-bold text-white">{vend}</td>
+                            <td className="py-3 text-center font-mono text-gray-300">{dados.count}</td>
+                            <td className="py-3 text-right font-mono font-bold text-white">
+                              {dados.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </td>
+                            <td className="py-3 text-right font-mono font-bold text-amber-300">
+                              {dados.comissao.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Rodapé do Modal */}
+        <div className="p-4 bg-[#111111] border-t border-[#222222] flex justify-between items-center text-xs">
+          <span className="text-gray-500">
+            * Dados calculados a partir dos registros de vendas e caixas no Supabase.
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold transition-all shadow-md shadow-purple-900/30 cursor-pointer"
+          >
+            Fechar Relatório
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}

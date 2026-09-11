@@ -29,6 +29,7 @@ import ModalEditarImei from './ModalEditarImei';
 import ModalGeradorGrade from './ModalGeradorGrade';
 import ModalGeradorPeliculas from './ModalGeradorPeliculas';
 import ModalEntradaAparelhosLote from './ModalEntradaAparelhosLote';
+import ModalDetalheRelatorio from './ModalDetalheRelatorio';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1032,6 +1033,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Estado para visualização de comprovante em Modal (Gerente)
   const [modalComprovante, setModalComprovante] = useState(null);
+  const [modalRelatorioAberto, setModalRelatorioAberto] = useState(false);
 
   // Estados para Torre de Controlo
   const [catalogoTab, setCatalogoTab] = useState('catalogo');
@@ -2123,11 +2125,8 @@ export default function Dashboard({ session, profileDataProps }) {
     const userEmail = (profile?.email || session?.user?.email || '').toLowerCase().trim();
     const isGerente = profile?.role === 'GERENTE' || userEmail === 'rodrigo.gerenciamonkeyshop@gmail.com';
 
-    if (activeTab === 'configuracoes' && !['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO', 'GERENTE', 'RH', 'RH_ADMIN'].includes(profile?.role)) {
-      setActiveTab('gestao');
-      setCurrentView('gestao');
-      showToast('Acesso Negado: Você não possui autorização para acessar este módulo.', 'error');
-    } else if (activeTab === 'assinatura' && (isGerente || !['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO'].includes(profile?.role))) {
+    // Configurações agora é acessível a todos os usuários logados (para dados pessoais e troca de senha)
+    if (activeTab === 'assinatura' && (isGerente || !['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO'].includes(profile?.role))) {
       setActiveTab('gestao');
       setCurrentView('gestao');
       showToast('Acesso Negado: Apenas Administradores e Donos da empresa possuem autorização para acessar este módulo.', 'error');
@@ -8114,12 +8113,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
-    if (view === 'configuracoes') {
-      if (!['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO', 'GERENTE', 'RH', 'RH_ADMIN'].includes(profile?.role)) {
-        showToast('Acesso Negado: Apenas Administradores, Gerentes e Recursos Humanos possuem autorização para acessar este módulo.', 'error');
-        return;
-      }
-    }
+    // Configurações liberado para todas as roles (para alteração de dados de acesso e senha)
 
     if (view === 'assinatura') {
       if (isGerente || !['SUPER_ADMIN', 'ADMIN', 'OWNER', 'DONO'].includes(profile?.role)) {
@@ -9283,67 +9277,47 @@ export default function Dashboard({ session, profileDataProps }) {
       showToast('Por favor, informe seu nome.', 'error');
       return;
     }
-    if (!profileEmail.trim()) {
-      showToast('Por favor, informe seu e-mail.', 'error');
-      return;
-    }
 
-    if (profileSenha.trim()) {
-      if (profileSenha.trim().length < 6) {
-        showToast('A nova senha deve ter no mínimo 6 caracteres.', 'error');
-        return;
-      }
-      if (profileSenha !== profileSenhaConfirm) {
-        showToast('As senhas não coincidem.', 'error');
-        return;
-      }
-    }
+    const novaSenha = profileSenha ? profileSenha.trim() : '';
+    const confirmarSenha = profileSenhaConfirm ? profileSenhaConfirm.trim() : '';
+    const nomeCompleto = profileNome.trim();
+    const user = session?.user || profile;
 
     setIsSavingProfile(true);
     try {
-      // 1. Atualizar e-mail e/ou senha na auth do Supabase se houver alteração
-      const authUpdates = {};
-      let emailChanged = false;
-
-      if (profileEmail.trim().toLowerCase() !== (profile?.email || '').toLowerCase()) {
-        authUpdates.email = profileEmail.trim();
-        emailChanged = true;
-      }
-      if (profileSenha.trim()) {
-        authUpdates.password = profileSenha.trim();
-      }
-
-      if (Object.keys(authUpdates).length > 0) {
-        const { error: authErr } = await supabase.auth.updateUser(authUpdates);
-        if (authErr) throw authErr;
-        if (emailChanged) {
-          showToast('E-mail atualizado na autenticação. Verifique seu e-mail para confirmação se necessário.', 'info');
+      if (novaSenha) {
+        if (novaSenha.length < 6) {
+          showToast('A nova senha deve ter no mínimo 6 caracteres.', 'error');
+          setIsSavingProfile(false);
+          return;
         }
+        if (novaSenha !== confirmarSenha) {
+          showToast('As senhas não conferem!', 'error');
+          setIsSavingProfile(false);
+          return;
+        }
+        const { error: passErr } = await supabase.auth.updateUser({ password: novaSenha });
+        if (passErr) throw passErr;
       }
 
-      // 2. Atualizar tabela profiles
       const { error: profileErr } = await supabase
         .from('profiles')
-        .update({
-          nome: profileNome.trim(),
-          email: profileEmail.trim()
-        })
-        .eq('id', profile.id);
+        .update({ nome: nomeCompleto })
+        .eq('id', user.id);
 
       if (profileErr) throw profileErr;
 
-      // 3. Atualizar estado local
+      // Atualizar estado local
       setProfile(prev => ({
         ...prev,
-        nome: profileNome.trim(),
-        email: profileEmail.trim()
+        nome: nomeCompleto
       }));
 
       // Limpar campos de senha
       setProfileSenha('');
       setProfileSenhaConfirm('');
 
-      showToast('Seus dados de acesso foram atualizados com sucesso!', 'success');
+      showToast('Dados e senha atualizados com sucesso!', 'success');
     } catch (err) {
       console.error('Erro ao atualizar perfil:', err);
       showToast('Erro ao atualizar perfil: ' + (err.message || 'Erro desconhecido'), 'error');
@@ -15390,10 +15364,8 @@ export default function Dashboard({ session, profileDataProps }) {
         items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
       }
 
-      // 11. Configurações - Oculto para DONO
-      if (currentRole !== 'DONO') {
-        items.push(sidebarItem('configuracoes', 'Configurações', Settings));
-      }
+      // 11. Configurações - Visível para todas as roles (para alteração de dados de acesso e senha)
+      items.push(sidebarItem('configuracoes', 'Configurações', Settings));
 
       // 12. Assinatura & Faturas - Oculto para DONO
       if (!isGerente && (['OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
@@ -15412,7 +15384,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
       if (currentRole === 'DONO') {
         const key = item.key;
-        if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura', 'configuracoes'].includes(key)) {
+        if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura'].includes(key)) {
           return false;
         }
       }
@@ -18676,7 +18648,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
                 {/* CONFIGURAÇÕES DO SISTEMA */}
-                {activeTab === 'configuracoes' && company?.id && company.id !== 'MASTER' && (
+                {(activeTab === 'configuracoes' || currentView === 'configuracoes') && company?.id && company.id !== 'MASTER' && (
                   <div className="space-y-8 animate-fadeIn">
                     <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl">
                       <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
@@ -18770,8 +18742,8 @@ export default function Dashboard({ session, profileDataProps }) {
                       </form>
                     </div>
 
-                    {/* SEÇÃO CONFIGURAÇÕES FISCAIS DA EMPRESA (Oculto para GERENTE) */}
-                    {profile?.role !== 'GERENTE' && ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(profile?.role) && (
+                    {/* SEÇÃO CONFIGURAÇÕES DO SISTEMA / PARÂMETROS GLOBAIS (Apenas ADMIN) */}
+                    {(userRole === 'ADMIN' || profile?.role === 'ADMIN' || ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO'].includes(profile?.role)) && (
                       <div className="space-y-8 animate-fadeIn">
                         <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl">
                           <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
@@ -19926,11 +19898,11 @@ export default function Dashboard({ session, profileDataProps }) {
                         />
                       </div>
                       <button
-                        onClick={() => window.print()}
-                        className="flex items-center gap-2 border border-[#222222] hover:border-purple-800 hover:text-purple-300 bg-black text-xs font-bold py-1.5 px-4 rounded transition-all ml-auto self-start"
+                        onClick={() => setModalRelatorioAberto(true)}
+                        className="flex items-center gap-2 border border-[#222222] hover:border-[#6A0DAD] hover:text-purple-300 bg-black text-xs font-bold py-1.5 px-4 rounded-lg transition-all ml-auto self-start shadow-sm shadow-purple-950/20 cursor-pointer"
                       >
-                        <FileText size={14} />
-                        Imprimir Relatório
+                        <BarChart3 size={14} className="text-[#6A0DAD]" />
+                        📊 Detalhar Relatório Financeiro
                       </button>
                     </div>
 
@@ -20885,8 +20857,10 @@ export default function Dashboard({ session, profileDataProps }) {
               /* PAINEL DE CONTROLE DO VENDEDOR */
               <div className="space-y-8">
 
-                {/* SE FILIAL ATIVA NÃO FOR ESCOLHIDA AINDA */}
-                {!activeFilialId ? (
+                {/* SE O VENDEDOR CLICOU EM CONFIGURAÇÕES, RENDERIZAR SEM PRECISAR ESCOLHER FILIAL */}
+                {(activeSellerTab === 'configuracoes' || currentView === 'configuracoes') ? (
+                  renderConfiguracoes()
+                ) : !activeFilialId ? (
                   <div className="max-w-3xl mx-auto space-y-8 animate-fadeIn">
                     <div className="text-center space-y-3">
                       <Store size={48} className="text-[#6A0DAD] mx-auto animate-pulse" />
@@ -21488,6 +21462,9 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
                       </div>
                     )}
+
+                    {/* VENDEDOR ABA CONFIGURAÇÕES: DADOS PESSOAIS */}
+                    {(activeSellerTab === 'configuracoes' || currentView === 'configuracoes') && renderConfiguracoes()}
 
                   </div>
                 )}
@@ -25274,6 +25251,13 @@ export default function Dashboard({ session, profileDataProps }) {
             window.dispatchEvent(new Event('catalogo_updated'));
             window.dispatchEvent(new Event('estoque_updated'));
           }}
+        />
+
+        {/* Modal Detalhamento Financeiro Interativo */}
+        <ModalDetalheRelatorio
+          isOpen={modalRelatorioAberto}
+          onClose={() => setModalRelatorioAberto(false)}
+          filiais={filiais}
         />
 
         {/* Toast Notification Container */}
