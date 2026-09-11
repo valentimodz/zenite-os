@@ -1056,7 +1056,12 @@ export default function Dashboard({ session, profileDataProps }) {
   const [filtroStatusCaixa, setFiltroStatusCaixa] = useState('TODOS');
   const [modalDetalheCaixa, setModalDetalheCaixa] = useState(null);
   const [loadingDados, setLoadingDados] = useState(false);
-  const [filtroMes, setFiltroMes] = useState(() => new Date().toISOString().substring(0, 7)); // YYYY-MM
+  const [filtroMes, setFiltroMes] = useState(() => {
+    const dataAtual = new Date();
+    const ano = dataAtual.getFullYear();
+    const mes = String(dataAtual.getMonth() + 1).padStart(2, '0');
+    return `${ano}-${mes}`;
+  }); // YYYY-MM
 
   // Estados para Correção de Fechamento de Caixa Diário
   const [modalAjusteCaixaOpen, setModalAjusteCaixaOpen] = useState(false);
@@ -2335,7 +2340,7 @@ export default function Dashboard({ session, profileDataProps }) {
     (profile?.role || profile?.cargo || '').toUpperCase()
   );
 
-  // Recarregar automaticamente a lista de colaboradores, descontos e categorias quando a empresa for carregada ou alternada
+  // Recarregar automaticamente a lista de colaboradores, descontos, vendas consolidadas e categorias quando a empresa for carregada, alternada ou quando o mês for trocado
   useEffect(() => {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
     if (targetEmpresaId) {
@@ -2343,9 +2348,10 @@ export default function Dashboard({ session, profileDataProps }) {
     }
     if (podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
-      fetchAuditoriaDescontos(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
+      fetchAuditoriaDescontos(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
+      fetchGerenteData(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
     }
-  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria]);
+  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria, filtroMes]);
 
   // Recarregar catálogo de produtos (invalidação de cache / stale data) ao alternar para 'estoque' ou 'catalogo_mestre'
   useEffect(() => {
@@ -2492,9 +2498,18 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  const fetchAuditoriaDescontos = async (empresaId) => {
+  const fetchAuditoriaDescontos = async (empresaId, mesAnoFiltro) => {
     const raw = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
     const targetEmpresaId = (raw && raw !== 'MASTER' && raw !== 'undefined' && raw !== 'null') ? raw : null;
+
+    // Range dinâmico baseado no seletor de mês
+    const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
+    const [anoStr, mesStr] = selectedMonth.split('-');
+    const anoNum = parseInt(anoStr, 10);
+    const mesNum = parseInt(mesStr, 10);
+    const dtInicio = new Date(anoNum, mesNum - 1, 1, 0, 0, 0, 0).toISOString();
+    const dtFim = new Date(anoNum, mesNum, 0, 23, 59, 59, 999).toISOString();
+
     setIsLoadingDescontos(true);
     try {
       const allDiscountLogs = [];
@@ -2504,8 +2519,8 @@ export default function Dashboard({ session, profileDataProps }) {
         let qItens = supabase
           .from('itens_venda')
           .select('*')
-          .gte('created_at', '2026-09-01T00:00:00')
-          .lte('created_at', '2026-09-30T23:59:59')
+          .gte('created_at', dtInicio)
+          .lte('created_at', dtFim)
           .order('created_at', { ascending: false });
         if (targetEmpresaId) {
           qItens = qItens.eq('empresa_id', targetEmpresaId);
@@ -2556,8 +2571,8 @@ export default function Dashboard({ session, profileDataProps }) {
         let qAudit = supabase
           .from('auditoria_descontos')
           .select('*')
-          .gte('created_at', '2026-09-01T00:00:00')
-          .lte('created_at', '2026-09-30T23:59:59')
+          .gte('created_at', dtInicio)
+          .lte('created_at', dtFim)
           .order('created_at', { ascending: false });
         if (targetEmpresaId) {
           qAudit = qAudit.eq('empresa_id', targetEmpresaId);
@@ -2596,8 +2611,8 @@ export default function Dashboard({ session, profileDataProps }) {
         let qVendas = supabase
           .from('vendas')
           .select('*')
-          .gte('created_at', '2026-09-01T00:00:00')
-          .lte('created_at', '2026-09-30T23:59:59')
+          .gte('created_at', dtInicio)
+          .lte('created_at', dtFim)
           .order('created_at', { ascending: false });
         if (targetEmpresaId) {
           qVendas = qVendas.eq('empresa_id', targetEmpresaId);
@@ -2609,8 +2624,8 @@ export default function Dashboard({ session, profileDataProps }) {
           const { data: fallbackVendas } = await supabase
             .from('vendas')
             .select('*')
-            .gte('created_at', '2026-09-01T00:00:00')
-            .lte('created_at', '2026-09-30T23:59:59')
+            .gte('created_at', dtInicio)
+            .lte('created_at', dtFim)
             .order('created_at', { ascending: false });
           if (fallbackVendas && fallbackVendas.length > 0) {
             vendasData = fallbackVendas;
@@ -3407,11 +3422,19 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   // Buscar dados consolidados do Gerente (Estoque, Vendas Globais, Fechamentos)
-  const fetchGerenteData = async (empresaId) => {
+  const fetchGerenteData = async (empresaId, mesAnoFiltro) => {
     setLoadingDados(true);
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const token = currentSession?.access_token;
+
+      // Range dinâmico baseado no seletor de mês
+      const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
+      const [anoStr, mesStr] = selectedMonth.split('-');
+      const anoNum = parseInt(anoStr, 10);
+      const mesNum = parseInt(mesStr, 10);
+      const dtInicio = new Date(anoNum, mesNum - 1, 1, 0, 0, 0, 0).toISOString();
+      const dtFim = new Date(anoNum, mesNum, 0, 23, 59, 59, 999).toISOString();
 
       const fetchSales = async () => {
         try {
@@ -3459,8 +3482,8 @@ export default function Dashboard({ session, profileDataProps }) {
                 preco_custo
               )
             `)
-            .gte('created_at', '2026-09-01T00:00:00')
-            .lte('created_at', '2026-09-30T23:59:59')
+            .gte('created_at', dtInicio)
+            .lte('created_at', dtFim)
             .order('created_at', { ascending: false });
 
           // Eliminar qualquer filtro estrito de empresa_id ou tenant_id que esteja vindo como undefined/null
@@ -3491,12 +3514,12 @@ export default function Dashboard({ session, profileDataProps }) {
                 cpf_cnpj
               )
             `)
-            .gte('created_at', '2026-09-01T00:00:00')
-            .lte('created_at', '2026-09-30T23:59:59')
+            .gte('created_at', dtInicio)
+            .lte('created_at', dtFim)
             .order('created_at', { ascending: false });
 
           if (!gErr && Array.isArray(globalMonthSales)) {
-            console.log('Vendas encontradas (global setembro):', globalMonthSales);
+            console.log('Vendas encontradas (global período):', globalMonthSales);
             return globalMonthSales;
           }
 
@@ -3506,8 +3529,8 @@ export default function Dashboard({ session, profileDataProps }) {
           let simpleQ = supabase
             .from('vendas')
             .select('*')
-            .gte('created_at', '2026-09-01T00:00:00')
-            .lte('created_at', '2026-09-30T23:59:59')
+            .gte('created_at', dtInicio)
+            .lte('created_at', dtFim)
             .order('created_at', { ascending: false });
 
           if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
@@ -3527,27 +3550,41 @@ export default function Dashboard({ session, profileDataProps }) {
       };
 
       const [prodsRes, salesData, fechRes, imeisRes, allImeisRes] = await Promise.all([
-        supabase.from('produtos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-        fetchSales(),
-        supabase.from('fechamentos').select('*, profiles!vendedor_id(*), filiais(*)').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+        supabase.from('produtos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }).catch(err => {
+          console.warn('[Dashboard] Falha na query de produtos:', err);
+          return { data: [], error: null };
+        }),
+        fetchSales().catch(err => {
+          console.warn('[Dashboard] Falha na query de vendas:', err);
+          return [];
+        }),
+        supabase.from('fechamentos').select('*, profiles!vendedor_id(*), filiais(*)').eq('empresa_id', empresaId).order('created_at', { ascending: false }).catch(err => {
+          console.warn('[Dashboard] Falha na query de fechamentos:', err);
+          return { data: [], error: null };
+        }),
         supabase.from('imeis')
           .select('id, imei, cor, status, created_at, filial_id, produto_id, produtos(nome)')
           .eq('empresa_id', empresaId)
           .order('created_at', { ascending: false })
-          .limit(10),
+          .limit(10)
+          .catch(err => {
+            console.warn('[Dashboard] Falha na query de ultimos imeis:', err);
+            return { data: [], error: null };
+          }),
         supabase.from('imeis')
           .select('id, produto_id, filial_id, status, vendido, imei, created_at, produtos(nome)')
           .eq('empresa_id', empresaId)
           .eq('vendido', false)
           .order('created_at', { ascending: false })
           .limit(5000)
+          .catch(err => {
+            console.warn('[Dashboard] Falha na query de imeis disponiveis:', err);
+            return { data: [], error: null };
+          })
       ]);
 
-      if (prodsRes.error) throw prodsRes.error;
-      if (fechRes.error) throw fechRes.error;
-
-      const baseProdutos = prodsRes.data || [];
-      const baseImeis = allImeisRes.data || [];
+      const baseProdutos = (prodsRes && !prodsRes.error && Array.isArray(prodsRes.data)) ? prodsRes.data : [];
+      const baseImeis = (allImeisRes && !allImeisRes.error && Array.isArray(allImeisRes.data)) ? allImeisRes.data : [];
 
       let imeisMapGlobal = {};
       baseImeis.forEach(im => {
@@ -3561,13 +3598,20 @@ export default function Dashboard({ session, profileDataProps }) {
       }));
 
       setProdutos(prodsMapeados);
-      setVendas(salesData);
-      setFechamentos(fechRes.data || []);
-      setUltimosRecebidos(imeisRes.data || []);
-      setDisponiveisImeis(allImeisRes.data || []);
-      fetchSessoesCaixas(empresaId);
+      setVendas(Array.isArray(salesData) ? salesData : []);
+      setFechamentos((fechRes && !fechRes.error && Array.isArray(fechRes.data)) ? fechRes.data : []);
+      setUltimosRecebidos((imeisRes && !imeisRes.error && Array.isArray(imeisRes.data)) ? imeisRes.data : []);
+      setDisponiveisImeis(baseImeis);
+      fetchSessoesCaixas(empresaId, filtroFilialCaixa, selectedMonth).catch(e => console.warn('Aviso caixas:', e));
     } catch (err) {
-      console.error('Erro ao buscar dados do gerente:', err);
+      console.error('[Dashboard] Erro detalhado ao buscar dados do gerente/dashboard:', err?.message || err, err);
+      logDiagnosticError(err?.message || String(err), 'fetchGerenteData');
+      // Fallbacks com array vazio para garantir estabilidade da tela
+      setProdutos(prev => Array.isArray(prev) ? prev : []);
+      setVendas(prev => Array.isArray(prev) ? prev : []);
+      setFechamentos(prev => Array.isArray(prev) ? prev : []);
+      setUltimosRecebidos(prev => Array.isArray(prev) ? prev : []);
+      setDisponiveisImeis(prev => Array.isArray(prev) ? prev : []);
     } finally {
       setLoadingDados(false);
     }
@@ -16860,7 +16904,15 @@ export default function Dashboard({ session, profileDataProps }) {
                               <input
                                 type="month"
                                 value={filtroMes}
-                                onChange={(e) => setFiltroMes(e.target.value)}
+                                onChange={(e) => {
+                                  const novoMes = e.target.value;
+                                  setFiltroMes(novoMes);
+                                  const tenantId = profile?.empresa_id || company?.id || activeEmpresaId;
+                                  if (tenantId) {
+                                    fetchGerenteData(tenantId, novoMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas no seletor de mês:', err));
+                                    fetchAuditoriaDescontos(tenantId, novoMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar descontos no seletor de mês:', err));
+                                  }
+                                }}
                                 className="bg-transparent text-white text-xs font-bold font-mono outline-none cursor-pointer"
                               />
                             </div>
@@ -16868,7 +16920,10 @@ export default function Dashboard({ session, profileDataProps }) {
                               type="button"
                               onClick={() => {
                                 const tenantId = profile?.empresa_id || company?.id || activeEmpresaId;
-                                if (tenantId) fetchGerenteData(tenantId);
+                                if (tenantId) {
+                                  fetchGerenteData(tenantId, filtroMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas:', err));
+                                  fetchAuditoriaDescontos(tenantId, filtroMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar descontos:', err));
+                                }
                               }}
                               className="flex items-center gap-1.5 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-purple-300 border border-[#6A0DAD]/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer"
                               title="Recarregar Dados Executivos"
@@ -16880,6 +16935,17 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
 
                         {(() => {
+                          // Helper para formatação monetária rigorosa em BRL com 2 casas decimais
+                          const formatBRL = (val) => {
+                            const n = Number(val);
+                            return (isNaN(n) ? 0 : n).toLocaleString('pt-BR', {
+                              style: 'currency',
+                              currency: 'BRL',
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            });
+                          };
+
                           // 1. Definição do Período Dinâmico com base no seletor de mês
                           const [anoFiltroStr, mesFiltroStr] = (filtroMes || new Date().toISOString().slice(0, 7)).split('-');
                           const anoFiltroNum = parseInt(anoFiltroStr, 10);
@@ -16929,32 +16995,36 @@ export default function Dashboard({ session, profileDataProps }) {
                           const margemLucro = faturamentoBruto > 0 ? ((lucroReal / faturamentoBruto) * 100) : 0;
                           const roiCalculado = custoTotal > 0 ? ((lucroReal / custoTotal) * 100) : 0;
 
-                          // Descontos do mês
-                          const descontosMes = (descontosLogs || []).filter(d => isVendaNoMes(d.created_at));
-                          const listaDescontosExecutivo = descontosMes.length > 0
-                            ? descontosMes
-                            : ((descontosLogs && descontosLogs.length > 0)
-                              ? descontosLogs
-                              : vendasMes.filter(s => {
-                                const descVal = parseFloat(s.valor_desconto || s.desconto || s.total_desconto || 0);
-                                const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
-                                const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
-                                const temDiferenca = pBase > 0 && pVendido > 0 && pBase > (pVendido + 0.001);
-                                return descVal > 0.001 || temDiferenca || Boolean(s.desconto_autorizado_por);
-                              })
-                            );
+                          // Descontos do mês: alinhado rigorosamente com as vendas do período
+                          const vendasComDesconto = vendasMes.filter(s => {
+                            const descVal = parseFloat(s.desconto || s.valor_desconto || s.total_desconto || 0);
+                            const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
+                            const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
+                            const temDiferenca = pBase > 0 && pVendido > 0 && pBase > (pVendido + 0.001);
+                            return descVal > 0.001 || temDiferenca || Boolean(s.desconto_autorizado_por);
+                          });
 
-                          const totalDescontosConcedidos = listaDescontosExecutivo.reduce((acc, s) => {
-                            let val = parseFloat(s.valor_desconto || s.desconto || s.total_desconto || 0);
-                            if (!val || isNaN(val) || val <= 0) {
+                          // Total em Descontos somando a coluna desconto das vendas do período
+                          const totalDescontosConcedidos = vendasMes.reduce((acc, s) => {
+                            let val = parseFloat(s.desconto || s.valor_desconto || s.total_desconto || 0);
+                            if ((!val || isNaN(val) || val <= 0) && s.preco_base && s.preco_base > 0) {
                               const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
                               const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
-                              if (pBase > pVendido && pBase > 0) {
+                              if (pBase > pVendido) {
                                 val = pBase - pVendido;
                               }
                             }
-                            return acc + (isNaN(val) || !val ? 0 : val);
+                            return acc + (isNaN(val) || !val || val <= 0 ? 0 : val);
                           }, 0);
+
+                          // Lista para a tabela de Auditoria Executiva de Descontos
+                          const descontosMesLogs = (descontosLogs || []).filter(d => isVendaNoMes(d.created_at));
+                          const listaDescontosExecutivo = descontosMesLogs.length > 0
+                            ? descontosMesLogs
+                            : vendasComDesconto;
+
+                          const qtdVendasComDesconto = vendasComDesconto.length > 0 ? vendasComDesconto.length : listaDescontosExecutivo.length;
+                          const percentualVendasDesconto = totalVendasCount > 0 ? ((qtdVendasComDesconto / totalVendasCount) * 100).toFixed(0) : '0';
 
                           // Agrupamento por Vendedor com Ticket Médio e Comissões Geradas
                           const vendedorMap = {};
@@ -17045,7 +17115,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <div>
                                     <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Faturamento Bruto</span>
                                     <span className="text-xl font-extrabold text-white font-mono mt-1 block">
-                                      R$ {faturamentoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      {formatBRL(faturamentoBruto)}
                                     </span>
                                   </div>
                                   <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
@@ -17059,7 +17129,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <div>
                                     <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Lucro Real &amp; ROI</span>
                                     <span className={`text-xl font-extrabold font-mono mt-1 block ${lucroReal >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                      R$ {lucroReal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      {formatBRL(lucroReal)}
                                     </span>
                                   </div>
                                   <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
@@ -17075,7 +17145,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <div>
                                     <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Custo de Produtos (CMV / Saídas)</span>
                                     <span className="text-xl font-extrabold text-gray-300 font-mono mt-1 block">
-                                      R$ {custoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      {formatBRL(custoTotal)}
                                     </span>
                                   </div>
                                   <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
@@ -17089,12 +17159,12 @@ export default function Dashboard({ session, profileDataProps }) {
                                   <div>
                                     <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Total em Descontos</span>
                                     <span className="text-xl font-extrabold text-amber-400 font-mono mt-1 block">
-                                      R$ {totalDescontosConcedidos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      {formatBRL(totalDescontosConcedidos)}
                                     </span>
                                   </div>
                                   <div className="mt-3 pt-2 border-t border-[#222222] flex items-center justify-between text-[11px]">
                                     <span className="text-gray-400">Vendas com Desconto:</span>
-                                    <span className="font-bold text-amber-400">{listaDescontosExecutivo.length} ({totalVendasCount > 0 ? ((listaDescontosExecutivo.length / totalVendasCount) * 100).toFixed(0) : 0}%)</span>
+                                    <span className="font-bold text-amber-400">{qtdVendasComDesconto} ({percentualVendasDesconto}%)</span>
                                   </div>
                                 </div>
                               </div>
@@ -17109,7 +17179,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                       Visão Geral por Filial (Faturamento &amp; Estoque Parado)
                                     </h3>
                                     {comparativoFiliais.length === 0 ? (
-                                      <p className="text-xs text-gray-500 italic py-6 text-center">Sem vendas registradas no mês.</p>
+                                        <p className="text-xs text-gray-500 italic py-6 text-center">Sem vendas registradas no mês.</p>
                                     ) : (
                                       <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                                         {comparativoFiliais.map((f, idx) => {
@@ -17124,7 +17194,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                                   {f.nome}
                                                 </span>
                                                 <span className="font-mono font-bold text-white">
-                                                  R$ {f.totalVendido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                  {formatBRL(f.totalVendido)}
                                                 </span>
                                               </div>
                                               <div className="w-full bg-[#151515] h-2 rounded-full overflow-hidden">
@@ -17136,7 +17206,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                               <div className="flex justify-between items-center text-[10px] text-gray-400 font-mono border-t border-[#111] pt-1.5 mt-1">
                                                 <span>{f.qtdVendas} venda(s) ({pct.toFixed(1)}%)</span>
                                                 <span className="text-amber-400 font-bold">
-                                                  Estoque Parado: {f.estoqueParadoQtd} un. (R$ {f.estoqueParadoValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                                                  Estoque Parado: {f.estoqueParadoQtd} un. ({formatBRL(f.estoqueParadoValor)})
                                                 </span>
                                               </div>
                                             </div>
@@ -17176,17 +17246,17 @@ export default function Dashboard({ session, profileDataProps }) {
                                                 <div className="truncate">
                                                   <span className="block text-xs font-bold text-white truncate">{v.nome}</span>
                                                   <span className="text-[10px] text-gray-400 font-mono">
-                                                    {v.qtdVendas} venda(s) · Tkt Médio: R$ {ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    {v.qtdVendas} venda(s) · Tkt Médio: {formatBRL(ticketMedio)}
                                                   </span>
                                                 </div>
                                               </div>
 
                                               <div className="text-right shrink-0">
                                                 <span className="block text-xs font-bold font-mono text-white">
-                                                  R$ {v.totalVendido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                  {formatBRL(v.totalVendido)}
                                                 </span>
                                                 <span className="block text-[10px] font-bold text-purple-400 font-mono">
-                                                  Comissão: R$ {v.comissaoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({pctMeta.toFixed(0)}% meta)
+                                                  Comissão: {formatBRL(v.comissaoTotal)} ({pctMeta.toFixed(0)}% meta)
                                                 </span>
                                               </div>
                                             </div>
@@ -17247,7 +17317,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                                     {vendedorExibido}
                                                   </td>
                                                   <td className="py-3 text-right font-mono font-bold text-amber-400">
-                                                    - R$ {(descAmount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                    - {formatBRL(descAmount || 0)}
                                                   </td>
                                                   <td className="py-3 text-right font-semibold text-purple-300">
                                                     {autorizadorExibido}
