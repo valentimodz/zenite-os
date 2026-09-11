@@ -5623,18 +5623,23 @@ export default function Dashboard({ session, profileDataProps }) {
     setLoadingFecharCaixaGerencial(true);
 
     try {
-      const dataFechamentoISO = new Date().toISOString();
-      const valDinheiro = parseFloat(fechamentoGerencialValores.dinheiro !== '' ? fechamentoGerencialValores.dinheiro : totaisVendasSessaoDetalhe.dinheiro) || 0;
-      const valCartao = parseFloat(fechamentoGerencialValores.cartao !== '' ? fechamentoGerencialValores.cartao : totaisVendasSessaoDetalhe.cartao) || 0;
-      const valPix = parseFloat(fechamentoGerencialValores.pix !== '' ? fechamentoGerencialValores.pix : totaisVendasSessaoDetalhe.pix) || 0;
-      const valOutros = parseFloat(fechamentoGerencialValores.outros !== '' ? fechamentoGerencialValores.outros : totaisVendasSessaoDetalhe.outros) || 0;
+      // 1. Sanitização dos Campos: strings com vírgula para float numérico válido
+      const parseMoeda = (val, fallback = 0) => {
+        const strVal = val !== undefined && val !== null && String(val).trim() !== '' ? String(val) : String(fallback);
+        return parseFloat(strVal.replace(',', '.')) || 0;
+      };
+
+      const valDinheiro = parseMoeda(fechamentoGerencialValores.dinheiro, totaisVendasSessaoDetalhe.dinheiro);
+      const valCartao = parseMoeda(fechamentoGerencialValores.cartao, totaisVendasSessaoDetalhe.cartao);
+      const valPix = parseMoeda(fechamentoGerencialValores.pix, totaisVendasSessaoDetalhe.pix);
+      const valOutros = parseMoeda(fechamentoGerencialValores.outros, totaisVendasSessaoDetalhe.outros);
       const totalGeral = valDinheiro + valCartao + valPix + valOutros;
       const obsFinal = (fechamentoGerencialObs || 'Fechamento manual realizado pela gerência').trim();
 
       const targetEmpresaId = modalDetalheCaixa.empresa_id || profile?.empresa_id || company?.id || activeEmpresaId;
       const targetOperadorId = modalDetalheCaixa.operador_id || session?.user?.id;
 
-      // 1. Inserir registro na tabela fechamentos
+      // Inserir registro na tabela fechamentos
       try {
         await supabase
           .from('fechamentos')
@@ -5657,27 +5662,46 @@ export default function Dashboard({ session, profileDataProps }) {
         console.warn('[Dashboard] Aviso ao registrar em fechamentos:', insertFechErr);
       }
 
-      // 2. Atualizar tabela caixas
-      const { error: caixaErr } = await supabase
+      // 2. Validação da Resposta do Supabase com .select()
+      const updatePayload = {
+        status: 'fechado',
+        data_fechamento: dataFechamentoISO,
+        saldo_final_dinheiro: valDinheiro,
+        saldo_final_cartao: valCartao,
+        saldo_final_pix: valPix,
+        saldo_final_boleto: valOutros,
+        total_vendas: totalGeral,
+        total_dinheiro: valDinheiro,
+        total_cartao: valCartao,
+        total_pix: valPix,
+        observacoes_fechamento: obsFinal
+      };
+
+      const { data: updatedCaixas, error: caixaErr } = await supabase
         .from('caixas')
-        .update({
-          status: 'fechado',
-          data_fechamento: dataFechamentoISO,
-          saldo_final_dinheiro: valDinheiro,
-          saldo_final_cartao: valCartao,
-          saldo_final_pix: valPix,
-          saldo_final_boleto: valOutros,
-          total_vendas: totalGeral,
-          total_dinheiro: valDinheiro,
-          total_cartao: valCartao,
-          total_pix: valPix,
-          observacoes_fechamento: obsFinal
+        .update(updatePayload)
+        .eq('id', modalDetalheCaixa.id)
+        .select();
+
+      if (caixaErr) {
+        throw caixaErr;
+      }
+
+      // 3. Atualização Reativa de Estado Local (substituindo status de ABERTO para FECHADO)
+      setSessoesCaixas(prevSessoes =>
+        (prevSessoes || []).map(cx => {
+          if (cx.id === modalDetalheCaixa.id) {
+            return {
+              ...cx,
+              ...updatePayload,
+              status: 'fechado'
+            };
+          }
+          return cx;
         })
-        .eq('id', modalDetalheCaixa.id);
+      );
 
-      if (caixaErr) throw caixaErr;
-
-      // 3. Se for o caixa da filial ativa localmente no state, resetar estado do caixa
+      // Se for o caixa da filial ativa localmente no state, resetar estado do caixa
       if (caixaAtual?.id === modalDetalheCaixa.id || String(activeFilialId) === String(modalDetalheCaixa.filial_id)) {
         setIsCaixaAberto(false);
         setCaixaAtual(null);
@@ -5687,7 +5711,7 @@ export default function Dashboard({ session, profileDataProps }) {
       setIsConfirmingFecharCaixaGerencial(false);
       setModalDetalheCaixa(null);
 
-      // 4. Recarregar dados
+      // 4. Recarregar dados em segundo plano
       fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
       fetchStatusCaixa(modalDetalheCaixa.filial_id);
 
@@ -22034,44 +22058,40 @@ export default function Dashboard({ session, profileDataProps }) {
                     <div>
                       <label className="text-[10px] font-bold text-gray-400 block mb-1">Dinheiro em Caixa (R$)</label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
                         value={fechamentoGerencialValores.dinheiro}
                         onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, dinheiro: e.target.value }))}
-                        placeholder="0.00"
+                        placeholder="0,00"
                         className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
                       />
                     </div>
                     <div>
                       <label className="text-[10px] font-bold text-gray-400 block mb-1">Cartão (R$)</label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
                         value={fechamentoGerencialValores.cartao}
                         onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, cartao: e.target.value }))}
-                        placeholder="0.00"
+                        placeholder="0,00"
                         className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
                       />
                     </div>
                     <div>
                       <label className="text-[10px] font-bold text-gray-400 block mb-1">PIX (R$)</label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
                         value={fechamentoGerencialValores.pix}
                         onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, pix: e.target.value }))}
-                        placeholder="0.00"
+                        placeholder="0,00"
                         className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
                       />
                     </div>
                     <div>
                       <label className="text-[10px] font-bold text-gray-400 block mb-1">Outros / Boleto (R$)</label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
                         value={fechamentoGerencialValores.outros}
                         onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, outros: e.target.value }))}
-                        placeholder="0.00"
+                        placeholder="0,00"
                         className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
                       />
                     </div>
