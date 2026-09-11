@@ -2243,10 +2243,11 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }
 
-        // Para DONO, OWNER e SUPER_ADMIN, a filial padrão é "[ Todas as Filiais ]" (""), com opção de alternar
+        // Para DONO, OWNER e SUPER_ADMIN, a filial padrão é "[ Todas as Filiais ]" ("") - Rede Consolidada
         if (filiaisData && filiaisData.length > 0) {
           if (['DONO', 'OWNER', 'SUPER_ADMIN'].includes(profileData.role)) {
-            if (activeFilialId === undefined || activeFilialId === null) {
+            // Se for DONO, forçar a visão REDE CONSOLIDADA ("") inicialmente para abranger todas as filiais
+            if (profileData.role === 'DONO' || activeFilialId === undefined || activeFilialId === null) {
               setActiveFilialId('');
               setActiveFilialNome('Todas as Filiais');
               localStorage.setItem('zenite_active_filial_id', '');
@@ -15552,13 +15553,13 @@ export default function Dashboard({ session, profileDataProps }) {
         items.push(sidebarItem('auditoria_credito', 'Auditoria Vendas & Crédito', ShieldCheck));
       }
 
-      // 8. Gestão de Estoque
-      if (!isGerente && ['ADMIN', 'OWNER', 'DONO', 'ESTOQUISTA'].includes(currentRole)) {
+      // 8. Gestão de Estoque - Oculto para DONO
+      if (!isGerente && ['ADMIN', 'OWNER', 'ESTOQUISTA'].includes(currentRole) && currentRole !== 'DONO') {
         const showEstoque = !isGerente;
-        const isStrictAdmin = ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
+        const isStrictAdmin = ['ADMIN', 'MASTER', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
         const showCatalogoMestre = isStrictAdmin;
-        const showTransferencias = !isGerente && currentRole !== 'DONO';
-        const showCategorias = !isGerente && currentRole !== 'DONO';
+        const showTransferencias = !isGerente;
+        const showCategorias = !isGerente;
 
         if (sidebarOpen || isMobileDrawer) {
           items.push(
@@ -15575,7 +15576,7 @@ export default function Dashboard({ session, profileDataProps }) {
               </button>
               {estoqueSubMenuOpen && (
                 <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
-                  {showEstoque && sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle (Estoque)' : 'Entrada de Estoque', Database)}
+                  {showEstoque && sidebarItem('estoque', 'Entrada de Estoque', Database)}
                   {showCatalogoMestre && sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2)}
                   {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
                   {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
@@ -15584,7 +15585,7 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           );
         } else {
-          if (showEstoque) items.push(sidebarItem('estoque', currentRole === 'DONO' ? 'Torre de Controle' : 'Entrada de Estoque', Database));
+          if (showEstoque) items.push(sidebarItem('estoque', 'Entrada de Estoque', Database));
           if (showCatalogoMestre) items.push(sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2));
           if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
           if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
@@ -15605,8 +15606,10 @@ export default function Dashboard({ session, profileDataProps }) {
         items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
       }
 
-      // 11. Configurações - Visível para todas as roles (para alteração de dados de acesso e senha)
-      items.push(sidebarItem('configuracoes', 'Configurações', Settings));
+      // 11. Configurações - Oculto para DONO
+      if (currentRole !== 'DONO') {
+        items.push(sidebarItem('configuracoes', 'Configurações', Settings));
+      }
 
       // 12. Assinatura & Faturas - Oculto para DONO
       if (!isGerente && (['OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
@@ -15625,7 +15628,9 @@ export default function Dashboard({ session, profileDataProps }) {
       }
       if (currentRole === 'DONO') {
         const key = item.key;
-        if (['pdv', 'clientes', 'categorias', 'transferencias', 'assinatura'].includes(key)) {
+        // O Dono deve ver apenas: Dashboard (Home), Relatórios & Fechamentos, Auditoria de Descontos, Auditoria Vendas & Crédito e Equipe / Funcionários
+        const permitidosDono = ['gestao', 'fechamentos', 'descontos', 'auditoria_credito', 'equipe'];
+        if (!permitidosDono.includes(key)) {
           return false;
         }
       }
@@ -16794,51 +16799,73 @@ export default function Dashboard({ session, profileDataProps }) {
                                 className="bg-transparent text-white text-xs font-bold font-mono outline-none cursor-pointer"
                               />
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const tenantId = profile?.empresa_id || company?.id || activeEmpresaId;
+                                if (tenantId) fetchGerenteData(tenantId);
+                              }}
+                              className="flex items-center gap-1.5 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-purple-300 border border-[#6A0DAD]/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                              title="Recarregar Dados Executivos"
+                            >
+                              <RefreshCw size={13} className={loadingDados ? 'animate-spin' : ''} />
+                              <span>Atualizar</span>
+                            </button>
                           </div>
                         </div>
 
                         {(() => {
-                          // Métricas Consolidadas do Mês Selecionado (Timezone Safe)
+                          // 1. Definição do Período Dinâmico com base no seletor de mês
                           const [anoFiltroStr, mesFiltroStr] = (filtroMes || new Date().toISOString().slice(0, 7)).split('-');
                           const anoFiltroNum = parseInt(anoFiltroStr, 10);
                           const mesFiltroNum = parseInt(mesFiltroStr, 10);
 
-                          const isSameMonthTimezoneSafe = (rawDate) => {
+                          const dataInicioMes = new Date(anoFiltroNum, mesFiltroNum - 1, 1, 0, 0, 0, 0);
+                          const dataFimMes = new Date(anoFiltroNum, mesFiltroNum, 0, 23, 59, 59, 999);
+
+                          // Filtragem timezone-safe e com fallback para timestamps ISO e ranges
+                          const isVendaNoMes = (rawDate) => {
                             if (!rawDate) return false;
                             const str = String(rawDate);
                             if (str.startsWith(`${anoFiltroStr}-${mesFiltroStr}`)) return true;
 
                             const d = new Date(rawDate);
                             if (isNaN(d.getTime())) return false;
-
-                            const yLocal = d.getFullYear();
-                            const mLocal = d.getMonth() + 1;
-                            const yUTC = d.getUTCFullYear();
-                            const mUTC = d.getUTCMonth() + 1;
-
-                            return (yLocal === anoFiltroNum && mLocal === mesFiltroNum) || (yUTC === anoFiltroNum && mUTC === mesFiltroNum);
+                            return d >= dataInicioMes && d <= dataFimMes;
                           };
 
-                          const vendasMes = vendas.filter(sale => isSameMonthTimezoneSafe(sale.created_at || sale.data || sale.date));
+                          // Vendas do mês selecionado da base de vendas globais (sem corte restritivo de filial para o Dono)
+                          const vendasMes = (vendas || []).filter(sale => isVendaNoMes(sale.created_at || sale.data || sale.date));
 
                           const totalVendasCount = vendasMes.length;
+
+                          // Faturamento Bruto: soma total de valor_total (com fallbacks para total / valor_vendido)
                           const faturamentoBruto = vendasMes.reduce((acc, sale) => {
                             const val = parseFloat(sale.valor_total || sale.total || sale.valor_vendido || (sale.preco * sale.quantidade) || 0);
-                            return acc + val;
+                            return acc + (isNaN(val) ? 0 : val);
                           }, 0);
 
+                          // Custo CMV: soma dos custos de cada venda (lê preco_custo da venda ou do relacionamento com produtos)
                           const custoTotal = vendasMes.reduce((acc, sale) => {
-                            const prodObj = produtos.find(p => p.id === sale.produto_id || p.nome === sale.produtos?.nome);
-                            const unitCost = parseFloat(sale.preco_custo || sale.produtos?.preco_custo || prodObj?.preco_custo || 0);
+                            const prodObj = (produtos || []).find(p => p.id === sale.produto_id || p.nome === sale.produtos?.nome || p.nome === sale.produto_nome);
+                            const unitCost = parseFloat(
+                              sale.preco_custo ||
+                              sale.custo_unitario ||
+                              sale.produtos?.preco_custo ||
+                              prodObj?.preco_custo ||
+                              0
+                            );
                             const qty = parseInt(sale.quantidade || 1, 10);
                             return acc + (unitCost * qty);
                           }, 0);
 
+                          // Lucro Real: faturamento - custo
                           const lucroReal = faturamentoBruto - custoTotal;
                           const margemLucro = faturamentoBruto > 0 ? ((lucroReal / faturamentoBruto) * 100) : 0;
                           const roiCalculado = custoTotal > 0 ? ((lucroReal / custoTotal) * 100) : 0;
 
-                          const descontosMes = (descontosLogs || []).filter(d => isSameMonthTimezoneSafe(d.created_at));
+                          // Descontos do mês
+                          const descontosMes = (descontosLogs || []).filter(d => isVendaNoMes(d.created_at));
                           const listaDescontosExecutivo = descontosMes.length > 0
                             ? descontosMes
                             : ((descontosLogs && descontosLogs.length > 0)
@@ -16868,19 +16895,19 @@ export default function Dashboard({ session, profileDataProps }) {
                           const vendedorMap = {};
                           vendasMes.forEach(s => {
                             const vId = s.vendedor_id || s.profiles?.id || 'outros';
-                            const teamMember = teamMembers.find(m => String(m.id) === String(vId));
-                            const vNome = teamMember?.nome || s.profiles?.nome || s.vendedor_nome || 'Vendedor';
+                            const teamMember = (teamMembers || []).find(m => String(m.id) === String(vId));
+                            const vNome = teamMember?.nome || s.profiles?.nome || s.vendedor?.nome || s.vendedor_nome || 'Vendedor';
                             if (!vendedorMap[vId]) {
                               vendedorMap[vId] = { id: vId, nome: vNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
                             }
                             const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
                             vendedorMap[vId].totalVendido += val;
                             vendedorMap[vId].qtdVendas += 1;
-                            vendedorMap[vId].comissaoTotal += (parseFloat(s.comissao) || 0);
+                            vendedorMap[vId].comissaoTotal += (parseFloat(s.comissao_vendedor || s.comissao || 0));
 
                             const tId = s.treener_id || s.trainee_id;
                             if (tId && (s.teve_participacao_trainee || Number(s.comissao_trainee) > 0)) {
-                              const traineeMember = teamMembers.find(m => String(m.id) === String(tId));
+                              const traineeMember = (teamMembers || []).find(m => String(m.id) === String(tId));
                               const tNome = traineeMember?.nome || 'Trainee';
                               if (!vendedorMap[tId]) {
                                 vendedorMap[tId] = { id: tId, nome: tNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
@@ -16893,9 +16920,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
                           const rankingVendedores = Object.values(vendedorMap).sort((a, b) => b.totalVendido - a.totalVendido);
 
-                          // Agrupamento por Filial com Faturamento e Estoque Parado
+                          // Vendas por filial: agrupe o faturamento somando por filial_id
                           const filialMap = {};
-                          filiais.forEach(f => {
+                          (filiais || []).forEach(f => {
                             const fKey = String(f.id);
                             filialMap[fKey] = {
                               id: f.id,
@@ -16908,26 +16935,33 @@ export default function Dashboard({ session, profileDataProps }) {
                           });
 
                           vendasMes.forEach(s => {
-                            const fId = s.filial_id ? String(s.filial_id) : 'sem_filial';
-                            if (!filialMap[fId]) {
-                              const fObj = filiais.find(f => String(f.id) === String(fId));
-                              filialMap[fId] = { id: fId, nome: fObj ? fObj.nome : (s.filial_nome || 'Matriz'), totalVendido: 0, qtdVendas: 0, estoqueParadoQtd: 0, estoqueParadoValor: 0 };
+                            const rawFilialId = s.filial_id ? String(s.filial_id) : 'sem_filial';
+                            if (!filialMap[rawFilialId]) {
+                              const fObj = (filiais || []).find(f => String(f.id) === String(rawFilialId));
+                              filialMap[rawFilialId] = {
+                                id: rawFilialId,
+                                nome: fObj ? fObj.nome : (s.filial?.nome || s.filial_nome || 'Matriz / Loja'),
+                                totalVendido: 0,
+                                qtdVendas: 0,
+                                estoqueParadoQtd: 0,
+                                estoqueParadoValor: 0
+                              };
                             }
                             const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
-                            filialMap[fId].totalVendido += val;
-                            filialMap[fId].qtdVendas += 1;
+                            filialMap[rawFilialId].totalVendido += val;
+                            filialMap[rawFilialId].qtdVendas += 1;
                           });
 
-                          produtos.forEach(p => {
+                          (produtos || []).forEach(p => {
                             const pFilialId = p.filial_id ? String(p.filial_id) : null;
                             let targetMap = pFilialId ? filialMap[pFilialId] : null;
-                            if (!targetMap && filiais.length > 0) {
+                            if (!targetMap && filiais && filiais.length > 0) {
                               targetMap = filialMap[String(filiais[0].id)];
                             }
                             if (targetMap) {
                               const isCelular = p.tipo === 'CELULAR' || p.tipo === 'Celular';
                               const qty = isCelular
-                                ? disponiveisImeis.filter(im => String(im.produto_id) === String(p.id) && (im.status === 'DISPONÍVEL' || im.status === 'Disponível' || im.vendido === false)).length
+                                ? (disponiveisImeis || []).filter(im => String(im.produto_id) === String(p.id) && (im.status === 'DISPONÍVEL' || im.status === 'Disponível' || im.vendido === false)).length
                                 : parseInt(p.quantidade || 0, 10);
                               const unitPrice = parseFloat(p.preco_custo || p.preco || 0);
                               targetMap.estoqueParadoQtd += Math.max(0, qty);
