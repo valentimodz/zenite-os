@@ -2141,17 +2141,22 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [activeTab, profile, session]);
 
+  // Helper unificado de permissão para visualização de auditoria (Admin, Super Admin, Gerente, Dono)
+  const podeVerAuditoria = ['ADMIN', 'SUPER_ADMIN', 'GERENTE', 'DONO', 'OWNER'].includes(
+    (profile?.role || profile?.cargo || '').toUpperCase()
+  );
+
   // Recarregar automaticamente a lista de colaboradores, descontos e categorias quando a empresa for carregada ou alternada
   useEffect(() => {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
     if (targetEmpresaId) {
       fetchCategorias(targetEmpresaId).catch(e => console.warn('Aviso ao carregar categorias:', e));
     }
-    if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) {
+    if (podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
       fetchAuditoriaDescontos(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
     }
-  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView]);
+  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria]);
 
   // Recarregar catálogo de produtos (invalidação de cache / stale data) ao alternar para 'estoque' ou 'catalogo_mestre'
   useEffect(() => {
@@ -16544,14 +16549,14 @@ export default function Dashboard({ session, profileDataProps }) {
                 {/* ABA 1: GESTÃO DE EQUIPE & FILIAIS / VISÃO CEO */}
                 {activeTab === 'gestao' && (
                   <div className="space-y-8 animate-fadeIn">
-                    {/* DASHBOARD CONSOLIDADO EXECUTIVO (VISÃO CEO / DONO DA EMPRESA) */}
-                    {['DONO', 'OWNER', 'SUPER_ADMIN', 'ADMIN'].includes(profile?.role) && (
+                    {/* DASHBOARD CONSOLIDADO EXECUTIVO (VISÃO CEO / DONO / GERÊNCIA) */}
+                    {podeVerAuditoria && (
                       <div className="space-y-6 bg-gradient-to-br from-[#0A001A] via-[#0A0A0A] to-black border border-[#6A0DAD]/30 p-6 rounded-2xl shadow-2xl">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-[#222222] pb-5">
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                                Visão CEO / Proprietário
+                                {['DONO', 'OWNER'].includes(profile?.role) ? 'Visão CEO / Proprietário' : 'Visão Gerencial / Auditoria'}
                               </span>
                               <span className="text-xs text-gray-500 font-mono">
                                 {company?.nome || 'Empresa'}
@@ -16883,121 +16888,123 @@ export default function Dashboard({ session, profileDataProps }) {
                               </div>
 
                               {/* RELATÓRIO 3: AUDITORIA DE DESCONTOS & AUDITORIA DE ACESSOS DA EQUIPE */}
-                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                {/* Auditoria de Descontos */}
-                                <div className="bg-black border border-[#222222] rounded-xl p-5 space-y-4">
-                                  <div className="flex items-center justify-between border-b border-[#222] pb-3">
-                                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                      <Tag size={16} className="text-amber-400" />
-                                      Auditoria de Descontos Concedidos
-                                    </h3>
-                                    <span className="text-[10px] bg-amber-950/40 text-amber-400 border border-amber-800/40 px-2 py-0.5 rounded font-bold uppercase">
-                                      Auditoria Executiva
-                                    </span>
-                                  </div>
+                              {podeVerAuditoria && (
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                  {/* Auditoria de Descontos */}
+                                  <div className="bg-black border border-[#222222] rounded-xl p-5 space-y-4">
+                                    <div className="flex items-center justify-between border-b border-[#222] pb-3">
+                                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                        <Tag size={16} className="text-amber-400" />
+                                        Auditoria de Descontos Concedidos
+                                      </h3>
+                                      <span className="text-[10px] bg-amber-950/40 text-amber-400 border border-amber-800/40 px-2 py-0.5 rounded font-bold uppercase">
+                                        Auditoria Executiva
+                                      </span>
+                                    </div>
 
-                                  {listaDescontosExecutivo.length === 0 ? (
-                                    <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum desconto concedido neste mês.</p>
-                                  ) : (
-                                    <div className="overflow-x-auto max-h-60 overflow-y-auto">
-                                      <table className="w-full text-left text-xs border-collapse">
-                                        <thead>
-                                          <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
-                                            <th className="pb-2">Data</th>
-                                            <th className="pb-2">Vendedor</th>
-                                            <th className="pb-2 text-right">Desconto (R$)</th>
-                                            <th className="pb-2 text-right">Autorizador</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-[#222222]/50">
-                                          {listaDescontosExecutivo.slice(0, 10).map((sale, sIdx) => {
-                                            let descAmount = parseFloat(sale.valor_desconto || sale.desconto || sale.total_desconto || 0);
-                                            if (!descAmount || isNaN(descAmount) || descAmount <= 0) {
-                                              const pBase = parseFloat(sale.preco_base || sale.valor_tabela || 0);
-                                              const pVendido = parseFloat(sale.preco_unitario_vendido || sale.preco_unitario || sale.valor_total || sale.valor_vendido || (sale.preco * sale.quantidade) || 0);
-                                              if (pBase > pVendido && pBase > 0) {
-                                                descAmount = pBase - pVendido;
+                                    {listaDescontosExecutivo.length === 0 ? (
+                                      <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum desconto concedido neste mês.</p>
+                                    ) : (
+                                      <div className="overflow-x-auto max-h-60 overflow-y-auto">
+                                        <table className="w-full text-left text-xs border-collapse">
+                                          <thead>
+                                            <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
+                                              <th className="pb-2">Data</th>
+                                              <th className="pb-2">Vendedor</th>
+                                              <th className="pb-2 text-right">Desconto (R$)</th>
+                                              <th className="pb-2 text-right">Autorizador</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-[#222222]/50">
+                                            {listaDescontosExecutivo.slice(0, 10).map((sale, sIdx) => {
+                                              let descAmount = parseFloat(sale.valor_desconto || sale.desconto || sale.total_desconto || 0);
+                                              if (!descAmount || isNaN(descAmount) || descAmount <= 0) {
+                                                const pBase = parseFloat(sale.preco_base || sale.valor_tabela || 0);
+                                                const pVendido = parseFloat(sale.preco_unitario_vendido || sale.preco_unitario || sale.valor_total || sale.valor_vendido || (sale.preco * sale.quantidade) || 0);
+                                                if (pBase > pVendido && pBase > 0) {
+                                                  descAmount = pBase - pVendido;
+                                                }
                                               }
-                                            }
-                                            const vendedorExibido = sale.vendedor_nome || sale.profiles?.nome || sale.vendedor?.nome || 'Vendedor';
-                                            const autorizadorExibido = sale.desconto_autorizado_por || sale.autorizador?.nome || 'Gerente / Dono';
-                                            return (
-                                              <tr key={sale.id || sIdx} className="hover:bg-white/5 transition-colors">
-                                                <td className="py-2 text-gray-400 font-mono text-[11px]">
-                                                  {new Date(sale.created_at || sale.data || Date.now()).toLocaleDateString('pt-BR')}
-                                                </td>
-                                                <td className="py-2 text-gray-300 font-semibold text-[11px]">
-                                                  {vendedorExibido}
-                                                </td>
-                                                <td className="py-3 text-right font-mono font-bold text-amber-400">
-                                                  - R$ {(descAmount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                                </td>
-                                                <td className="py-3 text-right font-semibold text-purple-300">
-                                                  {autorizadorExibido}
-                                                </td>
-                                              </tr>
-                                            );
-                                          })}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Auditoria de Acessos & Logins da Equipe */}
-                                <div className="bg-black border border-[#222222] rounded-xl p-5 space-y-4">
-                                  <div className="flex items-center justify-between border-b border-[#222] pb-3">
-                                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                      <Shield size={16} className="text-[#6A0DAD]" />
-                                      Auditoria de Acessos &amp; Atividade da Equipe
-                                    </h3>
-                                    <span className="text-[10px] bg-purple-950/40 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded font-bold uppercase">
-                                      Logs de Acesso
-                                    </span>
+                                              const vendedorExibido = sale.vendedor_nome || sale.profiles?.nome || sale.vendedor?.nome || 'Vendedor';
+                                              const autorizadorExibido = sale.desconto_autorizado_por || sale.autorizador?.nome || 'Gerente / Dono';
+                                              return (
+                                                <tr key={sale.id || sIdx} className="hover:bg-white/5 transition-colors">
+                                                  <td className="py-2 text-gray-400 font-mono text-[11px]">
+                                                    {new Date(sale.created_at || sale.data || Date.now()).toLocaleDateString('pt-BR')}
+                                                  </td>
+                                                  <td className="py-2 text-gray-300 font-semibold text-[11px]">
+                                                    {vendedorExibido}
+                                                  </td>
+                                                  <td className="py-3 text-right font-mono font-bold text-amber-400">
+                                                    - R$ {(descAmount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                                  </td>
+                                                  <td className="py-3 text-right font-semibold text-purple-300">
+                                                    {autorizadorExibido}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
                                   </div>
 
-                                  {teamMembers.length === 0 ? (
-                                    <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum registro de acesso encontrado.</p>
-                                  ) : (
-                                    <div className="overflow-x-auto max-h-60 overflow-y-auto">
-                                      <table className="w-full text-left text-xs border-collapse">
-                                        <thead>
-                                          <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
-                                            <th className="pb-2">Colaborador</th>
-                                            <th className="pb-2">Cargo</th>
-                                            <th className="pb-2">Filial</th>
-                                            <th className="pb-2 text-right">Status Acesso</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-[#222222]/50">
-                                          {teamMembers.map((member) => {
-                                            const fObj = filiais.find(f => f.id === member.filial_id);
-                                            return (
-                                              <tr key={member.id} className="hover:bg-white/5 transition-colors">
-                                                <td className="py-2 font-bold text-white flex items-center gap-2 text-[11px]">
-                                                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                                  <span>{member.nome}</span>
-                                                </td>
-                                                <td className="py-2 text-gray-400 font-mono text-[10px]">
-                                                  {member.role}
-                                                </td>
-                                                <td className="py-2 text-gray-400 text-[11px]">
-                                                  {fObj ? fObj.nome : 'Todas / Global'}
-                                                </td>
-                                                <td className="py-2 text-right text-[10px]">
-                                                  <span className="bg-green-950/30 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono font-bold">
-                                                    Autenticado / Ativo
-                                                  </span>
-                                                </td>
-                                              </tr>
-                                            );
-                                          })}
-                                        </tbody>
-                                      </table>
+                                  {/* Auditoria de Acessos & Logins da Equipe */}
+                                  <div className="bg-black border border-[#222222] rounded-xl p-5 space-y-4">
+                                    <div className="flex items-center justify-between border-b border-[#222] pb-3">
+                                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                        <Shield size={16} className="text-[#6A0DAD]" />
+                                        Auditoria de Acessos &amp; Atividade da Equipe
+                                      </h3>
+                                      <span className="text-[10px] bg-purple-950/40 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded font-bold uppercase">
+                                        Logs de Acesso
+                                      </span>
                                     </div>
-                                  )}
+
+                                    {teamMembers.length === 0 ? (
+                                      <p className="text-xs text-gray-500 italic py-6 text-center">Nenhum registro de acesso encontrado.</p>
+                                    ) : (
+                                      <div className="overflow-x-auto max-h-60 overflow-y-auto">
+                                        <table className="w-full text-left text-xs border-collapse">
+                                          <thead>
+                                            <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider">
+                                              <th className="pb-2">Colaborador</th>
+                                              <th className="pb-2">Cargo</th>
+                                              <th className="pb-2">Filial</th>
+                                              <th className="pb-2 text-right">Status Acesso</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-[#222222]/50">
+                                            {teamMembers.map((member) => {
+                                              const fObj = filiais.find(f => f.id === member.filial_id);
+                                              return (
+                                                <tr key={member.id} className="hover:bg-white/5 transition-colors">
+                                                  <td className="py-2 font-bold text-white flex items-center gap-2 text-[11px]">
+                                                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                                    <span>{member.nome}</span>
+                                                  </td>
+                                                  <td className="py-2 text-gray-400 font-mono text-[10px]">
+                                                    {member.role}
+                                                  </td>
+                                                  <td className="py-2 text-gray-400 text-[11px]">
+                                                    {fObj ? fObj.nome : 'Todas / Global'}
+                                                  </td>
+                                                  <td className="py-2 text-right text-[10px]">
+                                                    <span className="bg-green-950/30 text-green-400 border border-green-800/40 px-2 py-0.5 rounded font-mono font-bold">
+                                                      Autenticado / Ativo
+                                                    </span>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
+                              )}
                             </div>
                           );
                         })()}
