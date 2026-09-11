@@ -6,6 +6,23 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
+// Helper para formatação amigável dos métodos de pagamento
+const formatarMetodoPagamento = (metodo) => {
+  if (!metodo) return 'Outros';
+  const key = String(metodo).toUpperCase().trim();
+  const mapa = {
+    'CARTAO_DEBITO': 'Cartão de Débito',
+    'DEBITO': 'Cartão de Débito',
+    'CARTAO_CREDITO': 'Cartão de Crédito',
+    'CREDITO': 'Cartão de Crédito',
+    'BOLETO': 'Boleto / Crediário',
+    'CREDIARIO': 'Boleto / Crediário',
+    'PIX': 'Pix',
+    'DINHEIRO': 'Dinheiro'
+  };
+  return mapa[key] || metodo;
+};
+
 export default function ModalDetalheRelatorio({
   isOpen,
   onClose,
@@ -14,8 +31,16 @@ export default function ModalDetalheRelatorio({
   const [listaFiliais, setListaFiliais] = useState(filiais || []);
   const [filialSelecionada, setFilialSelecionada] = useState('todas');
   
+  // Função utilitária para formatar Date em YYYY-MM-DD
+  const formatarDataIso = (d) => {
+    const ano = d.getFullYear();
+    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    const dia = String(d.getDate()).padStart(2, '0');
+    return `${ano}-${mes}-${dia}`;
+  };
+
   // Padrão inicial: data de hoje YYYY-MM-DD
-  const hojeStr = useMemo(() => new Date().toISOString().substring(0, 10), []);
+  const hojeStr = useMemo(() => formatarDataIso(new Date()), []);
   const [dataInicio, setDataInicio] = useState(hojeStr);
   const [dataFim, setDataFim] = useState(hojeStr);
 
@@ -23,6 +48,36 @@ export default function ModalDetalheRelatorio({
   const [vendas, setVendas] = useState([]);
   const [caixas, setCaixas] = useState([]);
   const [tabAtiva, setTabAtiva] = useState('visao_geral'); // 'visao_geral' | 'metodos' | 'filiais' | 'vendedores'
+
+  // Funções de atalhos rápidos de período
+  const definirPeriodoHoje = () => {
+    const hoje = formatarDataIso(new Date());
+    setDataInicio(hoje);
+    setDataFim(hoje);
+  };
+
+  const definirPeriodoOntem = () => {
+    const ontem = new Date();
+    ontem.setDate(ontem.getDate() - 1);
+    const ontemStr = formatarDataIso(ontem);
+    setDataInicio(ontemStr);
+    setDataFim(ontemStr);
+  };
+
+  const definirPeriodoUltimos7Dias = () => {
+    const dHoje = new Date();
+    const d7Atras = new Date();
+    d7Atras.setDate(d7Atras.getDate() - 6);
+    setDataInicio(formatarDataIso(d7Atras));
+    setDataFim(formatarDataIso(dHoje));
+  };
+
+  const definirPeriodoMesAtual = () => {
+    const dHoje = new Date();
+    const primeiroDiaMes = new Date(dHoje.getFullYear(), dHoje.getMonth(), 1);
+    setDataInicio(formatarDataIso(primeiroDiaMes));
+    setDataFim(formatarDataIso(dHoje));
+  };
 
   // Sincronizar filiais caso receba novas props ou buscar do Supabase
   useEffect(() => {
@@ -130,7 +185,6 @@ export default function ModalDetalheRelatorio({
   // Cálculos consolidados
   const metricas = useMemo(() => {
     let faturamentoTotal = 0;
-    let totalCusto = 0;
     let totalComissoes = 0;
     let qtdItens = 0;
 
@@ -140,20 +194,19 @@ export default function ModalDetalheRelatorio({
 
     vendas.forEach(v => {
       const valor = Number(v.valor_total || v.valor || v.valor_pago || 0);
-      const custo = Number(v.preco_custo || 0) * Number(v.quantidade || 1);
       const comissao = Number(v.comissao || 0);
       const qtd = Number(v.quantidade || 1);
 
       faturamentoTotal += valor;
-      totalCusto += custo;
       totalComissoes += comissao;
       qtdItens += qtd;
 
-      // Por método
-      const metodo = (v.metodo_pagamento || v.forma_pagamento || 'OUTROS').toUpperCase();
-      if (!porMetodo[metodo]) porMetodo[metodo] = { valor: 0, count: 0 };
-      porMetodo[metodo].valor += valor;
-      porMetodo[metodo].count += 1;
+      // Por método formatado
+      const metodoRaw = v.metodo_pagamento || v.forma_pagamento || 'OUTROS';
+      const metodoLabel = formatarMetodoPagamento(metodoRaw);
+      if (!porMetodo[metodoLabel]) porMetodo[metodoLabel] = { valor: 0, count: 0 };
+      porMetodo[metodoLabel].valor += valor;
+      porMetodo[metodoLabel].count += 1;
 
       // Por filial
       const filialNome = listaFiliais.find(f => String(f.id) === String(v.filial_id))?.nome || v.filial_nome || 'Matriz';
@@ -169,16 +222,18 @@ export default function ModalDetalheRelatorio({
       porVendedor[vendedor].comissao += comissao;
     });
 
-    const lucroBrutoEstimado = faturamentoTotal - totalCusto;
-    const margemBruta = faturamentoTotal > 0 ? (lucroBrutoEstimado / faturamentoTotal) * 100 : 0;
+    // Cálculo real do CMV abatendo o preco_custo dos itens vendidos
+    const custoTotal = vendas.reduce((acc, v) => acc + Number(v.preco_custo || 0), 0);
+    const lucroBruto = faturamentoTotal - custoTotal;
+    const margem = faturamentoTotal > 0 ? ((lucroBruto / faturamentoTotal) * 100).toFixed(1) : 0;
     const ticketMedio = vendas.length > 0 ? faturamentoTotal / vendas.length : 0;
 
     return {
       faturamentoTotal,
-      totalCusto,
+      custoTotal,
       totalComissoes,
-      lucroBrutoEstimado,
-      margemBruta,
+      lucroBruto,
+      margem,
       ticketMedio,
       qtdVendas: vendas.length,
       qtdItens,
@@ -232,92 +287,129 @@ export default function ModalDetalheRelatorio({
           </div>
         </div>
 
-        {/* Barra de Filtros Rápidos */}
-        <div className="p-4 bg-[#0E0E0E] border-b border-[#222222] flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Filtro Data Inicial */}
-            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
-              <Calendar size={14} className="text-[#6A0DAD]" />
-              <span className="text-gray-400 font-semibold">De:</span>
-              <input
-                type="date"
-                value={dataInicio}
-                onChange={(e) => setDataInicio(e.target.value)}
-                className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
-              />
-            </div>
-
-            {/* Filtro Data Final */}
-            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
-              <Calendar size={14} className="text-[#6A0DAD]" />
-              <span className="text-gray-400 font-semibold">Até:</span>
-              <input
-                type="date"
-                value={dataFim}
-                onChange={(e) => setDataFim(e.target.value)}
-                className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
-              />
-            </div>
-
-            {/* Filtro Filial */}
-            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
-              <Building2 size={14} className="text-[#6A0DAD]" />
-              <span className="text-gray-400 font-semibold">Filial:</span>
-              <select
-                value={filialSelecionada}
-                onChange={(e) => setFilialSelecionada(e.target.value)}
-                className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
-              >
-                <option value="todas">🏢 Todas as Filiais</option>
-                {listaFiliais.map(f => (
-                  <option key={f.id} value={f.id}>{f.nome}</option>
-                ))}
-              </select>
-            </div>
+        {/* Barra de Filtros e Atalhos Rápidos */}
+        <div className="p-4 bg-[#0E0E0E] border-b border-[#222222] flex flex-col gap-3">
+          {/* Chips de Atalhos Rápidos de Período */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold text-gray-400 flex items-center gap-1 mr-1">
+              <Calendar size={13} className="text-[#6A0DAD]" /> Período rápido:
+            </span>
+            <button
+              type="button"
+              onClick={definirPeriodoHoje}
+              className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-black hover:bg-[#1a1a1a] text-gray-300 hover:text-white border border-[#2a2a2a] hover:border-purple-500/50 transition-all cursor-pointer"
+            >
+              Hoje
+            </button>
+            <button
+              type="button"
+              onClick={definirPeriodoOntem}
+              className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-black hover:bg-[#1a1a1a] text-gray-300 hover:text-white border border-[#2a2a2a] hover:border-purple-500/50 transition-all cursor-pointer"
+            >
+              Ontem
+            </button>
+            <button
+              type="button"
+              onClick={definirPeriodoUltimos7Dias}
+              className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-black hover:bg-[#1a1a1a] text-gray-300 hover:text-white border border-[#2a2a2a] hover:border-purple-500/50 transition-all cursor-pointer"
+            >
+              Últimos 7 dias
+            </button>
+            <button
+              type="button"
+              onClick={definirPeriodoMesAtual}
+              className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-black hover:bg-[#1a1a1a] text-gray-300 hover:text-white border border-[#2a2a2a] hover:border-purple-500/50 transition-all cursor-pointer"
+            >
+              Mês Atual
+            </button>
           </div>
 
-          {/* Abas Internas */}
-          <div className="flex items-center bg-black border border-[#222222] p-1 rounded-xl text-xs gap-1">
-            <button
-              onClick={() => setTabAtiva('visao_geral')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                tabAtiva === 'visao_geral'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Visão Geral
-            </button>
-            <button
-              onClick={() => setTabAtiva('metodos')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                tabAtiva === 'metodos'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Formas de Pagamento
-            </button>
-            <button
-              onClick={() => setTabAtiva('filiais')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                tabAtiva === 'filiais'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Por Filial
-            </button>
-            <button
-              onClick={() => setTabAtiva('vendedores')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
-                tabAtiva === 'vendedores'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Vendedores
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Filtro Data Inicial */}
+              <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
+                <Calendar size={14} className="text-[#6A0DAD]" />
+                <span className="text-gray-400 font-semibold">De:</span>
+                <input
+                  type="date"
+                  value={dataInicio}
+                  onChange={(e) => setDataInicio(e.target.value)}
+                  className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
+                />
+              </div>
+
+              {/* Filtro Data Final */}
+              <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
+                <Calendar size={14} className="text-[#6A0DAD]" />
+                <span className="text-gray-400 font-semibold">Até:</span>
+                <input
+                  type="date"
+                  value={dataFim}
+                  onChange={(e) => setDataFim(e.target.value)}
+                  className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
+                />
+              </div>
+
+              {/* Filtro Filial */}
+              <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg text-xs">
+                <Building2 size={14} className="text-[#6A0DAD]" />
+                <span className="text-gray-400 font-semibold">Filial:</span>
+                <select
+                  value={filialSelecionada}
+                  onChange={(e) => setFilialSelecionada(e.target.value)}
+                  className="bg-black text-white text-xs font-bold focus:outline-none cursor-pointer"
+                >
+                  <option value="todas">🏢 Todas as Filiais</option>
+                  {listaFiliais.map(f => (
+                    <option key={f.id} value={f.id}>{f.nome}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Abas Internas */}
+            <div className="flex items-center bg-black border border-[#222222] p-1 rounded-xl text-xs gap-1">
+              <button
+                onClick={() => setTabAtiva('visao_geral')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  tabAtiva === 'visao_geral'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Visão Geral
+              </button>
+              <button
+                onClick={() => setTabAtiva('metodos')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  tabAtiva === 'metodos'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Formas de Pagamento
+              </button>
+              <button
+                onClick={() => setTabAtiva('filiais')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  tabAtiva === 'filiais'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Por Filial
+              </button>
+              <button
+                onClick={() => setTabAtiva('vendedores')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                  tabAtiva === 'vendedores'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Vendedores
+              </button>
+            </div>
           </div>
         </div>
 
@@ -364,11 +456,18 @@ export default function ModalDetalheRelatorio({
                     <ArrowUpRight size={16} className="text-green-400" />
                   </div>
                   <span className="text-xl font-extrabold text-green-400 font-mono mt-1">
-                    {metricas.lucroBrutoEstimado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    {metricas.lucroBruto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   </span>
-                  <span className="text-[11px] text-emerald-500/80 font-medium">
-                    Margem bruta ~{metricas.margemBruta.toFixed(1)}%
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[11px] text-emerald-500/90 font-medium">
+                      Margem bruta ~{metricas.margem}%
+                    </span>
+                    {metricas.custoTotal === 0 && metricas.faturamentoTotal > 0 && (
+                      <span className="text-[10px] text-amber-400/90 bg-amber-950/40 px-1.5 py-0.2 rounded border border-amber-800/40" title="Itens vendidos sem preço de custo cadastrado no estoque">
+                        (sem custo base)
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="bg-[#111111] border border-[#222222] p-4 rounded-xl flex flex-col gap-1">
@@ -433,6 +532,10 @@ export default function ModalDetalheRelatorio({
                       ) : (
                         caixas.slice(0, 5).map(cx => {
                           const isAberto = String(cx.status || '').toLowerCase() === 'aberto' && !cx.data_fechamento;
+                          const fundo = Number(cx.saldo_inicial || 0);
+                          const totalDinheiro = Number(cx.total_dinheiro || 0);
+                          const emGaveta = fundo + totalDinheiro;
+
                           return (
                             <div key={cx.id} className="p-3 bg-black/50 border border-[#222222] rounded-lg flex items-center justify-between text-xs">
                               <div>
@@ -443,15 +546,20 @@ export default function ModalDetalheRelatorio({
                                   {cx.data_abertura ? new Date(cx.data_abertura).toLocaleDateString('pt-BR') : '-'}
                                 </span>
                               </div>
-                              <div className="text-right">
+                              <div className="text-right flex flex-col items-end">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                   isAberto ? 'bg-green-950 text-green-400 border border-green-800' : 'bg-zinc-900 text-gray-400'
                                 }`}>
                                   {isAberto ? 'Aberto' : 'Fechado'}
                                 </span>
-                                <span className="font-mono text-white font-bold block mt-1">
-                                  Fundo: R$ {Number(cx.saldo_inicial || 0).toFixed(2)}
-                                </span>
+                                <div className="mt-1 flex flex-col items-end text-[11px]">
+                                  <span className="font-mono text-gray-400">
+                                    Fundo: R$ {fundo.toFixed(2)}
+                                  </span>
+                                  <span className="font-mono text-emerald-400 font-bold">
+                                    Em Gaveta: R$ {emGaveta.toFixed(2)}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           );
@@ -486,7 +594,7 @@ export default function ModalDetalheRelatorio({
                           const tMedio = dados.count > 0 ? dados.valor / dados.count : 0;
                           return (
                             <tr key={metodo} className="hover:bg-purple-950/5">
-                              <td className="py-3 font-bold text-white uppercase">{metodo}</td>
+                              <td className="py-3 font-bold text-white">{metodo}</td>
                               <td className="py-3 text-center font-mono text-gray-300">{dados.count}</td>
                               <td className="py-3 text-right font-mono font-bold text-emerald-400">
                                 {dados.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
