@@ -134,7 +134,6 @@ function ProductTableRow({
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [copiedImei, setCopiedImei] = useState(false);
 
   const startEdit = (e, field, initialVal) => {
     e.stopPropagation();
@@ -203,12 +202,84 @@ function ProductTableRow({
     else if (e.key === 'Escape') cancelEdit(e);
   };
 
+  const [copiedImeiMap, setCopiedImeiMap] = useState({});
+
+  const copiarImeiParaClipboard = (e, imeiValor) => {
+    if (e) e.stopPropagation();
+    if (!imeiValor) return;
+    navigator.clipboard.writeText(imeiValor);
+    setCopiedImeiMap(prev => ({ ...prev, [imeiValor]: true }));
+    setTimeout(() => {
+      setCopiedImeiMap(prev => ({ ...prev, [imeiValor]: false }));
+    }, 2000);
+  };
+
+  // Coleta unificada e deduplicação de todos os IMEIs pertencentes a este produto
+  const listaImeisExtraidos = useMemo(() => {
+    const lista = [];
+    const vistos = new Set();
+
+    const addImei = (val, extra = {}) => {
+      if (!val) return;
+      const str = String(val).trim();
+      if (!str || str === '-' || str === 'null' || str === 'undefined') return;
+      // Tratar caso venha como lista separada por vírgula, ponto e vírgula ou quebra de linha
+      const tokens = str.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+      tokens.forEach(tok => {
+        if (!vistos.has(tok)) {
+          vistos.add(tok);
+          lista.push({ imei: tok, ...extra });
+        }
+      });
+    };
+
+    // 1. Array da relação imeis do Supabase ou imeis_db
+    const fontes = [p.imeis, p.imeis_db, productImeisMap[p.id]];
+    fontes.forEach(arr => {
+      if (Array.isArray(arr)) {
+        arr.forEach(item => {
+          if (typeof item === 'string') {
+            addImei(item);
+          } else if (item && typeof item === 'object') {
+            const numero = item.imei || item.numero || item.codigo;
+            // Se o item tem status de vendido, desconsiderar se houver flag
+            if (!item.vendido && String(item.status || '').toUpperCase() !== 'VENDIDO') {
+              addImei(numero, item);
+            } else if (numero && !vistos.has(numero)) {
+              addImei(numero, item);
+            }
+          }
+        });
+      }
+    });
+
+    // 2. Coluna direta 'imei' na linha do produto
+    if (p.imei) {
+      addImei(p.imei);
+    }
+
+    // 3. Fallback de disponiveisImeis global (busca por produto_id ou nome equivalente)
+    if (Array.isArray(disponiveisImeis)) {
+      disponiveisImeis.forEach(im => {
+        const matchesId = (p.id && im.produto_id && String(p.id) === String(im.produto_id));
+        const matchesNome = (!p.id || !im.produto_id) && (
+          im.produtos?.nome && p.nome &&
+          im.produtos.nome.trim().toLowerCase() === String(p.nome).trim().toLowerCase()
+        );
+        const matchesFilial = !p.filial_id || !im.filial_id || String(p.filial_id) === String(im.filial_id);
+        const isNotSold = !im.vendido && String(im.status || '').toUpperCase() !== 'VENDIDO';
+
+        if ((matchesId || matchesNome) && matchesFilial && isNotSold) {
+          if (im.imei) addImei(im.imei, im);
+        }
+      });
+    }
+
+    return lista;
+  }, [p, productImeisMap, disponiveisImeis]);
+
   const hasImeiProp = Boolean(p.imei && String(p.imei).trim() !== '');
-  const hasImeisList = Boolean(
-    (Array.isArray(p.imeis_db) && p.imeis_db.length > 0) ||
-    (Array.isArray(p.imeis) && p.imeis.length > 0) ||
-    (Array.isArray(productImeisMap[p.id]) && productImeisMap[p.id].length > 0)
-  );
+  const hasImeisList = listaImeisExtraidos.length > 0;
 
   const isCelular = (
     p.tipo === 'CELULAR' ||
@@ -216,15 +287,6 @@ function ProductTableRow({
     ['IOS', 'ANDROID'].includes(String(p.categoria || '').toUpperCase()) ||
     hasImeiProp ||
     hasImeisList
-  );
-
-  // Determinar IMEI principal para exibição direta quando disponível
-  const imeiPrincipal = (
-    (hasImeiProp ? String(p.imei).trim() : null) ||
-    p.imeis_db?.[0]?.imei ||
-    p.imeis?.[0]?.imei ||
-    productImeisMap[p.id]?.[0]?.imei ||
-    null
   );
 
   return (
@@ -238,24 +300,62 @@ function ProductTableRow({
             </div>
             {isCelular && (
               <div className="flex items-center">
-                {imeiPrincipal ? (
+                {listaImeisExtraidos.length === 1 ? (
+                  /* 1 IMEI: exibe a badge com botão de copiar */
                   <span className="inline-flex items-center gap-1.5 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-2 py-0.5 rounded">
-                    <span>IMEI: {imeiPrincipal}</span>
+                    <span>IMEI: {listaImeisExtraidos[0].imei}</span>
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(imeiPrincipal);
-                        setCopiedImei(true);
-                        setTimeout(() => setCopiedImei(false), 2000);
-                      }}
+                      onClick={(e) => copiarImeiParaClipboard(e, listaImeisExtraidos[0].imei)}
                       className="hover:text-white transition-colors cursor-pointer text-purple-300 ml-0.5"
                       title="Copiar IMEI"
                     >
-                      {copiedImei ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                      {copiedImeiMap[listaImeisExtraidos[0].imei] ? (
+                        <Check size={11} className="text-emerald-400" />
+                      ) : (
+                        <Copy size={11} />
+                      )}
                     </button>
                   </span>
+                ) : listaImeisExtraidos.length > 1 ? (
+                  /* Múltiplos IMEIs: exibe as badges com botão de cópia individual e botão de expansão */
+                  <div className="flex flex-wrap items-center gap-1 max-w-[280px]">
+                    {listaImeisExtraidos.slice(0, 3).map((imObj) => (
+                      <span
+                        key={imObj.imei}
+                        className="inline-flex items-center gap-1 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-1.5 py-0.5 rounded"
+                      >
+                        <span className="truncate max-w-[110px]" title={imObj.imei}>{imObj.imei}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => copiarImeiParaClipboard(e, imObj.imei)}
+                          className="hover:text-white transition-colors cursor-pointer text-purple-300"
+                          title={`Copiar IMEI ${imObj.imei}`}
+                        >
+                          {copiedImeiMap[imObj.imei] ? (
+                            <Check size={10} className="text-emerald-400" />
+                          ) : (
+                            <Copy size={10} />
+                          )}
+                        </button>
+                      </span>
+                    ))}
+                    {listaImeisExtraidos.length > 3 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id);
+                        }}
+                        className="text-[9px] bg-purple-900/50 hover:bg-purple-800/70 text-purple-200 px-1.5 py-0.5 rounded font-mono font-bold cursor-pointer transition-colors"
+                        title="Ver todos os seriais"
+                      >
+                        +{listaImeisExtraidos.length - 3} mais
+                      </button>
+                    )}
+                  </div>
                 ) : (
+                  /* Sem IMEI vinculado apenas se a lista/campo realmente retornar vazia */
                   <span className="inline-flex items-center bg-amber-950/40 border border-amber-800/40 text-amber-400 text-[10px] px-2 py-0.5 rounded italic">
                     Sem IMEI vinculado
                   </span>
@@ -335,28 +435,15 @@ function ProductTableRow({
           ) : (
             <div className="flex items-center gap-1.5">
               {isCelular ? (() => {
-                const imeisArray = (p.imeis && p.imeis.length > 0)
-                  ? p.imeis
-                  : (p.imeis_db && p.imeis_db.length > 0)
-                    ? p.imeis_db
-                    : (productImeisMap[p.id] && productImeisMap[p.id].length > 0)
-                      ? productImeisMap[p.id]
-                      : (disponiveisImeis || []);
-
-                const imeisValidos = (imeisArray || []).filter(i => 
-                  (!p.filial_id || String(i.filial_id) === String(p.filial_id)) &&
-                  (i.status?.toLowerCase().startsWith('dispon') || !i.status) &&
-                  !i.vendido
-                );
-                const totalExibido = imeisValidos.length > 0 
-                  ? imeisValidos.length 
+                const totalExibido = listaImeisExtraidos.length > 0
+                  ? listaImeisExtraidos.length
                   : (p.imeis_count !== undefined && p.imeis_count !== null && p.imeis_count > 0 ? p.imeis_count : (p.quantidade || 1));
 
                 if (totalExibido > 1) {
                   return (
                     <button
                       type="button"
-                      onClick={e => { e.stopPropagation(); toggleVerImeis(p.id, p.filial_id); }}
+                      onClick={e => { e.stopPropagation(); if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id); }}
                       className="text-[#6A0DAD] hover:text-purple-400 font-bold underline cursor-pointer flex items-center gap-1"
                       title="Ver todos os seriais/IMEIs deste aparelho"
                     >
@@ -393,17 +480,21 @@ function ProductTableRow({
           <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
             {(() => {
               const obterImeisDoProduto = (prod) => {
-                // Caso 0: mapa de IMEIs carregados sob demanda
+                // Caso 0: lista de IMEIs normalizados extraídos do componente
+                if (listaImeisExtraidos && listaImeisExtraidos.length > 0) {
+                  return listaImeisExtraidos;
+                }
+                // Caso 1: mapa de IMEIs carregados sob demanda
                 if (Array.isArray(productImeisMap[prod?.id]) && productImeisMap[prod?.id].length > 0) {
                   return productImeisMap[prod?.id];
                 }
-                // Caso 1: array de objetos ou strings já existente
+                // Caso 2: array de objetos ou strings já existente
                 if (Array.isArray(prod?.imeis) && prod.imeis.length > 0) return prod.imeis;
                 if (Array.isArray(prod?.imeis_db) && prod.imeis_db.length > 0) return prod.imeis_db;
                 if (Array.isArray(prod?.lista_imeis) && prod.lista_imeis.length > 0) return prod.lista_imeis;
                 if (Array.isArray(prod?.produtos_imeis) && prod.produtos_imeis.length > 0) return prod.produtos_imeis;
                 
-                // Caso 2: coluna única 'imei' na própria linha do produto
+                // Caso 3: coluna única 'imei' na própria linha do produto
                 if (prod?.imei) {
                   return [{ imei: prod.imei, cor: prod.cor, status: prod.status || 'DISPONÍVEL' }];
                 }
@@ -436,6 +527,20 @@ function ProductTableRow({
                         <span className="text-purple-300 font-mono font-semibold tracking-wider">
                           {valorImei || 'Sem número'}
                         </span>
+                        {valorImei && (
+                          <button
+                            type="button"
+                            onClick={(e) => copiarImeiParaClipboard(e, valorImei)}
+                            className="text-gray-400 hover:text-purple-300 transition-colors p-0.5 rounded cursor-pointer"
+                            title="Copiar este IMEI"
+                          >
+                            {copiedImeiMap[valorImei] ? (
+                              <Check size={11} className="text-emerald-400" />
+                            ) : (
+                              <Copy size={11} />
+                            )}
+                          </button>
+                        )}
                         {corImei && (
                           <ColorBadge cor={corImei} />
                         )}
@@ -3735,7 +3840,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let query = supabase
         .from('produtos')
-        .select('id, nome, filial_id, categoria, cor, preco, preco_venda, preco_custo, quantidade, imei, status, codigo_barras, tipo')
+        .select(`
+          id, nome, filial_id, categoria, cor, preco, preco_venda, preco_custo, quantidade, imei, status, codigo_barras, tipo,
+          imeis(id, produto_id, filial_id, empresa_id, status, vendido, imei, cor)
+        `)
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -3766,12 +3874,32 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
 
-      // Converte os produtos retornados garantindo a estrutura correta para exibição
-      const prodsFormatados = (data || []).map(p => ({
-        ...p,
-        imeis_db: p.imei ? [{ imei: p.imei, status: p.status || 'DISPONIVEL' }] : [],
-        imeis_count: Number(p.quantidade || 0)
-      }));
+      // Converte os produtos retornados garantindo a extração completa de todos os IMEIs
+      const prodsFormatados = (data || []).map(p => {
+        const seriaisDb = Array.isArray(p.imeis) ? p.imeis : [];
+        const imeisValidos = seriaisDb.filter(i => !i.vendido && String(i.status || '').toUpperCase() !== 'VENDIDO');
+
+        // Se houver coluna p.imei e ela não estiver contida na lista filha, incorporar
+        const imeisCombinados = [...imeisValidos];
+        if (p.imei && String(p.imei).trim() !== '') {
+          const imeiStr = String(p.imei).trim();
+          if (!imeisCombinados.some(i => String(i.imei).trim() === imeiStr)) {
+            imeisCombinados.push({
+              imei: imeiStr,
+              status: p.status || 'DISPONIVEL',
+              cor: p.cor || null,
+              filial_id: p.filial_id
+            });
+          }
+        }
+
+        return {
+          ...p,
+          imeis: imeisCombinados,
+          imeis_db: imeisCombinados,
+          imeis_count: imeisCombinados.length > 0 ? imeisCombinados.length : Number(p.quantidade || 0)
+        };
+      });
 
       setEstoqueConsolidadoLista(prodsFormatados);
     } catch (err) {
