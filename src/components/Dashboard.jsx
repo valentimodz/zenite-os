@@ -134,6 +134,7 @@ function ProductTableRow({
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [copiedImei, setCopiedImei] = useState(false);
 
   const startEdit = (e, field, initialVal) => {
     e.stopPropagation();
@@ -171,6 +172,21 @@ function ProductTableRow({
       return;
     }
 
+    if (editingField === 'quantidade') {
+      const novaQtd = parseInt(editValue, 10);
+      if (isNaN(novaQtd) || novaQtd < 0) return;
+      setIsSaving(true);
+      try {
+        await onUpdateProdutoField(p.id, p.nome, 'quantidade', novaQtd, p.filial_id);
+        setEditingField(null);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     setIsSaving(true);
     try {
       await onUpdateProdutoField(p.id, p.nome, editingField, editValue, p.filial_id);
@@ -187,15 +203,65 @@ function ProductTableRow({
     else if (e.key === 'Escape') cancelEdit(e);
   };
 
-  const isCelular = p.tipo === 'CELULAR';
+  const hasImeiProp = Boolean(p.imei && String(p.imei).trim() !== '');
+  const hasImeisList = Boolean(
+    (Array.isArray(p.imeis_db) && p.imeis_db.length > 0) ||
+    (Array.isArray(p.imeis) && p.imeis.length > 0) ||
+    (Array.isArray(productImeisMap[p.id]) && productImeisMap[p.id].length > 0)
+  );
+
+  const isCelular = (
+    p.tipo === 'CELULAR' ||
+    String(p.categoria || '').toLowerCase().includes('celular') ||
+    ['IOS', 'ANDROID'].includes(String(p.categoria || '').toUpperCase()) ||
+    hasImeiProp ||
+    hasImeisList
+  );
+
+  // Determinar IMEI principal para exibição direta quando disponível
+  const imeiPrincipal = (
+    (hasImeiProp ? String(p.imei).trim() : null) ||
+    p.imeis_db?.[0]?.imei ||
+    p.imeis?.[0]?.imei ||
+    productImeisMap[p.id]?.[0]?.imei ||
+    null
+  );
 
   return (
     <React.Fragment>
       <tr className="hover:bg-[#6A0DAD]/5 transition-colors">
         <td className="py-2.5 font-semibold text-white">
-          <div className="flex items-center gap-1.5">
-            {isCelular ? <Smartphone size={12} className="text-[#6A0DAD]" /> : <Tag size={12} className="text-pink-400" />}
-            <span className="truncate max-w-[120px]" title={p.nome}>{p.nome}</span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-1.5">
+              {isCelular ? <Smartphone size={13} className="text-[#6A0DAD] shrink-0" /> : <Tag size={12} className="text-pink-400 shrink-0" />}
+              <span className="truncate max-w-[150px]" title={p.nome}>{p.nome}</span>
+            </div>
+            {isCelular && (
+              <div className="flex items-center">
+                {imeiPrincipal ? (
+                  <span className="inline-flex items-center gap-1.5 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-2 py-0.5 rounded">
+                    <span>IMEI: {imeiPrincipal}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(imeiPrincipal);
+                        setCopiedImei(true);
+                        setTimeout(() => setCopiedImei(false), 2000);
+                      }}
+                      className="hover:text-white transition-colors cursor-pointer text-purple-300 ml-0.5"
+                      title="Copiar IMEI"
+                    >
+                      {copiedImei ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                    </button>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center bg-amber-950/40 border border-amber-800/40 text-amber-400 text-[10px] px-2 py-0.5 rounded italic">
+                    Sem IMEI vinculado
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </td>
         <td className="py-2.5 text-gray-500 truncate max-w-[80px]">{filiais.find(f => f.id === p.filial_id)?.nome || '-'}</td>
@@ -284,18 +350,35 @@ function ProductTableRow({
                 );
                 const totalExibido = imeisValidos.length > 0 
                   ? imeisValidos.length 
-                  : (p.imeis_count !== undefined && p.imeis_count !== null && p.imeis_count > 0 ? p.imeis_count : (p.quantidade || 0));
+                  : (p.imeis_count !== undefined && p.imeis_count !== null && p.imeis_count > 0 ? p.imeis_count : (p.quantidade || 1));
+
+                if (totalExibido > 1) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={e => { e.stopPropagation(); toggleVerImeis(p.id, p.filial_id); }}
+                      className="text-[#6A0DAD] hover:text-purple-400 font-bold underline cursor-pointer flex items-center gap-1"
+                      title="Ver todos os seriais/IMEIs deste aparelho"
+                    >
+                      <span>{totalExibido} unids (Seriais)</span>
+                      <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180' : ''} />
+                    </button>
+                  );
+                }
 
                 return (
-                  <button type="button" onClick={e => { e.stopPropagation(); toggleVerImeis(p.id, p.filial_id); }} className="text-[#6A0DAD] font-bold underline cursor-pointer flex items-center gap-1">
-                    <span>{totalExibido} (IMEIs)</span>
-                    <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180' : ''} />
-                  </button>
+                  <span className="font-bold text-purple-300 font-mono bg-purple-950/30 border border-purple-800/30 px-2 py-0.5 rounded text-[10px]">
+                    1 unid (Serial)
+                  </span>
                 );
               })() : (
                 <span className="font-bold text-gray-300">{p.quantidade || 0} unids</span>
               )}
-              {!isCelular && <button onClick={e => startEdit(e, 'quantidade', p.quantidade)} className="text-gray-500 hover:text-[#6A0DAD]"><Edit2 size={11} /></button>}
+              {!isCelular && (
+                <button onClick={e => startEdit(e, 'quantidade', p.quantidade)} className="text-gray-500 hover:text-[#6A0DAD]" title="Editar Quantidade">
+                  <Edit2 size={11} />
+                </button>
+              )}
             </div>
           )}
         </td>
@@ -3652,7 +3735,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let query = supabase
         .from('produtos')
-        .select('id, nome, filial_id, categoria, cor, preco, preco_venda, preco_custo, quantidade, imei, status, codigo_barras')
+        .select('id, nome, filial_id, categoria, cor, preco, preco_venda, preco_custo, quantidade, imei, status, codigo_barras, tipo')
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -12107,9 +12190,10 @@ export default function Dashboard({ session, profileDataProps }) {
             sku: (p.sku && String(p.sku).trim()) || (cat.sku && String(cat.sku).trim()) || null,
             categoria: p.categoria || cat.categoria || 'GERAL',
             tipo: p.tipo || cat.tipo || 'ACESSORIO',
+            imei: p.imei || null,
             preco: parseFloat(p.preco || cat.preco || 0),
             quantidade: p.quantidade || cat.quantidade || 0,
-            imeis_db: p.imeis_db || []
+            imeis_db: p.imeis_db || (p.imei ? [{ imei: p.imei, status: p.status || 'DISPONIVEL' }] : [])
           });
         });
       } else {
