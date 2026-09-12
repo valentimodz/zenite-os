@@ -15853,7 +15853,106 @@ export default function Dashboard({ session, profileDataProps }) {
             </div>
           )
         }
-      </div >
+      </div>
+    );
+  };
+
+  // Componente da Tela: Configurações do Vendedor / Dados Pessoais
+  const renderConfiguracoes = () => {
+    return (
+      <div className="space-y-8 animate-fadeIn">
+        <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl">
+          <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
+            <Settings size={22} className="text-[#6A0DAD]" />
+            Configurações
+          </h3>
+          <p className="text-xs text-gray-500 mt-1">
+            Gerencie seus dados de acesso pessoais e preferências de conta.
+          </p>
+        </div>
+
+        {/* CARD DE PERFIL / MEUS DADOS DE ACESSO */}
+        <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <User size={18} className="text-[#6A0DAD]" />
+              Meus Dados de Acesso
+            </h3>
+            <p className="text-xs text-gray-500 mt-1">Atualize seu nome completo, e-mail de login e redefina sua senha.</p>
+          </div>
+
+          <form onSubmit={handleSaveUserProfile} className="space-y-4 max-w-xl">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  Nome Completo
+                </label>
+                <input
+                  type="text"
+                  value={profileNome}
+                  onChange={(e) => setProfileNome(e.target.value)}
+                  required
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-semibold"
+                  placeholder="Ex: João Silva"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  E-mail / Login de Acesso
+                </label>
+                <input
+                  type="email"
+                  value={profileEmail}
+                  onChange={(e) => setProfileEmail(e.target.value)}
+                  required
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono font-semibold"
+                  placeholder="seuemail@exemplo.com"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  Nova Senha (Opcional)
+                </label>
+                <input
+                  type="password"
+                  value={profileSenha}
+                  onChange={(e) => setProfileSenha(e.target.value)}
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                  placeholder="Mínimo 6 caracteres"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  Confirmar Nova Senha
+                </label>
+                <input
+                  type="password"
+                  value={profileSenhaConfirm}
+                  onChange={(e) => setProfileSenhaConfirm(e.target.value)}
+                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                  placeholder="Confirme a nova senha"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={isSavingProfile}
+                className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-6 rounded-md transition-all flex items-center gap-2 text-sm cursor-pointer"
+              >
+                {isSavingProfile ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                {isSavingProfile ? 'Salvando...' : 'Salvar Dados'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     );
   };
 
