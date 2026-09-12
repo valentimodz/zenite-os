@@ -6035,6 +6035,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // 2. Validação da Resposta do Supabase com .select()
+      const dataFechamentoISO = new Date().toISOString();
       const updatePayload = {
         status: 'fechado',
         data_fechamento: dataFechamentoISO,
