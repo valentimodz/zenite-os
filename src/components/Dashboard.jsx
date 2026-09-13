@@ -671,9 +671,21 @@ export default function Dashboard({ session, profileDataProps }) {
   const [vendaDetalheSelecionada, setVendaDetalheSelecionada] = useState(null);
   const [profile, setProfile] = useState(profileDataProps || null);
   const [company, setCompany] = useState(null);
-  const activeEmpresaId = localStorage.getItem('@zenite_empresaId') || profile?.empresa_id
+  const activeEmpresaId = localStorage.getItem('@zenite_empresaId') || profile?.empresa_id;
   const [loading, setLoading] = useState(profileDataProps ? false : true);
   const [error, setError] = useState('');
+
+  // Perfil e Role do usuário logado (seguro contra ReferenceError em renderizações condicionais)
+  const userRole = (
+    profile?.role ||
+    profile?.cargo ||
+    profileDataProps?.role ||
+    profileDataProps?.cargo ||
+    session?.user?.role ||
+    session?.user?.user_metadata?.role ||
+    session?.user?.user_metadata?.cargo ||
+    ''
+  ).toUpperCase();
 
   const [toast, setToast] = useState(null); // { message: '', type: 'success' | 'error' | 'warning' | 'info' }
 
