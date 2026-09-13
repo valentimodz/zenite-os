@@ -1795,6 +1795,22 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [profile]);
 
+  // Reseta estado do cliente ao abrir o PDV para evitar reaproveitar IDs apagados do banco ou cache obsoleto
+  useEffect(() => {
+    const isPdvActive = currentView === 'pdv' || activeSellerTab === 'pdv' || activeTab === 'pdv';
+    if (isPdvActive && pdvCart.length === 0) {
+      setSelectedPdvClienteId(null);
+      setPdvClienteNome('');
+      setPdvClienteSearchInput('');
+      setPdvClienteCpfCnpj('');
+      setPdvClienteEmail('');
+      setPdvClienteTelefone('');
+      setPdvClienteDataNascimento('');
+      setIsPdvClienteFieldsEditable(false);
+      setIsPdvClienteDropdownOpen(false);
+    }
+  }, [currentView, activeSellerTab, activeTab]);
+
   // Trava de Segurança Estrita: Se um usuário não-admin (ex: GERENTE ou VENDEDOR) tentar acessar a aba catalogo_mestre, redireciona para a visão autorizada
   useEffect(() => {
     const roleUpper = (profile?.role || profileDataProps?.role || '').toUpperCase();
@@ -10991,107 +11007,142 @@ export default function Dashboard({ session, profileDataProps }) {
 
     setLoadingPdvVenda(true);
     try {
-      // 1. Inserção/Atualização Obrigatória (Upsert) do Cliente no Banco de Dados ANTES da Venda
-      let clienteIdBanco = selectedPdvClienteId;
+      // 1. Validação e Inserção/Atualização Obrigatória (Upsert) do Cliente no Banco de Dados ANTES da Venda
+      const isValidUuid = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id.trim());
+
+      let clienteIdBanco = isValidUuid(selectedPdvClienteId) ? selectedPdvClienteId.trim() : null;
+      if (selectedPdvClienteId && !isValidUuid(selectedPdvClienteId)) {
+        console.warn("⚠️ [PDV CHECKOUT] selectedPdvClienteId não é um UUID válido. Resetando:", selectedPdvClienteId);
+        setSelectedPdvClienteId(null);
+      }
+
       const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
+      const isConsumidorFinal = !nomeClienteFinal || 
+        nomeClienteFinal.toLowerCase() === 'consumidor final' || 
+        nomeClienteFinal.toLowerCase() === 'consumidor' ||
+        nomeClienteFinal.toLowerCase() === 'cliente balcão';
 
       const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
       const currentEmpresaId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
       const currentFilialId = profile?.filial_id || currentEmpresaId;
 
-      const payloadCliente = {
-        empresa_id: currentEmpresaId,
-        filial_id: currentFilialId,
-        vendedor_id: currentUserId,
-        usuario_id: currentUserId,
-        criado_por: currentUserId,
-        nome: nomeClienteFinal || 'Consumidor Final',
-        cpf_cnpj: pdvClienteCpfCnpj.trim() || null,
-        email: pdvClienteEmail.trim() || null,
-        telefone: pdvClienteTelefone.trim() || null,
-        data_nascimento: pdvClienteDataNascimento.trim() || null,
-      };
-
-      console.log("🔥 [PDV CLIENTE PAYLOAD] Salvar/Atualizar cliente PDV com autoria:", payloadCliente);
-
-      if (clienteIdBanco) {
-        // Se já possui cliente selecionado por ID, atualiza o cadastro no banco para manter dados síncronos
-        const { error: updateErr } = await supabase
-          .from('clientes')
-          .update(payloadCliente)
-          .eq('id', clienteIdBanco);
-
-        if (updateErr) {
-          console.error("Erro crítico ao atualizar cliente:", updateErr);
-          showToast(`Falha ao atualizar dados do cliente: ${updateErr.message}. A venda não pode ser concluída.`, "error");
-          alert(`Falha ao atualizar cliente: ${updateErr.message}. A venda não pode ser concluída.`);
-          setLoadingPdvVenda(false);
-          return; // BLOQUEIA A VENDA se o cliente não puder ser salvo/atualizado
-        }
-      } else if (nomeClienteFinal && nomeClienteFinal !== 'Consumidor Final') {
-        // Se não for um cliente previamente selecionado, tenta encontrar pelo CPF (se preenchido) ou pelo Nome exato
-        let clienteExistente = null;
-
-        if (pdvClienteCpfCnpj.trim()) {
-          const { data: byCpf } = await supabase
+      if (isConsumidorFinal) {
+        // Se for consumidor final ou sem nome, limpa referências para não violar foreign key constraint vendas_cliente_id_fkey
+        clienteIdBanco = null;
+        setSelectedPdvClienteId(null);
+      } else {
+        // Se há um clienteIdBanco, verificar previamente se ele realmente existe no banco para evitar erro de chave estrangeira
+        if (clienteIdBanco) {
+          const { data: clienteCheck } = await supabase
             .from('clientes')
             .select('id')
-            .eq('empresa_id', empresaId)
-            .eq('cpf_cnpj', pdvClienteCpfCnpj.trim())
+            .eq('id', clienteIdBanco)
             .maybeSingle();
-          clienteExistente = byCpf;
+
+          if (!clienteCheck) {
+            console.warn("⚠️ [PDV CHECKOUT] Cliente ID em cache não existe mais no banco. Resetando ID:", clienteIdBanco);
+            clienteIdBanco = null;
+            setSelectedPdvClienteId(null);
+          }
         }
 
-        if (!clienteExistente) {
-          const { data: byNome } = await supabase
-            .from('clientes')
-            .select('id')
-            .eq('empresa_id', empresaId)
-            .ilike('nome', nomeClienteFinal)
-            .maybeSingle();
-          clienteExistente = byNome;
-        }
+        const payloadCliente = {
+          empresa_id: currentEmpresaId,
+          filial_id: currentFilialId,
+          vendedor_id: currentUserId,
+          usuario_id: currentUserId,
+          criado_por: currentUserId,
+          nome: nomeClienteFinal,
+          cpf_cnpj: pdvClienteCpfCnpj.trim() || null,
+          email: pdvClienteEmail.trim() || null,
+          telefone: pdvClienteTelefone.trim() || null,
+          data_nascimento: pdvClienteDataNascimento.trim() || null,
+        };
 
-        if (clienteExistente?.id) {
-          const { error: updateExistenteErr } = await supabase
+        console.log("🔥 [PDV CLIENTE PAYLOAD] Salvar/Atualizar cliente PDV com autoria:", payloadCliente);
+
+        if (clienteIdBanco) {
+          // Se já possui cliente selecionado por ID verificado, atualiza o cadastro no banco para manter dados síncronos
+          const { error: updateErr } = await supabase
             .from('clientes')
             .update(payloadCliente)
-            .eq('id', clienteExistente.id);
+            .eq('id', clienteIdBanco);
 
-          if (updateExistenteErr) {
-            console.error("Erro crítico ao atualizar cliente existente:", updateExistenteErr);
-            showToast(`Falha ao atualizar cliente: ${updateExistenteErr.message}. A venda não pode ser concluída.`, "error");
-            alert(`Falha ao atualizar cliente: ${updateExistenteErr.message}. A venda não pode ser concluída.`);
+          if (updateErr) {
+            console.error("Erro crítico ao atualizar cliente:", updateErr);
+            showToast(`Falha ao atualizar dados do cliente: ${updateErr.message}. A venda não pode ser concluída.`, "error");
+            alert(`Falha ao atualizar cliente: ${updateErr.message}. A venda não pode ser concluída.`);
             setLoadingPdvVenda(false);
-            return;
+            return; // BLOQUEIA A VENDA se o cliente não puder ser salvo/atualizado
           }
-          clienteIdBanco = clienteExistente.id;
         } else {
-          console.log("📦 Payload enviado para o banco (PDV Novo Cliente):", payloadCliente);
+          // Se não for um cliente previamente selecionado, tenta encontrar pelo CPF (se preenchido) ou pelo Nome exato
+          let clienteExistente = null;
 
-          // SALVA novo cliente no banco obrigatoriamente
-          const { data: novoCliente, error: erroCliente } = await supabase
-            .from('clientes')
-            .insert([payloadCliente])
-            .select();
-
-          if (erroCliente) {
-            console.error("🚨 ERRO BRUTO DO SUPABASE (PDV INSERT CLIENTE):", erroCliente);
-            alert(`Falha fatal ao salvar cliente: ${erroCliente.message} \nDetalhes: ${erroCliente.details || 'Nenhum'}`);
-            setLoadingPdvVenda(false);
-            return; // BLOQUEIA A VENDA se o cliente não for salvo
+          if (pdvClienteCpfCnpj.trim()) {
+            const { data: byCpf } = await supabase
+              .from('clientes')
+              .select('id')
+              .eq('empresa_id', empresaId)
+              .eq('cpf_cnpj', pdvClienteCpfCnpj.trim())
+              .maybeSingle();
+            clienteExistente = byCpf;
           }
 
-          if (novoCliente && novoCliente.length > 0) {
-            clienteIdBanco = novoCliente[0].id;
+          if (!clienteExistente) {
+            const { data: byNome } = await supabase
+              .from('clientes')
+              .select('id')
+              .eq('empresa_id', empresaId)
+              .ilike('nome', nomeClienteFinal)
+              .maybeSingle();
+            clienteExistente = byNome;
           }
+
+          if (clienteExistente?.id && isValidUuid(clienteExistente.id)) {
+            const { error: updateExistenteErr } = await supabase
+              .from('clientes')
+              .update(payloadCliente)
+              .eq('id', clienteExistente.id);
+
+            if (updateExistenteErr) {
+              console.error("Erro crítico ao atualizar cliente existente:", updateExistenteErr);
+              showToast(`Falha ao atualizar cliente: ${updateExistenteErr.message}. A venda não pode ser concluída.`, "error");
+              alert(`Falha ao atualizar cliente: ${updateExistenteErr.message}. A venda não pode ser concluída.`);
+              setLoadingPdvVenda(false);
+              return;
+            }
+            clienteIdBanco = clienteExistente.id;
+          } else {
+            console.log("📦 Payload enviado para o banco (PDV Novo Cliente):", payloadCliente);
+
+            // SALVA novo cliente no banco obrigatoriamente
+            const { data: novoCliente, error: erroCliente } = await supabase
+              .from('clientes')
+              .insert([payloadCliente])
+              .select();
+
+            if (erroCliente) {
+              console.error("🚨 ERRO BRUTO DO SUPABASE (PDV INSERT CLIENTE):", erroCliente);
+              alert(`Falha fatal ao salvar cliente: ${erroCliente.message} \nDetalhes: ${erroCliente.details || 'Nenhum'}`);
+              setLoadingPdvVenda(false);
+              return; // BLOQUEIA A VENDA se o cliente não for salvo
+            }
+
+            if (novoCliente && novoCliente.length > 0 && isValidUuid(novoCliente[0].id)) {
+              clienteIdBanco = novoCliente[0].id;
+            }
+          }
+          if (clienteIdBanco) {
+            setSelectedPdvClienteId(clienteIdBanco);
+          }
+          setPdvClienteNome(nomeClienteFinal);
         }
-        setSelectedPdvClienteId(clienteIdBanco);
-        setPdvClienteNome(nomeClienteFinal);
       }
 
       // PASSO 1 & 2: EXTRAÇÃO DE CONTEXTO E GUARD CLAUSES (TRAVAS DE SEGURANÇA)
-      const cliente_id = clienteIdBanco || selectedPdvClienteId || null;
+      const rawCandidateId = clienteIdBanco || selectedPdvClienteId || null;
+      const cliente_id = (isConsumidorFinal || !isValidUuid(rawCandidateId)) ? null : rawCandidateId;
       const vendedor_id = session?.user?.id || profile?.id || null;
 
       console.log("🔥 [PRE-SAVE CHECK] Contexto do Checkout:", {
@@ -11100,6 +11151,7 @@ export default function Dashboard({ session, profileDataProps }) {
         cliente_id,
         vendedor_id,
         nomeClienteFinal,
+        isConsumidorFinal,
         pdvClienteCpfCnpj: pdvClienteCpfCnpj.trim()
       });
 
@@ -11116,8 +11168,8 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
 
-      // GUARD CLAUSE 1: Se o usuário selecionou/informou um cliente, o ID NÃO PODE ser nulo.
-      if (nomeClienteFinal && nomeClienteFinal !== 'Consumidor Final' && !cliente_id) {
+      // GUARD CLAUSE 1: Se o usuário informou um cliente customizado (não consumidor final), o ID NÃO PODE ser nulo.
+      if (!isConsumidorFinal && !cliente_id) {
         const msgErrCliente = "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo. Venda abortada.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCliente);
         showToast(msgErrCliente, "error");
@@ -11214,9 +11266,9 @@ export default function Dashboard({ session, profileDataProps }) {
         createdVendaIds.push(rpcRes.venda_id);
 
         try {
-          const resolvedClienteNome = nomeClienteFinal || 'Consumidor Final';
-          const resolvedClienteCpf = pdvClienteCpfCnpj.trim() || null;
-          const resolvedClienteId = cliente_id || clienteIdBanco || selectedPdvClienteId || null;
+          const resolvedClienteNome = isConsumidorFinal ? 'Consumidor Final' : (nomeClienteFinal || 'Consumidor Final');
+          const resolvedClienteCpf = isConsumidorFinal ? null : (pdvClienteCpfCnpj.trim() || null);
+          const resolvedClienteId = isConsumidorFinal ? null : (cliente_id || clienteIdBanco || null);
           const mapNomeMetodo = {
             'pix': 'PIX',
             'cartao': 'CARTÃO DE CRÉDITO',
@@ -14336,6 +14388,48 @@ export default function Dashboard({ session, profileDataProps }) {
                       <User size={14} className="text-primary" />
                       Vincular Cliente (Obrigatório)
                     </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPdvClienteId(null);
+                          setPdvClienteNome('Consumidor Final');
+                          setPdvClienteSearchInput('Consumidor Final');
+                          setPdvClienteCpfCnpj('');
+                          setPdvClienteEmail('');
+                          setPdvClienteTelefone('');
+                          setPdvClienteDataNascimento('');
+                          setIsPdvClienteFieldsEditable(false);
+                          setIsPdvClienteDropdownOpen(false);
+                          showToast('Selecionado: Consumidor Final (sem vínculo)', 'info');
+                        }}
+                        className="text-[10px] px-2 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary font-bold transition-colors cursor-pointer"
+                        title="Vender para Consumidor Final sem vincular cliente específico"
+                      >
+                        Consumidor Final
+                      </button>
+                      {(selectedPdvClienteId || pdvClienteNome || pdvClienteSearchInput) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedPdvClienteId(null);
+                            setPdvClienteNome('');
+                            setPdvClienteSearchInput('');
+                            setPdvClienteCpfCnpj('');
+                            setPdvClienteEmail('');
+                            setPdvClienteTelefone('');
+                            setPdvClienteDataNascimento('');
+                            setIsPdvClienteFieldsEditable(false);
+                            setIsPdvClienteDropdownOpen(false);
+                            showToast('Dados do cliente limpos.', 'info');
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold transition-colors cursor-pointer"
+                          title="Limpar seleção de cliente"
+                        >
+                          Limpar
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 mt-3 bg-surface border border-border p-4 rounded-xl shadow-sm">
