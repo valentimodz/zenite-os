@@ -154,6 +154,62 @@ const permiteParticipacaoTreener = (carrinho) => {
   });
 };
 
+// Categorias Críticas que exigem cadastro e identificação completa do cliente no PDV (Regra das Duas Esteiras)
+const CATEGORIAS_CRITICAS = ['CELULARES', 'VIDEOGAMES', 'CAIXAS DE SOM', 'TABLETS'];
+
+// Verifica se um item específico pertence à esteira de produtos críticos (ou possui IMEI/Número de Série)
+const isItemCritico = (item) => {
+  if (!item) return false;
+  const prod = item.produto || item;
+  const categoria = String(prod.categoria || item.categoria || prod.tipo || item.tipo || '').toUpperCase().trim();
+  const nome = String(prod.nome || item.nome || '').toUpperCase().trim();
+
+  // Trava 1: Se possuir imei ou numero de série vinculado
+  const hasImei = Boolean(
+    item.imei ||
+    item.imei_selecionado ||
+    item.imei_codigo ||
+    item.numero_serie ||
+    prod.imei ||
+    prod.numero_serie ||
+    (Array.isArray(item.imeis_selecionados) && item.imeis_selecionados.length > 0)
+  );
+  if (hasImei) return true;
+
+  // Trava 2: Se pertencer às categorias críticas estritas
+  const matchCat = CATEGORIAS_CRITICAS.some(c =>
+    categoria === c ||
+    categoria.includes(c) ||
+    (c === 'CELULARES' && (categoria.includes('CELULAR') || categoria.includes('SMARTPHONE'))) ||
+    (c === 'VIDEOGAMES' && (categoria.includes('VIDEOGAME') || categoria.includes('CONSOLE') || categoria.includes('GAME'))) ||
+    (c === 'CAIXAS DE SOM' && (categoria.includes('CAIXA DE SOM') || categoria.includes('CAIXAS DE SOM') || categoria.includes('SOM') || categoria.includes('JBL') || categoria.includes('SPEAKER'))) ||
+    (c === 'TABLETS' && (categoria.includes('TABLET') || categoria.includes('IPAD')))
+  );
+  if (matchCat) return true;
+
+  // Trava 3: Se o nome contiver termos típicos de aparelhos
+  if (
+    nome.includes('IPHONE') ||
+    nome.includes('XIAOMI') ||
+    nome.includes('SAMSUNG GALAXY') ||
+    nome.includes('MOTOROLA') ||
+    nome.includes('PLAYSTATION') ||
+    nome.includes('XBOX') ||
+    nome.includes('NINTENDO') ||
+    nome.includes('IPAD')
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+// Verifica se o carrinho possui ao menos 1 produto crítico
+const carrinhoPossuiItemCritico = (carrinho) => {
+  if (!carrinho || carrinho.length === 0) return false;
+  return carrinho.some(item => isItemCritico(item));
+};
+
 function ProductTableRow({
   produto: p,
   filiais = [],
@@ -862,10 +918,12 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isGeneratingIA, setIsGeneratingIA] = useState(false);
   const [isGeneratedByAI, setIsGeneratedByAI] = useState(false);
 
-  // Novos campos para Clientes (Data de Nascimento, Endereço Inteligente & Responsável Legal)
+  // Novos campos para Clientes (Data de Nascimento, Endereço Inteligente & Responsável Legal & Zona Rural)
   const [clienteDataNascimento, setClienteDataNascimento] = useState('');
   const [clienteResponsavelNome, setClienteResponsavelNome] = useState('');
   const [clienteResponsavelCpf, setClienteResponsavelCpf] = useState('');
+  const [clienteIsZonaRural, setClienteIsZonaRural] = useState(false);
+  const [clienteLocalidadeRural, setClienteLocalidadeRural] = useState('');
   const [clienteCep, setClienteCep] = useState('');
   const [clienteLogradouro, setClienteLogradouro] = useState('');
   const [clienteNumero, setClienteNumero] = useState('');
@@ -8169,6 +8227,7 @@ export default function Dashboard({ session, profileDataProps }) {
       const currentEmpresaId = activeEmpresaId || company?.id || profile?.empresa_id;
       const currentFilialId = profile?.filial_id || currentEmpresaId;
 
+      const isRural = Boolean(clienteIsZonaRural);
       const payload = {
         empresa_id: currentEmpresaId,
         filial_id: currentFilialId,
@@ -8180,13 +8239,13 @@ export default function Dashboard({ session, profileDataProps }) {
         email: clienteEmail.trim() || null,
         telefone: clienteTelefone.trim() || null,
         data_nascimento: dbDataNascimento,
-        cep: clienteCep.trim() || null,
-        logradouro: clienteLogradouro.trim() || null,
-        numero: clienteNumero.trim() || null,
-        bairro: clienteBairro.trim() || null,
+        cep: isRural ? null : (clienteCep.trim() || null),
+        logradouro: isRural ? (clienteLocalidadeRural.trim() || 'Zona Rural') : (clienteLogradouro.trim() || null),
+        numero: isRural ? 'S/N' : (clienteNumero.trim() || null),
+        bairro: isRural ? 'Zona Rural' : (clienteBairro.trim() || null),
         cidade: clienteCidade.trim() || null,
         uf: clienteUf.trim() || null,
-        complemento: clienteComplemento.trim() || null
+        complemento: isRural ? (clienteComplemento.trim() ? `Ref: ${clienteComplemento.trim()}` : null) : (clienteComplemento.trim() || null)
       };
 
       // Verificação preventiva de duplicidade de CPF na mesma empresa
@@ -8270,6 +8329,8 @@ export default function Dashboard({ session, profileDataProps }) {
       setClienteDataNascimento('');
       setClienteResponsavelNome('');
       setClienteResponsavelCpf('');
+      setClienteIsZonaRural(false);
+      setClienteLocalidadeRural('');
       setClienteCep('');
       setClienteLogradouro('');
       setClienteNumero('');
@@ -8296,6 +8357,8 @@ export default function Dashboard({ session, profileDataProps }) {
     setClienteDataNascimento('');
     setClienteResponsavelNome('');
     setClienteResponsavelCpf('');
+    setClienteIsZonaRural(false);
+    setClienteLocalidadeRural('');
     setClienteCep('');
     setClienteLogradouro('');
     setClienteNumero('');
@@ -8317,6 +8380,8 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
+    const ehZonaRural = !c.cep || String(c.bairro || '').toLowerCase().includes('rural') || String(c.logradouro || '').toLowerCase().includes('rural');
+
     setEditingCliente(c);
     setClienteNome(c.nome || '');
     setClienteCpfCnpj(c.cpf_cnpj || '');
@@ -8325,6 +8390,8 @@ export default function Dashboard({ session, profileDataProps }) {
     setClienteDataNascimento(birthDateFormatted);
     setClienteResponsavelNome(c.responsavel_nome || c.nome_responsavel || '');
     setClienteResponsavelCpf(c.responsavel_cpf || c.cpf_responsavel || '');
+    setClienteIsZonaRural(ehZonaRural);
+    setClienteLocalidadeRural(ehZonaRural ? (c.logradouro || '') : '');
     setClienteCep(c.cep || '');
     setClienteLogradouro(c.logradouro || '');
     setClienteNumero(c.numero || '');
@@ -11008,16 +11075,65 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
-    if (!pdvClienteNome.trim() || !pdvClienteCpfCnpj.trim() || !pdvClienteTelefone.trim() || !pdvClienteDataNascimento.trim() || !pdvClienteEmail.trim()) {
-      const msg = 'Todos os campos do cliente são obrigatórios (Nome, CPF/CNPJ, Telefone, Data de Nascimento e E-mail).';
-      showToast(msg, 'error');
-      alert(msg);
-      return;
-    }
-    const cleanCpfCnpj = pdvClienteCpfCnpj.replace(/\D/g, '');
-    if (cleanCpfCnpj.length !== 11 && cleanCpfCnpj.length !== 14) {
-      alert('Por favor, preencha um CPF válido (11 dígitos) ou CNPJ válido (14 dígitos).');
-      return;
+    // REGRA DAS DUAS ESTEIRAS: Verificação de Itens Críticos vs Acessórios Comuns
+    const carrinhoTemCritico = carrinhoPossuiItemCritico(pdvCart);
+    const nomeClienteRaw = (pdvClienteNome || pdvClienteSearchInput || '').trim();
+    const isConsumidorBalcao = !nomeClienteRaw || 
+      nomeClienteRaw.toLowerCase() === 'consumidor balcão' || 
+      nomeClienteRaw.toLowerCase() === 'consumidor final' ||
+      nomeClienteRaw.toLowerCase() === 'consumidor' ||
+      nomeClienteRaw.toLowerCase() === 'cliente balcão';
+
+    if (carrinhoTemCritico) {
+      // ESTEIRA CRÍTICA (Aparelhos / Alto Valor / IMEI / Serial):
+      // Bloqueia a finalização se o cliente for "Consumidor Balcão" ou nulo / não identificado.
+      // Nome, CPF e Telefone são OBRIGATÓRIOS.
+      if (isConsumidorBalcao) {
+        const msgAlertaCritico = "Identificação obrigatória: O carrinho contém produtos da Esteira Crítica (Celulares, Videogames, Caixas de Som, Tablets ou aparelhos com IMEI/Serial). É obrigatório vincular ou cadastrar um cliente com Nome, CPF e Telefone.";
+        toastHelper.warning(msgAlertaCritico);
+        alert(msgAlertaCritico);
+        handleOpenNewClienteModal(nomeClienteRaw && !isConsumidorBalcao ? nomeClienteRaw : '');
+        return;
+      }
+
+      if (!pdvClienteNome.trim()) {
+        const msg = "Para venda de produtos críticos/aparelhos, o Nome do cliente é obrigatório.";
+        showToast(msg, 'error');
+        alert(msg);
+        return;
+      }
+
+      const cleanCpfCnpj = pdvClienteCpfCnpj.replace(/\D/g, '');
+      if (cleanCpfCnpj.length !== 11 && cleanCpfCnpj.length !== 14) {
+        const msg = "Para venda de produtos críticos/aparelhos, informe um CPF válido (11 dígitos) ou CNPJ válido (14 dígitos).";
+        showToast(msg, 'error');
+        alert(msg);
+        setTimeout(() => {
+          document.getElementById('pdv-cliente-cpf-input')?.focus();
+        }, 100);
+        return;
+      }
+
+      const cleanTelefone = pdvClienteTelefone.replace(/\D/g, '');
+      if (cleanTelefone.length < 10) {
+        const msg = "Para venda de produtos críticos/aparelhos, o Telefone do cliente com DDD é obrigatório.";
+        showToast(msg, 'error');
+        alert(msg);
+        return;
+      }
+    } else {
+      // ESTEIRA COMUM (Apenas acessórios: capas, cabos, películas, adaptadores, chips, etc.)
+      // Permite conclusão imediata com Consumidor Balcão / Consumidor Final sem exigir CPF, Telefone ou E-mail.
+      if (isConsumidorBalcao) {
+        // Consumidor Balcão para acessórios comuns: Tudo ok para seguir!
+      } else {
+        // Se foi informado um cliente nominal específico, validar CPF apenas se preenchido
+        const cleanCpfCnpj = pdvClienteCpfCnpj.replace(/\D/g, '');
+        if (cleanCpfCnpj.length > 0 && cleanCpfCnpj.length !== 11 && cleanCpfCnpj.length !== 14) {
+          alert('Por favor, informe um CPF/CNPJ válido ou deixe em branco para Consumidor Balcão.');
+          return;
+        }
+      }
     }
 
     if (pdvStatusPagamento === 'PARCIAL') {
@@ -11071,9 +11187,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
       const isConsumidorFinal = !nomeClienteFinal || 
+        nomeClienteFinal.toLowerCase() === 'consumidor balcão' ||
+        nomeClienteFinal.toLowerCase() === 'consumidor balcao' ||
         nomeClienteFinal.toLowerCase() === 'consumidor final' || 
         nomeClienteFinal.toLowerCase() === 'consumidor' ||
-        nomeClienteFinal.toLowerCase() === 'cliente balcão';
+        nomeClienteFinal.toLowerCase() === 'cliente balcão' ||
+        nomeClienteFinal.toLowerCase() === 'cliente balcao';
 
       const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
       const currentEmpresaId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
@@ -14436,58 +14555,89 @@ export default function Dashboard({ session, profileDataProps }) {
               <div className="space-y-4">
                 {/* CADASTRO RÁPIDO DE CLIENTE */}
                 <div className="border-t border-border pt-4">
-                  <div className="flex justify-between items-center w-full text-xs font-bold text-muted-foreground">
-                    <span className="flex items-center gap-1.5 text-foreground">
-                      <User size={14} className="text-primary" />
-                      Vincular Cliente (Obrigatório)
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedPdvClienteId(null);
-                          setPdvClienteNome('Consumidor Final');
-                          setPdvClienteSearchInput('Consumidor Final');
-                          setPdvClienteCpfCnpj('');
-                          setPdvClienteEmail('');
-                          setPdvClienteTelefone('');
-                          setPdvClienteDataNascimento('');
-                          setIsPdvClienteFieldsEditable(false);
-                          setIsPdvClienteDropdownOpen(false);
-                          showToast('Selecionado: Consumidor Final (sem vínculo)', 'info');
-                        }}
-                        className="text-[10px] px-2 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary font-bold transition-colors cursor-pointer"
-                        title="Vender para Consumidor Final sem vincular cliente específico"
-                      >
-                        Consumidor Final
-                      </button>
-                      {(selectedPdvClienteId || pdvClienteNome || pdvClienteSearchInput) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedPdvClienteId(null);
-                            setPdvClienteNome('');
-                            setPdvClienteSearchInput('');
-                            setPdvClienteCpfCnpj('');
-                            setPdvClienteEmail('');
-                            setPdvClienteTelefone('');
-                            setPdvClienteDataNascimento('');
-                            setIsPdvClienteFieldsEditable(false);
-                            setIsPdvClienteDropdownOpen(false);
-                            showToast('Dados do cliente limpos.', 'info');
-                          }}
-                          className="text-[10px] px-2 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold transition-colors cursor-pointer"
-                          title="Limpar seleção de cliente"
-                        >
-                          Limpar
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  {(() => {
+                    const cartTemCritico = carrinhoPossuiItemCritico(pdvCart);
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center w-full text-xs font-bold text-muted-foreground">
+                          <span className="flex items-center gap-1.5 text-foreground">
+                            <User size={14} className="text-primary" />
+                            <span>Identificação do Cliente</span>
+                            {cartTemCritico ? (
+                              <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded">
+                                Obrigatório
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                                Opcional
+                              </span>
+                            )}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPdvClienteId(null);
+                                setPdvClienteNome('Consumidor Balcão');
+                                setPdvClienteSearchInput('Consumidor Balcão');
+                                setPdvClienteCpfCnpj('');
+                                setPdvClienteEmail('');
+                                setPdvClienteTelefone('');
+                                setPdvClienteDataNascimento('');
+                                setIsPdvClienteFieldsEditable(false);
+                                setIsPdvClienteDropdownOpen(false);
+                                showToast('Selecionado: Consumidor Balcão', 'info');
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary font-bold transition-colors cursor-pointer"
+                              title="Vender para Consumidor Balcão sem vincular cliente específico"
+                            >
+                              Consumidor Balcão
+                            </button>
+                            {(selectedPdvClienteId || pdvClienteNome || pdvClienteSearchInput) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPdvClienteId(null);
+                                  setPdvClienteNome('');
+                                  setPdvClienteSearchInput('');
+                                  setPdvClienteCpfCnpj('');
+                                  setPdvClienteEmail('');
+                                  setPdvClienteTelefone('');
+                                  setPdvClienteDataNascimento('');
+                                  setIsPdvClienteFieldsEditable(false);
+                                  setIsPdvClienteDropdownOpen(false);
+                                  showToast('Dados do cliente limpos.', 'info');
+                                }}
+                                className="text-[10px] px-2 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold transition-colors cursor-pointer"
+                                title="Limpar seleção de cliente"
+                              >
+                                Limpar
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Banner Informativo da Esteira */}
+                        {cartTemCritico ? (
+                          <div className="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-300 p-2 rounded-lg flex items-center gap-1.5">
+                            <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+                            <span><strong>Esteira Crítica (Aparelhos):</strong> Identificação com Nome, CPF e Telefone é obrigatória para finalizar a venda.</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-2 rounded-lg flex items-center gap-1.5">
+                            <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                            <span><strong>Esteira Balcão (Acessórios):</strong> Venda rápida permitida com <em>Consumidor Balcão</em>.</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="grid grid-cols-2 gap-3 mt-3 bg-surface border border-border p-4 rounded-xl shadow-sm">
                     <div className="col-span-2 relative">
-                      <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Nome Completo <span className="text-destructive">*</span></label>
+                      <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                        Nome Completo {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive">*</span>}
+                      </label>
                       <input
                         type="text"
                         id="pdv-cliente-busca-input"
@@ -14509,7 +14659,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           }, 200);
                         }}
                         className="w-full bg-surface-elevated border border-border focus:border-primary rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none"
-                        placeholder="Ex: João da Silva (digite para buscar...)"
+                        placeholder="Ex: João da Silva ou Consumidor Balcão..."
                       />
 
                       {/* Dropdown do Autocomplete */}
@@ -14564,7 +14714,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider font-mono">CPF / CNPJ <span className="text-destructive">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider font-mono">
+                          CPF / CNPJ {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive">*</span>}
+                        </label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
@@ -14588,7 +14740,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Telefone <span className="text-destructive">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Telefone {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive">*</span>}
+                        </label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
@@ -14602,7 +14756,6 @@ export default function Dashboard({ session, profileDataProps }) {
                       <input
                         type="text"
                         value={pdvClienteTelefone}
-                        required
                         disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                         onChange={(e) => setPdvClienteTelefone(e.target.value)}
                         className="w-full bg-surface-elevated border border-border focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none font-sans"
@@ -14612,7 +14765,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Data de Nascimento <span className="text-destructive">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Data de Nascimento</label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
@@ -14626,7 +14779,6 @@ export default function Dashboard({ session, profileDataProps }) {
                       <input
                         type="date"
                         value={pdvClienteDataNascimento}
-                        required
                         disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                         onChange={(e) => setPdvClienteDataNascimento(e.target.value)}
                         className="w-full bg-surface-elevated border border-border focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none font-sans"
@@ -14635,7 +14787,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     <div className="col-span-1">
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">E-mail <span className="text-destructive">*</span></label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          E-mail <span className="text-muted-foreground font-normal lowercase">(opcional)</span>
+                        </label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
@@ -14649,11 +14803,10 @@ export default function Dashboard({ session, profileDataProps }) {
                       <input
                         type="email"
                         value={pdvClienteEmail}
-                        required
                         disabled={selectedPdvClienteId !== null && !isPdvClienteFieldsEditable}
                         onChange={(e) => setPdvClienteEmail(e.target.value)}
                         className="w-full bg-surface-elevated border border-border focus:border-primary disabled:bg-muted/40 disabled:text-muted-foreground rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none"
-                        placeholder="cliente@email.com"
+                        placeholder="cliente@email.com (opcional)"
                       />
                     </div>
                   </div>
@@ -24872,14 +25025,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       <div>
                         <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          E-mail
+                          E-mail <span className="text-gray-500 font-normal lowercase">(opcional)</span>
                         </label>
                         <input
                           type="email"
                           value={clienteEmail}
                           onChange={(e) => setClienteEmail(e.target.value)}
-                          placeholder="cliente@email.com"
-                          required
+                          placeholder="cliente@email.com (opcional)"
                           className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
                         />
                       </div>
@@ -24961,40 +25113,104 @@ export default function Dashboard({ session, profileDataProps }) {
 
                   {/* ENDEREÇO */}
                   <div className="border-t border-[#222222]/60 pt-4">
-                    <h4 className="text-[10px] font-bold text-[#6A0DAD] uppercase tracking-wider mb-3">Endereço</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                          <span>CEP</span>
-                          {cepLookupLoading && <Loader2 size={10} className="animate-spin text-[#6A0DAD]" />}
-                          {cepLookupFailed && <span className="text-[9px] text-red-500 font-bold lowercase italic">Não encontrado</span>}
-                        </label>
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-[10px] font-bold text-[#6A0DAD] uppercase tracking-wider">Endereço</h4>
+                      <label className="flex items-center gap-2 cursor-pointer bg-neutral-900 border border-[#222222] px-2.5 py-1 rounded-md hover:border-[#6A0DAD]/60 transition-colors">
                         <input
-                          type="text"
-                          value={clienteCep}
-                          onChange={(e) => handleCepChange(e.target.value)}
-                          placeholder="00000-000"
-                          maxLength="9"
-                          required
-                          className={`w-full bg-black border rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all ${cepLookupFailed ? 'border-red-800 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
-                            }`}
+                          type="checkbox"
+                          checked={clienteIsZonaRural}
+                          onChange={(e) => setClienteIsZonaRural(e.target.checked)}
+                          className="w-3.5 h-3.5 text-[#6A0DAD] rounded accent-[#6A0DAD] cursor-pointer"
                         />
-                      </div>
+                        <span className="text-xs font-semibold text-gray-300">
+                          Zona Rural / Sem CEP
+                        </span>
+                      </label>
+                    </div>
 
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Número
-                        </label>
-                        <input
-                          type="text"
-                          ref={clienteNumeroInputRef}
-                          value={clienteNumero}
-                          onChange={(e) => setClienteNumero(e.target.value)}
-                          placeholder="Ex: 123"
-                          required
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                        />
+                    {clienteIsZonaRural ? (
+                      /* FLUXO ZONA RURAL / SEM CEP */
+                      <div className="space-y-3 bg-[#6A0DAD]/5 border border-[#6A0DAD]/20 p-3.5 rounded-lg animate-fadeIn">
+                        <div className="flex items-center gap-2 text-[#a855f7] text-xs font-semibold">
+                          <CheckCircle2 size={15} />
+                          <span>Endereço Simplificado para Zona Rural (CEP dispensado)</span>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                            Localidade / Vicinal / Ponto de Referência <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={clienteLocalidadeRural}
+                            onChange={(e) => setClienteLocalidadeRural(e.target.value)}
+                            placeholder="Ex: Fazenda Boa Esperança, Vicinal 02, Próximo ao Rio Verde..."
+                            required={clienteIsZonaRural}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                              Cidade (Opcional)
+                            </label>
+                            <input
+                              type="text"
+                              value={clienteCidade}
+                              onChange={(e) => setClienteCidade(e.target.value)}
+                              placeholder="Cidade..."
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1 font-mono">
+                              UF / Estado (Opcional)
+                            </label>
+                            <input
+                              type="text"
+                              value={clienteUf}
+                              onChange={(e) => setClienteUf(e.target.value.toUpperCase())}
+                              placeholder="Ex: SP"
+                              maxLength="2"
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all"
+                            />
+                          </div>
+                        </div>
                       </div>
+                    ) : (
+                      /* FLUXO URBANO CONVENCIONAL */
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                            <span>CEP</span>
+                            {cepLookupLoading && <Loader2 size={10} className="animate-spin text-[#6A0DAD]" />}
+                            {cepLookupFailed && <span className="text-[9px] text-red-500 font-bold lowercase italic">Não encontrado</span>}
+                          </label>
+                          <input
+                            type="text"
+                            value={clienteCep}
+                            onChange={(e) => handleCepChange(e.target.value)}
+                            placeholder="00000-000"
+                            maxLength="9"
+                            required={!clienteIsZonaRural}
+                            className={`w-full bg-black border rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all ${cepLookupFailed ? 'border-red-800 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
+                              }`}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                            Número
+                          </label>
+                          <input
+                            type="text"
+                            ref={clienteNumeroInputRef}
+                            value={clienteNumero}
+                            onChange={(e) => setClienteNumero(e.target.value)}
+                            placeholder="Ex: 123 ou S/N"
+                            required={!clienteIsZonaRural}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                          />
+                        </div>
 
                       <div>
                         <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
@@ -25006,7 +25222,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           onChange={(e) => setClienteUf(e.target.value.toUpperCase())}
                           placeholder="Ex: SP"
                           maxLength="2"
-                          required
+                          required={!clienteIsZonaRural}
                           readOnly={!!clienteUf && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
                           className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
                         />
@@ -25021,7 +25237,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           value={clienteLogradouro}
                           onChange={(e) => setClienteLogradouro(e.target.value)}
                           placeholder="Rua, Avenida, Travessa..."
-                          required
+                          required={!clienteIsZonaRural}
                           readOnly={!!clienteLogradouro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
                           className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
                         />
@@ -25036,7 +25252,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           value={clienteBairro}
                           onChange={(e) => setClienteBairro(e.target.value)}
                           placeholder="Bairro..."
-                          required
+                          required={!clienteIsZonaRural}
                           readOnly={!!clienteBairro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
                           className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
                         />
@@ -25051,25 +25267,26 @@ export default function Dashboard({ session, profileDataProps }) {
                           value={clienteCidade}
                           onChange={(e) => setClienteCidade(e.target.value)}
                           placeholder="Cidade..."
-                          required
+                          required={!clienteIsZonaRural}
                           readOnly={!!clienteCidade && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
                           className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Complemento
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteComplemento}
-                          onChange={(e) => setClienteComplemento(e.target.value)}
-                          placeholder="Ex: Apto 4"
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                        />
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                            Complemento
+                          </label>
+                          <input
+                            type="text"
+                            value={clienteComplemento}
+                            onChange={(e) => setClienteComplemento(e.target.value)}
+                            placeholder="Ex: Apto 4"
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                          />
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                 </div>
