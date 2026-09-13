@@ -2024,10 +2024,21 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
 
-  // --- ATALHOS DE TECLADO PDV ---
+  // --- ATALHOS DE TECLADO (PDV & TRANSFERÊNCIAS) ---
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (activeSellerTab !== 'pdv' || profile?.role !== 'VENDEDOR') return;
+      const isNaTelaTransferencias = activeSellerTab === 'transferencias' || activeTab === 'transferencias';
+      const isNoPdvVendedor = activeSellerTab === 'pdv' && profile?.role === 'VENDEDOR';
+
+      if (e.key === 'F4' || (e.altKey && (e.key === 'e' || e.key === 'E'))) {
+        if (isNoPdvVendedor || isNaTelaTransferencias) {
+          e.preventDefault();
+          setIsModalEntradaEstoqueRapidaOpen(true);
+          return;
+        }
+      }
+
+      if (!isNoPdvVendedor) return;
 
       if (e.key === 'F2') {
         e.preventDefault();
@@ -2047,9 +2058,6 @@ export default function Dashboard({ session, profileDataProps }) {
           const searchInput = document.getElementById('pdv-busca-input');
           if (searchInput) searchInput.focus();
         }
-      } else if (e.key === 'F4' || (e.altKey && (e.key === 'e' || e.key === 'E'))) {
-        e.preventDefault();
-        setIsModalEntradaEstoqueRapidaOpen(true);
       } else if (e.key === 'F8') {
         e.preventDefault();
         setIsQuickClientFormOpen(true);
@@ -2074,7 +2082,7 @@ export default function Dashboard({ session, profileDataProps }) {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeSellerTab, pdvCart, pdvBusca, pdvClienteTelefone, pdvClienteNome, pdvClienteCpfCnpj, pdvClienteEmail, pdvMetodoPagamento, pdvCartaoParcelas, pdvUsadoList, pdvObsGarantia, pdvVendaTrainee, profile, taxasCartao, pdvClienteSearchInput, selectedPdvClienteId, isPdvClienteFieldsEditable]);
+  }, [activeSellerTab, activeTab, pdvCart, pdvBusca, pdvClienteTelefone, pdvClienteNome, pdvClienteCpfCnpj, pdvClienteEmail, pdvMetodoPagamento, pdvCartaoParcelas, pdvUsadoList, pdvObsGarantia, pdvVendaTrainee, profile, taxasCartao, pdvClienteSearchInput, selectedPdvClienteId, isPdvClienteFieldsEditable]);
 
   // Polling suave para atualizar remessas de transferência pendentes em tempo real
   useEffect(() => {
@@ -13710,37 +13718,39 @@ export default function Dashboard({ session, profileDataProps }) {
 
     return (
       <div className="space-y-6 animate-fadeIn font-sans">
-        <div className="flex gap-4 border-b border-[#222222] pb-2">
+        {/* Cabeçalho da Página de Transferências com Botão de Entrada Rápida (F4) */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-[#222222] pb-4">
+          <div>
+            <h2 className="text-base sm:text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <Truck size={20} className="text-[#6A0DAD]" />
+              Transferência e Realocação entre Filiais
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Envio e movimentação de mercadorias entre estoques e filiais da rede
+            </p>
+          </div>
+
           <button
-            onClick={() => setTransfSubTab('enviar')}
-            className={`pb-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${transfSubTab === 'enviar' ? 'text-[#6A0DAD]' : 'text-gray-500 hover:text-white'
-              }`}
+            type="button"
+            onClick={() => setIsModalEntradaEstoqueRapidaOpen(true)}
+            className="px-3.5 py-2 rounded-lg text-xs font-extrabold bg-[#111111] hover:bg-[#1a1a1a] text-purple-300 hover:text-white border border-[#6A0DAD]/40 hover:border-[#6A0DAD] transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 shadow-sm cursor-pointer group"
+            title="Entrada rápida de mercadorias no estoque da sua loja (Atalho: Tecla F4 ou Alt+E)"
           >
-            Enviar Mercadorias
-            {transfSubTab === 'enviar' && (
-              <span className="absolute bottom-[-9px] left-0 w-full h-[2px] bg-[#6A0DAD]"></span>
-            )}
-          </button>
-          <button
-            onClick={() => setTransfSubTab('receber')}
-            className={`pb-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${transfSubTab === 'receber' ? 'text-[#6A0DAD]' : 'text-gray-500 hover:text-white'
-              }`}
-          >
-            Cargas Pendentes {cargasPendentes.length > 0 && <span className="ml-1 bg-[#6A0DAD] text-white text-[10px] px-2 py-0.5 rounded-full">{cargasPendentes.length}</span>}
-            {transfSubTab === 'receber' && (
-              <span className="absolute bottom-[-9px] left-0 w-full h-[2px] bg-[#6A0DAD]"></span>
-            )}
+            <Package size={14} className="shrink-0 text-[#6A0DAD] group-hover:scale-110 transition-transform" />
+            <span>📦 Entrada Rápida</span>
+            <span className="text-[10px] font-mono bg-[#6A0DAD]/20 group-hover:bg-[#6A0DAD]/40 text-purple-200 px-1.5 py-0.2 rounded border border-[#6A0DAD]/30">
+              F4
+            </span>
           </button>
         </div>
 
-        {transfSubTab === 'enviar' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Card 1: Formulário de Transferência */}
-              <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
-                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                  <Truck size={18} className="text-[#6A0DAD]" /> Transferência e Realocação entre Filiais
-                </h3>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Card 1: Formulário de Transferência */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
+              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <Truck size={18} className="text-[#6A0DAD]" /> Dados da Transferência
+              </h3>
 
                 <div className="space-y-4">
                   {/* Seletor de Filial Origem e Destino */}
@@ -13976,45 +13986,7 @@ export default function Dashboard({ session, profileDataProps }) {
               )}
             </div>
           </div>
-        )}
-
-        {transfSubTab === 'receber' && (
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden">
-            <div className="p-4 border-b border-[#222222]">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Package size={18} className="text-[#6A0DAD]" /> Cargas Pendentes
-              </h3>
-            </div>
-            {cargasPendentes.length === 0 ? (
-              <div className="p-10 text-center text-gray-500 text-sm">
-                Nenhuma carga pendente de recebimento.
-              </div>
-            ) : (
-              <div className="divide-y divide-[#222222]">
-                {cargasPendentes.map(carga => (
-                  <div key={carga.id} className="p-4 hover:bg-[#111111] transition-colors flex justify-between items-center">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs bg-yellow-900/30 text-yellow-500 border border-yellow-700/50 px-2 py-0.5 rounded-full font-bold uppercase">Em Trânsito</span>
-                        <span className="text-sm text-gray-400">{new Date(carga.created_at).toLocaleString('pt-BR')}</span>
-                      </div>
-                      <p className="text-white font-bold">Origem: {carga.origem?.nome || 'Desconhecida'}</p>
-                      <p className="text-xs text-gray-500 mt-1">{carga.transferencias_itens?.length || 0} Itens • Obs: {carga.observacoes || 'Nenhuma'}</p>
-                    </div>
-                    <button
-                      onClick={() => handleConfirmarRecebimento(carga.id)}
-                      disabled={loadingTransferencias}
-                      className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-2 rounded font-bold transition-colors text-sm"
-                    >
-                      Confirmar Recebimento
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+        </div>
     );
   };
 
