@@ -11879,13 +11879,24 @@ export default function Dashboard({ session, profileDataProps }) {
         createdVendaIds.push(rpcRes.venda_id);
 
         try {
+          // Helper de sanitização estrita para cliente_id evitando violação de foreign key vendas_cliente_id_fkey
+          const getClienteIdValido = (cliente) => {
+            if (!cliente) return '00000000-0000-0000-0000-000000000000';
+            const rawId = typeof cliente === 'object' ? (cliente.id || cliente.cliente_id) : cliente;
+            if (rawId && typeof rawId === 'string') {
+              const trimmed = rawId.trim();
+              if (trimmed !== '' && trimmed !== 'null' && trimmed !== 'undefined' && isValidUuid(trimmed)) {
+                return trimmed;
+              }
+            }
+            // Fallback seguro: Consumidor Final padrão
+            return '00000000-0000-0000-0000-000000000000';
+          };
+
+          const clienteIdFinalValido = getClienteIdValido(cliente_id || clienteIdBanco || selectedPdvClienteId);
+
           const resolvedClienteNome = isConsumidorFinal ? 'Consumidor Final' : (nomeClienteFinal || 'Consumidor Final');
           const resolvedClienteCpf = isConsumidorFinal ? null : (pdvClienteCpfCnpj.trim() || null);
-          const resolvedClienteId = (isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID)
-            ? cliente_id
-            : (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID
-              ? clienteIdBanco
-              : CONSUMIDOR_FINAL_UUID);
           const mapNomeMetodo = {
             'pix': 'PIX',
             'cartao': 'CARTÃO DE CRÉDITO',
@@ -11924,7 +11935,7 @@ export default function Dashboard({ session, profileDataProps }) {
             cliente_cpf_cnpj: resolvedClienteCpf,
             cliente_email: pdvClienteEmail.trim() || null,
             cliente_telefone: pdvClienteTelefone.trim() || null,
-            cliente_id: resolvedClienteId,
+            cliente_id: clienteIdFinalValido,
             vendedor_id: vendedor_id,
             usuario_id: vendedor_id,
             criado_por: vendedor_id,
@@ -11956,6 +11967,14 @@ export default function Dashboard({ session, profileDataProps }) {
 
           if (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
+            // Se falhar a atualização com cliente_id, tenta fallback com cliente_id Consumidor Final ou null para garantir gravação da venda
+            if (updateVendaErr.code === '23503' || String(updateVendaErr.message).includes('foreign key')) {
+              console.warn("⚠️ Tentando fallback de cliente_id na venda...");
+              await supabase
+                .from('vendas')
+                .update({ ...payloadVendaUpdate, cliente_id: '00000000-0000-0000-0000-000000000000' })
+                .eq('id', rpcRes.venda_id);
+            }
           }
 
           // Registrar item_venda para auditoria detalhada com validação estrita e log agressivo
