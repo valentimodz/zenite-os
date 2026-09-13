@@ -1213,16 +1213,16 @@ export default function Dashboard({ session, profileDataProps }) {
   const [cestProduto, setCestProduto] = useState('');
   const [cfopProduto, setCfopProduto] = useState('5102');
   const [origemProduto, setOrigemProduto] = useState('0');
-  const [pdvClienteNome, setPdvClienteNome] = useState('');
+  const [pdvClienteNome, setPdvClienteNome] = useState('Consumidor Final');
   const [pdvClienteCpfCnpj, setPdvClienteCpfCnpj] = useState('');
   const [pdvClienteEmail, setPdvClienteEmail] = useState('');
   const [pdvClienteTelefone, setPdvClienteTelefone] = useState('');
   const [pdvClienteDataNascimento, setPdvClienteDataNascimento] = useState('');
-  const [pdvClienteSearchInput, setPdvClienteSearchInput] = useState('');
+  const [pdvClienteSearchInput, setPdvClienteSearchInput] = useState('Consumidor Final');
   const [pdvClienteSearchResults, setPdvClienteSearchResults] = useState([]);
   const [pdvClienteSearchLoading, setPdvClienteSearchLoading] = useState(false);
   const [isPdvClienteDropdownOpen, setIsPdvClienteDropdownOpen] = useState(false);
-  const [selectedPdvClienteId, setSelectedPdvClienteId] = useState(null);
+  const [selectedPdvClienteId, setSelectedPdvClienteId] = useState('00000000-0000-0000-0000-000000000000');
   const [isPdvClienteFieldsEditable, setIsPdvClienteFieldsEditable] = useState(false);
   const [pdvCart, setPdvCart] = useState([]);
   const [taxasCartao, setTaxasCartao] = useState([]);
@@ -2033,16 +2033,16 @@ export default function Dashboard({ session, profileDataProps }) {
         e.preventDefault();
         const temItemCritico = carrinhoPossuiItemCritico(pdvCart);
         if (!temItemCritico && pdvCart.length > 0) {
-          setSelectedPdvClienteId(null);
-          setPdvClienteNome('Consumidor Balcão');
-          setPdvClienteSearchInput('Consumidor Balcão');
+          setSelectedPdvClienteId('00000000-0000-0000-0000-000000000000');
+          setPdvClienteNome('Consumidor Final');
+          setPdvClienteSearchInput('Consumidor Final');
           setPdvClienteCpfCnpj('');
           setPdvClienteEmail('');
           setPdvClienteTelefone('');
           setPdvClienteDataNascimento('');
           setIsPdvClienteFieldsEditable(false);
           setIsPdvClienteDropdownOpen(false);
-          showToast('⚡ Consumidor Balcão selecionado via F2', 'info');
+          showToast('⚡ Consumidor Final selecionado via F2', 'info');
         } else {
           const searchInput = document.getElementById('pdv-busca-input');
           if (searchInput) searchInput.focus();
@@ -10890,14 +10890,14 @@ export default function Dashboard({ session, profileDataProps }) {
     setPdvObsGarantia('');
     setSelectedTreenerId('');
     setPdvVendaTrainee(false);
-    setPdvClienteNome('');
+    setPdvClienteNome('Consumidor Final');
     setPdvClienteCpfCnpj('');
     setPdvClienteEmail('');
     setPdvClienteTelefone('');
     setPdvClienteDataNascimento('');
-    setPdvClienteSearchInput('');
+    setPdvClienteSearchInput('Consumidor Final');
     setPdvClienteSearchResults([]);
-    setSelectedPdvClienteId(null);
+    setSelectedPdvClienteId('00000000-0000-0000-0000-000000000000');
     setIsPdvClienteFieldsEditable(false);
     setPdvUsadoList([]);
     setPdvUsadoProdutoSelecionado(null);
@@ -11599,6 +11599,7 @@ export default function Dashboard({ session, profileDataProps }) {
     setLoadingPdvVenda(true);
     try {
       // 1. Validação e Inserção/Atualização Obrigatória (Upsert) do Cliente no Banco de Dados ANTES da Venda
+      const CONSUMIDOR_FINAL_UUID = '00000000-0000-0000-0000-000000000000';
       const isValidUuid = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id.trim());
 
       let clienteIdBanco = isValidUuid(selectedPdvClienteId) ? selectedPdvClienteId.trim() : null;
@@ -11614,16 +11615,17 @@ export default function Dashboard({ session, profileDataProps }) {
         nomeClienteFinal.toLowerCase() === 'consumidor final' || 
         nomeClienteFinal.toLowerCase() === 'consumidor' ||
         nomeClienteFinal.toLowerCase() === 'cliente balcão' ||
-        nomeClienteFinal.toLowerCase() === 'cliente balcao';
+        nomeClienteFinal.toLowerCase() === 'cliente balcao' ||
+        selectedPdvClienteId === CONSUMIDOR_FINAL_UUID;
 
       const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
       const currentEmpresaId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
       const currentFilialId = profile?.filial_id || currentEmpresaId;
 
       if (isConsumidorFinal) {
-        // Se for consumidor final ou sem nome, limpa referências para não violar foreign key constraint vendas_cliente_id_fkey
-        clienteIdBanco = null;
-        setSelectedPdvClienteId(null);
+        // Fallback seguro: Consumidor Final com UUID fixo
+        clienteIdBanco = CONSUMIDOR_FINAL_UUID;
+        setSelectedPdvClienteId(CONSUMIDOR_FINAL_UUID);
       } else {
         // Se há um clienteIdBanco, verificar previamente se ele realmente existe no banco para evitar erro de chave estrangeira
         if (clienteIdBanco) {
@@ -11735,8 +11737,16 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // PASSO 1 & 2: EXTRAÇÃO DE CONTEXTO E GUARD CLAUSES (TRAVAS DE SEGURANÇA)
+      // Fallback seguro: cliente_id recebe clienteSelecionado?.id || '00000000-0000-0000-0000-000000000000'
       const rawCandidateId = clienteIdBanco || selectedPdvClienteId || null;
-      const cliente_id = (isConsumidorFinal || !isValidUuid(rawCandidateId)) ? null : rawCandidateId;
+      let cliente_id = null;
+      if (isValidUuid(rawCandidateId) && rawCandidateId !== CONSUMIDOR_FINAL_UUID) {
+        cliente_id = rawCandidateId;
+      } else if (isConsumidorFinal || !rawCandidateId || rawCandidateId === CONSUMIDOR_FINAL_UUID) {
+        cliente_id = CONSUMIDOR_FINAL_UUID;
+      } else {
+        cliente_id = CONSUMIDOR_FINAL_UUID;
+      }
       const vendedor_id = session?.user?.id || profile?.id || null;
 
       console.log("🔥 [PRE-SAVE CHECK] Contexto do Checkout:", {
@@ -11762,9 +11772,9 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
 
-      // GUARD CLAUSE 1: Se o usuário informou um cliente customizado (não consumidor final), o ID NÃO PODE ser nulo.
-      if (!isConsumidorFinal && !cliente_id) {
-        const msgErrCliente = "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo. Venda abortada.";
+      // GUARD CLAUSE 1: Se o usuário informou um cliente customizado (não consumidor final), o ID NÃO PODE ser nulo ou inválido.
+      if (!isConsumidorFinal && (!cliente_id || cliente_id === CONSUMIDOR_FINAL_UUID)) {
+        const msgErrCliente = "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo ou inválido. Venda abortada.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCliente);
         showToast(msgErrCliente, "error");
         alert(msgErrCliente);
@@ -11862,7 +11872,11 @@ export default function Dashboard({ session, profileDataProps }) {
         try {
           const resolvedClienteNome = isConsumidorFinal ? 'Consumidor Final' : (nomeClienteFinal || 'Consumidor Final');
           const resolvedClienteCpf = isConsumidorFinal ? null : (pdvClienteCpfCnpj.trim() || null);
-          const resolvedClienteId = isConsumidorFinal ? null : (cliente_id || clienteIdBanco || null);
+          const resolvedClienteId = (isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID)
+            ? cliente_id
+            : (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID
+              ? clienteIdBanco
+              : CONSUMIDOR_FINAL_UUID);
           const mapNomeMetodo = {
             'pix': 'PIX',
             'cartao': 'CARTÃO DE CRÉDITO',
@@ -14701,7 +14715,7 @@ export default function Dashboard({ session, profileDataProps }) {
             {/* Dicas de Atalhos (Visível apenas no Desktop) */}
             <div className="hidden lg:flex bg-surface-elevated border border-border p-4 rounded-xl flex-wrap gap-4 text-[10px] text-muted-foreground font-medium shadow-sm">
               <span className="font-bold text-foreground uppercase tracking-wider block w-full mb-1">Teclas de Atalho [PDV]:</span>
-              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F2</kbd> Buscar Produto</span>
+              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F2</kbd> Consumidor Final / Buscar</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F4</kbd> Entrada Rápida de Estoque</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F8</kbd> Cadastro de Cliente</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F9</kbd> Participação Trainee</span>
@@ -15012,26 +15026,26 @@ export default function Dashboard({ session, profileDataProps }) {
                                 Exige Cadastro Completo
                               </span>
                             ) : (
-                              /* ESTEIRA ACESSÓRIOS: Botão nítido Consumidor Balcão (F2) */
+                              /* ESTEIRA ACESSÓRIOS: Botão nítido Consumidor Final (F2) */
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setSelectedPdvClienteId(null);
-                                  setPdvClienteNome('Consumidor Balcão');
-                                  setPdvClienteSearchInput('Consumidor Balcão');
+                                  setSelectedPdvClienteId('00000000-0000-0000-0000-000000000000');
+                                  setPdvClienteNome('Consumidor Final');
+                                  setPdvClienteSearchInput('Consumidor Final');
                                   setPdvClienteCpfCnpj('');
                                   setPdvClienteEmail('');
                                   setPdvClienteTelefone('');
                                   setPdvClienteDataNascimento('');
                                   setIsPdvClienteFieldsEditable(false);
                                   setIsPdvClienteDropdownOpen(false);
-                                  showToast('⚡ Selecionado: Consumidor Balcão', 'info');
+                                  showToast('⚡ Selecionado: Consumidor Final', 'info');
                                 }}
                                 className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-md bg-[#18181b] hover:bg-[#27272a] text-zinc-100 hover:text-white border border-zinc-700/80 hover:border-zinc-500 shadow-sm transition-all cursor-pointer group"
-                                title="Vender para Consumidor Balcão sem cadastro obrigatório (Atalho: Tecla F2)"
+                                title="Vender para Consumidor Final sem cadastro obrigatório (Atalho: Tecla F2)"
                               >
                                 <span className="text-amber-400 group-hover:scale-110 transition-transform">⚡</span>
-                                <span>Consumidor Balcão</span>
+                                <span>Consumidor Final</span>
                                 <span className="text-[9px] font-mono font-medium px-1 py-0.2 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 ml-0.5">
                                   F2
                                 </span>
