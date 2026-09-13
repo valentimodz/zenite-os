@@ -91,6 +91,42 @@ const verificarElegibilidadeBoleto = (carrinho) => {
   return contemAndroid && !contemIphone;
 };
 
+// Utilitário universal para calcular a idade a partir de strings 'YYYY-MM-DD' ou 'DD/MM/AAAA'
+const calcularIdade = (dataStr) => {
+  if (!dataStr || typeof dataStr !== 'string') return null;
+  const str = dataStr.trim();
+  let day, month, year;
+
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length !== 3) return null;
+    day = parseInt(parts[0], 10);
+    month = parseInt(parts[1], 10) - 1;
+    year = parseInt(parts[2], 10);
+  } else if (str.includes('-')) {
+    const parts = str.split('-');
+    if (parts.length !== 3) return null;
+    year = parseInt(parts[0], 10);
+    month = parseInt(parts[1], 10) - 1;
+    day = parseInt(parts[2], 10);
+  } else {
+    return null;
+  }
+
+  const birthDate = new Date(year, month, day);
+  if (isNaN(birthDate.getTime())) return null;
+
+  const today = new Date();
+  if (birthDate > today) return -1; // Data futura inválida
+
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+};
+
 // Validador de Elegibilidade de Participação Trainee/Treener (Exige Celular/Smartphone no carrinho)
 const permiteParticipacaoTreener = (carrinho) => {
   if (!carrinho || carrinho.length === 0) return false;
@@ -826,8 +862,10 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isGeneratingIA, setIsGeneratingIA] = useState(false);
   const [isGeneratedByAI, setIsGeneratedByAI] = useState(false);
 
-  // Novos campos para Clientes (Data de Nascimento & Endereço Inteligente)
+  // Novos campos para Clientes (Data de Nascimento, Endereço Inteligente & Responsável Legal)
   const [clienteDataNascimento, setClienteDataNascimento] = useState('');
+  const [clienteResponsavelNome, setClienteResponsavelNome] = useState('');
+  const [clienteResponsavelCpf, setClienteResponsavelCpf] = useState('');
   const [clienteCep, setClienteCep] = useState('');
   const [clienteLogradouro, setClienteLogradouro] = useState('');
   const [clienteNumero, setClienteNumero] = useState('');
@@ -8230,6 +8268,8 @@ export default function Dashboard({ session, profileDataProps }) {
       setClienteEmail('');
       setClienteTelefone('');
       setClienteDataNascimento('');
+      setClienteResponsavelNome('');
+      setClienteResponsavelCpf('');
       setClienteCep('');
       setClienteLogradouro('');
       setClienteNumero('');
@@ -8254,6 +8294,8 @@ export default function Dashboard({ session, profileDataProps }) {
     setClienteEmail('');
     setClienteTelefone('');
     setClienteDataNascimento('');
+    setClienteResponsavelNome('');
+    setClienteResponsavelCpf('');
     setClienteCep('');
     setClienteLogradouro('');
     setClienteNumero('');
@@ -8281,6 +8323,8 @@ export default function Dashboard({ session, profileDataProps }) {
     setClienteEmail(c.email || '');
     setClienteTelefone(c.telefone || '');
     setClienteDataNascimento(birthDateFormatted);
+    setClienteResponsavelNome(c.responsavel_nome || c.nome_responsavel || '');
+    setClienteResponsavelCpf(c.responsavel_cpf || c.cpf_responsavel || '');
     setClienteCep(c.cep || '');
     setClienteLogradouro(c.logradouro || '');
     setClienteNumero(c.numero || '');
@@ -10951,6 +10995,15 @@ export default function Dashboard({ session, profileDataProps }) {
             cpfInput?.focus();
           }
         }, 100);
+        return;
+      }
+
+      // Restrição de Menor de Idade estritamente para vendas a prazo/crédito (Boleto, Crediário, Financeiras)
+      const idadeClientePdv = calcularIdade(pdvClienteDataNascimento);
+      if (idadeClientePdv !== null && idadeClientePdv >= 0 && idadeClientePdv < 18) {
+        const msgIdadeBloqueio = "Venda bloqueada: Clientes menores de 18 anos não podem realizar compras a prazo (Boleto, Crediário ou Financeiras).";
+        showToast(msgIdadeBloqueio, 'error');
+        alert(msgIdadeBloqueio);
         return;
       }
     }
@@ -14604,6 +14657,27 @@ export default function Dashboard({ session, profileDataProps }) {
                       />
                     </div>
                   </div>
+
+                  {/* AVISO DE CLIENTE MENOR DE IDADE NO PDV */}
+                  {(() => {
+                    const idadePdv = calcularIdade(pdvClienteDataNascimento);
+                    if (idadePdv !== null && idadePdv >= 0 && idadePdv < 18) {
+                      return (
+                        <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl flex items-center gap-2 mt-2 text-xs shadow-sm">
+                          <AlertTriangle className="text-amber-500 shrink-0" size={16} />
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                            <span className="font-extrabold text-amber-500 text-[10px] uppercase tracking-wider">
+                              Cliente Menor de Idade ({idadePdv} anos)
+                            </span>
+                            <span className="text-[10px] text-amber-400/90 font-medium">
+                              Vendas à vista (Dinheiro, Pix, Cartão) são permitidas. Vendas a crédito/prazo exigirão responsável legal.
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
 
                 {/* ALERTA POKA-YOKE DE ADIMPLÊNCIA / INADIMPLÊNCIA NO PDV */}
@@ -14657,11 +14731,21 @@ export default function Dashboard({ session, profileDataProps }) {
                       return;
                     }
 
-                    if (pdvNovoMetodo === 'boleto' && !verificarElegibilidadeBoleto(pdvCart)) {
-                      const msgBloqueio = '❌ A forma de pagamento BOLETO exige a presença de um celular Android no carrinho e proíbe iPhones/Apple ou apenas acessórios.';
-                      showToast(msgBloqueio, 'error');
-                      alert(msgBloqueio);
-                      return;
+                    if (pdvNovoMetodo === 'boleto') {
+                      if (!verificarElegibilidadeBoleto(pdvCart)) {
+                        const msgBloqueio = '❌ A forma de pagamento BOLETO exige a presença de um celular Android no carrinho e proíbe iPhones/Apple ou apenas acessórios.';
+                        showToast(msgBloqueio, 'error');
+                        alert(msgBloqueio);
+                        return;
+                      }
+
+                      const idadeAtual = calcularIdade(pdvClienteDataNascimento);
+                      if (idadeAtual !== null && idadeAtual >= 0 && idadeAtual < 18) {
+                        const msgMenor = '❌ Clientes menores de 18 anos não podem realizar compras a prazo ou no Boleto/Carnê.';
+                        showToast(msgMenor, 'error');
+                        alert(msgMenor);
+                        return;
+                      }
                     }
 
                     if (pdvNovoMetodo !== 'dinheiro' && valNum > (faltaPagar + 0.01)) {
@@ -24806,7 +24890,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             Data de Nascimento
                           </label>
                           {isMenorDeIdade && (
-                            <span className="text-[9px] font-bold bg-red-950/60 text-red-400 border border-red-800/40 px-2 py-0.5 rounded">
+                            <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2 py-0.5 rounded">
                               Menor de Idade
                             </span>
                           )}
@@ -24828,6 +24912,51 @@ export default function Dashboard({ session, profileDataProps }) {
                         />
                       </div>
                     </div>
+
+                    {/* AVISO E CAMPOS DO RESPONSÁVEL LEGAL PARA MENORES DE IDADE */}
+                    {isMenorDeIdade && (
+                      <div className="mt-4 p-3.5 rounded-lg border border-amber-500/30 bg-amber-500/10 space-y-3 animate-fadeIn">
+                        <div className="flex items-start gap-2 text-amber-400">
+                          <AlertTriangle size={16} className="shrink-0 mt-0.5 text-amber-400" />
+                          <div>
+                            <p className="text-xs font-bold text-amber-300">
+                              Cliente Menor de Idade (Vendas a crédito exigirão responsável legal)
+                            </p>
+                            <p className="text-[10px] text-amber-400/80 mt-0.5">
+                              O cadastro pode ser realizado normalmente. Compras à vista são permitidas. Para compras a prazo/crédito, informe os dados do responsável abaixo:
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-amber-500/20">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                              Nome do Responsável Legal (Opcional)
+                            </label>
+                            <input
+                              type="text"
+                              value={clienteResponsavelNome}
+                              onChange={(e) => setClienteResponsavelNome(e.target.value)}
+                              placeholder="Nome do pai, mãe ou tutor..."
+                              className="w-full bg-black border border-[#222222] focus:border-amber-500 rounded-md text-white px-3 py-2 text-xs outline-none transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 font-mono">
+                              CPF do Responsável Legal (Opcional)
+                            </label>
+                            <input
+                              type="text"
+                              value={clienteResponsavelCpf}
+                              onChange={(e) => setClienteResponsavelCpf(e.target.value.replace(/\D/g, ''))}
+                              placeholder="000.000.000-00"
+                              maxLength="14"
+                              className="w-full bg-black border border-[#222222] focus:border-amber-500 rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* ENDEREÇO */}
