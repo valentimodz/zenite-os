@@ -8,7 +8,7 @@ import {
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
   MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter, Clock, Image as ImageIcon,
-  Sun, Moon, Layers, RotateCcw
+  Sun, Moon, Layers, RotateCcw, ListChecks
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { emitirNfseStub } from '../services/fiscal';
@@ -1166,6 +1166,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [selectedFilialDestino, setSelectedFilialDestino] = useState('');
   const [ultimosRecebidos, setUltimosRecebidos] = useState([]);
   const [disponiveisImeis, setDisponiveisImeis] = useState([]);
+  const [entradaLoteItens, setEntradaLoteItens] = useState([]);
+  const [entradaSubTab, setEntradaSubTab] = useState('conferencia'); // 'conferencia' | 'catalogo'
 
   // Vendas e Fechamentos Globais
   const [vendas, setVendas] = useState([]);
@@ -8672,9 +8674,9 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
-    if (view === 'estoque' || view === 'transferencias') {
+    if (view === 'transferencias') {
       if (isGerente) {
-        showToast('Acesso Negado: O perfil Gerente não possui permissão para acessar o módulo de Entrada/Transferência de Estoque.', 'error');
+        showToast('Acesso Negado: O perfil Gerente não possui permissão para acessar o módulo de Transferência de Estoque.', 'error');
         return;
       }
     }
@@ -8703,6 +8705,12 @@ export default function Dashboard({ session, profileDataProps }) {
     } else if (view === 'gestao' || view === 'estoque' || view === 'catalogo_mestre') {
       fetchGerenteData(tenantId);
       fetchCatalogoProdutos(tenantId);
+      if (view === 'estoque') {
+        fetchEstoqueMovimentacoes();
+        if (!selectedFilialDestino && (activeFilialId || profile?.filial_id)) {
+          setSelectedFilialDestino(activeFilialId || profile?.filial_id);
+        }
+      }
     } else if (view === 'assinatura') {
       fetchTenantFaturas();
     }
@@ -9371,6 +9379,22 @@ export default function Dashboard({ session, profileDataProps }) {
           return;
         }
 
+        // Gravar movimentação de estoque
+        try {
+          await supabase.from('estoque_movimentacoes').insert({
+            empresa_id: targetEmpresaId,
+            filial_destino_id: selectedFilialDestino,
+            produto_id: targetProdutoId,
+            imei: String(imei).trim(),
+            quantidade: 1,
+            tipo_movimentacao: 'ENTRADA_AQUISICAO',
+            observacao: `Entrada física de celular (${selectedProdutoMestre.nome}) - Cor: ${entradaCorDispositivo || 'Padrão'}`,
+            criado_por: session?.user?.id || profile?.id
+          });
+        } catch (movErr) {
+          console.warn("Aviso ao registrar log de movimentação de celular:", movErr);
+        }
+
         showToast(`✅ IMEI ${imei} cadastrado com sucesso!`, 'success');
         setEntradaImei('');
         setTimeout(() => {
@@ -9379,6 +9403,22 @@ export default function Dashboard({ session, profileDataProps }) {
           }
         }, 50);
       } else {
+        // Gravar movimentação de estoque para acessório
+        try {
+          await supabase.from('estoque_movimentacoes').insert({
+            empresa_id: targetEmpresaId,
+            filial_destino_id: selectedFilialDestino,
+            produto_id: targetProdutoId,
+            imei: null,
+            quantidade: qtyToAdd,
+            tipo_movimentacao: 'ENTRADA_AQUISICAO',
+            observacao: `Entrada física avulsa / aquisição (${selectedProdutoMestre.nome}) - ${qtyToAdd} unidade(s)`,
+            criado_por: session?.user?.id || profile?.id
+          });
+        } catch (movErr) {
+          console.warn("Aviso ao registrar log de movimentação de acessório:", movErr);
+        }
+
         showToast(`✅ Entrada de ${qtyToAdd} unidade(s) do acessório "${selectedProdutoMestre.nome}" registrada com sucesso!`, 'success');
         setEntradaCodigoBarras('');
         setEntradaQtdAcessorio('1');
@@ -9575,6 +9615,38 @@ export default function Dashboard({ session, profileDataProps }) {
           setLoadingEntrada(false);
           return;
         }
+        // Gravar logs em estoque_movimentacoes para cada IMEI inserido
+        try {
+          const movLogs = imeisValidos.map(({ imei, cor }) => ({
+            empresa_id: company.id,
+            filial_destino_id: entradaFilial,
+            produto_id: targetProdutoId,
+            imei: String(imei).trim(),
+            quantidade: 1,
+            tipo_movimentacao: 'ENTRADA_AQUISICAO',
+            observacao: `Entrada via catálogo (${entradaProdutoSelecionado.nome}) - Cor: ${cor || 'Padrão'}`,
+            criado_por: session?.user?.id || profile?.id
+          }));
+          await supabase.from('estoque_movimentacoes').insert(movLogs);
+        } catch (movErr) {
+          console.warn("Aviso ao registrar log de movimentações em lote:", movErr);
+        }
+      } else if (!isCelular) {
+        // Gravar movimentação de estoque para acessório
+        try {
+          await supabase.from('estoque_movimentacoes').insert({
+            empresa_id: company.id,
+            filial_destino_id: entradaFilial,
+            produto_id: targetProdutoId,
+            imei: null,
+            quantidade: qtd,
+            tipo_movimentacao: 'ENTRADA_AQUISICAO',
+            observacao: `Entrada via catálogo (${entradaProdutoSelecionado.nome}) - ${qtd} unidade(s)`,
+            criado_por: session?.user?.id || profile?.id
+          });
+        } catch (movErr) {
+          console.warn("Aviso ao registrar log de acessório via catálogo:", movErr);
+        }
       }
 
       showToast(`✅ ${qtd} ${isCelular ? 'celular(es)' : 'unidade(s)'} de "${entradaProdutoSelecionado.nome}" inserido(s) com sucesso!`, 'success');
@@ -9612,8 +9684,318 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar histórico de movimentações de estoque
   const fetchEstoqueMovimentacoes = async () => {
-    setEstoqueMovimentacoes([]);
-    setMovimentacoesLoading(false);
+    setMovimentacoesLoading(true);
+    try {
+      const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+      if (!targetEmpresaId) {
+        setEstoqueMovimentacoes([]);
+        return;
+      }
+
+      let query = supabase
+        .from('estoque_movimentacoes')
+        .select(`
+          id,
+          empresa_id,
+          produto_id,
+          imei,
+          tipo_movimentacao,
+          filial_origem_id,
+          filial_destino_id,
+          quantidade,
+          observacao,
+          criado_por,
+          created_at,
+          produtos (id, nome, tipo, categoria, codigo_barras),
+          filial_origem:filiais!filial_origem_id (id, nome),
+          filial_destino:filiais!filial_destino_id (id, nome),
+          usuario:profiles!criado_por (id, nome, email)
+        `)
+        .eq('empresa_id', targetEmpresaId)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      const { data, error } = await query;
+      if (error) {
+        // Fallback simples sem relacionamentos caso falhe
+        console.warn('Tentando fallback simples para estoque_movimentacoes:', error.message);
+        const { data: simpleData, error: simpleErr } = await supabase
+          .from('estoque_movimentacoes')
+          .select('*')
+          .eq('empresa_id', targetEmpresaId)
+          .order('created_at', { ascending: false })
+          .limit(100);
+
+        if (!simpleErr && simpleData) {
+          const enriched = simpleData.map(item => ({
+            ...item,
+            produtos: produtos.find(p => p.id === item.produto_id) || catalogoProdutos.find(c => c.id === item.produto_id) || null,
+            filial_origem: filiais.find(f => f.id === item.filial_origem_id) || null,
+            filial_destino: filiais.find(f => f.id === item.filial_destino_id) || null,
+            usuario: teamMembers.find(m => m.id === item.criado_por) || null
+          }));
+          setEstoqueMovimentacoes(enriched);
+        } else {
+          setEstoqueMovimentacoes([]);
+        }
+      } else {
+        setEstoqueMovimentacoes(data || []);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar movimentações de estoque:', err);
+      setEstoqueMovimentacoes([]);
+    } finally {
+      setMovimentacoesLoading(false);
+    }
+  };
+
+  // Handlers para Fila de Conferência / Entrada de Estoque em Lote (Poka-Yoke)
+  const handleEntradaLoteAdd = (item) => {
+    if (!item) return;
+    setEntradaLoteItens(prev => [
+      {
+        id: 'lote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+        ...item
+      },
+      ...prev
+    ]);
+  };
+
+  const handleEntradaLoteRemove = (itemId) => {
+    setEntradaLoteItens(prev => prev.filter(i => i.id !== itemId));
+  };
+
+  const handleEntradaLoteLimpar = () => {
+    setEntradaLoteItens([]);
+  };
+
+  const handleConfirmarEntradaLote = async () => {
+    if (entradaLoteItens.length === 0) {
+      showToast('A fila de conferência está vazia. Adicione produtos antes de confirmar.', 'error');
+      return;
+    }
+
+    const destinoFilial = selectedFilialDestino || activeFilialId || profile?.filial_id;
+    if (!destinoFilial) {
+      showToast('Por favor, selecione a Filial de Destino antes de concluir.', 'error');
+      return;
+    }
+
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    if (!targetEmpresaId) {
+      showToast('Erro: Empresa não identificada. Por favor, recarregue a página.', 'error');
+      return;
+    }
+
+    setLoadingEntrada(true);
+    let sucessoCount = 0;
+    let erroCount = 0;
+
+    try {
+      for (const item of entradaLoteItens) {
+        try {
+          const isCelular = Boolean(
+            item.isCelular ||
+            item.tipo?.toLowerCase().includes('celular') ||
+            item.tipo?.toLowerCase().includes('smartphone') ||
+            item.categoria?.toLowerCase().includes('celular') ||
+            item.categoria?.toLowerCase().includes('smartphone') ||
+            item.categoria?.toLowerCase().includes('ios') ||
+            item.categoria?.toLowerCase().includes('android') ||
+            item.exige_imei === true ||
+            item.is_celular === true
+          );
+
+          const imei = isCelular ? String(item.imei || '').trim() : null;
+          const cor = (item.cor || 'Padrão').trim();
+          const qtyToAdd = isCelular ? 1 : (parseInt(item.quantidade, 10) || 1);
+
+          // 1. Se celular, validar unicidade do IMEI
+          if (isCelular) {
+            const { data: imeiExistente, error: checkErr } = await supabase
+              .from('imeis')
+              .select('imei, status, filiais(nome)')
+              .eq('imei', imei)
+              .maybeSingle();
+
+            if (checkErr) throw checkErr;
+            if (imeiExistente) {
+              console.warn(`IMEI ${imei} já cadastrado na filial ${imeiExistente.filiais?.nome}`);
+              erroCount++;
+              continue;
+            }
+          }
+
+          // 2. Localizar se o produto já existe em produtos para esta filial
+          const targetCor = cor;
+          const eanEntradaLimpo = item.codigo_barras ? String(item.codigo_barras).trim() : null;
+
+          let findQuery = supabase
+            .from('produtos')
+            .select('*')
+            .eq('nome', item.nome)
+            .eq('filial_id', destinoFilial);
+
+          if (targetEmpresaId) {
+            findQuery = findQuery.eq('empresa_id', targetEmpresaId);
+          }
+          if (targetCor) {
+            findQuery = findQuery.eq('cor', targetCor);
+          }
+
+          let existingProd = null;
+          try {
+            const { data: prodsData, error: findErr } = await findQuery;
+            if (!findErr && prodsData && prodsData.length > 0) {
+              if (eanEntradaLimpo) {
+                existingProd = prodsData.find(p => p.codigo_barras === eanEntradaLimpo) || prodsData[0];
+              } else {
+                existingProd = prodsData[0];
+              }
+            }
+          } catch (e) {
+            console.warn("Aviso busca produto na filial:", e);
+          }
+
+          let targetProdutoId;
+          let finalQty = qtyToAdd;
+
+          if (!existingProd) {
+            const prodPayload = {
+              empresa_id: targetEmpresaId,
+              filial_id: destinoFilial,
+              nome: item.nome,
+              tipo: item.tipo || (isCelular ? 'CELULAR' : 'ACESSORIO'),
+              categoria: item.categoria || (isCelular ? 'CELULAR' : 'ACESSORIO'),
+              cor: targetCor,
+              codigo_barras: eanEntradaLimpo,
+              preco: parseFloat(item.preco || 0),
+              preco_venda: parseFloat(item.preco_venda || item.preco || 0),
+              quantidade: qtyToAdd,
+              status: 'Disponível'
+            };
+
+            const { data: newProd, error: newProdErr } = await supabase
+              .from('produtos')
+              .insert(prodPayload)
+              .select()
+              .single();
+
+            if (newProdErr) {
+              if (newProdErr.code === '42703' || newProdErr.code === 'PGRST204' || newProdErr.message?.includes('codigo_barras') || newProdErr.message?.includes('could not find the column') || newProdErr.message?.includes('does not exist')) {
+                delete prodPayload.codigo_barras;
+                const { data: retryProd, error: retryErr } = await supabase
+                  .from('produtos')
+                  .insert(prodPayload)
+                  .select()
+                  .single();
+                if (retryErr) throw retryErr;
+                targetProdutoId = retryProd.id;
+              } else {
+                throw newProdErr;
+              }
+            } else {
+              targetProdutoId = newProd.id;
+            }
+          } else {
+            finalQty = (existingProd.quantidade || 0) + qtyToAdd;
+            const updatePayload = {
+              quantidade: finalQty,
+              codigo_barras: existingProd.codigo_barras || eanEntradaLimpo
+            };
+
+            const { error: updateErr } = await supabase
+              .from('produtos')
+              .update(updatePayload)
+              .eq('id', existingProd.id);
+
+            if (updateErr) {
+              if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.includes('codigo_barras') || updateErr.message?.includes('could not find the column') || updateErr.message?.includes('does not exist')) {
+                delete updatePayload.codigo_barras;
+                const { error: retryUpdateErr } = await supabase
+                  .from('produtos')
+                  .update(updatePayload)
+                  .eq('id', existingProd.id);
+                if (retryUpdateErr) throw retryUpdateErr;
+              } else {
+                throw updateErr;
+              }
+            }
+            targetProdutoId = existingProd.id;
+          }
+
+          // 3. Se celular, cadastrar no imeis
+          if (isCelular && imei) {
+            const payloadImei = {
+              produto_id: targetProdutoId,
+              empresa_id: targetEmpresaId,
+              filial_id: destinoFilial,
+              imei: imei,
+              cor: targetCor,
+              status: 'Disponível',
+              vendido: false
+            };
+
+            let { error: insertErr } = await supabase
+              .from('imeis')
+              .insert(payloadImei);
+
+            if (insertErr && (insertErr.code === '23514' || insertErr.message?.includes('check constraint') || insertErr.message?.includes('imeis_status_check'))) {
+              await supabase.from('imeis').insert({ ...payloadImei, status: 'DISPONÍVEL' });
+            }
+          }
+
+          // 4. Registrar movimentação em estoque_movimentacoes (tipo_movimentacao: 'ENTRADA_AQUISICAO')
+          try {
+            await supabase.from('estoque_movimentacoes').insert({
+              empresa_id: targetEmpresaId,
+              filial_destino_id: destinoFilial,
+              produto_id: targetProdutoId,
+              imei: isCelular ? imei : null,
+              quantidade: qtyToAdd,
+              tipo_movimentacao: 'ENTRADA_AQUISICAO',
+              observacao: `Entrada física em lote: ${item.nome} (${isCelular ? `IMEI: ${imei} - Cor: ${cor}` : `Qtd: ${qtyToAdd}`})`,
+              criado_por: session?.user?.id || profile?.id
+            });
+          } catch (movErr) {
+            console.warn("Aviso ao registrar log de movimentação em lote:", movErr);
+          }
+
+          sucessoCount++;
+        } catch (itemErr) {
+          console.error(`Erro ao processar item do lote ${item.nome}:`, itemErr);
+          erroCount++;
+        }
+      }
+
+      playBeepSucesso();
+      if (sucessoCount > 0) {
+        showToast(`✅ ${sucessoCount} item(ns) de estoque confirmados e integrados com sucesso!`, 'success');
+        setEntradaLoteItens([]);
+      }
+      if (erroCount > 0) {
+        showToast(`⚠️ ${erroCount} item(ns) não puderam ser processados (verifique se o IMEI já existe).`, 'error');
+      }
+
+      // Recarregar dados em tempo real
+      if (targetEmpresaId) {
+        fetchGerenteData(targetEmpresaId);
+        fetchCatalogoProdutos(targetEmpresaId);
+        fetchEstoqueMovimentacoes();
+        if (activeFilialId && session?.user?.id) {
+          fetchVendedorData(activeFilialId, session.user.id, targetEmpresaId);
+        }
+      }
+      const filialParaRecarregar = filtroFilialEstoque || destinoFilial || activeFilialId;
+      if (filialParaRecarregar) {
+        fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+      }
+    } catch (err) {
+      console.error('Erro geral na confirmação da entrada em lote:', err);
+      showToast('Erro ao concluir entrada de estoque: ' + (err.message || 'Falha de conexão'), 'error');
+    } finally {
+      setLoadingEntrada(false);
+    }
   };
 
   // Salvar ajuste manual de estoque
@@ -16333,6 +16715,764 @@ export default function Dashboard({ session, profileDataProps }) {
     );
   };
 
+  // Componente de Entrada e Gestão de Estoque Unificado (Filiais, Vendedores, Gerentes e Admins)
+  const renderEstoqueContent = () => {
+    const destinoFilialId = selectedFilialDestino || activeFilialId || profile?.filial_id;
+    const destinoFilialObj = filiais.find(f => String(f.id) === String(destinoFilialId));
+
+    return (
+      <div className="space-y-8 animate-fadeIn">
+        {/* Cabeçalho da Entrada de Estoque */}
+        <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
+              <Package size={22} className="text-[#6A0DAD]" />
+              Entrada de Estoque Físico
+              <span className="text-xs bg-[#6A0DAD]/20 text-[#6A0DAD] border border-[#6A0DAD]/40 px-2 py-0.5 rounded-full font-semibold ml-1">
+                Poka-Yoke
+              </span>
+            </h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Bipe produtos mestre e IMEIs diretamente para o estoque da sua filial sem complexidade.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Seletor de Filial de Destino */}
+            <div className="flex items-center gap-2 bg-black border border-[#6A0DAD]/50 px-3 py-1.5 rounded-lg shadow-sm">
+              <Store size={14} className="text-[#6A0DAD] shrink-0" />
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hidden sm:inline">Filial Destino:</span>
+              <select
+                value={selectedFilialDestino || activeFilialId || profile?.filial_id || ''}
+                onChange={(e) => setSelectedFilialDestino(e.target.value)}
+                className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer border-none"
+              >
+                <option value="" className="bg-gray-900 text-gray-400">Selecione a Filial...</option>
+                {filiais.map(f => (
+                  <option key={f.id} value={f.id} className="bg-gray-900 text-white">
+                    {f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'MASTER'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (catalogoProdutos && catalogoProdutos.length > 0) {
+                    handleAbrirDistribuirEstoque(catalogoProdutos[0]);
+                  } else {
+                    showToast("Nenhum produto cadastrado no catálogo mestre ainda.", "info");
+                  }
+                }}
+                className="px-3.5 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md shrink-0 cursor-pointer"
+              >
+                <Share2 size={14} />
+                <span>Distribuir Estoque Matriz</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsModalAparelhosLoteOpen(true)}
+              className="px-3.5 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md shrink-0 cursor-pointer"
+              title="Entrada rápida de celulares com lista de IMEIs em lote"
+            >
+              <Smartphone size={14} />
+              <span>📱 Entrada de Aparelhos em Lote</span>
+            </button>
+
+            <div className="flex items-center gap-2 text-xs text-gray-600 border border-[#222222] px-4 py-2 rounded-lg">
+              <span className="w-2 h-2 rounded-full bg-[#6A0DAD] animate-pulse"></span>
+              Scanner Ativo
+            </div>
+          </div>
+        </div>
+
+        {/* Sub-Navegação: Fila de Conferência vs Entrada Direta vs Histórico de Movimentações */}
+        <div className="flex items-center gap-2 border-b border-[#222222] pb-2">
+          <button
+            type="button"
+            onClick={() => setEntradaSubTab('conferencia')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              entradaSubTab === 'conferencia'
+                ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <CheckCircle2 size={15} />
+            <span>Fila de Conferência & Entrada</span>
+            {entradaLoteItens.length > 0 && (
+              <span className="bg-red-500 text-white px-2 py-0.2 rounded-full text-[10px] font-black">
+                {entradaLoteItens.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEntradaSubTab('movimentacoes');
+              fetchEstoqueMovimentacoes();
+            }}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              entradaSubTab === 'movimentacoes'
+                ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <ClipboardList size={15} />
+            <span>Histórico de Movimentações (Logs)</span>
+          </button>
+        </div>
+
+        {/* ABA 1: FILA DE CONFERÊNCIA & ENTRADA FÍSICA */}
+        {entradaSubTab === 'conferencia' && (
+          <div className="space-y-6">
+            {/* Seção Superior da Fila: Painel de Itens Pendentes de Confirmação */}
+            {entradaLoteItens.length > 0 && (
+              <div className="bg-[#0A0A0A] border-2 border-[#6A0DAD]/50 rounded-xl p-5 space-y-4 shadow-xl shadow-[#6A0DAD]/10 animate-fadeIn">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#222222] pb-3">
+                  <div>
+                    <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
+                      <ListChecks size={18} className="text-[#6A0DAD]" />
+                      Itens na Fila de Conferência ({entradaLoteItens.length})
+                      <span className="text-[10px] bg-purple-900/40 text-purple-300 px-2 py-0.5 rounded border border-purple-700/50">
+                        Destino: {destinoFilialObj?.nome || 'Filial Selecionada'}
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      Confira os itens bipados antes de concluir a entrada definitiva no banco de dados.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={handleEntradaLoteLimpar}
+                      disabled={loadingEntrada}
+                      className="px-3 py-1.5 bg-gray-900 hover:bg-red-950/40 text-gray-400 hover:text-red-400 border border-gray-800 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      Limpar Fila
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmarEntradaLote}
+                      disabled={loadingEntrada}
+                      className="flex-1 sm:flex-none px-5 py-2.5 bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white rounded-lg text-xs font-black flex items-center justify-center gap-2 transition-all shadow-lg shadow-[#6A0DAD]/30 cursor-pointer"
+                    >
+                      {loadingEntrada ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Gravando Entrada...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={16} />
+                          Confirmar e Concluir Entrada de Estoque ({entradaLoteItens.length})
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Cards / Tabela da Fila */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                  {entradaLoteItens.map((item) => (
+                    <div
+                      key={item.id}
+                      className="bg-black/60 border border-[#222222] hover:border-[#6A0DAD]/50 p-3 rounded-lg flex items-center justify-between gap-2 transition-all"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-[#6A0DAD]/10 flex items-center justify-center text-[#6A0DAD] shrink-0">
+                          {item.imei ? <Smartphone size={16} /> : <Package size={16} />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">{item.nome}</p>
+                          <div className="flex items-center gap-1.5 text-[10px] text-gray-400 font-mono mt-0.5">
+                            {item.imei ? (
+                              <>
+                                <span className="text-purple-300 font-bold">IMEI: {item.imei}</span>
+                                <span className="text-gray-600">•</span>
+                                <span>{item.cor || 'Preto'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-emerald-400 font-bold">{item.quantidade} un.</span>
+                                {item.codigo_barras && (
+                                  <>
+                                    <span className="text-gray-600">•</span>
+                                    <span>EAN: {item.codigo_barras}</span>
+                                  </>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleEntradaLoteRemove(item.id)}
+                        className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-950/20 rounded transition-colors shrink-0 cursor-pointer"
+                        title="Remover da fila"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              {/* FORMULÁRIO DE ENTRADA / BIPAGEM */}
+              <div className="lg:col-span-2 space-y-5">
+                <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2 border-b border-[#222222] pb-3 mb-2">
+                    <Package size={16} className="text-[#6A0DAD]" />
+                    Bipagem & Reposição Física
+                  </h4>
+
+                  {/* Filtro Categoria */}
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex justify-between items-center">
+                      <span>Categoria / Tipo (Opcional)</span>
+                      {entradaFiltroCategoria !== 'todas' && (
+                        <button
+                          type="button"
+                          onClick={() => setEntradaFiltroCategoria('todas')}
+                          className="text-[9px] text-[#6A0DAD] hover:underline font-bold"
+                        >
+                          Limpar Filtro
+                        </button>
+                      )}
+                    </label>
+                    <select
+                      value={entradaFiltroCategoria}
+                      onChange={(e) => {
+                        setEntradaFiltroCategoria(e.target.value);
+                        setSelectedProdutoMestre(null);
+                      }}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                    >
+                      <option value="todas" className="bg-gray-900 text-white">Todas as Categorias (Geral)</option>
+                      <option value="CELULAR" className="bg-gray-900 text-white">📱 Celulares / Smartphones</option>
+                      <option value="IOS" className="bg-gray-900 text-white">🍎 iPhones (iOS)</option>
+                      <option value="ANDROID" className="bg-gray-900 text-white">🤖 Android (Samsung, Xiaomi, Motorola, etc.)</option>
+                      <option value="ACESSORIO" className="bg-gray-900 text-white">🎧 Acessórios</option>
+                      <option value="APPLE_JBL_CONSOLE" className="bg-gray-900 text-white">🎮 Apple / JBL / Consoles</option>
+                      <option value="SERVICO" className="bg-gray-900 text-white">🛠️ Serviços</option>
+                      {categorias && categorias.length > 0 && (
+                        <optgroup label="📂 Categorias Cadastradas no Sistema">
+                          {categorias.map(cat => (
+                            <option key={cat.id || cat.nome} value={cat.nome} className="bg-gray-900 text-white">
+                              🏷️ {cat.nome}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+
+                  {/* Bipar Código de Barras / Buscar Produto Mestre */}
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                      Bipar Código de Barras / Buscar Produto Mestre
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={entradaBuscaMestre}
+                        onChange={(e) => handleBuscaMestreChange(e.target.value)}
+                        onKeyDown={handleBuscaMestreKeyDown}
+                        placeholder="Bipe o EAN/barcode, digite o SKU ou nome..."
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2.5 text-sm outline-none font-mono transition-all placeholder:text-gray-600"
+                      />
+                      <Barcode size={16} className="absolute left-3 top-3 text-gray-500" />
+                    </div>
+                  </div>
+
+                  {/* Dropdown Produto Mestre */}
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Produto Mestre <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={selectedProdutoMestre ? String(selectedProdutoMestre.id) : ''}
+                      onChange={(e) => {
+                        const prodId = String(e.target.value || '');
+                        const prod = (produtosMestreOptions || []).find(p => String(p.id) === prodId) || (catalogoProdutos || []).find(p => String(p.id) === prodId);
+                        setSelectedProdutoMestre(prod || null);
+                        if (prod) {
+                          setEntradaCodigoBarras(prod.codigo_barras || prod.barcode || prod.ean || '');
+                        }
+                      }}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                    >
+                      <option value="">Selecione o Produto Mestre...</option>
+                      {(produtosMestreOptions || []).map(p => {
+                        const nomeExibido = p.nome || p.name || 'Produto sem Nome';
+                        const eanExibido = p.codigo_barras || p.barcode || p.ean;
+                        const catExibida = p.categoria || p.tipo || p.category || 'Geral';
+                        return (
+                          <option key={p.id || p.nome} value={p.id}>
+                            {nomeExibido} {eanExibido ? `[EAN: ${eanExibido}]` : ''} ({catExibida})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Campos Dinâmicos (Celular vs Acessório) */}
+                  {(() => {
+                    const isCelularForm = Boolean(
+                      (selectedProdutoMestre && (
+                        selectedProdutoMestre.tipo?.toLowerCase().includes('celular') ||
+                        selectedProdutoMestre.tipo?.toLowerCase().includes('smartphone') ||
+                        selectedProdutoMestre.categoria?.toLowerCase().includes('celular') ||
+                        selectedProdutoMestre.categoria?.toLowerCase().includes('smartphone') ||
+                        selectedProdutoMestre.categoria?.toLowerCase().includes('ios') ||
+                        selectedProdutoMestre.categoria?.toLowerCase().includes('android') ||
+                        selectedProdutoMestre.exige_imei === true ||
+                        selectedProdutoMestre.is_celular === true
+                      )) ||
+                      (!selectedProdutoMestre && entradaFiltroCategoria && (
+                        entradaFiltroCategoria.toLowerCase().includes('celular') ||
+                        entradaFiltroCategoria.toLowerCase().includes('smartphone') ||
+                        entradaFiltroCategoria.toLowerCase().includes('ios') ||
+                        entradaFiltroCategoria.toLowerCase().includes('android')
+                      ))
+                    );
+
+                    if (isCelularForm) {
+                      return (
+                        <>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                              IMEI (Exclusivo, 15 dígitos) <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                              <input
+                                ref={imeiInputRef}
+                                type="text"
+                                inputMode="numeric"
+                                value={entradaImei}
+                                onChange={(e) => setEntradaImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSalvarEstoqueFisico(e);
+                                  }
+                                }}
+                                placeholder="Digite ou bipe os 15 dígitos do IMEI..."
+                                maxLength={15}
+                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2.5 text-sm outline-none font-mono tracking-widest transition-all"
+                              />
+                              <Smartphone size={16} className="absolute left-3 top-3 text-[#6A0DAD]" />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                              Cor do Aparelho <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={entradaCorDispositivo}
+                              onChange={(e) => setEntradaCorDispositivo(e.target.value)}
+                              placeholder="Selecione ou digite a cor..."
+                              list="lista-cores-sugeridas-estoque"
+                              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                            />
+                            <datalist id="lista-cores-sugeridas-estoque">
+                              <option value="Preto" />
+                              <option value="Branco" />
+                              <option value="Azul" />
+                              <option value="Vermelho" />
+                              <option value="Verde" />
+                              <option value="Rosa" />
+                              <option value="Dourado" />
+                              <option value="Prateado" />
+                              <option value="Cinza" />
+                              <option value="Roxo" />
+                              <option value="Grafite" />
+                              <option value="Titânio Natural" />
+                              <option value="Titânio Preto" />
+                              <option value="Titânio Branco" />
+                            </datalist>
+                          </div>
+                        </>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                            Código de Barras (EAN / Barcode) *
+                          </label>
+                          <input
+                            type="text"
+                            value={entradaCodigoBarras || (selectedProdutoMestre ? selectedProdutoMestre.codigo_barras || '' : '')}
+                            onChange={(e) => setEntradaCodigoBarras(e.target.value)}
+                            placeholder="Bipe ou digite o código de barras..."
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-white rounded-md px-4 py-2.5 text-sm outline-none font-mono transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
+                            Quantidade de Entrada <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={entradaQtdAcessorio}
+                            onChange={(e) => setEntradaQtdAcessorio(e.target.value)}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all font-bold text-center"
+                            placeholder="1"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Dropdown Filial Destino Local */}
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Filial de Destino (Localização Física)
+                    </label>
+                    <select
+                      value={selectedFilialDestino || activeFilialId || profile?.filial_id || ''}
+                      onChange={(e) => setSelectedFilialDestino(e.target.value)}
+                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                    >
+                      <option value="">Selecione a Filial...</option>
+                      {filiais.map(f => (
+                        <option key={f.id} value={f.id}>{f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Botões de Ação: Adicionar à Fila ou Gravar Imediato */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedProdutoMestre) {
+                          showToast('Selecione um Produto Mestre antes.', 'error');
+                          return;
+                        }
+                        const isCel = Boolean(
+                          selectedProdutoMestre.tipo?.toLowerCase().includes('celular') ||
+                          selectedProdutoMestre.tipo?.toLowerCase().includes('smartphone') ||
+                          selectedProdutoMestre.categoria?.toLowerCase().includes('celular') ||
+                          selectedProdutoMestre.categoria?.toLowerCase().includes('smartphone') ||
+                          selectedProdutoMestre.exige_imei === true ||
+                          selectedProdutoMestre.is_celular === true
+                        );
+                        if (isCel) {
+                          if (!entradaImei || entradaImei.length !== 15) {
+                            showToast('Informe os 15 dígitos numéricos do IMEI.', 'error');
+                            return;
+                          }
+                          if (!validateLuhn(entradaImei)) {
+                            showToast('IMEI inválido (falha na validação Luhn).', 'error');
+                            return;
+                          }
+                          if (entradaLoteItens.some(i => i.imei === entradaImei)) {
+                            showToast('Este IMEI já está na sua fila de conferência!', 'error');
+                            return;
+                          }
+                        }
+
+                        handleEntradaLoteAdd({
+                          nome: selectedProdutoMestre.nome,
+                          tipo: selectedProdutoMestre.tipo,
+                          categoria: selectedProdutoMestre.categoria,
+                          preco: selectedProdutoMestre.preco,
+                          preco_venda: selectedProdutoMestre.preco_venda,
+                          codigo_barras: entradaCodigoBarras || selectedProdutoMestre.codigo_barras,
+                          imei: isCel ? entradaImei : null,
+                          cor: isCel ? (entradaCorDispositivo || 'Preto') : null,
+                          quantidade: isCel ? 1 : (parseInt(entradaQtdAcessorio, 10) || 1),
+                          isCelular: isCel
+                        });
+
+                        playBeepSucesso();
+                        showToast(`➕ Adicionado à fila: ${selectedProdutoMestre.nome}`, 'success');
+                        setEntradaImei('');
+                        setTimeout(() => {
+                          if (imeiInputRef.current) imeiInputRef.current.focus();
+                        }, 50);
+                      }}
+                      disabled={!selectedProdutoMestre}
+                      className="w-full bg-[#222222] hover:bg-[#333333] hover:border-[#6A0DAD] border border-transparent disabled:opacity-50 text-white font-bold py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer"
+                    >
+                      <Plus size={15} className="text-[#6A0DAD]" />
+                      Adicionar à Fila
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSalvarEstoqueFisico}
+                      disabled={loadingEntrada || !selectedProdutoMestre || !(selectedFilialDestino || activeFilialId || profile?.filial_id) || ((selectedProdutoMestre?.tipo === 'CELULAR' || selectedProdutoMestre?.tipo === 'Celular') && !entradaImei)}
+                      className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white font-bold py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
+                    >
+                      {loadingEntrada ? (
+                        <>
+                          <Loader2 className="animate-spin" size={15} />
+                          Gravando...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={15} />
+                          Entrada Imediata
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* PAINEL DIREITO: Lista Recente de IMEIs + Estoque Consolidado */}
+              <div className="lg:col-span-3 space-y-5">
+                {/* Últimos Aparelhos Recebidos */}
+                <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2 mb-4 border-b border-[#222222] pb-3">
+                    <ClipboardList size={15} className="text-[#6A0DAD]" />
+                    Últimos Aparelhos Recebidos na Rede
+                  </h4>
+
+                  {ultimosRecebidos.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-gray-700">
+                      <Smartphone size={28} className="mb-2 opacity-30" />
+                      <p className="text-xs italic">Nenhum aparelho recebido recentemente.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                      {ultimosRecebidos.slice(0, 10).map((item, idx) => (
+                        <div
+                          key={item.id || idx}
+                          className="flex items-center justify-between rounded-lg px-3 py-2 border bg-black/40 border-[#222222] hover:border-[#6A0DAD]/30 transition-all"
+                        >
+                          <div className="flex items-center gap-3">
+                            <Smartphone size={15} className="text-purple-400 flex-shrink-0" />
+                            <div>
+                              <p className="text-xs font-bold text-white tracking-wider">
+                                {item.produtos?.nome || 'Modelo não identificado'}
+                              </p>
+                              <div className="flex items-center gap-2 text-[10px] font-mono mt-0.5 flex-wrap">
+                                <span className="text-gray-500">IMEI: <span className="text-gray-300 font-semibold">{item.imei}</span></span>
+                                <ColorBadge cor={item.cor} />
+                              </div>
+                            </div>
+                          </div>
+                          <div>
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${item.status === 'VENDIDO' || item.status === 'Vendido'
+                              ? 'bg-red-950/20 text-red-400 border border-red-800/30'
+                              : 'bg-green-950/20 text-green-400 border border-green-800/30'
+                              }`}>
+                              {item.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Estoque Consolidado */}
+                <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 flex flex-col">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Database size={15} className="text-[#6A0DAD]" />
+                      Estoque Físico Consolidado
+                    </h4>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-wrap">
+                      <div className="relative flex-1 min-w-[180px] sm:w-56">
+                        <Search size={13} className="absolute left-3 top-2.5 text-gray-600" />
+                        <input
+                          type="text"
+                          value={buscaEstoque}
+                          onChange={(e) => setBuscaEstoque(e.target.value)}
+                          placeholder="Buscar estoque..."
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-8 pr-4 py-1.5 text-xs outline-none transition-all"
+                        />
+                      </div>
+                      <select
+                        value={filtroFilialEstoque}
+                        onChange={(e) => setFiltroFilialEstoque(e.target.value)}
+                        className="bg-black border border-[#222222] rounded-md text-white px-3 py-1.5 text-xs outline-none focus:border-[#6A0DAD] min-w-[120px]"
+                      >
+                        <option value="">Todas as Filiais</option>
+                        {filiais.map(f => (
+                          <option key={f.id} value={f.id}>{f.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const displayEstoqueConsolidado = (estoqueConsolidadoLista && estoqueConsolidadoLista.length > 0)
+                      ? estoqueConsolidadoLista
+                      : filteredProdutosEstoque;
+
+                    if (loadingProdutos || loadingDados) {
+                      return (
+                        <div className="flex flex-col items-center justify-center py-12 gap-3">
+                          <div className="w-7 h-7 border-3 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
+                          <span className="text-xs text-gray-600">Carregando estoque físico...</span>
+                        </div>
+                      );
+                    }
+
+                    if (displayEstoqueConsolidado.length === 0) {
+                      return (
+                        <div className="flex flex-col items-center justify-center py-12 text-gray-700">
+                          <Package size={28} className="mb-2 opacity-30" />
+                          <span className="text-xs italic">Nenhum produto em estoque.</span>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="overflow-x-auto max-h-96">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="border-b border-[#222222] text-gray-600 font-bold uppercase tracking-wider">
+                              <th className="pb-2">Produto</th>
+                              <th className="pb-2">Filial</th>
+                              <th className="pb-2">Cor</th>
+                              <th className="pb-2">Preço</th>
+                              <th className="pb-2">Qtd</th>
+                              <th className="pb-2 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#111111]">
+                            {displayEstoqueConsolidado.slice(0, 50).map(p => (
+                              <ProductTableRow
+                                key={p.id}
+                                produto={p}
+                                filiais={filiais}
+                                disponiveisImeis={disponiveisImeis}
+                                expandedProductImeis={expandedProductImeis}
+                                productImeisMap={productImeisMap}
+                                toggleVerImeis={toggleVerImeis}
+                                onUpdateProdutoField={handleUpdateProdutoField}
+                                onDeleteProduto={handleDeleteProduto}
+                                onOpenEditImeiModal={handleOpenEditImeiModal}
+                                userRole={profile?.role}
+                              />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ABA 2: HISTÓRICO DE MOVIMENTAÇÕES DE ESTOQUE (LOGS AUDITÁVEIS) */}
+        {entradaSubTab === 'movimentacoes' && (
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 space-y-4 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#222222] pb-4">
+              <div>
+                <h4 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <ClipboardList size={18} className="text-[#6A0DAD]" />
+                  Histórico de Movimentações (Audit Log)
+                </h4>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Registro permanente de todas as entradas, transferências e saídas da empresa.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={fetchEstoqueMovimentacoes}
+                disabled={movimentacoesLoading}
+                className="px-3.5 py-1.5 bg-[#6A0DAD]/10 hover:bg-[#6A0DAD]/20 text-[#6A0DAD] border border-[#6A0DAD]/30 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                {movimentacoesLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                Atualizar Logs
+              </button>
+            </div>
+
+            {movimentacoesLoading ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <div className="w-7 h-7 border-3 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-xs text-gray-500">Consultando estoque_movimentacoes...</span>
+              </div>
+            ) : estoqueMovimentacoes.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-gray-700">
+                <ClipboardList size={32} className="mb-2 opacity-30" />
+                <p className="text-xs italic">Nenhuma movimentação registrada no histórico até o momento.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="pb-3">Data / Hora</th>
+                      <th className="pb-3">Tipo</th>
+                      <th className="pb-3">Produto</th>
+                      <th className="pb-3">IMEI</th>
+                      <th className="pb-3">Filial Destino</th>
+                      <th className="pb-3 text-center">Qtd</th>
+                      <th className="pb-3">Operador</th>
+                      <th className="pb-3">Observação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#111111]">
+                    {estoqueMovimentacoes.map((mov) => {
+                      const tipo = mov.tipo_movimentacao || 'ENTRADA';
+                      const isEntrada = tipo.includes('ENTRADA') || tipo.includes('AQUISICAO');
+                      return (
+                        <tr key={mov.id} className="hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3 text-gray-400 font-mono text-[11px] whitespace-nowrap">
+                            {mov.created_at ? new Date(mov.created_at).toLocaleString('pt-BR') : '-'}
+                          </td>
+                          <td className="py-3">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${
+                              isEntrada
+                                ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/40'
+                                : 'bg-blue-950/30 text-blue-400 border border-blue-800/40'
+                            }`}>
+                              {tipo}
+                            </span>
+                          </td>
+                          <td className="py-3 font-semibold text-white">
+                            {mov.produtos?.nome || 'Produto ID: ' + (mov.produto_id || '-')}
+                          </td>
+                          <td className="py-3 font-mono text-purple-300 text-[11px]">
+                            {mov.imei || '-'}
+                          </td>
+                          <td className="py-3 text-gray-300">
+                            {mov.filial_destino?.nome || '-'}
+                          </td>
+                          <td className="py-3 text-center font-bold text-white">
+                            {mov.quantidade || 1}
+                          </td>
+                          <td className="py-3 text-gray-400 text-[11px]">
+                            {mov.usuario?.nome || mov.usuario?.email || 'Sistema'}
+                          </td>
+                          <td className="py-3 text-gray-500 text-[11px] max-w-xs truncate" title={mov.observacao}>
+                            {mov.observacao || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const getTopRightHeaderName = () => {
     if (!profile) return 'Rede Cred';
     const role = profile.role;
@@ -16482,12 +17622,12 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // 8. Gestão de Estoque - Oculto para DONO
-      if (!isGerente && ['ADMIN', 'OWNER', 'ESTOQUISTA'].includes(currentRole) && currentRole !== 'DONO') {
-        const showEstoque = !isGerente;
+      if (['ADMIN', 'OWNER', 'ESTOQUISTA', 'GERENTE', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
+        const showEstoque = true; // Liberado para operador de filial dar entrada de estoque
         const isStrictAdmin = ['ADMIN', 'MASTER', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
         const showCatalogoMestre = isStrictAdmin;
         const showTransferencias = !isGerente;
-        const showCategorias = !isGerente;
+        const showCategorias = isStrictAdmin || ['ESTOQUISTA'].includes(currentRole);
 
         if (sidebarOpen || isMobileDrawer) {
           items.push(
@@ -16550,7 +17690,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (!item) return false;
       if (isGerente) {
         const key = item.key;
-        if (['estoque', 'transferencias', 'assinatura', 'pdv'].includes(key)) {
+        if (['transferencias', 'assinatura', 'pdv'].includes(key)) {
           return false;
         }
       }
@@ -20617,489 +21757,8 @@ export default function Dashboard({ session, profileDataProps }) {
                 )}
 
                 {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE */}
-                {activeTab === 'estoque' && profile?.role !== 'RH_ADMIN' && (
-                  <div className="space-y-8 animate-fadeIn">
-
-                    {/* Cabeçalho da Aba */}
-                    <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                      <div>
-                        <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
-                          <Package size={22} className="text-[#6A0DAD]" />
-                          Entrada de Estoque
-                          <span className="text-xs bg-[#6A0DAD]/20 text-[#6A0DAD] border border-[#6A0DAD]/40 px-2 py-0.5 rounded-full font-semibold ml-1">Poka-Yoke</span>
-                        </h3>
-                        <p className="text-xs text-gray-500 mt-1">Selecione um modelo do catálogo e bipe os IMEIs. Validação automática em tempo real.</p>
-                      </div>
-                      <div className="flex items-center gap-3 flex-wrap">
-                        {/* Seletor de Filial de Destino no Cabeçalho */}
-                        <div className="flex items-center gap-2 bg-black border border-[#6A0DAD]/50 px-3 py-1.5 rounded-lg shadow-sm">
-                          <Store size={14} className="text-[#6A0DAD] shrink-0" />
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider hidden sm:inline">Filial Destino:</span>
-                          <select
-                            value={selectedFilialDestino}
-                            onChange={(e) => setSelectedFilialDestino(e.target.value)}
-                            className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer border-none"
-                          >
-                            <option value="" className="bg-gray-900 text-gray-400">Selecione a Filial...</option>
-                            {filiais.map(f => (
-                              <option key={f.id} value={f.id} className="bg-gray-900 text-white">
-                                {f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'MASTER'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (catalogoProdutos && catalogoProdutos.length > 0) {
-                                handleAbrirDistribuirEstoque(catalogoProdutos[0]);
-                              } else {
-                                showToast("Nenhum produto cadastrado no catálogo mestre ainda.", "info");
-                              }
-                            }}
-                            className="px-3.5 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md shrink-0 cursor-pointer"
-                          >
-                            <Share2 size={14} />
-                            <span>Distribuir Estoque Matriz</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setIsModalAparelhosLoteOpen(true)}
-                          className="px-3.5 py-2 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all shadow-md shrink-0 cursor-pointer"
-                          title="Entrada rápida de celulares com lista de IMEIs em lote"
-                        >
-                          <Smartphone size={14} />
-                          <span>📱 Entrada de Aparelhos em Lote</span>
-                        </button>
-                        <div className="flex items-center gap-2 text-xs text-gray-600 border border-[#222222] px-4 py-2 rounded-lg">
-                          <span className="w-2 h-2 rounded-full bg-[#6A0DAD] animate-pulse"></span>
-                          Scanner Mode Ativo
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                      {/* FORMULÁRIO DE ENTRADA DE ESTOQUE */}
-                      {true && (
-                        <div className="lg:col-span-2 space-y-5">
-                          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4">
-                            <h4 className="text-sm font-bold text-white flex items-center gap-2 border-b border-[#222222] pb-3 mb-2">
-                              <Package size={16} className="text-[#6A0DAD]" />
-                              Entrada Física de Produtos (Reposição de Estoque)
-                            </h4>
-
-                            {/* Filtro A: Categoria / Tipo */}
-                            <div>
-                              <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex justify-between items-center">
-                                <span>Categoria / Tipo (Opcional)</span>
-                                {entradaFiltroCategoria !== 'todas' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setEntradaFiltroCategoria('todas')}
-                                    className="text-[9px] text-[#6A0DAD] hover:underline font-bold"
-                                  >
-                                    Limpar Filtro
-                                  </button>
-                                )}
-                              </label>
-                              <select
-                                value={entradaFiltroCategoria}
-                                onChange={(e) => {
-                                  setEntradaFiltroCategoria(e.target.value);
-                                  setSelectedProdutoMestre(null);
-                                }}
-                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                              >
-                                <option value="todas" className="bg-gray-900 text-white">Todas as Categorias (Geral)</option>
-                                <option value="CELULAR" className="bg-gray-900 text-white">📱 Celulares / Smartphones</option>
-                                <option value="IOS" className="bg-gray-900 text-white">🍎 iPhones (iOS)</option>
-                                <option value="ANDROID" className="bg-gray-900 text-white">🤖 Android (Samsung, Xiaomi, Motorola, etc.)</option>
-                                <option value="ACESSORIO" className="bg-gray-900 text-white">🎧 Acessórios</option>
-                                <option value="APPLE_JBL_CONSOLE" className="bg-gray-900 text-white">🎮 Apple / JBL / Consoles</option>
-                                <option value="SERVICO" className="bg-gray-900 text-white">🛠️ Serviços</option>
-                                {categorias && categorias.length > 0 && (
-                                  <optgroup label="📂 Categorias Cadastradas no Sistema">
-                                    {categorias.map(cat => (
-                                      <option key={cat.id || cat.nome} value={cat.nome} className="bg-gray-900 text-white">
-                                        🏷️ {cat.nome}
-                                      </option>
-                                    ))}
-                                  </optgroup>
-                                )}
-                              </select>
-                            </div>
-
-                            {/* Filtro B: Bipar Código de Barras / Buscar Produto Mestre */}
-                            <div>
-                              <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                                Bipar Código de Barras / Buscar Produto Mestre
-                              </label>
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  value={entradaBuscaMestre}
-                                  onChange={(e) => handleBuscaMestreChange(e.target.value)}
-                                  onKeyDown={handleBuscaMestreKeyDown}
-                                  placeholder="Bipe o EAN/barcode, digite o SKU ou nome..."
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2.5 text-sm outline-none font-mono transition-all placeholder:text-gray-600"
-                                />
-                                <Barcode size={16} className="absolute left-3 top-3 text-gray-500" />
-                              </div>
-                            </div>
-
-                            {/* Campo 1: Dropdown 'Produto Mestre' */}
-                            <div>
-                              <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                Produto Mestre <span className="text-red-500">*</span>
-                              </label>
-                              <select
-                                value={selectedProdutoMestre ? String(selectedProdutoMestre.id) : ''}
-                                onChange={(e) => {
-                                  const prodId = String(e.target.value || '');
-                                  const prod = (produtosMestreOptions || []).find(p => String(p.id) === prodId) || (catalogoProdutos || []).find(p => String(p.id) === prodId);
-                                  setSelectedProdutoMestre(prod || null);
-                                  if (prod) {
-                                    setEntradaCodigoBarras(prod.codigo_barras || prod.barcode || prod.ean || '');
-                                  }
-                                }}
-                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                              >
-                                <option value="">Selecione o Produto Mestre...</option>
-                                {(produtosMestreOptions || []).map(p => {
-                                  const nomeExibido = p.nome || p.name || 'Produto sem Nome';
-                                  const eanExibido = p.codigo_barras || p.barcode || p.ean;
-                                  const catExibida = p.categoria || p.tipo || p.category || 'Geral';
-                                  return (
-                                    <option key={p.id || p.nome} value={p.id}>
-                                      {nomeExibido} {eanExibido ? `[EAN: ${eanExibido}]` : ''} ({catExibida})
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                            </div>
-
-                            {/* Campo 2 & 3: Dinâmico baseado no tipo do Produto Mestre ou Categoria (Celulares vs Acessórios/Geral) */}
-                            {(() => {
-                              const isCelularForm = Boolean(
-                                (selectedProdutoMestre && (
-                                  selectedProdutoMestre.tipo?.toLowerCase().includes('celular') ||
-                                  selectedProdutoMestre.tipo?.toLowerCase().includes('smartphone') ||
-                                  selectedProdutoMestre.categoria?.toLowerCase().includes('celular') ||
-                                  selectedProdutoMestre.categoria?.toLowerCase().includes('smartphone') ||
-                                  selectedProdutoMestre.categoria?.toLowerCase().includes('ios') ||
-                                  selectedProdutoMestre.categoria?.toLowerCase().includes('android') ||
-                                  selectedProdutoMestre.exige_imei === true ||
-                                  selectedProdutoMestre.is_celular === true
-                                )) ||
-                                (!selectedProdutoMestre && entradaFiltroCategoria && (
-                                  entradaFiltroCategoria.toLowerCase().includes('celular') ||
-                                  entradaFiltroCategoria.toLowerCase().includes('smartphone') ||
-                                  entradaFiltroCategoria.toLowerCase().includes('ios') ||
-                                  entradaFiltroCategoria.toLowerCase().includes('android')
-                                ))
-                              );
-
-                              if (isCelularForm) {
-                                return (
-                                  <>
-                                    <div>
-                                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                                        IMEI (Exclusivo, 15 dígitos) <span className="text-red-500">*</span>
-                                      </label>
-                                      <div className="relative">
-                                        <input
-                                          ref={imeiInputRef}
-                                          type="text"
-                                          inputMode="numeric"
-                                          value={entradaImei}
-                                          onChange={(e) => setEntradaImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                                          onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                              e.preventDefault();
-                                              handleSalvarEstoqueFisico(e);
-                                            }
-                                          }}
-                                          placeholder="Digite ou bipe os 15 dígitos do IMEI..."
-                                          maxLength={15}
-                                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-9 pr-4 py-2.5 text-sm outline-none font-mono tracking-widest transition-all"
-                                        />
-                                        <Smartphone size={16} className="absolute left-3 top-3 text-[#6A0DAD]" />
-                                      </div>
-                                    </div>
-
-                                    <div>
-                                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                        Cor do Aparelho <span className="text-red-500">*</span>
-                                      </label>
-                                      <input
-                                        type="text"
-                                        value={entradaCorDispositivo}
-                                        onChange={(e) => setEntradaCorDispositivo(e.target.value)}
-                                        placeholder="Selecione ou digite a cor..."
-                                        list="lista-cores-sugeridas"
-                                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                                      />
-                                      <datalist id="lista-cores-sugeridas">
-                                        <option value="Preto" />
-                                        <option value="Branco" />
-                                        <option value="Azul" />
-                                        <option value="Vermelho" />
-                                        <option value="Verde" />
-                                        <option value="Rosa" />
-                                        <option value="Dourado" />
-                                        <option value="Prateado" />
-                                        <option value="Cinza" />
-                                        <option value="Roxo" />
-                                        <option value="Grafite" />
-                                        <option value="Titânio Natural" />
-                                        <option value="Titânio Preto" />
-                                        <option value="Titânio Branco" />
-                                      </datalist>
-                                    </div>
-                                  </>
-                                );
-                              }
-
-                              return (
-                                <div className="space-y-4">
-                                  <div>
-                                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                                      Código de Barras (EAN / Barcode) *
-                                    </label>
-                                    <input
-                                      type="text"
-                                      value={entradaCodigoBarras || (selectedProdutoMestre ? selectedProdutoMestre.codigo_barras || '' : '')}
-                                      onChange={(e) => setEntradaCodigoBarras(e.target.value)}
-                                      placeholder="Bipe ou digite o código de barras..."
-                                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-white rounded-md px-4 py-2.5 text-sm outline-none font-mono transition-all"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-sans">
-                                      Quantidade de Entrada <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      value={entradaQtdAcessorio}
-                                      onChange={(e) => setEntradaQtdAcessorio(e.target.value)}
-                                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all font-bold text-center"
-                                      placeholder="1"
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            })()}
-
-                            {/* Campo 4: Dropdown de 'Filial de Destino' */}
-                            <div>
-                              <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                                Filial de Destino (Localização Física)
-                              </label>
-                              <select
-                                value={selectedFilialDestino}
-                                onChange={(e) => setSelectedFilialDestino(e.target.value)}
-                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
-                              >
-                                <option value="">Selecione a Filial...</option>
-                                {filiais.map(f => (
-                                  <option key={f.id} value={f.id}>{f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}</option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <button
-                              onClick={handleSalvarEstoqueFisico}
-                              disabled={loadingEntrada || !selectedProdutoMestre || !selectedFilialDestino || ((selectedProdutoMestre?.tipo === 'CELULAR' || selectedProdutoMestre?.tipo === 'Celular') && !entradaImei)}
-                              className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white font-extrabold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-[#6A0DAD]/20 hover:shadow-[#6A0DAD]/40 mt-4"
-                            >
-                              {loadingEntrada ? (
-                                <>
-                                  <Loader2 className="animate-spin" size={16} />
-                                  Salvando...
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle2 size={16} />
-                                  Salvar Entrada Física
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* PAINEL DIREITO: Lista de IMEIs + Estoque */}
-                      <div className={`${profile?.role === 'DONO' ? 'lg:col-span-5' : 'lg:col-span-3'} space-y-5`}>
-                        {/* Últimas Entradas de Aparelhos (Histórico Recente) */}
-                        <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5">
-                          <h4 className="text-sm font-bold text-white flex items-center gap-2 mb-4 border-b border-[#222222] pb-3">
-                            <ClipboardList size={15} className="text-[#6A0DAD]" />
-                            Últimos Aparelhos Recebidos (Rede)
-                          </h4>
-
-                          {ultimosRecebidos.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-10 text-gray-700">
-                              <Smartphone size={28} className="mb-2 opacity-30" />
-                              <p className="text-xs italic">Nenhum aparelho recebido recentemente.</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                              {ultimosRecebidos.map((item, idx) => (
-                                <div
-                                  key={item.id || idx}
-                                  className="flex items-center justify-between rounded-lg px-3 py-2.5 border bg-black/40 border-[#222222] hover:border-[#6A0DAD]/30 transition-all"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <Smartphone size={15} className="text-purple-400 flex-shrink-0" />
-                                    <div>
-                                      <p className="text-xs font-bold text-white tracking-wider">
-                                        {item.produtos?.nome || 'Modelo não identificado'}
-                                      </p>
-                                      <div className="flex items-center gap-2 text-[10px] font-mono mt-0.5 flex-wrap">
-                                        <span className="text-gray-500">IMEI: <span className="text-gray-300 font-semibold">{item.imei}</span></span>
-                                        <ColorBadge cor={item.cor} />
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${item.status === 'VENDIDO' || item.status === 'Vendido'
-                                      ? 'bg-red-950/20 text-red-400 border border-red-800/30'
-                                      : 'bg-green-950/20 text-green-400 border border-green-800/30'
-                                      }`}>
-                                      {item.status}
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Estoque Consolidado */}
-                        <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 flex flex-col">
-                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                              <Database size={15} className="text-[#6A0DAD]" />
-                              Estoque Consolidado
-                            </h4>
-                            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-wrap">
-                              <div className="relative flex-1 min-w-[180px] sm:w-64">
-                                <Search size={13} className="absolute left-3 top-2.5 text-gray-600" />
-                                <input
-                                  type="text"
-                                  value={buscaEstoque}
-                                  onChange={(e) => setBuscaEstoque(e.target.value)}
-                                  placeholder="Nome, SKU, IMEI, EAN, Cor..."
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-8 pr-4 py-2 text-xs outline-none transition-all"
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={handleDebugBusca}
-                                className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-md transition-all shadow-md flex items-center gap-1 shrink-0"
-                                title="Forçar busca pura no Supabase sem filtros de loja/interface"
-                              >
-                                🔥 DEBUG FORÇA BRUTA
-                              </button>
-                              <select
-                                value={filtroFilialEstoque}
-                                onChange={(e) => setFiltroFilialEstoque(e.target.value)}
-                                className="bg-black border border-[#222222] rounded-md text-white px-3 py-2 text-xs outline-none focus:border-[#6A0DAD] min-w-[120px]"
-                              >
-                                <option value="">Todas as Filiais</option>
-                                {filiais.map(f => (
-                                  <option key={f.id} value={f.id}>{f.nome}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={filtroCategoriaEstoque}
-                                onChange={(e) => setFiltroCategoriaEstoque(e.target.value)}
-                                className="bg-black border border-[#222222] rounded-md text-white px-3 py-2 text-xs outline-none focus:border-[#6A0DAD] min-w-[120px]"
-                              >
-                                <option value="">Todas as Categorias</option>
-                                {categorias.map(cat => (
-                                  <option key={cat.id} value={cat.nome}>{cat.nome}</option>
-                                ))}
-                              </select>
-                              <select
-                                value={filtroStatusEstoque}
-                                onChange={(e) => setFiltroStatusEstoque(e.target.value)}
-                                className="bg-black border border-[#222222] rounded-md text-white px-3 py-2 text-xs outline-none focus:border-[#6A0DAD] min-w-[125px]"
-                              >
-                                <option value="">Disponibilidade (Todas)</option>
-                                <option value="disponivel">Disponível</option>
-                                <option value="indisponivel">Indisponível</option>
-                              </select>
-                            </div>
-                          </div>
-
-                          {(() => {
-                            const displayEstoqueConsolidado = (estoqueConsolidadoLista && estoqueConsolidadoLista.length > 0)
-                              ? estoqueConsolidadoLista
-                              : filteredProdutosEstoque;
-
-                            if (loadingProdutos || loadingDados) {
-                              return (
-                                <div className="flex flex-col items-center justify-center py-16 gap-3">
-                                  <div className="w-7 h-7 border-3 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
-                                  <span className="text-xs text-gray-600">Carregando estoque...</span>
-                                </div>
-                              );
-                            }
-
-                            if (displayEstoqueConsolidado.length === 0) {
-                              return (
-                                <div className="flex flex-col items-center justify-center py-16 text-gray-700">
-                                  <Package size={30} className="mb-2 opacity-30" />
-                                  <span className="text-sm italic">Nenhum produto no estoque.</span>
-                                </div>
-                              );
-                            }
-
-                            return (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-left text-xs border-collapse">
-                                  <thead>
-                                    <tr className="border-b border-[#222222] text-gray-600 font-bold uppercase tracking-wider">
-                                      <th className="pb-3">Produto</th>
-                                      <th className="pb-3">Filial</th>
-                                      <th className="pb-3">Cat.</th>
-                                      <th className="pb-3">Cor</th>
-                                      <th className="pb-3">Preço</th>
-                                      <th className="pb-3">Qtd</th>
-                                      <th className="pb-3 text-right">Ações</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-[#111111]">
-                                    {displayEstoqueConsolidado.map(p => (
-                                      <ProductTableRow
-                                        key={p.id}
-                                        produto={p}
-                                        filiais={filiais}
-                                        disponiveisImeis={disponiveisImeis}
-                                        expandedProductImeis={expandedProductImeis}
-                                        productImeisMap={productImeisMap}
-                                        toggleVerImeis={toggleVerImeis}
-                                        onUpdateProdutoField={handleUpdateProdutoField}
-                                        onDeleteProduto={handleDeleteProduto}
-                                        onOpenEditImeiModal={handleOpenEditImeiModal}
-                                        userRole={profile?.role}
-                                      />
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            );
-                          })()}
-                        </div>
-
-                      </div>
-                    </div>
-                  </div>
+                {(activeTab === 'estoque' || currentView === 'estoque') && profile?.role !== 'RH_ADMIN' && (
+                  renderEstoqueContent()
                 )}
 
 
@@ -22570,6 +23229,8 @@ export default function Dashboard({ session, profileDataProps }) {
                     )}
 
                     {activeSellerTab === 'transferencias' && renderTransferencias()}
+
+                    {(activeSellerTab === 'estoque' || currentView === 'estoque') && renderEstoqueContent()}
 
                     {(activeSellerTab === 'auditoria_credito' || currentView === 'auditoria_credito') && ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role) && renderAuditoriaCredito()}
 
