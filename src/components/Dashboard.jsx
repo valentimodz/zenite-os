@@ -30,6 +30,7 @@ import ModalGeradorGrade from './ModalGeradorGrade';
 import ModalGeradorPeliculas from './ModalGeradorPeliculas';
 import ModalEntradaAparelhosLote from './ModalEntradaAparelhosLote';
 import ModalDetalheRelatorio from './ModalDetalheRelatorio';
+import ModalEntradaEstoqueRapida from './ModalEntradaEstoqueRapida';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1168,6 +1169,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [disponiveisImeis, setDisponiveisImeis] = useState([]);
   const [entradaLoteItens, setEntradaLoteItens] = useState([]);
   const [entradaSubTab, setEntradaSubTab] = useState('conferencia'); // 'conferencia' | 'catalogo'
+  const [isModalEntradaEstoqueRapidaOpen, setIsModalEntradaEstoqueRapidaOpen] = useState(false);
 
   // Vendas e Fechamentos Globais
   const [vendas, setVendas] = useState([]);
@@ -2045,6 +2047,9 @@ export default function Dashboard({ session, profileDataProps }) {
           const searchInput = document.getElementById('pdv-busca-input');
           if (searchInput) searchInput.focus();
         }
+      } else if (e.key === 'F4') {
+        e.preventDefault();
+        setIsModalEntradaEstoqueRapidaOpen(true);
       } else if (e.key === 'F8') {
         e.preventDefault();
         setIsQuickClientFormOpen(true);
@@ -8681,6 +8686,12 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
+    if (view === 'estoque' && profile?.role === 'VENDEDOR') {
+      setIsMobileMenuOpen(false);
+      setIsModalEntradaEstoqueRapidaOpen(true);
+      return;
+    }
+
     setCurrentView(view);
     setIsMobileMenuOpen(false);
     const tenantId = profile?.empresa_id;
@@ -14691,6 +14702,7 @@ export default function Dashboard({ session, profileDataProps }) {
             <div className="hidden lg:flex bg-surface-elevated border border-border p-4 rounded-xl flex-wrap gap-4 text-[10px] text-muted-foreground font-medium shadow-sm">
               <span className="font-bold text-foreground uppercase tracking-wider block w-full mb-1">Teclas de Atalho [PDV]:</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F2</kbd> Buscar Produto</span>
+              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F4</kbd> Entrada Rápida de Estoque</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F8</kbd> Cadastro de Cliente</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F9</kbd> Participação Trainee</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F10</kbd> Finalizar Venda</span>
@@ -14789,27 +14801,39 @@ export default function Dashboard({ session, profileDataProps }) {
                   </button>
                 </div>
 
-                {/* Linha 2: Ação de atalho expandida */}
-                <button
-                  type="button"
-                  disabled={isPdvBloqueadoParaUsuario}
-                  onClick={() => {
-                    if (isPdvBloqueadoParaUsuario) {
-                      showToast('Caixa Fechado: É necessário realizar a abertura do caixa para vendas rápidas.', 'error');
-                      setIsModalAbrirCaixaOpen(true);
-                      return;
-                    }
-                    setIsVendaRapidaOpen(true);
-                  }}
-                  className={`w-full px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-2 ${isPdvBloqueadoParaUsuario
-                    ? 'bg-surface-elevated text-muted-foreground border border-border opacity-60 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-primary-foreground shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
-                    }`}
-                  title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
-                >
-                  <Zap size={14} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-muted-foreground' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
-                  <span>⚡ Venda Rápida</span>
-                </button>
+                {/* Linha 2: Ações rápidas do Caixa (Venda Rápida + Entrada de Mercadoria) */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isPdvBloqueadoParaUsuario}
+                    onClick={() => {
+                      if (isPdvBloqueadoParaUsuario) {
+                        showToast('Caixa Fechado: É necessário realizar a abertura do caixa para vendas rápidas.', 'error');
+                        setIsModalAbrirCaixaOpen(true);
+                        return;
+                      }
+                      setIsVendaRapidaOpen(true);
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 ${isPdvBloqueadoParaUsuario
+                      ? 'bg-surface-elevated text-muted-foreground border border-border opacity-60 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-primary-foreground shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
+                      }`}
+                    title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
+                  >
+                    <Zap size={13} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-muted-foreground' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
+                    <span>⚡ Venda Rápida</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsModalEntradaEstoqueRapidaOpen(true)}
+                    className="px-3 py-2 rounded-lg text-xs font-extrabold bg-[#111111] hover:bg-[#1a1a1a] text-purple-300 hover:text-white border border-[#6A0DAD]/40 hover:border-[#6A0DAD] transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                    title="Entrada rápida de mercadorias no estoque da sua loja [Atalho: F4]"
+                  >
+                    <Package size={13} className="shrink-0 text-[#6A0DAD]" />
+                    <span>📦 Entrada Rápida</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -21756,8 +21780,8 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 )}
 
-                {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE */}
-                {(activeTab === 'estoque' || currentView === 'estoque') && profile?.role !== 'RH_ADMIN' && (
+                {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE (EXCLUSIVO PARA ADMIN / GERENTE / ESTOQUISTA) */}
+                {(activeTab === 'estoque' || currentView === 'estoque') && profile?.role !== 'RH_ADMIN' && profile?.role !== 'VENDEDOR' && (
                   renderEstoqueContent()
                 )}
 
@@ -23229,8 +23253,6 @@ export default function Dashboard({ session, profileDataProps }) {
                     )}
 
                     {activeSellerTab === 'transferencias' && renderTransferencias()}
-
-                    {(activeSellerTab === 'estoque' || currentView === 'estoque') && renderEstoqueContent()}
 
                     {(activeSellerTab === 'auditoria_credito' || currentView === 'auditoria_credito') && ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role) && renderAuditoriaCredito()}
 
@@ -27257,6 +27279,26 @@ export default function Dashboard({ session, profileDataProps }) {
           isOpen={modalRelatorioAberto}
           onClose={() => setModalRelatorioAberto(false)}
           filiais={filiais}
+        />
+
+        {/* Modal Entrada Rápida de Estoque (Para Vendedores / Balcão) */}
+        <ModalEntradaEstoqueRapida
+          isOpen={isModalEntradaEstoqueRapidaOpen}
+          onClose={() => setIsModalEntradaEstoqueRapidaOpen(false)}
+          perfilUsuario={profile}
+          session={session}
+          activeFilialId={activeFilialId}
+          activeFilialNome={activeFilialNome}
+          onSuccess={(qtdAdicionada, nomeProduto) => {
+            showToast(`${qtdAdicionada} unidades de "${nomeProduto}" adicionadas com sucesso!`, 'success');
+            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+            if (targetEmpresaId) {
+              fetchProdutos(targetEmpresaId);
+              fetchGerenteData(targetEmpresaId);
+            }
+            window.dispatchEvent(new Event('estoque_updated'));
+            window.dispatchEvent(new Event('produtos_updated'));
+          }}
         />
 
         {/* Toast Notification Container */}
