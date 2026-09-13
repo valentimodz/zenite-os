@@ -2047,7 +2047,7 @@ export default function Dashboard({ session, profileDataProps }) {
           const searchInput = document.getElementById('pdv-busca-input');
           if (searchInput) searchInput.focus();
         }
-      } else if (e.key === 'F4') {
+      } else if (e.key === 'F4' || (e.altKey && (e.key === 'e' || e.key === 'E'))) {
         e.preventDefault();
         setIsModalEntradaEstoqueRapidaOpen(true);
       } else if (e.key === 'F8') {
@@ -14827,11 +14827,14 @@ export default function Dashboard({ session, profileDataProps }) {
                   <button
                     type="button"
                     onClick={() => setIsModalEntradaEstoqueRapidaOpen(true)}
-                    className="px-3 py-2 rounded-lg text-xs font-extrabold bg-[#111111] hover:bg-[#1a1a1a] text-purple-300 hover:text-white border border-[#6A0DAD]/40 hover:border-[#6A0DAD] transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                    title="Entrada rápida de mercadorias no estoque da sua loja [Atalho: F4]"
+                    className="px-3 py-2 rounded-lg text-xs font-extrabold bg-[#111111] hover:bg-[#1a1a1a] text-purple-300 hover:text-white border border-[#6A0DAD]/40 hover:border-[#6A0DAD] transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 shadow-sm cursor-pointer group"
+                    title="Entrada rápida de mercadorias no estoque da sua loja (Atalho: Tecla F4 ou Alt+E)"
                   >
-                    <Package size={13} className="shrink-0 text-[#6A0DAD]" />
+                    <Package size={13} className="shrink-0 text-[#6A0DAD] group-hover:scale-110 transition-transform" />
                     <span>📦 Entrada Rápida</span>
+                    <span className="text-[10px] font-mono bg-[#6A0DAD]/20 group-hover:bg-[#6A0DAD]/40 text-purple-200 px-1.5 py-0.2 rounded border border-[#6A0DAD]/30">
+                      F4
+                    </span>
                   </button>
                 </div>
               </div>
@@ -17645,9 +17648,9 @@ export default function Dashboard({ session, profileDataProps }) {
         items.push(sidebarItem('auditoria_credito', 'Auditoria Vendas & Crédito', ShieldCheck));
       }
 
-      // 8. Gestão de Estoque - Oculto para DONO
-      if (['ADMIN', 'OWNER', 'ESTOQUISTA', 'GERENTE', 'VENDEDOR'].includes(currentRole) && currentRole !== 'DONO') {
-        const showEstoque = true; // Liberado para operador de filial dar entrada de estoque
+      // 8. Gestão de Estoque - Exclusivo para ADMIN / GERENTE / ESTOQUISTA (Oculto para VENDEDOR e DONO)
+      if (['ADMIN', 'OWNER', 'ESTOQUISTA', 'GERENTE'].includes(currentRole) && currentRole !== 'DONO') {
+        const showEstoque = true;
         const isStrictAdmin = ['ADMIN', 'MASTER', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
         const showCatalogoMestre = isStrictAdmin;
         const showTransferencias = !isGerente;

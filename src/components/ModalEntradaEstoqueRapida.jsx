@@ -56,6 +56,30 @@ export default function ModalEntradaEstoqueRapida({
     );
   }, [activeFilialNome, perfilUsuario]);
 
+  // Foco automático imediato ao abrir o modal
+  useEffect(() => {
+    if (isOpen) {
+      // Foco instantâneo síncrono/microtask
+      const timerInstant = setTimeout(() => {
+        if (inputBuscaRef.current) {
+          inputBuscaRef.current.focus();
+          inputBuscaRef.current.select?.();
+        }
+      }, 50);
+
+      const timerBackup = setTimeout(() => {
+        if (inputBuscaRef.current && document.activeElement !== inputBuscaRef.current) {
+          inputBuscaRef.current.focus();
+        }
+      }, 250);
+
+      return () => {
+        clearTimeout(timerInstant);
+        clearTimeout(timerBackup);
+      };
+    }
+  }, [isOpen]);
+
   // Carregar produtos da filial e catálogo quando o modal abrir
   useEffect(() => {
     if (!isOpen) {
@@ -101,10 +125,10 @@ export default function ModalEntradaEstoqueRapida({
       } finally {
         setLoadingProdutos(false);
         setTimeout(() => {
-          if (inputBuscaRef.current) {
+          if (inputBuscaRef.current && !produtoSelecionado) {
             inputBuscaRef.current.focus();
           }
-        }, 150);
+        }, 100);
       }
     };
 
@@ -399,6 +423,7 @@ export default function ModalEntradaEstoqueRapida({
               <input
                 ref={inputBuscaRef}
                 type="text"
+                autoFocus
                 value={busca}
                 onChange={(e) => {
                   setBusca(e.target.value);
