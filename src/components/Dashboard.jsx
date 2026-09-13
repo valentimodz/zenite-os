@@ -2015,8 +2015,22 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (e.key === 'F2') {
         e.preventDefault();
-        const searchInput = document.getElementById('pdv-busca-input');
-        if (searchInput) searchInput.focus();
+        const temItemCritico = carrinhoPossuiItemCritico(pdvCart);
+        if (!temItemCritico && pdvCart.length > 0) {
+          setSelectedPdvClienteId(null);
+          setPdvClienteNome('Consumidor Balcão');
+          setPdvClienteSearchInput('Consumidor Balcão');
+          setPdvClienteCpfCnpj('');
+          setPdvClienteEmail('');
+          setPdvClienteTelefone('');
+          setPdvClienteDataNascimento('');
+          setIsPdvClienteFieldsEditable(false);
+          setIsPdvClienteDropdownOpen(false);
+          showToast('⚡ Consumidor Balcão selecionado via F2', 'info');
+        } else {
+          const searchInput = document.getElementById('pdv-busca-input');
+          if (searchInput) searchInput.focus();
+        }
       } else if (e.key === 'F8') {
         e.preventDefault();
         setIsQuickClientFormOpen(true);
@@ -14556,43 +14570,50 @@ export default function Dashboard({ session, profileDataProps }) {
                 {/* CADASTRO RÁPIDO DE CLIENTE */}
                 <div className="border-t border-border pt-4">
                   {(() => {
-                    const cartTemCritico = carrinhoPossuiItemCritico(pdvCart);
+                    const isEsteiraCritica = carrinhoPossuiItemCritico(pdvCart);
                     return (
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center w-full text-xs font-bold text-muted-foreground">
-                          <span className="flex items-center gap-1.5 text-foreground">
+                      <div className="space-y-2.5">
+                        {/* CABEÇALHO DO BLOCO: Título + Badge ou Botão Consumidor Balcão */}
+                        <div className="flex justify-between items-center w-full">
+                          <span className="flex items-center gap-1.5 text-xs font-bold text-foreground">
                             <User size={14} className="text-primary" />
                             <span>Identificação do Cliente</span>
-                            {cartTemCritico ? (
-                              <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded">
-                                Obrigatório
+                          </span>
+
+                          <div className="flex items-center gap-2">
+                            {isEsteiraCritica ? (
+                              /* ESTEIRA CRÍTICA: Badge sutil âmbar/dourado */
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 shadow-sm">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                                Exige Cadastro Completo
                               </span>
                             ) : (
-                              <span className="text-[10px] font-semibold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
-                                Opcional
-                              </span>
+                              /* ESTEIRA ACESSÓRIOS: Botão nítido Consumidor Balcão (F2) */
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPdvClienteId(null);
+                                  setPdvClienteNome('Consumidor Balcão');
+                                  setPdvClienteSearchInput('Consumidor Balcão');
+                                  setPdvClienteCpfCnpj('');
+                                  setPdvClienteEmail('');
+                                  setPdvClienteTelefone('');
+                                  setPdvClienteDataNascimento('');
+                                  setIsPdvClienteFieldsEditable(false);
+                                  setIsPdvClienteDropdownOpen(false);
+                                  showToast('⚡ Selecionado: Consumidor Balcão', 'info');
+                                }}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-md bg-[#18181b] hover:bg-[#27272a] text-zinc-100 hover:text-white border border-zinc-700/80 hover:border-zinc-500 shadow-sm transition-all cursor-pointer group"
+                                title="Vender para Consumidor Balcão sem cadastro obrigatório (Atalho: Tecla F2)"
+                              >
+                                <span className="text-amber-400 group-hover:scale-110 transition-transform">⚡</span>
+                                <span>Consumidor Balcão</span>
+                                <span className="text-[9px] font-mono font-medium px-1 py-0.2 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 ml-0.5">
+                                  F2
+                                </span>
+                              </button>
                             )}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedPdvClienteId(null);
-                                setPdvClienteNome('Consumidor Balcão');
-                                setPdvClienteSearchInput('Consumidor Balcão');
-                                setPdvClienteCpfCnpj('');
-                                setPdvClienteEmail('');
-                                setPdvClienteTelefone('');
-                                setPdvClienteDataNascimento('');
-                                setIsPdvClienteFieldsEditable(false);
-                                setIsPdvClienteDropdownOpen(false);
-                                showToast('Selecionado: Consumidor Balcão', 'info');
-                              }}
-                              className="text-[10px] px-2 py-0.5 rounded bg-primary/10 hover:bg-primary/20 text-primary font-bold transition-colors cursor-pointer"
-                              title="Vender para Consumidor Balcão sem vincular cliente específico"
-                            >
-                              Consumidor Balcão
-                            </button>
+
                             {(selectedPdvClienteId || pdvClienteNome || pdvClienteSearchInput) && (
                               <button
                                 type="button"
@@ -14608,8 +14629,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                   setIsPdvClienteDropdownOpen(false);
                                   showToast('Dados do cliente limpos.', 'info');
                                 }}
-                                className="text-[10px] px-2 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold transition-colors cursor-pointer"
-                                title="Limpar seleção de cliente"
+                                className="text-[10px] px-2 py-1 rounded bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-semibold transition-colors cursor-pointer"
+                                title="Limpar campos do cliente"
                               >
                                 Limpar
                               </button>
@@ -14618,15 +14639,15 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
 
                         {/* Banner Informativo da Esteira */}
-                        {cartTemCritico ? (
+                        {isEsteiraCritica ? (
                           <div className="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-300 p-2 rounded-lg flex items-center gap-1.5">
                             <AlertTriangle size={13} className="text-amber-400 shrink-0" />
-                            <span><strong>Esteira Crítica (Aparelhos):</strong> Identificação com Nome, CPF e Telefone é obrigatória para finalizar a venda.</span>
+                            <span><strong>Esteira Crítica (Aparelhos):</strong> Identificação com Nome, CPF e Telefone é obrigatória para emissão do termo de garantia.</span>
                           </div>
                         ) : (
                           <div className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-2 rounded-lg flex items-center gap-1.5">
                             <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-                            <span><strong>Esteira Balcão (Acessórios):</strong> Venda rápida permitida com <em>Consumidor Balcão</em>.</span>
+                            <span><strong>Esteira Balcão (Acessórios):</strong> Venda rápida permitida com <em>Consumidor Balcão</em> ou atalho [F2].</span>
                           </div>
                         )}
                       </div>
@@ -14634,9 +14655,10 @@ export default function Dashboard({ session, profileDataProps }) {
                   })()}
 
                   <div className="grid grid-cols-2 gap-3 mt-3 bg-surface border border-border p-4 rounded-xl shadow-sm">
+                    {/* NOME COMPLETO */}
                     <div className="col-span-2 relative">
                       <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                        Nome Completo {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive">*</span>}
+                        Nome Completo {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive font-bold">*</span>}
                       </label>
                       <input
                         type="text"
@@ -14659,7 +14681,7 @@ export default function Dashboard({ session, profileDataProps }) {
                           }, 200);
                         }}
                         className="w-full bg-surface-elevated border border-border focus:border-primary rounded-lg text-foreground px-2.5 py-1.5 text-xs outline-none"
-                        placeholder="Ex: João da Silva ou Consumidor Balcão..."
+                        placeholder="Nome completo do titular da garantia..."
                       />
 
                       {/* Dropdown do Autocomplete */}
@@ -14712,10 +14734,11 @@ export default function Dashboard({ session, profileDataProps }) {
                       )}
                     </div>
 
+                    {/* CPF / CNPJ */}
                     <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider font-mono">
-                          CPF / CNPJ {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive">*</span>}
+                          CPF / CNPJ {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive font-bold">*</span>}
                         </label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
@@ -14738,10 +14761,11 @@ export default function Dashboard({ session, profileDataProps }) {
                       />
                     </div>
 
+                    {/* TELEFONE */}
                     <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
-                          Telefone {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive">*</span>}
+                          Telefone {carrinhoPossuiItemCritico(pdvCart) && <span className="text-destructive font-bold">*</span>}
                         </label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
@@ -14763,9 +14787,12 @@ export default function Dashboard({ session, profileDataProps }) {
                       />
                     </div>
 
+                    {/* DATA DE NASCIMENTO */}
                     <div>
                       <div className="flex justify-between items-center mb-1">
-                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">Data de Nascimento</label>
+                        <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Data de Nascimento
+                        </label>
                         {selectedPdvClienteId !== null && !isPdvClienteFieldsEditable && (
                           <button
                             type="button"
@@ -14785,7 +14812,8 @@ export default function Dashboard({ session, profileDataProps }) {
                       />
                     </div>
 
-                    <div className="col-span-1">
+                    {/* E-MAIL */}
+                    <div>
                       <div className="flex justify-between items-center mb-1">
                         <label className="block text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
                           E-mail <span className="text-muted-foreground font-normal lowercase">(opcional)</span>
