@@ -2030,8 +2030,9 @@ export default function Dashboard({ session, profileDataProps }) {
       const isNaTelaTransferencias = activeSellerTab === 'transferencias' || activeTab === 'transferencias';
       const isNoPdvVendedor = activeSellerTab === 'pdv' && profile?.role === 'VENDEDOR';
 
+      // F4 / Alt+E ativo EXCLUSIVAMENTE na tela de Transferências
       if (e.key === 'F4' || (e.altKey && (e.key === 'e' || e.key === 'E'))) {
-        if (isNoPdvVendedor || isNaTelaTransferencias) {
+        if (isNaTelaTransferencias) {
           e.preventDefault();
           setIsModalEntradaEstoqueRapidaOpen(true);
           return;
@@ -14688,7 +14689,6 @@ export default function Dashboard({ session, profileDataProps }) {
             <div className="hidden lg:flex bg-surface-elevated border border-border p-4 rounded-xl flex-wrap gap-4 text-[10px] text-muted-foreground font-medium shadow-sm">
               <span className="font-bold text-foreground uppercase tracking-wider block w-full mb-1">Teclas de Atalho [PDV]:</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F2</kbd> Consumidor Final / Buscar</span>
-              <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F4</kbd> Entrada Rápida de Estoque</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F8</kbd> Cadastro de Cliente</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F9</kbd> Participação Trainee</span>
               <span><kbd className="bg-surface border border-border px-1.5 py-0.5 rounded text-foreground mr-1.5 font-bold font-mono shadow-sm">F10</kbd> Finalizar Venda</span>
@@ -14787,8 +14787,8 @@ export default function Dashboard({ session, profileDataProps }) {
                   </button>
                 </div>
 
-                {/* Linha 2: Ações rápidas do Caixa (Venda Rápida + Entrada de Mercadoria) */}
-                <div className="grid grid-cols-2 gap-2">
+                {/* Linha 2: Ação rápida do Caixa (Venda Rápida) */}
+                <div className="w-full">
                   <button
                     type="button"
                     disabled={isPdvBloqueadoParaUsuario}
@@ -14800,27 +14800,14 @@ export default function Dashboard({ session, profileDataProps }) {
                       }
                       setIsVendaRapidaOpen(true);
                     }}
-                    className={`px-3 py-2 rounded-lg text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 ${isPdvBloqueadoParaUsuario
+                    className={`w-full px-3 py-2.5 rounded-lg text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 ${isPdvBloqueadoParaUsuario
                       ? 'bg-surface-elevated text-muted-foreground border border-border opacity-60 cursor-not-allowed'
                       : 'bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-primary-foreground shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
                       }`}
                     title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
                   >
-                    <Zap size={13} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-muted-foreground' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
+                    <Zap size={14} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-muted-foreground' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
                     <span>⚡ Venda Rápida</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsModalEntradaEstoqueRapidaOpen(true)}
-                    className="px-3 py-2 rounded-lg text-xs font-extrabold bg-[#111111] hover:bg-[#1a1a1a] text-purple-300 hover:text-white border border-[#6A0DAD]/40 hover:border-[#6A0DAD] transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 shadow-sm cursor-pointer group"
-                    title="Entrada rápida de mercadorias no estoque da sua loja (Atalho: Tecla F4 ou Alt+E)"
-                  >
-                    <Package size={13} className="shrink-0 text-[#6A0DAD] group-hover:scale-110 transition-transform" />
-                    <span>📦 Entrada Rápida</span>
-                    <span className="text-[10px] font-mono bg-[#6A0DAD]/20 group-hover:bg-[#6A0DAD]/40 text-purple-200 px-1.5 py-0.2 rounded border border-[#6A0DAD]/30">
-                      F4
-                    </span>
                   </button>
                 </div>
               </div>
