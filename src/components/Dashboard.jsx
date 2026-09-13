@@ -11094,10 +11094,13 @@ export default function Dashboard({ session, profileDataProps }) {
       // Restrição de Menor de Idade estritamente para vendas a prazo/crédito (Boleto, Crediário, Financeiras)
       const idadeClientePdv = calcularIdade(pdvClienteDataNascimento);
       if (idadeClientePdv !== null && idadeClientePdv >= 0 && idadeClientePdv < 18) {
-        const msgIdadeBloqueio = "Venda bloqueada: Clientes menores de 18 anos não podem realizar compras a prazo (Boleto, Crediário ou Financeiras).";
-        showToast(msgIdadeBloqueio, 'error');
-        alert(msgIdadeBloqueio);
-        return;
+        const clienteObj = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
+        const cpfResp = (clienteObj?.responsavel_cpf || clienteObj?.cpf_responsavel || clienteResponsavelCpf || '').replace(/\D/g, '');
+        if (cpfResp.length !== 11) {
+          const msgIdadeBloqueio = "Venda a prazo/financiamento para clientes menores de 18 anos exige o CPF do responsável legal cadastrado.";
+          showToast(msgIdadeBloqueio, 'error');
+          return;
+        }
       }
     }
 
@@ -14934,10 +14937,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
                       const idadeAtual = calcularIdade(pdvClienteDataNascimento);
                       if (idadeAtual !== null && idadeAtual >= 0 && idadeAtual < 18) {
-                        const msgMenor = '❌ Clientes menores de 18 anos não podem realizar compras a prazo ou no Boleto/Carnê.';
-                        showToast(msgMenor, 'error');
-                        alert(msgMenor);
-                        return;
+                        const clienteObj = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
+                        const cpfResp = (clienteObj?.responsavel_cpf || clienteObj?.cpf_responsavel || clienteResponsavelCpf || '').replace(/\D/g, '');
+                        if (cpfResp.length !== 11) {
+                          const msgMenor = '❌ Clientes menores de 18 anos exigem CPF de responsável legal cadastrado para compras a prazo/boleto.';
+                          showToast(msgMenor, 'error');
+                          return;
+                        }
                       }
                     }
 
