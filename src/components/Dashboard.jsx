@@ -24826,15 +24826,6 @@ export default function Dashboard({ session, profileDataProps }) {
                 )}
               </div>
 
-              {pdvReciboDados.obs_garantia && (
-                <div className="bg-surface-elevated border border-border p-3.5 rounded-xl text-xs print:bg-white print:border-gray-300 mb-4">
-                  <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1 print:text-gray-600">
-                    Observações de Garantia
-                  </span>
-                  <p className="text-foreground print:text-black whitespace-pre-wrap">{pdvReciboDados.obs_garantia}</p>
-                </div>
-              )}
-
               {/* Itens de Saída (Carrinho) */}
               <div className="bg-surface border border-border p-4 rounded-xl space-y-2.5 print:bg-white print:border-gray-300">
                 <span className="text-[9px] text-primary font-bold uppercase tracking-wider block print:text-purple-650">
@@ -24882,6 +24873,19 @@ export default function Dashboard({ session, profileDataProps }) {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* BLOCO DESTACADO: TERMO DE GARANTIA / CONDIÇÕES */}
+              <div className="bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/30 dark:border-amber-500/40 p-3.5 rounded-xl text-xs print:bg-white print:border print:border-gray-400 print:p-2.5 shadow-sm space-y-1">
+                <div className="flex items-center gap-1.5 text-amber-500 dark:text-amber-400 print:text-black font-extrabold uppercase tracking-wide text-[10px]">
+                  <span>🛡️</span>
+                  <span>TERMO DE GARANTIA</span>
+                </div>
+                <p className="text-foreground dark:text-zinc-200 print:text-black text-[11px] leading-relaxed whitespace-pre-wrap font-medium">
+                  {(pdvReciboDados.obs_garantia && pdvReciboDados.obs_garantia.trim()) 
+                    ? pdvReciboDados.obs_garantia.trim() 
+                    : 'Garantia legal conforme CDC de 90 dias contra defeitos de fabricação.'}
+                </p>
               </div>
 
               {/* Aparelhos de Entrada (Troca) */}
