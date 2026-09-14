@@ -11195,63 +11195,76 @@ export default function Dashboard({ session, profileDataProps }) {
     const rawInput = stringToScan.replace(/[\r\n]/g, '').trim();
     if (!rawInput) return;
 
-    // 1. Tentar busca direta por IMEI em disponiveisImeis ou na tabela imeis
-    const cleanDigits = rawInput.replace(/\D/g, '');
-    let imeiObj = null;
+    // 1. Consulta prioritária na tabela 'imeis' com produto vinculado
+    let serialData = null;
+    try {
+      const { data: directSerial, error: serialErr } = await supabase
+        .from('imeis')
+        .select('*, produto:produtos(*)')
+        .eq('imei', rawInput)
+        .maybeSingle();
 
-    if (disponiveisImeis && disponiveisImeis.length > 0) {
-      imeiObj = disponiveisImeis.find(im =>
-        !im.vendido &&
-        (im.imei === rawInput || (cleanDigits.length >= 8 && im.imei && im.imei.replace(/\D/g, '') === cleanDigits))
-      );
-    }
-
-    if (!imeiObj) {
-      try {
-        let query = supabase
-          .from('imeis')
-          .select('*, produtos!produto_id(*)')
-          .eq('vendido', false);
-
-        if (cleanDigits.length >= 8) {
-          query = query.or(`imei.eq.${rawInput},imei.ilike.%${cleanDigits}%`);
-        } else {
-          query = query.eq('imei', rawInput);
-        }
-
-        const { data: dbImeis } = await query;
-        if (dbImeis && dbImeis.length > 0) {
-          imeiObj = dbImeis[0];
-        }
-      } catch (err) {
-        console.warn('Busca direta por IMEI:', err);
+      if (serialErr) {
+        console.warn('Erro ao consultar tabela imeis por rawInput:', serialErr);
       }
+      serialData = directSerial;
+
+      // Se não achou com rawInput exato, tentar pelos dígitos limpos caso aplicável
+      if (!serialData && cleanDigits && cleanDigits !== rawInput) {
+        const { data: digitSerial } = await supabase
+          .from('imeis')
+          .select('*, produto:produtos(*)')
+          .eq('imei', cleanDigits)
+          .maybeSingle();
+        serialData = digitSerial;
+      }
+    } catch (err) {
+      console.warn('Exceção na consulta prioritária por IMEI:', err);
     }
 
-    if (imeiObj) {
-      if (pdvCart.some(item => item.imei === imeiObj.imei)) {
+    // Se encontrou o serial na tabela imeis, aplicar validações de negócio
+    if (serialData) {
+      // a) Verificar se o aparelho já está no carrinho
+      if (pdvCart.some(item => item.imei === serialData.imei)) {
         playBeepErro();
-        alert('Este IMEI já está no carrinho.');
+        showToast('Este IMEI já está no carrinho.', 'warning');
         return;
       }
 
-      playBeepSucesso();
-      const prod = imeiObj.produtos ||
-        listaProdutosPdvDinamica.find(p => String(p.id) === String(imeiObj.produto_id) || String(p.catalogo_id) === String(imeiObj.produto_id)) ||
-        listaProdutosConsolidada.find(p => String(p.id) === String(imeiObj.produto_id) || String(p.catalogo_id) === String(imeiObj.produto_id)) ||
-        (produtos || []).find(p => String(p.id) === String(imeiObj.produto_id)) ||
-        (catalogoProdutos || []).find(c => String(c.id) === String(imeiObj.produto_id));
+      // b) Verificar se serialData.filial_id corresponde à filial atual ativa no PDV
+      if (activeFilialId && serialData.filial_id && String(serialData.filial_id) !== String(activeFilialId)) {
+        playBeepErro();
+        const filialDono = filiais.find(f => String(f.id) === String(serialData.filial_id))?.nome || 'outra filial';
+        showToast(`Este aparelho pertence à filial ${filialDono}`, 'error');
+        return;
+      }
 
-      const prodName = prod?.nome || 'Aparelho Celular';
-      const prodPreco = parseFloat(prod?.preco || 0);
+      // c) Verificar se o status for diferente de disponível (ex: 'vendido')
+      const isVendido = serialData.vendido || String(serialData.status || '').toLowerCase() === 'vendido';
+      if (isVendido) {
+        playBeepErro();
+        showToast('Aparelho já consta como vendido', 'error');
+        return;
+      }
+
+      // d) Estando liberado, adicionar o produto pai (serialData.produto) ao carrinho de vendas vinculando o imei
+      playBeepSucesso();
+      const prodPai = serialData.produto ||
+        listaProdutosPdvDinamica.find(p => String(p.id) === String(serialData.produto_id) || String(p.catalogo_id) === String(serialData.produto_id)) ||
+        listaProdutosConsolidada.find(p => String(p.id) === String(serialData.produto_id) || String(p.catalogo_id) === String(serialData.produto_id)) ||
+        (produtos || []).find(p => String(p.id) === String(serialData.produto_id)) ||
+        (catalogoProdutos || []).find(c => String(c.id) === String(serialData.produto_id));
+
+      const prodName = prodPai?.nome || 'Aparelho Celular';
+      const prodPreco = parseFloat(prodPai?.preco || prodPai?.preco_venda || 0);
 
       const novoItem = {
         cartId: crypto.randomUUID(),
-        produto: prod ? { ...prod, cor: imeiObj.cor || prod.cor } : { id: imeiObj.produto_id, nome: prodName, preco: prodPreco, cor: imeiObj.cor },
+        produto: prodPai ? { ...prodPai, cor: serialData.cor || prodPai.cor } : { id: serialData.produto_id, nome: prodName, preco: prodPreco, cor: serialData.cor },
         quantidade: 1,
-        imei: imeiObj.imei,
-        cor: imeiObj.cor || prod?.cor || null,
-        availableImeis: [imeiObj],
+        imei: serialData.imei,
+        cor: serialData.cor || prodPai?.cor || null,
+        availableImeis: [serialData],
         preco_original: prodPreco,
         valorUnitario: prodPreco,
         vendaTrainee: pdvVendaTrainee
@@ -11259,7 +11272,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       setPdvCart(prev => [...prev, novoItem]);
       setPdvScanImei('');
-      showToast(`🛒 ${prodName} adicionado pelo IMEI ${imeiObj.imei}!`, 'success');
+      showToast(`🛒 ${prodName} adicionado pelo IMEI ${serialData.imei}!`, 'success');
       return;
     }
 
