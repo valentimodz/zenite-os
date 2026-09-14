@@ -17408,7 +17408,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       <Database size={15} className="text-[#6A0DAD]" />
                       Estoque Físico Consolidado
                     </h4>
-                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-wrap">
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto flex-wrap items-center">
                       <div className="relative flex-1 min-w-[180px] sm:w-56">
                         <Search size={13} className="absolute left-3 top-2.5 text-gray-600" />
                         <input
@@ -17419,6 +17419,27 @@ export default function Dashboard({ session, profileDataProps }) {
                           className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white pl-8 pr-4 py-1.5 text-xs outline-none transition-all"
                         />
                       </div>
+                      <select
+                        value={filtroCategoriaEstoque}
+                        onChange={(e) => setFiltroCategoriaEstoque(e.target.value)}
+                        className="bg-black border border-[#222222] rounded-md text-white px-3 py-1.5 text-xs outline-none focus:border-[#6A0DAD] min-w-[140px]"
+                      >
+                        <option value="">Todas as Categorias</option>
+                        {(() => {
+                          const baseLista = (estoqueConsolidadoLista && estoqueConsolidadoLista.length > 0)
+                            ? estoqueConsolidadoLista
+                            : (filteredProdutosEstoque || produtos || []);
+                          const catsExtraidas = baseLista.map(p => p.categoria || p.tipo).filter(Boolean);
+                          const catsGlobais = (categorias || []).map(c => c.nome || c.categoria || c).filter(Boolean);
+                          const todasCategorias = Array.from(new Set([...catsGlobais, ...catsExtraidas, 'CELULARES', 'PELÍCULAS', 'CARREGADORES', 'CABOS', 'ACESSÓRIOS']))
+                            .filter(c => c && c.trim() !== '')
+                            .sort((a, b) => a.localeCompare(b));
+
+                          return todasCategorias.map(cat => (
+                            <option key={cat} value={cat}>{cat}</option>
+                          ));
+                        })()}
+                      </select>
                       <select
                         value={filtroFilialEstoque}
                         onChange={(e) => setFiltroFilialEstoque(e.target.value)}
@@ -17433,9 +17454,17 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
 
                   {(() => {
-                    const displayEstoqueConsolidado = (estoqueConsolidadoLista && estoqueConsolidadoLista.length > 0)
+                    const rawList = (estoqueConsolidadoLista && estoqueConsolidadoLista.length > 0)
                       ? estoqueConsolidadoLista
                       : filteredProdutosEstoque;
+
+                    const displayEstoqueConsolidado = (rawList || []).filter(produto => {
+                      if (!filtroCategoriaEstoque) return true;
+                      const catAlvo = filtroCategoriaEstoque.toUpperCase().trim();
+                      const prodCat = (produto.categoria || '').toUpperCase().trim();
+                      const prodTipo = (produto.tipo || '').toUpperCase().trim();
+                      return prodCat === catAlvo || prodTipo === catAlvo || prodCat.includes(catAlvo) || catAlvo.includes(prodCat);
+                    });
 
                     if (loadingProdutos || loadingDados) {
                       return (
