@@ -11628,10 +11628,41 @@ export default function Dashboard({ session, profileDataProps }) {
       const currentEmpresaId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
       const currentFilialId = profile?.filial_id || currentEmpresaId;
 
+      // Resolução dinâmica de Cliente Padrão / Consumidor Final existente no banco para a empresa
+      let idPadraoConsumidor = null;
+      try {
+        const { data: clientePadraoDb } = await supabase
+          .from('clientes')
+          .select('id')
+          .eq('empresa_id', currentEmpresaId)
+          .ilike('nome', '%consumidor%')
+          .limit(1)
+          .maybeSingle();
+
+        if (clientePadraoDb?.id && isValidUuid(clientePadraoDb.id)) {
+          idPadraoConsumidor = clientePadraoDb.id;
+        } else {
+          // Fallback: qualquer cliente válido da empresa
+          const { data: anyClienteDb } = await supabase
+            .from('clientes')
+            .select('id')
+            .eq('empresa_id', currentEmpresaId)
+            .limit(1)
+            .maybeSingle();
+          if (anyClienteDb?.id && isValidUuid(anyClienteDb.id)) {
+            idPadraoConsumidor = anyClienteDb.id;
+          }
+        }
+      } catch (errBuscaPadrao) {
+        console.warn("Aviso ao buscar cliente padrão da empresa:", errBuscaPadrao);
+      }
+
       if (isConsumidorFinal) {
-        // Fallback seguro: Consumidor Final com UUID fixo
-        clienteIdBanco = CONSUMIDOR_FINAL_UUID;
-        setSelectedPdvClienteId(CONSUMIDOR_FINAL_UUID);
+        // Fallback seguro: ID dinâmico encontrado no banco ou null se a tabela aceitar nulos
+        clienteIdBanco = idPadraoConsumidor || null;
+        if (idPadraoConsumidor) {
+          setSelectedPdvClienteId(idPadraoConsumidor);
+        }
       } else {
         // Se há um clienteIdBanco, verificar previamente se ele realmente existe no banco para evitar erro de chave estrangeira
         if (clienteIdBanco) {
@@ -11743,15 +11774,14 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // PASSO 1 & 2: EXTRAÇÃO DE CONTEXTO E GUARD CLAUSES (TRAVAS DE SEGURANÇA)
-      // Fallback seguro: cliente_id recebe clienteSelecionado?.id || '00000000-0000-0000-0000-000000000000'
       const rawCandidateId = clienteIdBanco || selectedPdvClienteId || null;
       let cliente_id = null;
       if (isValidUuid(rawCandidateId) && rawCandidateId !== CONSUMIDOR_FINAL_UUID) {
         cliente_id = rawCandidateId;
       } else if (isConsumidorFinal || !rawCandidateId || rawCandidateId === CONSUMIDOR_FINAL_UUID) {
-        cliente_id = CONSUMIDOR_FINAL_UUID;
+        cliente_id = idPadraoConsumidor || null;
       } else {
-        cliente_id = CONSUMIDOR_FINAL_UUID;
+        cliente_id = idPadraoConsumidor || null;
       }
       const vendedor_id = session?.user?.id || profile?.id || null;
 
@@ -11878,16 +11908,20 @@ export default function Dashboard({ session, profileDataProps }) {
         try {
           // Helper de sanitização estrita para cliente_id evitando violação de foreign key vendas_cliente_id_fkey
           const getClienteIdValido = (cliente) => {
-            if (!cliente) return '00000000-0000-0000-0000-000000000000';
+            if (!cliente) return (idPadraoConsumidor || null);
             const rawId = typeof cliente === 'object' ? (cliente.id || cliente.cliente_id) : cliente;
             if (rawId && typeof rawId === 'string') {
               const trimmed = rawId.trim();
               if (trimmed !== '' && trimmed !== 'null' && trimmed !== 'undefined' && isValidUuid(trimmed)) {
+                // Se for o UUID zeros e houver um idPadraoConsumidor real no banco, prefira o idPadraoConsumidor
+                if (trimmed === '00000000-0000-0000-0000-000000000000' && idPadraoConsumidor) {
+                  return idPadraoConsumidor;
+                }
                 return trimmed;
               }
             }
-            // Fallback seguro: Consumidor Final padrão
-            return '00000000-0000-0000-0000-000000000000';
+            // Fallback seguro: ID dinâmico encontrado no banco ou null (DROP NOT NULL)
+            return (idPadraoConsumidor || null);
           };
 
           const clienteIdFinalValido = getClienteIdValido(cliente_id || clienteIdBanco || selectedPdvClienteId);
@@ -11964,12 +11998,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
           if (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
-            // Se falhar a atualização com cliente_id, tenta fallback com cliente_id Consumidor Final ou null para garantir gravação da venda
+            // Se falhar a atualização com cliente_id (violação foreign key), tenta fallback com cliente padrão real ou null
             if (updateVendaErr.code === '23503' || String(updateVendaErr.message).includes('foreign key')) {
-              console.warn("⚠️ Tentando fallback de cliente_id na venda...");
+              console.warn("⚠️ Tentando fallback de cliente_id na venda com cliente padrão ou null...");
               await supabase
                 .from('vendas')
-                .update({ ...payloadVendaUpdate, cliente_id: '00000000-0000-0000-0000-000000000000' })
+                .update({ ...payloadVendaUpdate, cliente_id: (idPadraoConsumidor || null) })
                 .eq('id', rpcRes.venda_id);
             }
           }
