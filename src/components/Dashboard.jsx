@@ -1178,6 +1178,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [filtroFilialCaixa, setFiltroFilialCaixa] = useState('todas');
   const [filtroStatusCaixa, setFiltroStatusCaixa] = useState('TODOS');
   const [modalDetalheCaixa, setModalDetalheCaixa] = useState(null);
+  const [comprovantesOnDemand, setComprovantesOnDemand] = useState([]);
+  const [loadingComprovantesOnDemand, setLoadingComprovantesOnDemand] = useState(false);
   const [loadingDados, setLoadingDados] = useState(false);
   const [filtroMes, setFiltroMes] = useState(() => {
     const dataAtual = new Date();
@@ -2082,14 +2084,14 @@ export default function Dashboard({ session, profileDataProps }) {
     };
   }, [activeSellerTab, activeTab, pdvCart, pdvBusca, pdvClienteTelefone, pdvClienteNome, pdvClienteCpfCnpj, pdvClienteEmail, pdvMetodoPagamento, pdvCartaoParcelas, pdvUsadoList, pdvObsGarantia, pdvVendaTrainee, profile, taxasCartao, pdvClienteSearchInput, selectedPdvClienteId, isPdvClienteFieldsEditable]);
 
-  // Polling suave para atualizar remessas de transferência pendentes em tempo real
+  // Polling suave para atualizar remessas de transferência pendentes em tempo real (intervalo otimizado para evitar tráfego contínuo)
   useEffect(() => {
     fetchTransferenciasPendentes();
     const interval = setInterval(() => {
       fetchTransferenciasPendentes();
-    }, 15000);
+    }, 60000);
     return () => clearInterval(interval);
-  }, [activeEmpresaId, profile, company]);
+  }, [activeEmpresaId, profile?.empresa_id, company?.id]);
 
   // --- VEXTRON LAB: SRE (Rascunho Automático do PDV) ---
   useEffect(() => {
@@ -2158,6 +2160,65 @@ export default function Dashboard({ session, profileDataProps }) {
 
     return () => clearTimeout(delayDebounceFn);
   }, [pdvClienteSearchInput, company, profile]);
+
+  // Buscar comprovantes anexados sob demanda APENAS quando o modal de detalhes da sessão for aberto (Elimina Megabytes de tráfego de egress)
+  useEffect(() => {
+    if (!modalDetalheCaixa) {
+      setComprovantesOnDemand([]);
+      setLoadingComprovantesOnDemand(false);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchComprovanteModal = async () => {
+      // 1. Se o próprio objeto já possui comprovantes em memória, usá-los
+      if (modalDetalheCaixa.comprovantes && Array.isArray(modalDetalheCaixa.comprovantes) && modalDetalheCaixa.comprovantes.length > 0) {
+        setComprovantesOnDemand(modalDetalheCaixa.comprovantes.filter(Boolean));
+        return;
+      }
+      if (modalDetalheCaixa.comprovante_url) {
+        const list = Array.isArray(modalDetalheCaixa.comprovante_url)
+          ? modalDetalheCaixa.comprovante_url.filter(Boolean)
+          : [modalDetalheCaixa.comprovante_url].filter(Boolean);
+        if (list.length > 0) {
+          setComprovantesOnDemand(list);
+          return;
+        }
+      }
+
+      // 2. Caso contrário, buscar pontualmente no banco por ID da sessão / caixa / filial
+      setLoadingComprovantesOnDemand(true);
+      try {
+        let q = supabase
+          .from('fechamentos')
+          .select('comprovante_url')
+          .limit(1);
+
+        if (modalDetalheCaixa.id) {
+          q = q.eq('caixa_id', modalDetalheCaixa.id);
+        } else if (modalDetalheCaixa.filial_id) {
+          q = q.eq('filial_id', modalDetalheCaixa.filial_id).order('created_at', { ascending: false });
+        }
+
+        const { data, error } = await q;
+        if (!error && data && data.length > 0 && isMounted) {
+          const rawUrl = data[0].comprovante_url;
+          if (Array.isArray(rawUrl)) {
+            setComprovantesOnDemand(rawUrl.filter(Boolean));
+          } else if (typeof rawUrl === 'string' && rawUrl.trim()) {
+            setComprovantesOnDemand([rawUrl.trim()]);
+          }
+        }
+      } catch (err) {
+        console.warn('Aviso ao carregar comprovante sob demanda:', err);
+      } finally {
+        if (isMounted) setLoadingComprovantesOnDemand(false);
+      }
+    };
+
+    fetchComprovanteModal();
+    return () => { isMounted = false; };
+  }, [modalDetalheCaixa?.id, modalDetalheCaixa?.filial_id]);
 
   const handleSelectPdvCliente = (client) => {
     setSelectedPdvClienteId(client.id);
@@ -2504,13 +2565,17 @@ export default function Dashboard({ session, profileDataProps }) {
     (profile?.role || profile?.cargo || '').toUpperCase()
   );
 
-  // Recarregar automaticamente a lista de colaboradores, descontos, vendas consolidadas e categorias quando a empresa for carregada, alternada ou quando o mês for trocado
+  // Recarregar dados de gestão, auditoria de descontos e vendas consolidadas sob demanda quando a empresa, mês ou aba relevante mudar
   useEffect(() => {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-    if (targetEmpresaId) {
-      fetchCategorias(targetEmpresaId).catch(e => console.warn('Aviso ao carregar categorias:', e));
-    }
-    if (podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) {
+    if (!targetEmpresaId) return;
+
+    fetchCategorias(targetEmpresaId).catch(e => console.warn('Aviso ao carregar categorias:', e));
+
+    const isAbaGestao = ['gestao', 'relatorios', 'auditoria', 'ranking', 'fechamentos'].includes(activeTab) ||
+                        ['gestao', 'relatorios', 'auditoria', 'ranking', 'fechamentos'].includes(currentView);
+
+    if ((podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) && isAbaGestao) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
       fetchAuditoriaDescontos(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
       fetchGerenteData(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
@@ -2682,10 +2747,11 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let qItens = supabase
           .from('itens_venda')
-          .select('*')
+          .select('id, venda_id, vendedor_id, filial_id, quantidade, preco_base, preco_unitario, preco_unitario_vendido, valor_desconto, desconto, valor_total, percentual_desconto, produto_nome, cliente_nome, created_at')
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(200);
         if (targetEmpresaId) {
           qItens = qItens.eq('empresa_id', targetEmpresaId);
         }
@@ -2730,14 +2796,15 @@ export default function Dashboard({ session, profileDataProps }) {
         console.warn('[Dashboard] Aviso ao buscar itens_venda:', errItens);
       }
 
-      // 2. Buscar da tabela 'auditoria_descontos' usando select('*') puro
+      // 2. Buscar da tabela 'auditoria_descontos' com colunas estritas
       try {
         let qAudit = supabase
           .from('auditoria_descontos')
-          .select('*')
+          .select('id, venda_id, vendedor_id, vendedor_nome, filial_id, filial_nome, cliente_nome, itens_resumo, valor_tabela, valor_final, valor_desconto, percentual_desconto, created_at')
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(200);
         if (targetEmpresaId) {
           qAudit = qAudit.eq('empresa_id', targetEmpresaId);
         }
@@ -2770,14 +2837,15 @@ export default function Dashboard({ session, profileDataProps }) {
         console.warn('[Dashboard] Aviso ao buscar auditoria_descontos:', errAudit);
       }
 
-      // 3. Buscar da tabela 'vendas' usando select('*') puro no período e comparar com catálogo/preços
+      // 3. Buscar da tabela 'vendas' usando campos estritos no período e comparar com catálogo/preços
       try {
         let qVendas = supabase
           .from('vendas')
-          .select('*')
+          .select('id, empresa_id, filial_id, vendedor_id, usuario_id, produto_id, produto_nome, produtos_descricao, quantidade, preco, valor_total, valor_vendido, total, desconto, valor_desconto, total_desconto, valor_tabela, preco_base, percentual_desconto, desconto_autorizado_por, cliente_nome, created_at')
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(200);
         if (targetEmpresaId) {
           qVendas = qVendas.eq('empresa_id', targetEmpresaId);
         }
@@ -2787,10 +2855,11 @@ export default function Dashboard({ session, profileDataProps }) {
         if ((!vendasData || vendasData.length === 0) && targetEmpresaId) {
           const { data: fallbackVendas } = await supabase
             .from('vendas')
-            .select('*')
+            .select('id, empresa_id, filial_id, vendedor_id, usuario_id, produto_id, produto_nome, produtos_descricao, quantidade, preco, valor_total, valor_vendido, total, desconto, valor_desconto, total_desconto, valor_tabela, preco_base, percentual_desconto, desconto_autorizado_por, cliente_nome, created_at')
             .gte('created_at', dtInicio)
             .lte('created_at', dtFim)
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .limit(200);
           if (fallbackVendas && fallbackVendas.length > 0) {
             vendasData = fallbackVendas;
           }
@@ -3745,9 +3814,10 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const res = await supabase
           .from('fechamentos')
-          .select('*, profiles!vendedor_id(*), filiais(*)')
+          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, created_at, profiles!vendedor_id(id, nome), filiais(id, nome)')
           .eq('empresa_id', empresaId)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(50);
         fechRes = res || { data: [], error: null };
       } catch (err) {
         console.warn('[Dashboard] Falha na query de fechamentos:', err);
@@ -3770,11 +3840,11 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const res = await supabase
           .from('imeis')
-          .select('id, produto_id, filial_id, status, vendido, imei, created_at, produtos(nome)')
+          .select('id, produto_id, filial_id, status, vendido, imei')
           .eq('empresa_id', empresaId)
           .eq('vendido', false)
           .order('created_at', { ascending: false })
-          .limit(5000);
+          .limit(1000);
         allImeisRes = res || { data: [], error: null };
       } catch (err) {
         console.warn('[Dashboard] Falha na query de imeis disponiveis:', err);
@@ -4276,7 +4346,8 @@ export default function Dashboard({ session, profileDataProps }) {
               vendas_pagamentos (*)
             `)
             .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .limit(100);
           if (dbSales) salesData = dbSales;
         } catch (dbErr) {
           console.warn('Aviso: Erro ao buscar vendas do vendedor via Supabase:', dbErr);
@@ -4295,8 +4366,6 @@ export default function Dashboard({ session, profileDataProps }) {
       let imeisDataGlobal = [];
       try {
         const imeisRes = await supabase
-          .from('imeis')
-        isRes = await supabase
           .from('imeis')
           .select('id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, created_at, produtos(nome)')
           .eq('empresa_id', empId)
@@ -6051,9 +6120,10 @@ export default function Dashboard({ session, profileDataProps }) {
       // Recarregar os fechamentos para atualizar a UI
       const { data: newFechamentos, error: fetchErr } = await supabase
         .from('fechamentos')
-        .select('*, profiles!vendedor_id(*), filiais(*)')
+        .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, created_at, profiles!vendedor_id(id, nome), filiais(id, nome)')
         .eq('empresa_id', profile.empresa_id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(50);
 
       if (!fetchErr && newFechamentos) {
         setFechamentos(newFechamentos);
@@ -6242,9 +6312,10 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const { data: newFechamentos } = await supabase
           .from('fechamentos')
-          .select('*, profiles!vendedor_id(*), filiais(*)')
+          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, created_at, profiles!vendedor_id(id, nome), filiais(id, nome)')
           .eq('empresa_id', targetEmpresaId)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(50);
 
         if (newFechamentos) {
           setFechamentos(newFechamentos);
@@ -24030,9 +24101,11 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* Seção de Comprovantes Anexados */}
               {(() => {
-                // Obter comprovantes a partir de comprovante_url, comprovantes ou buscando no array de fechamentos
+                // Obter comprovantes a partir de comprovantesOnDemand (busca leve sob demanda) ou propriedades diretas
                 let comprovantesList = [];
-                if (modalDetalheCaixa.comprovantes && Array.isArray(modalDetalheCaixa.comprovantes)) {
+                if (comprovantesOnDemand && Array.isArray(comprovantesOnDemand) && comprovantesOnDemand.length > 0) {
+                  comprovantesList = comprovantesOnDemand.filter(Boolean);
+                } else if (modalDetalheCaixa.comprovantes && Array.isArray(modalDetalheCaixa.comprovantes)) {
                   comprovantesList = modalDetalheCaixa.comprovantes.filter(Boolean);
                 } else if (modalDetalheCaixa.comprovante_url) {
                   if (Array.isArray(modalDetalheCaixa.comprovante_url)) {
@@ -24147,7 +24220,12 @@ export default function Dashboard({ session, profileDataProps }) {
                       )}
                     </div>
 
-                    {comprovantesList.length === 0 ? (
+                    {loadingComprovantesOnDemand ? (
+                      <div className="text-center py-5 px-3 bg-black/40 border border-dashed border-[#222] rounded-xl text-gray-500 text-xs italic flex flex-col items-center gap-1.5">
+                        <Loader2 size={20} className="text-purple-500 animate-spin" />
+                        <span>Carregando comprovantes anexados...</span>
+                      </div>
+                    ) : comprovantesList.length === 0 ? (
                       <div className="text-center py-5 px-3 bg-black/40 border border-dashed border-[#222] rounded-xl text-gray-500 text-xs italic flex flex-col items-center gap-1.5">
                         <ImageIcon size={20} className="text-gray-600 opacity-60" />
                         <span>Nenhum comprovante anexado a este fechamento</span>
