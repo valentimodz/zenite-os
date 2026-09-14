@@ -17,8 +17,6 @@ import { hasFeature } from '../utils/featureFlags';
 import SaasDashboard from '../pages/SaaS/SaasDashboard';
 import SaasTenants from '../pages/SaaS/SaasTenants';
 import SaasBilling from '../pages/SaaS/SaasBilling';
-import SaasSettings from '../pages/SaaS/SaasSettings';
-import PainelVendaRapida from './PainelVendaRapida';
 import CameraScanner from './CameraScanner';
 import ImportadorVendasCSV from './ImportadorVendasCSV';
 import ModalAuditoriaCega from './ModalAuditoriaCega';
@@ -1230,7 +1228,6 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isSavingTaxas, setIsSavingTaxas] = useState(false);
   const [tempTaxasMap, setTempTaxasMap] = useState({});
   const [isQuickClientFormOpen, setIsQuickClientFormOpen] = useState(true);
-  const [isVendaRapidaOpen, setIsVendaRapidaOpen] = useState(false);
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -14484,15 +14481,7 @@ export default function Dashboard({ session, profileDataProps }) {
             {/* Dica para busca mobile quando catálogo oculto */}
             {!pdvBusca.trim() && pdvCategoria === 'TUDO' && (
               <div className="lg:hidden text-center py-3.5 px-3 bg-surface border border-border rounded-lg text-xs text-muted-foreground flex items-center justify-center gap-2">
-                <span>💡 Use a busca acima ou clique em</span>
-                <button
-                  type="button"
-                  onClick={() => setIsVendaRapidaOpen(true)}
-                  className="text-primary hover:underline font-bold flex items-center gap-1"
-                >
-                  <Zap size={12} className="text-amber-400 fill-amber-400" />
-                  ⚡ Venda Rápida
-                </button>
+                <span>💡 Digite no campo de busca acima para localizar produtos do catálogo</span>
               </div>
             )}
 
@@ -14803,30 +14792,6 @@ export default function Dashboard({ session, profileDataProps }) {
                     className="bg-primary hover:bg-[#500885] disabled:bg-surface-elevated disabled:text-muted-foreground disabled:cursor-not-allowed px-3.5 py-2 rounded-lg text-xs font-bold text-primary-foreground transition-all shrink-0 whitespace-nowrap cursor-pointer shadow-sm"
                   >
                     Bipar
-                  </button>
-                </div>
-
-                {/* Linha 2: Ação rápida do Caixa (Venda Rápida) */}
-                <div className="w-full">
-                  <button
-                    type="button"
-                    disabled={isPdvBloqueadoParaUsuario}
-                    onClick={() => {
-                      if (isPdvBloqueadoParaUsuario) {
-                        showToast('Caixa Fechado: É necessário realizar a abertura do caixa para vendas rápidas.', 'error');
-                        setIsModalAbrirCaixaOpen(true);
-                        return;
-                      }
-                      setIsVendaRapidaOpen(true);
-                    }}
-                    className={`w-full px-3 py-2.5 rounded-lg text-xs font-extrabold transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 ${isPdvBloqueadoParaUsuario
-                      ? 'bg-surface-elevated text-muted-foreground border border-border opacity-60 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-primary-foreground shadow-md hover:scale-[1.01] active:scale-[0.99] cursor-pointer'
-                      }`}
-                    title="Abrir Painel de Venda Rápida de Acessórios (Seleção por toque)"
-                  >
-                    <Zap size={14} className={`shrink-0 ${isPdvBloqueadoParaUsuario ? 'text-muted-foreground' : 'text-amber-300 fill-amber-300 animate-pulse'}`} />
-                    <span>⚡ Venda Rápida</span>
                   </button>
                 </div>
               </div>
@@ -26810,15 +26775,6 @@ export default function Dashboard({ session, profileDataProps }) {
           </div>
         )}
 
-        {/* Modal de Venda Rápida de Acessórios */}
-        <PainelVendaRapida
-          isOpen={isVendaRapidaOpen}
-          onClose={() => setIsVendaRapidaOpen(false)}
-          session={session}
-          produtos={listaProdutosPdvDinamica && listaProdutosPdvDinamica.length > 0 ? listaProdutosPdvDinamica : (produtosFilial && produtosFilial.length > 0 ? produtosFilial : produtos)}
-          onAddToCart={(prod) => handleAddToCart(prod)}
-          cartItemCount={pdvCart.length}
-        />
 
         {/* Leitor por Câmera Mobile */}
         <CameraScanner
