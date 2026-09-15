@@ -29,6 +29,7 @@ import ModalGeradorPeliculas from './ModalGeradorPeliculas';
 import ModalEntradaAparelhosLote from './ModalEntradaAparelhosLote';
 import ModalDetalheRelatorio from './ModalDetalheRelatorio';
 import ModalEntradaEstoqueRapida from './ModalEntradaEstoqueRapida';
+import ModalMetasFilial from './ModalMetasFilial';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1458,6 +1459,10 @@ export default function Dashboard({ session, profileDataProps }) {
   const [buscaMovimentacao, setBuscaMovimentacao] = useState('');
   const [filtroMovTipo, setFiltroMovTipo] = useState('TODOS');
   const [movimentacoesLoading, setMovimentacoesLoading] = useState(false);
+
+  // Estados para Modal de Metas da Loja e Comissoes
+  const [filialSelecionadaMetas, setFilialSelecionadaMetas] = useState(null);
+  const [isModalMetasFilialOpen, setIsModalMetasFilialOpen] = useState(false);
 
   // Estados para Ajuste Manual de Estoque
   const [isAjustarEstoqueModalOpen, setIsAjustarEstoqueModalOpen] = useState(false);
@@ -19656,6 +19661,17 @@ export default function Dashboard({ session, profileDataProps }) {
                                           <>
                                             <button
                                               type="button"
+                                              onClick={() => {
+                                                setFilialSelecionadaMetas(f);
+                                                setIsModalMetasFilialOpen(true);
+                                              }}
+                                              className="px-2 py-1 text-[11px] font-bold text-purple-300 hover:text-white bg-purple-950/40 hover:bg-[#6A0DAD] border border-purple-800/40 hover:border-[#6A0DAD] rounded flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                                              title="Metas e Comissões desta Filial"
+                                            >
+                                              🎯 Metas &amp; Comissões
+                                            </button>
+                                            <button
+                                              type="button"
                                               onClick={() => handleStartEditFilial(f)}
                                               className="p-1.5 text-gray-400 hover:text-purple-400 hover:bg-purple-950/20 rounded transition-colors"
                                               title="Editar Informações da Filial"
@@ -27415,6 +27431,18 @@ export default function Dashboard({ session, profileDataProps }) {
         />
 
         {/* Modal Detalhamento Financeiro Interativo */}
+        <ModalMetasFilial
+          filial={filialSelecionadaMetas}
+          isOpen={isModalMetasFilialOpen}
+          onClose={() => {
+            setIsModalMetasFilialOpen(false);
+            setFilialSelecionadaMetas(null);
+          }}
+          onSuccess={(regrasAtualizadas) => {
+            showToast('Metas e comissões atualizadas com sucesso!', 'success');
+          }}
+        />
+
         <ModalDetalheRelatorio
           isOpen={modalRelatorioAberto}
           onClose={() => setModalRelatorioAberto(false)}

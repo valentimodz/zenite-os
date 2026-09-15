@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, BarChart3, Calendar, Building2, DollarSign, TrendingUp, 
   ArrowUpRight, ArrowDownRight, CreditCard, Layers, Store, 
-  User, PieChart, RefreshCw, Printer, Download, Filter, Eye
+  User, PieChart, RefreshCw, Printer, Download, Filter, Eye,
+  Target, Award
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
@@ -47,6 +48,7 @@ export default function ModalDetalheRelatorio({
   const [loading, setLoading] = useState(false);
   const [vendas, setVendas] = useState([]);
   const [caixas, setCaixas] = useState([]);
+  const [regrasComissoes, setRegrasComissoes] = useState([]);
   const [tabAtiva, setTabAtiva] = useState('visao_geral'); // 'visao_geral' | 'metodos' | 'filiais' | 'vendedores'
 
   // Funções de atalhos rápidos de período
@@ -135,11 +137,19 @@ export default function ModalDetalheRelatorio({
           queryCaixas = queryCaixas.eq('filial_id', filialSelecionada);
         }
 
-        const [resVendas, resCaixas, resProfiles, resFiliais] = await Promise.all([
+        // 3. Buscar regras de comissões/metas vigentes para o período
+        const mesRef = (dataInicio || hojeStr).substring(0, 7);
+        let queryRegras = supabase.from('regras_comissoes').select('*');
+        if (filialSelecionada && filialSelecionada !== 'todas') {
+          queryRegras = queryRegras.eq('filial_id', filialSelecionada);
+        }
+
+        const [resVendas, resCaixas, resProfiles, resFiliais, resRegras] = await Promise.all([
           queryVendas,
           queryCaixas,
           supabase.from('profiles').select('id, nome'),
-          supabase.from('filiais').select('id, nome')
+          supabase.from('filiais').select('id, nome'),
+          queryRegras
         ]);
 
         const profilesMap = (resProfiles.data || []).reduce((acc, p) => {
@@ -158,6 +168,7 @@ export default function ModalDetalheRelatorio({
         }));
 
         setVendas(vendasFormatadas);
+        setRegrasComissoes(resRegras.data || []);
 
         // Mapear sessões de caixa com nomes reais de vendedor e filial
         const caixasFormatados = (resCaixas.data || []).map(cx => {
@@ -209,10 +220,29 @@ export default function ModalDetalheRelatorio({
       porMetodo[metodoLabel].count += 1;
 
       // Por filial
-      const filialNome = listaFiliais.find(f => String(f.id) === String(v.filial_id))?.nome || v.filial_nome || 'Matriz';
-      if (!porFilial[filialNome]) porFilial[filialNome] = { valor: 0, count: 0 };
+      const filialObj = listaFiliais.find(f => String(f.id) === String(v.filial_id));
+      const filialNome = filialObj?.nome || v.filial_nome || 'Matriz';
+      const filialId = filialObj?.id || v.filial_id || 'matriz';
+      if (!porFilial[filialNome]) {
+        porFilial[filialNome] = { 
+          id: filialId,
+          valor: 0, 
+          count: 0,
+          totalBoleto: 0,
+          totalAcessorios: 0
+        };
+      }
       porFilial[filialNome].valor += valor;
       porFilial[filialNome].count += 1;
+
+      const metodoKey = String(v.metodo_pagamento || v.forma_pagamento || '').toUpperCase();
+      if (metodoKey.includes('BOLETO') || metodoKey.includes('CREDIARIO')) {
+        porFilial[filialNome].totalBoleto += valor;
+      }
+      const catProd = String(v.categoria || v.produtos?.categoria || '').toUpperCase();
+      if (catProd.includes('ACESS') || catProd.includes('CASE') || catProd.includes('CABO') || catProd.includes('FONE')) {
+        porFilial[filialNome].totalAcessorios += valor;
+      }
 
       // Por vendedor
       const vendedor = v.vendedor_nome || 'Vendedor Padrão';
@@ -614,29 +644,109 @@ export default function ModalDetalheRelatorio({
                 </div>
               )}
 
-              {/* ABA 3: Por Filial */}
+              {/* ABA 3: Por Filial e Metas da Loja */}
               {tabAtiva === 'filiais' && (
-                <div className="bg-[#111111] border border-[#222222] rounded-xl p-5">
-                  <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                    <Building2 size={16} className="text-purple-400" />
-                    Desempenho Financeiro por Filial
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="bg-[#111111] border border-[#222222] rounded-xl p-5 space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Building2 size={16} className="text-purple-400" />
+                      Desempenho Financeiro & Metas por Filial
+                    </h3>
+                    <span className="text-[11px] text-gray-400">
+                      Metas sincronizadas com as <strong className="text-purple-300">Regras de Comissionamento</strong>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {Object.entries(metricas.porFilial).map(([filial, dados]) => {
                       const part = metricas.faturamentoTotal > 0 ? (dados.valor / metricas.faturamentoTotal) * 100 : 0;
+                      // Buscar meta cadastrada para a filial
+                      const regraFilial = regrasComissoes.find(r => String(r.filial_id) === String(dados.id));
+                      const metaBoleto = Number(regraFilial?.meta_loja_boleto || 0);
+                      const superMeta = Number(regraFilial?.super_meta || 0);
+                      const metaAcessorios = Number(regraFilial?.meta_loja_acessorios || 0);
+
+                      const pctBoleto = metaBoleto > 0 ? Math.min(100, Math.round((dados.totalBoleto / metaBoleto) * 100)) : null;
+                      const pctAcessorios = metaAcessorios > 0 ? Math.min(100, Math.round((dados.totalAcessorios / metaAcessorios) * 100)) : null;
+
                       return (
-                        <div key={filial} className="bg-black/60 border border-[#222222] p-4 rounded-xl flex flex-col gap-2">
-                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                            <Store size={14} className="text-purple-400" />
-                            {filial}
-                          </span>
-                          <span className="text-lg font-extrabold text-white font-mono">
-                            {dados.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          </span>
-                          <div className="flex justify-between text-[11px] text-gray-400 border-t border-[#222222] pt-2">
-                            <span>{dados.count} vendas</span>
-                            <span className="text-purple-300 font-bold">{part.toFixed(1)}% do total</span>
+                        <div key={filial} className="bg-black/60 border border-[#222222] p-5 rounded-xl flex flex-col gap-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <Store size={15} className="text-purple-400" />
+                              {filial}
+                            </span>
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-purple-950/60 border border-purple-800/60 text-purple-300 font-bold">
+                              {part.toFixed(1)}% faturamento
+                            </span>
                           </div>
+
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-xl font-extrabold text-white font-mono">
+                              {dados.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                            <span className="text-xs text-gray-400 font-medium">
+                              {dados.count} vendas realizadas
+                            </span>
+                          </div>
+
+                          {/* Seção de Metas da Loja se houver regra configurada */}
+                          {regraFilial ? (
+                            <div className="bg-[#121212] border border-[#262626] rounded-lg p-3 space-y-2 mt-1">
+                              <div className="flex items-center justify-between text-[11px] text-gray-400 font-bold">
+                                <span className="flex items-center gap-1 text-purple-300">
+                                  <Target size={13} /> Metas Definidas ({regraFilial.mes_referencia || 'Mês Atual'})
+                                </span>
+                                {dados.totalBoleto >= superMeta && superMeta > 0 && (
+                                  <span className="text-amber-300 flex items-center gap-1 font-extrabold">
+                                    <Award size={13} /> SUPER META BATIDA!
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Barra Meta Boletos */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-[10px]">
+                                  <span className="text-gray-400">Boletos / Crediário:</span>
+                                  <span className="font-mono text-gray-300 font-bold">
+                                    {dados.totalBoleto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / {metaBoleto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    {pctBoleto !== null && ` (${pctBoleto}%)`}
+                                  </span>
+                                </div>
+                                <div className="w-full bg-[#202020] h-1.5 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${
+                                      dados.totalBoleto >= metaBoleto ? 'bg-emerald-500' : 'bg-purple-600'
+                                    }`}
+                                    style={{ width: `${pctBoleto || 0}%` }}
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Barra Meta Acessórios */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-[10px]">
+                                  <span className="text-gray-400">Acessórios:</span>
+                                  <span className="font-mono text-gray-300 font-bold">
+                                    {dados.totalAcessorios.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / {metaAcessorios.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    {pctAcessorios !== null && ` (${pctAcessorios}%)`}
+                                  </span>
+                                </div>
+                                <div className="w-full bg-[#202020] h-1.5 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${
+                                      dados.totalAcessorios >= metaAcessorios ? 'bg-emerald-500' : 'bg-blue-600'
+                                    }`}
+                                    style={{ width: `${pctAcessorios || 0}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-gray-500 italic border-t border-[#222222] pt-2">
+                              Metas não configuradas para esta filial neste mês.
+                            </div>
+                          )}
                         </div>
                       );
                     })}
