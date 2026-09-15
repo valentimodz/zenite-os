@@ -2,17 +2,31 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   X,
-  Package,
+  Smartphone,
   Barcode,
   Search,
-  Plus,
-  Minus,
   CheckCircle2,
   Loader2,
   Store,
   Tag,
-  AlertCircle
+  AlertCircle,
+  Trash2,
+  Sparkles,
+  Palette
 } from 'lucide-react';
+
+const CORES_SUGESTOES = [
+  'Preto',
+  'Azul',
+  'Branco',
+  'Prata',
+  'Titânio',
+  'Cinza',
+  'Dourado',
+  'Verde',
+  'Roxo',
+  'Grafite'
+];
 
 export default function ModalEntradaEstoqueRapida({
   isOpen,
@@ -23,19 +37,30 @@ export default function ModalEntradaEstoqueRapida({
   activeFilialNome,
   onSuccess
 }) {
-  const [busca, setBusca] = useState('');
+  // Estado de seleção do modelo / catálogo
+  const [buscaModelo, setBuscaModelo] = useState('');
   const [produtoSelecionado, setProdutoSelecionado] = useState(null);
-  const [quantidade, setQuantidade] = useState('1');
-  const [observacao, setObservacao] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [loadingProdutos, setLoadingProdutos] = useState(false);
-  const [produtosLocais, setProdutosLocais] = useState([]);
-  const [catalogoGeral, setCatalogoGeral] = useState([]);
+  const [loadingCatalogo, setLoadingCatalogo] = useState(false);
+  const [catalogoAparelhos, setCatalogoAparelhos] = useState([]);
+
+  // Estado de Cor
+  const [corSelecionada, setCorSelecionada] = useState('Preto');
+  const [sugestoesCores, setSugestoesCores] = useState(CORES_SUGESTOES);
+
+  // Estado de Leitura de IMEI / Serial
+  const [inputImei, setInputImei] = useState('');
+  const [imeisBipados, setImeisBipados] = useState([]); // [{ imei: string, cor: string }]
+  const [validandoImei, setValidandoImei] = useState(false);
+
+  // Feedback e Loading
+  const [loadingSalvando, setLoadingSalvando] = useState(false);
   const [erroMsg, setErroMsg] = useState(null);
+  const [sucessoMsg, setSucessoMsg] = useState(null);
 
   const inputBuscaRef = useRef(null);
+  const inputImeiRef = useRef(null);
 
-  // Filial fixa do vendedor
+  // Filial fixa / travada
   const filialIdFixa = useMemo(() => {
     return (
       activeFilialId ||
@@ -52,299 +77,362 @@ export default function ModalEntradaEstoqueRapida({
       activeFilialNome ||
       perfilUsuario?.filial?.nome ||
       localStorage.getItem('zenite_active_filial_nome') ||
-      'Minha Filial'
+      'MONKEY SHOP'
     );
   }, [activeFilialNome, perfilUsuario]);
 
-  // Foco automático imediato ao abrir o modal
-  useEffect(() => {
-    if (isOpen) {
-      // Foco instantâneo síncrono/microtask
-      const timerInstant = setTimeout(() => {
-        if (inputBuscaRef.current) {
-          inputBuscaRef.current.focus();
-          inputBuscaRef.current.select?.();
-        }
-      }, 50);
+  const empresaId = useMemo(() => {
+    return (
+      perfilUsuario?.empresa_id ||
+      session?.user?.user_metadata?.empresa_id ||
+      null
+    );
+  }, [perfilUsuario, session]);
 
-      const timerBackup = setTimeout(() => {
-        if (inputBuscaRef.current && document.activeElement !== inputBuscaRef.current) {
-          inputBuscaRef.current.focus();
-        }
-      }, 250);
-
-      return () => {
-        clearTimeout(timerInstant);
-        clearTimeout(timerBackup);
-      };
-    }
-  }, [isOpen]);
-
-  // Carregar produtos da filial e catálogo quando o modal abrir
+  // Carregar catálogo de celulares ao abrir
   useEffect(() => {
     if (!isOpen) {
-      setBusca('');
+      setBuscaModelo('');
       setProdutoSelecionado(null);
-      setQuantidade('1');
-      setObservacao('');
+      setCorSelecionada('Preto');
+      setInputImei('');
+      setImeisBipados([]);
       setErroMsg(null);
+      setSucessoMsg(null);
       return;
     }
 
-    const carregarDados = async () => {
-      setLoadingProdutos(true);
-      setErroMsg(null);
+    const carregarCatalogo = async () => {
+      setLoadingCatalogo(true);
       try {
-        const empresaId =
-          perfilUsuario?.empresa_id ||
-          session?.user?.user_metadata?.empresa_id;
+        // Buscar produtos já cadastrados no estoque local e no catálogo geral
+        const [resProds, resCat, resCores] = await Promise.all([
+          supabase
+            .from('produtos')
+            .select('id, nome, categoria, tipo, preco, preco_custo, preco_venda, filial_id, empresa_id')
+            .or('tipo.ilike.%celular%,categoria.ilike.%celular%'),
+          supabase
+            .from('produtos_catalogo')
+            .select('id, nome, categoria, tipo, preco, preco_custo, preco_venda, empresa_id')
+            .or('tipo.ilike.%celular%,categoria.ilike.%celular%'),
+          supabase
+            .from('cores_aparelhos')
+            .select('nome')
+        ]);
 
-        // 1. Produtos já existentes na filial
-        let queryProdutos = supabase.from('produtos').select('*');
-        if (filialIdFixa) {
-          queryProdutos = queryProdutos.eq('filial_id', filialIdFixa);
-        } else if (empresaId) {
-          queryProdutos = queryProdutos.eq('empresa_id', empresaId);
-        }
-        const { data: dataProds, error: errProds } = await queryProdutos;
-        if (!errProds && dataProds) {
-          setProdutosLocais(dataProds);
-        }
+        const combinados = [];
+        const nomesVistos = new Set();
 
-        // 2. Catálogo geral mestre para reposição de novos itens
-        let queryCat = supabase.from('produtos_catalogo').select('*');
-        if (empresaId) {
-          queryCat = queryCat.eq('empresa_id', empresaId);
-        }
-        const { data: dataCat } = await queryCat;
-        if (dataCat) {
-          setCatalogoGeral(dataCat);
+        (resProds.data || []).forEach(p => {
+          if (p.nome && !nomesVistos.has(p.nome.trim().toUpperCase())) {
+            nomesVistos.add(p.nome.trim().toUpperCase());
+            combinados.push({
+              id: p.id,
+              nome: p.nome,
+              categoria: p.categoria || 'Celulares',
+              tipo: p.tipo || 'CELULAR',
+              preco: p.preco || p.preco_venda || 0,
+              preco_custo: p.preco_custo || 0,
+              preco_venda: p.preco_venda || p.preco || 0,
+              origem: 'produtos'
+            });
+          }
+        });
+
+        (resCat.data || []).forEach(c => {
+          if (c.nome && !nomesVistos.has(c.nome.trim().toUpperCase())) {
+            nomesVistos.add(c.nome.trim().toUpperCase());
+            combinados.push({
+              id: c.id,
+              nome: c.nome,
+              categoria: c.categoria || 'Celulares',
+              tipo: c.tipo || 'CELULAR',
+              preco: c.preco || c.preco_venda || 0,
+              preco_custo: c.preco_custo || 0,
+              preco_venda: c.preco_venda || c.preco || 0,
+              origem: 'catalogo'
+            });
+          }
+        });
+
+        setCatalogoAparelhos(combinados);
+
+        if (resCores.data && resCores.data.length > 0) {
+          const nomesCores = resCores.data.map(c => c.nome).filter(Boolean);
+          const unicas = Array.from(new Set([...CORES_SUGESTOES, ...nomesCores]));
+          setSugestoesCores(unicas);
         }
       } catch (err) {
-        console.warn('Erro ao carregar produtos para entrada rápida:', err);
+        console.warn('Erro ao carregar catálogo de celulares:', err);
       } finally {
-        setLoadingProdutos(false);
-        setTimeout(() => {
-          if (inputBuscaRef.current && !produtoSelecionado) {
-            inputBuscaRef.current.focus();
-          }
-        }, 100);
+        setLoadingCatalogo(false);
       }
     };
 
-    carregarDados();
-  }, [isOpen, filialIdFixa, perfilUsuario, session]);
+    carregarCatalogo();
+  }, [isOpen]);
 
-  // Itens filtrados para o dropdown de busca rápida
-  const resultadosBusca = useMemo(() => {
-    const q = busca.toLowerCase().trim();
-    if (!q || q.length < 2) return [];
+  // Foco inteligente
+  useEffect(() => {
+    if (!isOpen) return;
 
-    const matchesLocais = produtosLocais.filter((p) => {
-      return (
-        (p.nome && p.nome.toLowerCase().includes(q)) ||
-        (p.codigo_barras && p.codigo_barras.toLowerCase().includes(q)) ||
-        (p.sku && p.sku.toLowerCase().includes(q)) ||
-        (p.categoria && p.categoria.toLowerCase().includes(q))
-      );
-    });
+    const timer = setTimeout(() => {
+      if (!produtoSelecionado && inputBuscaRef.current) {
+        inputBuscaRef.current.focus();
+      } else if (produtoSelecionado && inputImeiRef.current) {
+        inputImeiRef.current.focus();
+      }
+    }, 80);
 
-    // Se já encontramos localmente, retorna
-    if (matchesLocais.length > 0) {
-      return matchesLocais.slice(0, 10);
-    }
+    return () => clearTimeout(timer);
+  }, [isOpen, produtoSelecionado]);
 
-    // Se não encontrou no estoque local, busca no catálogo mestre
-    const matchesCat = catalogoGeral.filter((c) => {
-      return (
-        (c.nome && c.nome.toLowerCase().includes(q)) ||
-        (c.codigo_barras && c.codigo_barras.toLowerCase().includes(q)) ||
-        (c.sku && c.sku.toLowerCase().includes(q)) ||
-        (c.categoria && c.categoria.toLowerCase().includes(q))
-      );
-    });
+  // Filtro de modelos para o autocomplete
+  const modelosFiltrados = useMemo(() => {
+    const q = buscaModelo.trim().toLowerCase();
+    if (!q || q.length < 1) return catalogoAparelhos.slice(0, 8);
 
-    return matchesCat.slice(0, 10);
-  }, [busca, produtosLocais, catalogoGeral]);
+    return catalogoAparelhos
+      .filter(item => item.nome && item.nome.toLowerCase().includes(q))
+      .slice(0, 10);
+  }, [buscaModelo, catalogoAparelhos]);
 
-  // Selecionar produto
-  const handleSelecionarProduto = (item) => {
+  // Ao selecionar modelo
+  const handleSelecionarModelo = (item) => {
     setProdutoSelecionado(item);
-    setBusca(item.nome || '');
-  };
-
-  // Submeter bipagem direta via tecla Enter
-  const handleBuscaKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const termo = busca.trim().toLowerCase();
-      if (!termo) return;
-
-      // Busca exata por código de barras ou SKU
-      const exatoLocal = produtosLocais.find(
-        (p) =>
-          (p.codigo_barras && p.codigo_barras.toLowerCase() === termo) ||
-          (p.sku && p.sku.toLowerCase() === termo) ||
-          (p.nome && p.nome.toLowerCase() === termo)
-      );
-
-      if (exatoLocal) {
-        handleSelecionarProduto(exatoLocal);
-        return;
-      }
-
-      const exatoCat = catalogoGeral.find(
-        (c) =>
-          (c.codigo_barras && c.codigo_barras.toLowerCase() === termo) ||
-          (c.sku && c.sku.toLowerCase() === termo) ||
-          (c.nome && c.nome.toLowerCase() === termo)
-      );
-
-      if (exatoCat) {
-        handleSelecionarProduto(exatoCat);
-        return;
-      }
-
-      if (resultadosBusca.length > 0) {
-        handleSelecionarProduto(resultadosBusca[0]);
-      }
-    }
-  };
-
-  // Ação de confirmar e salvar a entrada de estoque
-  const handleConfirmarEntrada = async (e) => {
-    if (e) e.preventDefault();
+    setBuscaModelo(item.nome);
     setErroMsg(null);
+    setTimeout(() => {
+      if (inputImeiRef.current) {
+        inputImeiRef.current.focus();
+      }
+    }, 100);
+  };
 
-    if (!produtoSelecionado) {
-      setErroMsg('Selecione ou bipe um produto antes de confirmar.');
+  // Sanitizar e processar leitura de IMEI
+  const handleAdicionarImei = async () => {
+    setErroMsg(null);
+    const imeiLimpo = inputImei.replace(/\D/g, '').trim();
+
+    if (!imeiLimpo) return;
+
+    // Validação: sanitizar apenas números e verificar se tem 14 ou 15 dígitos
+    if (imeiLimpo.length !== 14 && imeiLimpo.length !== 15) {
+      setErroMsg(`IMEI inválido: deve conter 14 ou 15 dígitos numéricos (informado: ${imeiLimpo.length}).`);
       return;
     }
 
-    const qtdNum = parseInt(quantidade, 10);
-    if (isNaN(qtdNum) || qtdNum <= 0) {
-      setErroMsg('Informe uma quantidade válida maior que zero.');
+    // Validar duplicidade local na lista atual de bipados
+    const jaBipado = imeisBipados.some(item => item.imei === imeiLimpo);
+    if (jaBipado) {
+      setErroMsg(`O IMEI ${imeiLimpo} já foi adicionado a esta entrada.`);
+      return;
+    }
+
+    // Validar duplicidade no banco (tabela 'imeis')
+    setValidandoImei(true);
+    try {
+      const { data: imeiExistente, error: errCheck } = await supabase
+        .from('imeis')
+        .select('id, imei, status, vendido')
+        .eq('imei', imeiLimpo)
+        .maybeSingle();
+
+      if (errCheck && errCheck.code !== 'PGRST116') {
+        console.warn('Aviso verificação de IMEI existente:', errCheck);
+      }
+
+      if (imeiExistente) {
+        const isAtivo = !imeiExistente.vendido && String(imeiExistente.status || '').toUpperCase() !== 'BAIXADO';
+        if (isAtivo) {
+          setErroMsg(`O IMEI ${imeiLimpo} já está cadastrado no sistema (Status: ${imeiExistente.status || 'Ativo'}).`);
+          setValidandoImei(false);
+          return;
+        }
+      }
+
+      // Adicionar à lista de bipados com a cor selecionada
+      setImeisBipados(prev => [
+        ...prev,
+        {
+          imei: imeiLimpo,
+          cor: corSelecionada.trim() || 'Preto',
+          timestamp: Date.now()
+        }
+      ]);
+      setInputImei('');
+      setErroMsg(null);
+    } catch (err) {
+      console.error('Erro ao verificar duplicidade de IMEI:', err);
+      setErroMsg('Erro ao validar IMEI no banco de dados.');
+    } finally {
+      setValidandoImei(false);
+      setTimeout(() => {
+        if (inputImeiRef.current) inputImeiRef.current.focus();
+      }, 50);
+    }
+  };
+
+  const handleImeiKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAdicionarImei();
+    }
+  };
+
+  const handleRemoverImei = (imeiParaRemover) => {
+    setImeisBipados(prev => prev.filter(item => item.imei !== imeiParaRemover));
+    if (inputImeiRef.current) inputImeiRef.current.focus();
+  };
+
+  // Gravação no Banco (Supabase)
+  const handleConfirmarEntrada = async (e) => {
+    if (e) e.preventDefault();
+    setErroMsg(null);
+    setSucessoMsg(null);
+
+    if (!produtoSelecionado) {
+      setErroMsg('Selecione o modelo do aparelho no catálogo.');
+      return;
+    }
+
+    if (imeisBipados.length === 0) {
+      setErroMsg('Bipe ou digite ao menos um IMEI antes de confirmar.');
       return;
     }
 
     if (!filialIdFixa) {
-      setErroMsg('Erro: Nenhuma filial de trabalho ativa foi detectada.');
+      setErroMsg('Erro: Nenhuma filial ativa de trabalho identificada.');
       return;
     }
 
-    setLoading(true);
+    setLoadingSalvando(true);
     try {
-      const empresaId =
-        perfilUsuario?.empresa_id ||
-        session?.user?.user_metadata?.empresa_id ||
-        produtoSelecionado.empresa_id;
+      const qtdTotal = imeisBipados.length;
+      const targetEmpresaId = empresaId || produtoSelecionado.empresa_id;
       const userId = session?.user?.id || perfilUsuario?.id;
 
-      let targetProdutoId = produtoSelecionado.id;
-      let saldoAnterior = Number(produtoSelecionado.quantidade || 0);
+      // 1. Localizar ou criar o produto correspondente nesta filial
+      let targetProdutoId = null;
+      let saldoAnterior = 0;
 
-      // Verificar se o produto já existe na tabela 'produtos' com a filialIdFixa
-      const { data: prodExistente, error: findErr } = await supabase
+      const { data: prodNaFilial } = await supabase
         .from('produtos')
         .select('*')
         .eq('filial_id', filialIdFixa)
         .eq('nome', produtoSelecionado.nome)
         .maybeSingle();
 
-      if (findErr && findErr.code !== 'PGRST116') {
-        console.warn('Aviso busca produto na filial:', findErr);
-      }
+      if (prodNaFilial) {
+        targetProdutoId = prodNaFilial.id;
+        saldoAnterior = Number(prodNaFilial.quantidade || 0);
 
-      if (prodExistente) {
-        // Incrementa a coluna quantidade do produto existente
-        targetProdutoId = prodExistente.id;
-        saldoAnterior = Number(prodExistente.quantidade || 0);
-        const novoSaldo = saldoAnterior + qtdNum;
-
-        const updatePayload = {
-          quantidade: novoSaldo,
-          status: 'Disponível'
-        };
-        if (produtoSelecionado.codigo_barras && !prodExistente.codigo_barras) {
-          updatePayload.codigo_barras = produtoSelecionado.codigo_barras;
-        }
-
-        const { error: updateErr } = await supabase
+        // Atualiza saldo físico consolidado
+        const { error: updErr } = await supabase
           .from('produtos')
-          .update(updatePayload)
+          .update({
+            quantidade: saldoAnterior + qtdTotal,
+            status: 'Disponível',
+            tipo: 'CELULAR',
+            categoria: 'Celulares'
+          })
           .eq('id', targetProdutoId);
 
-        if (updateErr) throw updateErr;
+        if (updErr) throw updErr;
       } else {
-        // Se ainda não existia nessa filial, cria o registro na filial do operador
-        const novoPayload = {
-          empresa_id: empresaId,
+        // Criar produto na filial
+        const payloadNovoProd = {
+          empresa_id: targetEmpresaId,
           filial_id: filialIdFixa,
           nome: produtoSelecionado.nome,
-          tipo: produtoSelecionado.tipo || 'ACESSORIO',
-          categoria: produtoSelecionado.categoria || 'ACESSORIO',
-          cor: produtoSelecionado.cor || null,
-          codigo_barras: produtoSelecionado.codigo_barras || produtoSelecionado.sku || null,
-          sku: produtoSelecionado.sku || null,
+          tipo: 'CELULAR',
+          categoria: 'Celulares',
+          cor: corSelecionada || null,
           preco: parseFloat(produtoSelecionado.preco || 0),
+          preco_custo: parseFloat(produtoSelecionado.preco_custo || 0),
           preco_venda: parseFloat(produtoSelecionado.preco_venda || produtoSelecionado.preco || 0),
-          quantidade: qtdNum,
+          quantidade: qtdTotal,
           status: 'Disponível'
         };
 
-        const { data: novoProd, error: insertProdErr } = await supabase
+        const { data: novoCriado, error: crtErr } = await supabase
           .from('produtos')
-          .insert(novoPayload)
+          .insert(payloadNovoProd)
           .select()
           .single();
 
-        if (insertProdErr) throw insertProdErr;
-        targetProdutoId = novoProd.id;
+        if (crtErr) throw crtErr;
+        targetProdutoId = novoCriado.id;
       }
 
-      // Registrar obrigatoriamente a movimentação em estoque_movimentacoes
-      // Compatibilidade: tenta ENTRADA_AVULSA e faz fallback para ENTRADA_AQUISICAO caso haja check constraint
-      const obsTexto = observacao.trim()
-        ? `Entrada Rápida PDV: ${observacao.trim()}`
-        : `Entrada rápida de ${qtdNum} un. na filial ${nomeFilialFixa}`;
+      // 2. Inserir cada IMEI na tabela 'imeis'
+      const rowsImeis = imeisBipados.map(item => ({
+        imei: item.imei,
+        produto_id: targetProdutoId,
+        filial_id: filialIdFixa,
+        empresa_id: targetEmpresaId,
+        status: 'DISPONIVEL',
+        cor: item.cor || corSelecionada || 'Preto',
+        vendido: false
+      }));
 
+      const { error: errImeis } = await supabase
+        .from('imeis')
+        .insert(rowsImeis);
+
+      if (errImeis) {
+        console.warn('Erro ao inserir em imeis, aplicando fallback de status:', errImeis);
+        // Fallback para case-sensitivity ou schema de status
+        const rowsFallback = rowsImeis.map(r => ({ ...r, status: 'Disponível' }));
+        const { error: errFallback } = await supabase.from('imeis').insert(rowsFallback);
+        if (errFallback) throw errFallback;
+      }
+
+      // 3. Registrar movimentação em 'estoque_movimentacoes' com tipo 'ENTRADA'
+      const obsTexto = `Entrada Rápida de Aparelhos: ${produtoSelecionado.nome} (${qtdTotal} un. - IMEIs: ${imeisBipados.map(i => i.imei).join(', ')})`;
+      
       const movPayload = {
-        empresa_id: empresaId,
+        empresa_id: targetEmpresaId,
         filial_destino_id: filialIdFixa,
         produto_id: targetProdutoId,
-        quantidade: qtdNum,
-        tipo_movimentacao: 'ENTRADA_AVULSA',
+        quantidade: qtdTotal,
+        tipo_movimentacao: 'ENTRADA',
         criado_por: userId,
         status: 'CONCLUIDO',
         observacao: obsTexto
       };
 
-      const { error: movErr } = await supabase
+      const { error: errMov } = await supabase
         .from('estoque_movimentacoes')
         .insert(movPayload);
 
-      if (movErr) {
-        console.warn('Aviso insert ENTRADA_AVULSA, aplicando fallback:', movErr.message);
-        // Fallback para constraint ENTRADA_AQUISICAO
-        const fallbackPayload = {
+      if (errMov) {
+        console.warn('Aviso insert ENTRADA em estoque_movimentacoes, tentando ENTRADA_AQUISICAO:', errMov.message);
+        await supabase.from('estoque_movimentacoes').insert({
           ...movPayload,
           tipo_movimentacao: 'ENTRADA_AQUISICAO'
-        };
-        // Remove status se a coluna não existir
-        delete fallbackPayload.status;
-        await supabase.from('estoque_movimentacoes').insert(fallbackPayload);
+        });
       }
 
-      // Notificar sucesso e disparar recarregamento
+      // Notificar sucesso e resetar formulário
+      setSucessoMsg(`${qtdTotal} aparelho(s) cadastrado(s) com sucesso na filial ${nomeFilialFixa}!`);
+      
       if (onSuccess) {
-        onSuccess(qtdNum, produtoSelecionado.nome);
+        onSuccess(qtdTotal, produtoSelecionado.nome);
       }
-      onClose();
+
+      window.dispatchEvent(new Event('estoque_updated'));
+      window.dispatchEvent(new Event('catalogo_updated'));
+
+      setTimeout(() => {
+        onClose();
+      }, 1200);
+
     } catch (err) {
-      console.error('Erro ao registrar entrada rápida:', err);
-      setErroMsg('Falha ao salvar entrada: ' + (err.message || 'Erro desconhecido'));
+      console.error('Erro ao confirmar entrada de celulares:', err);
+      setErroMsg('Falha ao gravar entrada: ' + (err.message || 'Erro desconhecido'));
     } finally {
-      setLoading(false);
+      setLoadingSalvando(false);
     }
   };
 
@@ -352,19 +440,20 @@ export default function ModalEntradaEstoqueRapida({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl w-full max-w-lg shadow-2xl shadow-[#6A0DAD]/20 overflow-hidden flex flex-col">
-        {/* Cabeçalho do Modal */}
-        <div className="p-5 border-b border-[#222222] flex items-center justify-between bg-gradient-to-r from-[#120024] to-[#0A0A0A]">
+      <div className="bg-[#0A0A0A] border border-purple-500/40 rounded-2xl w-full max-w-xl shadow-2xl shadow-purple-950/30 overflow-hidden flex flex-col">
+        
+        {/* Cabeçalho */}
+        <div className="p-5 border-b border-[#222222] flex items-center justify-between bg-gradient-to-r from-[#17002e] via-[#0e001c] to-[#0A0A0A]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 flex items-center justify-center text-[#6A0DAD]">
-              <Package size={20} />
+            <div className="w-10 h-10 rounded-xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400">
+              <Smartphone size={22} />
             </div>
             <div>
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                Entrada Rápida de Mercadoria
+                📱 Entrada Rápida de Aparelhos (Celulares)
               </h3>
               <p className="text-[11px] text-gray-400">
-                Confira a quantidade física antes de confirmar o saldo
+                Cadastro rápido com conferência de IMEI, cor e quantidade automática
               </p>
             </div>
           </div>
@@ -377,123 +466,126 @@ export default function ModalEntradaEstoqueRapida({
           </button>
         </div>
 
-        {/* Corpo do Formulário */}
-        <form onSubmit={handleConfirmarEntrada} className="p-6 space-y-5">
-          {/* Filial Travada (Fixa na filial ativa) */}
+        {/* Formulário */}
+        <form onSubmit={handleConfirmarEntrada} className="p-6 space-y-5 overflow-y-auto max-h-[80vh]">
+          
+          {/* Filial de Destino: Travada / Fixa */}
           <div className="flex items-center justify-between bg-black/60 border border-[#222222] rounded-xl px-4 py-3">
             <div className="flex items-center gap-2 text-xs">
-              <Store size={16} className="text-[#6A0DAD] shrink-0" />
+              <Store size={16} className="text-purple-400 shrink-0" />
               <span className="text-gray-400 font-medium">Filial de Destino:</span>
               <span className="text-white font-extrabold tracking-wide uppercase">
                 {nomeFilialFixa}
               </span>
             </div>
-            <span className="text-[10px] bg-[#6A0DAD]/20 text-purple-300 font-bold px-2 py-0.5 rounded border border-[#6A0DAD]/30">
+            <span className="text-[10px] bg-purple-950/80 text-purple-300 font-bold px-2 py-0.5 rounded border border-purple-800/60">
               Travada / Fixa
             </span>
           </div>
 
-          {/* Mensagem de Erro se houver */}
+          {/* Feedback de Erro ou Sucesso */}
           {erroMsg && (
             <div className="bg-red-950/40 border border-red-800/60 rounded-xl p-3 text-red-400 text-xs flex items-center gap-2 animate-fadeIn">
               <AlertCircle size={16} className="shrink-0" />
               <span>{erroMsg}</span>
             </div>
           )}
+          {sucessoMsg && (
+            <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-xl p-3 text-emerald-400 text-xs flex items-center gap-2 animate-fadeIn">
+              <CheckCircle2 size={16} className="shrink-0" />
+              <span>{sucessoMsg}</span>
+            </div>
+          )}
 
-          {/* 1. Campo de Busca / Bipagem */}
+          {/* CAMPO 1: Selecionar Aparelho (Catálogo) com autocomplete */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-gray-300 flex justify-between items-center">
-              <span>Bipar Código de Barras / Buscar Produto *</span>
+              <span>1. Selecionar Aparelho (Catálogo) *</span>
               {produtoSelecionado && (
                 <button
                   type="button"
                   onClick={() => {
                     setProdutoSelecionado(null);
-                    setBusca('');
-                    if (inputBuscaRef.current) inputBuscaRef.current.focus();
+                    setBuscaModelo('');
+                    setTimeout(() => inputBuscaRef.current?.focus(), 50);
                   }}
-                  className="text-[10px] text-purple-400 hover:underline font-bold"
+                  className="text-[10px] text-purple-400 hover:underline font-bold cursor-pointer"
                 >
-                  Trocar Produto
+                  Trocar Aparelho
                 </button>
               )}
             </label>
+
             <div className="relative">
               <input
                 ref={inputBuscaRef}
                 type="text"
-                autoFocus
-                value={busca}
+                value={buscaModelo}
                 onChange={(e) => {
-                  setBusca(e.target.value);
+                  setBuscaModelo(e.target.value);
                   if (produtoSelecionado && e.target.value !== produtoSelecionado.nome) {
                     setProdutoSelecionado(null);
                   }
                 }}
-                onKeyDown={handleBuscaKeyDown}
-                placeholder="Bipe o código de barras, SKU ou digite o nome..."
+                placeholder="Busque o modelo (ex: Honor X5c Plus 256GB, Poco X8 Pro)..."
                 className={`w-full bg-black border rounded-xl pl-10 pr-4 py-3 text-xs text-white outline-none font-medium transition-all ${
                   produtoSelecionado
                     ? 'border-emerald-500/60 bg-emerald-950/10'
-                    : 'border-[#222222] focus:border-[#6A0DAD]'
+                    : 'border-[#222222] focus:border-purple-500'
                 }`}
               />
-              <Barcode
-                size={18}
+              <Search
+                size={17}
                 className={`absolute left-3.5 top-3.5 transition-colors ${
                   produtoSelecionado ? 'text-emerald-400' : 'text-gray-500'
                 }`}
               />
-              {loadingProdutos && (
+              {loadingCatalogo && (
                 <Loader2
                   size={16}
-                  className="absolute right-3.5 top-3.5 animate-spin text-[#6A0DAD]"
+                  className="absolute right-3.5 top-3.5 animate-spin text-purple-400"
                 />
               )}
             </div>
 
-            {/* Dropdown de sugestões de busca */}
-            {!produtoSelecionado && resultadosBusca.length > 0 && (
-              <div className="bg-[#111111] border border-[#222222] rounded-xl shadow-2xl max-h-48 overflow-y-auto divide-y divide-[#222222] mt-1 z-10">
-                {resultadosBusca.map((item) => (
+            {/* Dropdown de sugestões do catálogo */}
+            {!produtoSelecionado && modelosFiltrados.length > 0 && buscaModelo.trim().length > 0 && (
+              <div className="bg-[#111111] border border-[#222222] rounded-xl shadow-2xl max-h-48 overflow-y-auto divide-y divide-[#222222] mt-1 z-20">
+                {modelosFiltrados.map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => handleSelecionarProduto(item)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-[#6A0DAD]/15 flex items-center justify-between gap-3 transition-colors text-xs cursor-pointer"
+                    onClick={() => handleSelecionarModelo(item)}
+                    className="w-full text-left px-4 py-2.5 hover:bg-purple-950/30 flex items-center justify-between gap-3 transition-colors text-xs cursor-pointer"
                   >
                     <div className="min-w-0">
                       <p className="font-bold text-white truncate">{item.nome}</p>
-                      <div className="flex items-center gap-2 text-[10px] text-gray-400 font-mono mt-0.5">
-                        {item.codigo_barras && <span>EAN: {item.codigo_barras}</span>}
-                        {item.sku && <span>SKU: {item.sku}</span>}
-                        <span className="text-purple-300">({item.categoria || item.tipo || 'Geral'})</span>
-                      </div>
+                      <span className="text-[10px] text-purple-300 font-mono">
+                        {item.categoria || 'Celulares'}
+                      </span>
                     </div>
-                    <span className="text-[11px] font-mono text-emerald-400 shrink-0 font-bold">
-                      Estoque: {item.quantidade ?? item.estoque ?? 0}
+                    <span className="text-[10px] bg-[#1a1a1a] text-gray-300 px-2 py-0.5 rounded border border-[#333] shrink-0">
+                      Selecionar
                     </span>
                   </button>
                 ))}
               </div>
             )}
 
-            {/* Card informativo do item selecionado */}
+            {/* Badge de modelo e categoria confirmada */}
             {produtoSelecionado && (
-              <div className="bg-[#6A0DAD]/10 border border-[#6A0DAD]/30 rounded-xl p-3 flex items-center justify-between gap-3 animate-fadeIn">
+              <div className="bg-purple-950/30 border border-purple-800/40 rounded-xl p-3 flex items-center justify-between gap-3 animate-fadeIn">
                 <div className="min-w-0">
-                  <span className="text-[10px] text-purple-300 font-extrabold uppercase tracking-wider block">
-                    Item Selecionado
-                  </span>
-                  <p className="text-xs font-bold text-white truncate">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-purple-900 text-purple-200 font-extrabold uppercase tracking-wider">
+                      {produtoSelecionado.categoria || 'Celulares'}
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-semibold">
+                      Modelo Confirmado
+                    </span>
+                  </div>
+                  <p className="text-xs font-bold text-white mt-1 truncate">
                     {produtoSelecionado.nome}
-                  </p>
-                  <p className="text-[10px] text-gray-400 font-mono mt-0.5">
-                    Saldo atual nesta loja:{' '}
-                    <strong className="text-emerald-400">
-                      {produtoSelecionado.quantidade ?? 0} un.
-                    </strong>
                   </p>
                 </div>
                 <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
@@ -503,77 +595,150 @@ export default function ModalEntradaEstoqueRapida({
             )}
           </div>
 
-          {/* 2. Quantidade Recebida */}
+          {/* CAMPO 2: Cor do Aparelho */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-gray-300">
-              Quantidade Recebida <span className="text-red-500">*</span>
+            <label className="block text-xs font-bold text-gray-300 flex items-center gap-1.5">
+              <Palette size={14} className="text-purple-400" />
+              <span>2. Cor do Aparelho *</span>
             </label>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  const val = Math.max(1, (parseInt(quantidade, 10) || 1) - 1);
-                  setQuantidade(String(val));
-                }}
-                className="w-12 h-11 bg-black border border-[#222222] hover:border-[#6A0DAD] rounded-xl flex items-center justify-center text-white hover:text-[#6A0DAD] transition-all cursor-pointer shrink-0"
+            <div className="flex items-center gap-2">
+              <select
+                value={corSelecionada}
+                onChange={(e) => setCorSelecionada(e.target.value)}
+                className="w-full bg-black border border-[#222222] focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white outline-none font-bold cursor-pointer"
               >
-                <Minus size={16} />
-              </button>
+                {sugestoesCores.map((cor) => (
+                  <option key={cor} value={cor}>
+                    {cor}
+                  </option>
+                ))}
+              </select>
               <input
-                type="number"
-                min="1"
-                value={quantidade}
-                onChange={(e) => setQuantidade(e.target.value)}
-                className="flex-1 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-xl py-2.5 text-center text-base font-extrabold text-white outline-none font-mono transition-all"
-                placeholder="1"
+                type="text"
+                placeholder="Ou digite outra cor..."
+                value={corSelecionada}
+                onChange={(e) => setCorSelecionada(e.target.value)}
+                className="w-1/2 bg-black border border-[#222222] focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white outline-none font-medium"
               />
-              <button
-                type="button"
-                onClick={() => {
-                  const val = (parseInt(quantidade, 10) || 0) + 1;
-                  setQuantidade(String(val));
-                }}
-                className="w-12 h-11 bg-black border border-[#222222] hover:border-[#6A0DAD] rounded-xl flex items-center justify-center text-white hover:text-[#6A0DAD] transition-all cursor-pointer shrink-0"
-              >
-                <Plus size={16} />
-              </button>
             </div>
           </div>
 
-          {/* 3. Observação (Opcional) */}
+          {/* CAMPO 3: Leitura de IMEI / Serial */}
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-gray-300 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Barcode size={15} className="text-purple-400" />
+                <span>3. Leitura de IMEI / Serial (14 ou 15 dígitos) *</span>
+              </span>
+              <span className="text-[10px] text-gray-400 font-normal">
+                Pressione Enter para adicionar à lista
+              </span>
+            </label>
+
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  ref={inputImeiRef}
+                  type="text"
+                  value={inputImei}
+                  onChange={(e) => setInputImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                  onKeyDown={handleImeiKeyDown}
+                  placeholder="Bipe ou digite o IMEI (15 dígitos)..."
+                  className="w-full bg-black border border-[#222222] focus:border-purple-500 rounded-xl pl-9 pr-4 py-3 text-xs text-white outline-none font-mono font-bold tracking-wider transition-all placeholder:font-sans placeholder:tracking-normal"
+                />
+                <Barcode size={16} className="absolute left-3 top-3.5 text-gray-500" />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleAdicionarImei}
+                disabled={validandoImei || !inputImei.trim()}
+                className="px-4 py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                {validandoImei ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <span>Adicionar</span>
+                )}
+              </button>
+            </div>
+
+            {/* Lista de chips/tags de IMEIs bipados */}
+            {imeisBipados.length > 0 ? (
+              <div className="bg-black/50 border border-[#222222] rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-gray-400 font-semibold border-b border-[#222222] pb-1.5">
+                  <span>IMEIs Prontos para Entrada ({imeisBipados.length}):</span>
+                  <button
+                    type="button"
+                    onClick={() => setImeisBipados([])}
+                    className="text-red-400 hover:underline text-[10px] cursor-pointer"
+                  >
+                    Limpar todos
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pt-1">
+                  {imeisBipados.map((item) => (
+                    <div
+                      key={item.imei}
+                      className="flex items-center gap-2 bg-[#121212] border border-purple-800/40 text-gray-200 px-3 py-1.5 rounded-lg text-xs font-mono font-bold shadow-sm"
+                    >
+                      <span className="text-white">{item.imei}</span>
+                      <span className="text-[10px] text-purple-300 font-sans font-normal px-1.5 py-0.5 rounded bg-purple-950/60 border border-purple-800/30">
+                        {item.cor}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoverImei(item.imei)}
+                        className="text-gray-500 hover:text-red-400 transition-colors ml-0.5 cursor-pointer"
+                        title="Remover IMEI"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-500 italic">
+                Nenhum IMEI bipado até o momento. Conecte o leitor ou digite o número acima.
+              </p>
+            )}
+          </div>
+
+          {/* CAMPO 4: Quantidade Total (Desabilitado para edição manual) */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-gray-300">
-              Observação <span className="text-[10px] text-gray-500 font-normal">(Opcional)</span>
+              4. Quantidade Total (Calculada Automaticamente)
             </label>
-            <input
-              type="text"
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value)}
-              placeholder="Ex: Recebido do fornecedor, reposição de balcão..."
-              className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all placeholder:text-gray-600"
-            />
+            <div className="flex items-center justify-between bg-black border border-[#222222] rounded-xl px-4 py-3">
+              <span className="text-xs text-gray-400 font-medium">Contador de aparelhos bipados:</span>
+              <span className="font-mono font-extrabold text-base text-emerald-400 bg-emerald-950/30 border border-emerald-800/40 px-3 py-1 rounded-lg">
+                Quantidade: {imeisBipados.length} un.
+              </span>
+            </div>
           </div>
 
           {/* Botão de Ação */}
           <div className="pt-2">
             <button
               type="submit"
-              disabled={loading || !produtoSelecionado}
-              className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-extrabold py-3.5 px-6 rounded-xl transition-all flex items-center justify-center gap-2 text-xs shadow-lg shadow-[#6A0DAD]/20 hover:shadow-[#6A0DAD]/40 cursor-pointer"
+              disabled={loadingSalvando || !produtoSelecionado || imeisBipados.length === 0}
+              className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 text-white font-extrabold py-3.5 px-6 rounded-xl transition-all flex items-center justify-center gap-2 text-xs shadow-lg shadow-purple-900/30 hover:shadow-purple-900/50 cursor-pointer"
             >
-              {loading ? (
+              {loadingSalvando ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
-                  Atualizando Estoque...
+                  Gravando no Estoque e Tabela de IMEIs...
                 </>
               ) : (
                 <>
                   <CheckCircle2 size={16} />
-                  Confirmar Entrada no Estoque
+                  Confirmar Entrada no Estoque ({imeisBipados.length} un.)
                 </>
               )}
             </button>
           </div>
+
         </form>
       </div>
     </div>
