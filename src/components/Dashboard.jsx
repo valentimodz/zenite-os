@@ -1110,7 +1110,7 @@ export default function Dashboard({ session, profileDataProps }) {
     return () => clearTimeout(handler);
   }, [eanImeiSearch]);
 
-  // Revalidação em Segundo Plano (Stale-While-Revalidate): atualiza o catálogo de produtos ao focar a janela ou receber o evento catalogo_updated
+  // Revalidação por Evento Específico: atualiza o catálogo apenas sob o evento catalogo_updated (refetch on focus desativado)
   useEffect(() => {
     const handleRevalidate = () => {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
@@ -1119,11 +1119,9 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     };
 
-    window.addEventListener('focus', handleRevalidate);
     window.addEventListener('catalogo_updated', handleRevalidate);
 
     return () => {
-      window.removeEventListener('focus', handleRevalidate);
       window.removeEventListener('catalogo_updated', handleRevalidate);
     };
   }, [profile?.empresa_id, company?.id, activeEmpresaId]);
