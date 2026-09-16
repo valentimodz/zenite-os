@@ -27417,14 +27417,13 @@ export default function Dashboard({ session, profileDataProps }) {
           filiais={filiais}
           onSuccess={(qtdCriada) => {
             showToast(`${qtdCriada} aparelhos cadastrados com sucesso no estoque!`, 'success');
-            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-            if (targetEmpresaId) {
-              fetchProdutos(targetEmpresaId);
-              fetchGerenteData(targetEmpresaId);
-              fetchCatalogoProdutos(targetEmpresaId);
+            const targetFilial = activeFilialId || profile?.filial_id;
+            if (targetFilial && typeof fetchProdutosPDV === 'function') {
+              fetchProdutosPDV(targetFilial);
             }
             window.dispatchEvent(new Event('catalogo_updated'));
             window.dispatchEvent(new Event('estoque_updated'));
+            window.dispatchEvent(new Event('produtos_updated'));
           }}
         />
 
@@ -27457,10 +27456,9 @@ export default function Dashboard({ session, profileDataProps }) {
           activeFilialNome={activeFilialNome}
           onSuccess={(qtdAdicionada, nomeProduto) => {
             showToast(`${qtdAdicionada} unidades de "${nomeProduto}" adicionadas com sucesso!`, 'success');
-            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
-            if (targetEmpresaId) {
-              fetchProdutos(targetEmpresaId);
-              fetchGerenteData(targetEmpresaId);
+            const targetFilial = activeFilialId || profile?.filial_id;
+            if (targetFilial && typeof fetchProdutosPDV === 'function') {
+              fetchProdutosPDV(targetFilial);
             }
             window.dispatchEvent(new Event('estoque_updated'));
             window.dispatchEvent(new Event('produtos_updated'));
