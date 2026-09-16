@@ -282,12 +282,14 @@ export default function ModalEntradaEstoqueRapida({
         }
       }
 
+      const corFinalAtual = (corSelecionada || '').trim() || 'Preto';
+
       // Adicionar à lista de bipados com a cor selecionada
       setImeisBipados(prev => [
         ...prev,
         {
           imei: imeiLimpo,
-          cor: corSelecionada.trim() || 'Preto',
+          cor: corFinalAtual,
           timestamp: Date.now()
         }
       ]);
@@ -337,6 +339,9 @@ export default function ModalEntradaEstoqueRapida({
       return;
     }
 
+    // Determinar a cor final escolhida/digitada
+    const corFinal = (corSelecionada || '').trim() || 'Preto';
+
     setLoadingSalvando(true);
     try {
       const qtdTotal = imeisBipados.length;
@@ -349,7 +354,7 @@ export default function ModalEntradaEstoqueRapida({
 
       const { data: prodExistente, error: errBuscaProd } = await supabase
         .from('produtos')
-        .select('id, quantidade, preco_custo, preco_venda')
+        .select('id, quantidade, preco_custo, preco_venda, cor')
         .eq('filial_id', filialIdFixa)
         .eq('nome', nomeAparelho)
         .maybeSingle();
@@ -363,22 +368,31 @@ export default function ModalEntradaEstoqueRapida({
         targetProdutoId = prodExistente.id;
         const saldoAnterior = Number(prodExistente.quantidade || 0);
 
+        const payloadUpdate = {
+          quantidade: saldoAnterior + qtdTotal,
+          tipo: 'APARELHO',
+          categoria: 'Celulares'
+        };
+
+        // Se o produto existente estiver sem cor ou "Sem cor", atualizar com a corFinal
+        const corAtual = (prodExistente.cor || '').trim().toLowerCase();
+        if (!corAtual || corAtual === 'sem cor' || corAtual === 'null' || corAtual === 'undefined') {
+          payloadUpdate.cor = corFinal;
+        }
+
         const { error: updErr } = await supabase
           .from('produtos')
-          .update({
-            quantidade: saldoAnterior + qtdTotal,
-            tipo: 'APARELHO',
-            categoria: 'Celulares'
-          })
+          .update(payloadUpdate)
           .eq('id', targetProdutoId);
 
         if (updErr) throw updErr;
       } else {
-        // SE NÃO EXISTE NA FILIAL: fazer primeiro um INSERT na tabela 'produtos'
+        // SE NÃO EXISTE NA FILIAL: fazer primeiro um INSERT na tabela 'produtos' com a cor obrigatória
         const payloadNovoProd = {
           nome: nomeAparelho,
           categoria: 'Celulares',
           tipo: 'APARELHO',
+          cor: corFinal,
           filial_id: filialIdFixa,
           empresa_id: targetEmpresaId,
           quantidade: qtdTotal,
@@ -396,13 +410,13 @@ export default function ModalEntradaEstoqueRapida({
         targetProdutoId = novoCriado.id;
       }
 
-      // 2. Batch INSERT na tabela 'imeis'
+      // 2. Batch INSERT na tabela 'imeis' com a corFinal
       const rowsImeis = imeisBipados.map(item => ({
         imei: item.imei,
         produto_id: targetProdutoId,
         filial_id: filialIdFixa,
         empresa_id: targetEmpresaId,
-        cor: item.cor || corSelecionada || 'Preto',
+        cor: (item.cor || corFinal).trim() || corFinal,
         status: 'DISPONIVEL'
       }));
 
