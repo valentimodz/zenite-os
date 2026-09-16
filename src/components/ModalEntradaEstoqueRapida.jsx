@@ -89,7 +89,7 @@ export default function ModalEntradaEstoqueRapida({
     );
   }, [perfilUsuario, session]);
 
-  // Carregar catálogo de celulares ao abrir
+  // Carregar cores personalizadas ao abrir
   useEffect(() => {
     if (!isOpen) {
       setBuscaModelo('');
@@ -99,78 +99,116 @@ export default function ModalEntradaEstoqueRapida({
       setImeisBipados([]);
       setErroMsg(null);
       setSucessoMsg(null);
+      setCatalogoAparelhos([]);
       return;
     }
 
-    const carregarCatalogo = async () => {
-      setLoadingCatalogo(true);
+    const carregarCores = async () => {
       try {
-        // Buscar produtos já cadastrados no estoque local e no catálogo geral
-        const [resProds, resCat, resCores] = await Promise.all([
-          supabase
-            .from('produtos')
-            .select('id, nome, categoria, tipo, preco, preco_custo, preco_venda, filial_id, empresa_id')
-            .or('tipo.ilike.%celular%,categoria.ilike.%celular%'),
-          supabase
-            .from('produtos_catalogo')
-            .select('id, nome, categoria, tipo, preco, preco_custo, preco_venda, empresa_id')
-            .or('tipo.ilike.%celular%,categoria.ilike.%celular%'),
-          supabase
-            .from('cores_aparelhos')
-            .select('nome')
-        ]);
+        const { data: resCores } = await supabase
+          .from('cores_aparelhos')
+          .select('nome');
 
-        const combinados = [];
-        const nomesVistos = new Set();
-
-        (resProds.data || []).forEach(p => {
-          if (p.nome && !nomesVistos.has(p.nome.trim().toUpperCase())) {
-            nomesVistos.add(p.nome.trim().toUpperCase());
-            combinados.push({
-              id: p.id,
-              nome: p.nome,
-              categoria: p.categoria || 'Celulares',
-              tipo: p.tipo || 'CELULAR',
-              preco: p.preco || p.preco_venda || 0,
-              preco_custo: p.preco_custo || 0,
-              preco_venda: p.preco_venda || p.preco || 0,
-              origem: 'produtos'
-            });
-          }
-        });
-
-        (resCat.data || []).forEach(c => {
-          if (c.nome && !nomesVistos.has(c.nome.trim().toUpperCase())) {
-            nomesVistos.add(c.nome.trim().toUpperCase());
-            combinados.push({
-              id: c.id,
-              nome: c.nome,
-              categoria: c.categoria || 'Celulares',
-              tipo: c.tipo || 'CELULAR',
-              preco: c.preco || c.preco_venda || 0,
-              preco_custo: c.preco_custo || 0,
-              preco_venda: c.preco_venda || c.preco || 0,
-              origem: 'catalogo'
-            });
-          }
-        });
-
-        setCatalogoAparelhos(combinados);
-
-        if (resCores.data && resCores.data.length > 0) {
-          const nomesCores = resCores.data.map(c => c.nome).filter(Boolean);
+        if (resCores && resCores.length > 0) {
+          const nomesCores = resCores.map(c => c.nome).filter(Boolean);
           const unicas = Array.from(new Set([...CORES_SUGESTOES, ...nomesCores]));
           setSugestoesCores(unicas);
         }
       } catch (err) {
-        console.warn('Erro ao carregar catálogo de celulares:', err);
-      } finally {
-        setLoadingCatalogo(false);
+        console.warn('Erro ao carregar cores personalizadas:', err);
       }
     };
 
-    carregarCatalogo();
+    carregarCores();
   }, [isOpen]);
+
+  // Busca Híbrida e Inteligente no Catálogo com Debounce de 250ms
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Se já selecionou um item e o texto bate com ele, não precisa refazer busca
+    if (produtoSelecionado && buscaModelo.trim() === produtoSelecionado.nome_completo) {
+      return;
+    }
+
+    const termo = buscaModelo.trim();
+    if (!termo) {
+      setCatalogoAparelhos([]);
+      setLoadingCatalogo(false);
+      return;
+    }
+
+    setLoadingCatalogo(true);
+    const handler = setTimeout(async () => {
+      try {
+        // 1. Consultar a tabela 'catalogo_smartphones' buscando por 'nome_completo' ILIKE `%termo%` (limit 25)
+        const { data: catalogoData, error: errCat } = await supabase
+          .from('catalogo_smartphones')
+          .select('id, marca, modelo, nome_completo, categoria')
+          .ilike('nome_completo', `%${termo}%`)
+          .limit(25);
+
+        if (errCat) {
+          console.warn('Erro ao consultar catalogo_smartphones:', errCat);
+          setCatalogoAparelhos([]);
+          return;
+        }
+
+        const modelosCatalogo = catalogoData || [];
+
+        if (modelosCatalogo.length === 0) {
+          setCatalogoAparelhos([]);
+          return;
+        }
+
+        // 2. Consultar a tabela 'produtos' da filial ativa para verificar quais desses modelos já estão cadastrados na loja
+        const nomesParaChecar = modelosCatalogo.map(m => m.nome_completo);
+
+        let produtosFilial = [];
+        if (filialIdFixa) {
+          const { data: prodsData, error: errProds } = await supabase
+            .from('produtos')
+            .select('id, nome, quantidade, filial_id, empresa_id')
+            .eq('filial_id', filialIdFixa)
+            .in('nome', nomesParaChecar);
+
+          if (!errProds && prodsData) {
+            produtosFilial = prodsData;
+          }
+        }
+
+        // Mapa de produtos cadastrados na filial por nome normalizado
+        const mapaFilial = new Map();
+        produtosFilial.forEach(p => {
+          if (p.nome) {
+            mapaFilial.set(p.nome.trim().toUpperCase(), p);
+          }
+        });
+
+        // 3. Montar lista enriquecida com status
+        const listaEnriquecida = modelosCatalogo.map(item => {
+          const chave = (item.nome_completo || '').trim().toUpperCase();
+          const prodExistente = mapaFilial.get(chave);
+          const jaCadastrado = !!prodExistente;
+
+          return {
+            ...item,
+            cadastrado: jaCadastrado,
+            produto_id_filial: prodExistente ? prodExistente.id : null,
+            saldo_atual_filial: prodExistente ? Number(prodExistente.quantidade || 0) : 0
+          };
+        });
+
+        setCatalogoAparelhos(listaEnriquecida);
+      } catch (err) {
+        console.error('Erro na busca de celulares:', err);
+      } finally {
+        setLoadingCatalogo(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(handler);
+  }, [buscaModelo, isOpen, produtoSelecionado, filialIdFixa]);
 
   // Foco inteligente
   useEffect(() => {
@@ -187,26 +225,19 @@ export default function ModalEntradaEstoqueRapida({
     return () => clearTimeout(timer);
   }, [isOpen, produtoSelecionado]);
 
-  // Filtro de modelos para o autocomplete
-  const modelosFiltrados = useMemo(() => {
-    const q = buscaModelo.trim().toLowerCase();
-    if (!q || q.length < 1) return catalogoAparelhos.slice(0, 8);
-
-    return catalogoAparelhos
-      .filter(item => item.nome && item.nome.toLowerCase().includes(q))
-      .slice(0, 10);
-  }, [buscaModelo, catalogoAparelhos]);
-
-  // Ao selecionar modelo
+  // Ao selecionar modelo da lista
   const handleSelecionarModelo = (item) => {
     setProdutoSelecionado(item);
-    setBuscaModelo(item.nome);
+    setBuscaModelo(item.nome_completo);
+    setCatalogoAparelhos([]);
     setErroMsg(null);
+
+    // Mover o foco imediatamente para o campo "3. Leitura de IMEI / Serial"
     setTimeout(() => {
       if (inputImeiRef.current) {
         inputImeiRef.current.focus();
       }
-    }, 100);
+    }, 60);
   };
 
   // Sanitizar e processar leitura de IMEI
@@ -309,71 +340,70 @@ export default function ModalEntradaEstoqueRapida({
     setLoadingSalvando(true);
     try {
       const qtdTotal = imeisBipados.length;
-      const targetEmpresaId = empresaId || produtoSelecionado.empresa_id;
+      const targetEmpresaId = empresaId || perfilUsuario?.empresa_id || null;
       const userId = session?.user?.id || perfilUsuario?.id;
+      const nomeAparelho = produtoSelecionado.nome_completo || produtoSelecionado.nome;
 
-      // 1. Localizar ou criar o produto correspondente nesta filial
+      // 1. Verificar se o modelo selecionado já possui um registro na tabela 'produtos' com a 'filial_id' atual
       let targetProdutoId = null;
-      let saldoAnterior = 0;
 
-      const { data: prodNaFilial } = await supabase
+      const { data: prodExistente, error: errBuscaProd } = await supabase
         .from('produtos')
-        .select('*')
+        .select('id, quantidade, preco_custo, preco_venda')
         .eq('filial_id', filialIdFixa)
-        .eq('nome', produtoSelecionado.nome)
+        .eq('nome', nomeAparelho)
         .maybeSingle();
 
-      if (prodNaFilial) {
-        targetProdutoId = prodNaFilial.id;
-        saldoAnterior = Number(prodNaFilial.quantidade || 0);
+      if (errBuscaProd && errBuscaProd.code !== 'PGRST116') {
+        throw errBuscaProd;
+      }
 
-        // Atualiza saldo físico consolidado
+      if (prodExistente) {
+        // SE JÁ EXISTE: recuperar o 'produto_id' existente e somar a quantidade de IMEIs bipados na coluna 'quantidade'
+        targetProdutoId = prodExistente.id;
+        const saldoAnterior = Number(prodExistente.quantidade || 0);
+
         const { error: updErr } = await supabase
           .from('produtos')
           .update({
             quantidade: saldoAnterior + qtdTotal,
-            status: 'Disponível',
-            tipo: 'CELULAR',
+            tipo: 'APARELHO',
             categoria: 'Celulares'
           })
           .eq('id', targetProdutoId);
 
         if (updErr) throw updErr;
       } else {
-        // Criar produto na filial
+        // SE NÃO EXISTE NA FILIAL: fazer primeiro um INSERT na tabela 'produtos'
         const payloadNovoProd = {
-          empresa_id: targetEmpresaId,
-          filial_id: filialIdFixa,
-          nome: produtoSelecionado.nome,
-          tipo: 'CELULAR',
+          nome: nomeAparelho,
           categoria: 'Celulares',
-          cor: corSelecionada || null,
-          preco: parseFloat(produtoSelecionado.preco || 0),
-          preco_custo: parseFloat(produtoSelecionado.preco_custo || 0),
-          preco_venda: parseFloat(produtoSelecionado.preco_venda || produtoSelecionado.preco || 0),
+          tipo: 'APARELHO',
+          filial_id: filialIdFixa,
+          empresa_id: targetEmpresaId,
           quantidade: qtdTotal,
-          status: 'Disponível'
+          preco_custo: 0,
+          preco_venda: 0
         };
 
         const { data: novoCriado, error: crtErr } = await supabase
           .from('produtos')
           .insert(payloadNovoProd)
-          .select()
+          .select('id')
           .single();
 
         if (crtErr) throw crtErr;
         targetProdutoId = novoCriado.id;
       }
 
-      // 2. Inserir cada IMEI na tabela 'imeis'
+      // 2. Batch INSERT na tabela 'imeis'
       const rowsImeis = imeisBipados.map(item => ({
         imei: item.imei,
         produto_id: targetProdutoId,
         filial_id: filialIdFixa,
         empresa_id: targetEmpresaId,
-        status: 'DISPONIVEL',
         cor: item.cor || corSelecionada || 'Preto',
-        vendido: false
+        status: 'DISPONIVEL'
       }));
 
       const { error: errImeis } = await supabase
@@ -381,48 +411,58 @@ export default function ModalEntradaEstoqueRapida({
         .insert(rowsImeis);
 
       if (errImeis) {
-        console.warn('Erro ao inserir em imeis, aplicando fallback de status:', errImeis);
-        // Fallback para case-sensitivity ou schema de status
-        const rowsFallback = rowsImeis.map(r => ({ ...r, status: 'Disponível' }));
-        const { error: errFallback } = await supabase.from('imeis').insert(rowsFallback);
-        if (errFallback) throw errFallback;
+        // Tratar erro com toast/alerta caso ocorra chave duplicada de IMEI ou validação
+        if (errImeis.code === '23505' || errImeis.message?.toLowerCase().includes('unique') || errImeis.message?.toLowerCase().includes('duplicate')) {
+          throw new Error('Falha ao cadastrar IMEIs: Um ou mais IMEIs bipados já existem no banco de dados.');
+        }
+        throw errImeis;
       }
 
-      // 3. Registrar movimentação em 'estoque_movimentacoes' com tipo 'ENTRADA'
-      const obsTexto = `Entrada Rápida de Aparelhos: ${produtoSelecionado.nome} (${qtdTotal} un. - IMEIs: ${imeisBipados.map(i => i.imei).join(', ')})`;
-      
-      const movPayload = {
-        empresa_id: targetEmpresaId,
-        filial_destino_id: filialIdFixa,
-        produto_id: targetProdutoId,
-        quantidade: qtdTotal,
-        tipo_movimentacao: 'ENTRADA',
-        criado_por: userId,
-        status: 'CONCLUIDO',
-        observacao: obsTexto
-      };
+      // 3. Registrar movimentação em 'estoque_movimentacoes' com tipo 'ENTRADA' (se tabela existir)
+      try {
+        const obsTexto = `Entrada Rápida: ${nomeAparelho} (${qtdTotal} un. - IMEIs: ${imeisBipados.map(i => i.imei).join(', ')})`;
+        const movPayload = {
+          empresa_id: targetEmpresaId,
+          filial_destino_id: filialIdFixa,
+          produto_id: targetProdutoId,
+          quantidade: qtdTotal,
+          tipo_movimentacao: 'ENTRADA',
+          criado_por: userId,
+          status: 'CONCLUIDO',
+          observacao: obsTexto
+        };
 
-      const { error: errMov } = await supabase
-        .from('estoque_movimentacoes')
-        .insert(movPayload);
+        const { error: errMov } = await supabase
+          .from('estoque_movimentacoes')
+          .insert(movPayload);
 
-      if (errMov) {
-        console.warn('Aviso insert ENTRADA em estoque_movimentacoes, tentando ENTRADA_AQUISICAO:', errMov.message);
-        await supabase.from('estoque_movimentacoes').insert({
-          ...movPayload,
-          tipo_movimentacao: 'ENTRADA_AQUISICAO'
-        });
+        if (errMov) {
+          await supabase.from('estoque_movimentacoes').insert({
+            ...movPayload,
+            tipo_movimentacao: 'ENTRADA_AQUISICAO'
+          });
+        }
+      } catch (errMov) {
+        console.warn('Aviso ao registrar log de movimentação de estoque:', errMov);
       }
 
-      // Notificar sucesso e resetar formulário
-      setSucessoMsg(`${qtdTotal} aparelho(s) cadastrado(s) com sucesso na filial ${nomeFilialFixa}!`);
+      // 4. Limpar o formulário, zerar a lista de bipados e exibir toast de sucesso
+      const mensagemSucesso = `${qtdTotal} aparelho(s) adicionados ao estoque com sucesso!`;
+      setSucessoMsg(mensagemSucesso);
       
       if (onSuccess) {
-        onSuccess(qtdTotal, produtoSelecionado.nome);
+        onSuccess(qtdTotal, nomeAparelho);
       }
 
       window.dispatchEvent(new Event('estoque_updated'));
       window.dispatchEvent(new Event('catalogo_updated'));
+
+      // Limpar estados
+      setBuscaModelo('');
+      setProdutoSelecionado(null);
+      setInputImei('');
+      setImeisBipados([]);
+      setCatalogoAparelhos([]);
 
       setTimeout(() => {
         onClose();
@@ -430,7 +470,7 @@ export default function ModalEntradaEstoqueRapida({
 
     } catch (err) {
       console.error('Erro ao confirmar entrada de celulares:', err);
-      setErroMsg('Falha ao gravar entrada: ' + (err.message || 'Erro desconhecido'));
+      setErroMsg(err.message || 'Falha ao gravar entrada no estoque.');
     } finally {
       setLoadingSalvando(false);
     }
@@ -548,27 +588,47 @@ export default function ModalEntradaEstoqueRapida({
               )}
             </div>
 
-            {/* Dropdown de sugestões do catálogo */}
-            {!produtoSelecionado && modelosFiltrados.length > 0 && buscaModelo.trim().length > 0 && (
-              <div className="bg-[#111111] border border-[#222222] rounded-xl shadow-2xl max-h-48 overflow-y-auto divide-y divide-[#222222] mt-1 z-20">
-                {modelosFiltrados.map((item) => (
+            {/* Dropdown de sugestões do catálogo inteligente */}
+            {!produtoSelecionado && catalogoAparelhos.length > 0 && buscaModelo.trim().length > 0 && (
+              <div className="bg-[#111111] border border-[#222222] rounded-xl shadow-2xl max-h-56 overflow-y-auto divide-y divide-[#222222] mt-1 z-20">
+                {catalogoAparelhos.map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => handleSelecionarModelo(item)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-purple-950/30 flex items-center justify-between gap-3 transition-colors text-xs cursor-pointer"
+                    className="w-full text-left px-4 py-2.5 hover:bg-purple-950/30 flex items-center justify-between gap-3 transition-colors text-xs cursor-pointer group"
                   >
-                    <div className="min-w-0">
-                      <p className="font-bold text-white truncate">{item.nome}</p>
-                      <span className="text-[10px] text-purple-300 font-mono">
-                        {item.categoria || 'Celulares'}
-                      </span>
+                    <div className="min-w-0 flex items-center gap-2.5">
+                      {item.marca && (
+                        <span className="text-[10px] px-2 py-0.5 rounded font-extrabold tracking-wider uppercase bg-purple-950/70 text-purple-300 border border-purple-800/50 shrink-0">
+                          {item.marca}
+                        </span>
+                      )}
+                      <p className="font-bold text-white truncate text-xs">
+                        {item.nome_completo}
+                      </p>
                     </div>
-                    <span className="text-[10px] bg-[#1a1a1a] text-gray-300 px-2 py-0.5 rounded border border-[#333] shrink-0">
-                      Selecionar
-                    </span>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {item.cadastrado ? (
+                        <span className="text-[10px] bg-emerald-950/50 text-emerald-400 px-2 py-0.5 rounded font-medium border border-emerald-800/40">
+                          Cadastrado
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-purple-950/40 text-purple-300 px-2 py-0.5 rounded font-medium border border-purple-800/30 group-hover:border-purple-500 transition-colors">
+                          + Criar entrada
+                        </span>
+                      )}
+                    </div>
                   </button>
                 ))}
+              </div>
+            )}
+
+            {/* Aviso quando pesquisou e nenhum modelo foi encontrado */}
+            {!produtoSelecionado && !loadingCatalogo && buscaModelo.trim().length >= 2 && catalogoAparelhos.length === 0 && (
+              <div className="bg-[#111111] border border-[#222222] rounded-xl p-3 text-xs text-gray-400 mt-1 text-center">
+                Nenhum aparelho encontrado no catálogo para "<span className="text-white font-semibold">{buscaModelo}</span>".
               </div>
             )}
 
@@ -577,15 +637,26 @@ export default function ModalEntradaEstoqueRapida({
               <div className="bg-purple-950/30 border border-purple-800/40 rounded-xl p-3 flex items-center justify-between gap-3 animate-fadeIn">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-purple-900 text-purple-200 font-extrabold uppercase tracking-wider">
-                      {produtoSelecionado.categoria || 'Celulares'}
+                    {produtoSelecionado.marca && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-purple-900 text-purple-200 font-extrabold uppercase tracking-wider">
+                        {produtoSelecionado.marca}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                      <CheckCircle2 size={12} /> Modelo Confirmado
                     </span>
-                    <span className="text-[10px] text-emerald-400 font-semibold">
-                      Modelo Confirmado
-                    </span>
+                    {produtoSelecionado.cadastrado ? (
+                      <span className="text-[9px] bg-emerald-950/60 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-800/40">
+                        Já cadastrado na filial
+                      </span>
+                    ) : (
+                      <span className="text-[9px] bg-purple-950/60 text-purple-300 px-1.5 py-0.5 rounded border border-purple-800/40">
+                        Novo produto na filial
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs font-bold text-white mt-1 truncate">
-                    {produtoSelecionado.nome}
+                  <p className="text-xs font-bold text-white mt-1.5 truncate">
+                    {produtoSelecionado.nome_completo || produtoSelecionado.nome}
                   </p>
                 </div>
                 <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
