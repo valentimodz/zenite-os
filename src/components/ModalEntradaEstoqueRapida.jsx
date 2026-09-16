@@ -309,6 +309,7 @@ export default function ModalEntradaEstoqueRapida({
   const handleImeiKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      e.stopPropagation();
       handleAdicionarImei();
     }
   };
@@ -521,7 +522,7 @@ export default function ModalEntradaEstoqueRapida({
         </div>
 
         {/* Formulário */}
-        <form onSubmit={handleConfirmarEntrada} className="p-6 space-y-5 overflow-y-auto max-h-[80vh]">
+        <form onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); }} className="p-6 space-y-5 overflow-y-auto max-h-[80vh]">
           
           {/* Filial de Destino: Travada / Fixa */}
           <div className="flex items-center justify-between bg-black/60 border border-[#222222] rounded-xl px-4 py-3">
@@ -806,7 +807,8 @@ export default function ModalEntradaEstoqueRapida({
           {/* Botão de Ação */}
           <div className="pt-2">
             <button
-              type="submit"
+              type="button"
+              onClick={handleConfirmarEntrada}
               disabled={loadingSalvando || !produtoSelecionado || imeisBipados.length === 0}
               className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 text-white font-extrabold py-3.5 px-6 rounded-xl transition-all flex items-center justify-center gap-2 text-xs shadow-lg shadow-purple-900/30 hover:shadow-purple-900/50 cursor-pointer"
             >
