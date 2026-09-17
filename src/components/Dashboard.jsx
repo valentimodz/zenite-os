@@ -956,6 +956,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [vendaNewValor, setVendaNewValor] = useState('');
   const [vendaNewComissao, setVendaNewComissao] = useState('');
   const [vendaNewMetodoPagamento, setVendaNewMetodoPagamento] = useState('PIX');
+  const [vendaNewVendedorId, setVendaNewVendedorId] = useState('');
+  const [vendaNewFilialId, setVendaNewFilialId] = useState('');
   const [vendaJustificativa, setVendaJustificativa] = useState('');
   const [isVendaEditModalOpen, setIsVendaEditModalOpen] = useState(false);
 
@@ -8633,6 +8635,19 @@ export default function Dashboard({ session, profileDataProps }) {
     setVendaNewComissao(venda.comissao);
     const metodoInicial = venda.metodo_pagamento || venda.forma_pagamento || 'PIX';
     setVendaNewMetodoPagamento(metodoInicial);
+
+    // Identificar Vendedor inicial
+    const vendedorIdInicial = venda.vendedor_id || (
+      (vendedores || []).find(v => (v.nome || v.name) === venda.vendedor_nome)?.id ||
+      (teamMembers || []).find(m => (m.nome || m.name || m.email) === venda.vendedor_nome)?.id ||
+      ''
+    );
+    setVendaNewVendedorId(vendedorIdInicial ? String(vendedorIdInicial) : '');
+
+    // Identificar Filial inicial
+    const filialIdInicial = venda.filial_id || '';
+    setVendaNewFilialId(filialIdInicial ? String(filialIdInicial) : '');
+
     setVendaJustificativa('');
     setIsVendaEditModalOpen(true);
   };
@@ -8674,15 +8689,31 @@ export default function Dashboard({ session, profileDataProps }) {
     const novoMetodo = vendaNewMetodoPagamento || 'PIX';
     const justificativaTexto = vendaJustificativa.trim();
 
+    // Obter Vendedor e Filial selecionados
+    const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(vendaNewVendedorId)) ||
+      (teamMembers || []).find(m => String(m.id) === String(vendaNewVendedorId));
+    
+    const novoVendedorId = vendaNewVendedorId ? vendaNewVendedorId : (editingVenda.vendedor_id || null);
+    const novoVendedorNome = vendedorEncontrado ? (vendedorEncontrado.nome || vendedorEncontrado.name || vendedorEncontrado.email) : (editingVenda.vendedor_nome || 'Vendedor');
+
+    const novaFilialId = vendaNewFilialId ? vendaNewFilialId : (editingVenda.filial_id || null);
+    const precoUnitario = novaQtd > 0 ? (novoValor / novaQtd) : novoValor;
+
     try {
-      // 1. UPDATE direto na tabela 'vendas' garantindo persistência imediata
+      // 1. UPDATE direto na tabela 'vendas' garantindo sincronização total
       const updatePayload = {
         valor_total: novoValor,
+        preco_unitario_vendido: precoUnitario,
         quantidade: novaQtd,
         comissao: novaComissao,
         metodo_pagamento: novoMetodo,
         produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
-        categoria: novaCategoria
+        categoria: novaCategoria,
+        vendedor_id: novoVendedorId,
+        vendedor_nome: novoVendedorNome,
+        filial_id: novaFilialId,
+        justificativa_correcao: justificativaTexto,
+        atualizado_em: new Date().toISOString()
       };
 
       const { data: updatedData, error: updateError } = await supabase
@@ -8695,14 +8726,34 @@ export default function Dashboard({ session, profileDataProps }) {
         throw updateError;
       }
 
-      // 2. Registro opcional/resiliente de auditoria (sem bloquear o usuário caso a tabela/RPC ainda não exista)
+      // 2. Sincronização de Estoque / IMEI (Se a venda possuir 'imei' vinculado e a filial mudou)
+      const imeiVinculado = (editingVenda.imei || '').trim();
+      const filialMudou = novaFilialId && String(novaFilialId) !== String(editingVenda.filial_id);
+      if (imeiVinculado && filialMudou) {
+        try {
+          const { error: imeiUpdateErr } = await supabase
+            .from('imeis')
+            .update({ filial_id: novaFilialId })
+            .eq('imei', imeiVinculado);
+
+          if (imeiUpdateErr) {
+            console.warn('Aviso ao sincronizar filial do IMEI:', imeiUpdateErr.message);
+          } else {
+            console.log(`[IMEI Sync] IMEI ${imeiVinculado} transferido para a filial ${novaFilialId}`);
+          }
+        } catch (imeiErr) {
+          console.warn('Falha silenciosa ao atualizar IMEI:', imeiErr);
+        }
+      }
+
+      // 3. Registro opcional/resiliente de auditoria (sem bloquear o usuário caso a tabela não exista)
       try {
         await supabase.from('sales_audit_logs').insert([{
           venda_id: vendaId,
           user_id: session?.user?.id || profile?.id || null,
           user_email: profile?.email || session?.user?.email || null,
           empresa_id: editingVenda.empresa_id || company?.id || profile?.empresa_id || null,
-          filial_id: editingVenda.filial_id || null,
+          filial_id: novaFilialId,
           justificativa: justificativaTexto,
           dados_antigos: {
             produto_nome: editingVenda.produto_nome,
@@ -8710,7 +8761,10 @@ export default function Dashboard({ session, profileDataProps }) {
             quantidade: editingVenda.quantidade,
             valor_total: editingVenda.valor_total,
             comissao: editingVenda.comissao,
-            metodo_pagamento: editingVenda.metodo_pagamento
+            metodo_pagamento: editingVenda.metodo_pagamento,
+            vendedor_id: editingVenda.vendedor_id,
+            vendedor_nome: editingVenda.vendedor_nome,
+            filial_id: editingVenda.filial_id
           },
           dados_novos: updatePayload
         }]);
@@ -8718,11 +8772,11 @@ export default function Dashboard({ session, profileDataProps }) {
         console.warn('Registro em sales_audit_logs ignorado ou não disponível:', auditErr);
       }
 
-      showToast('Venda corrigida com sucesso!', 'success');
+      showToast('Venda e vínculos atualizados com sucesso!', 'success');
       setIsVendaEditModalOpen(false);
       setEditingVenda(null);
 
-      // 3. Atualização reativa imediata na listagem de vendas
+      // 4. Atualização reativa imediata na listagem de vendas
       setVendas(prev => prev.map(v => {
         if (v.id === vendaId) {
           return {
@@ -8739,7 +8793,7 @@ export default function Dashboard({ session, profileDataProps }) {
         return v;
       }));
 
-      // 4. Atualização imediata também na lista de vendas do vendedor
+      // 5. Atualização imediata também na lista de vendas do vendedor
       setVendasVendedor(prev => prev.map(v => {
         if (v.id === vendaId) {
           return {
@@ -8756,15 +8810,16 @@ export default function Dashboard({ session, profileDataProps }) {
         return v;
       }));
 
-      // 5. Notificar outros componentes / listeners globais
+      // 6. Notificar outros componentes / listeners globais
       try {
         window.dispatchEvent(new CustomEvent('vendas_updated', { detail: { vendaId, updatePayload } }));
+        window.dispatchEvent(new Event('estoque_updated'));
       } catch (_) {}
 
-      // 6. Recarregar dados do gerente/dashboard para recalcular totais e métricas
+      // 7. Recarregar dados do gerente/dashboard para recalcular totais e métricas
       const targetEmpresaId = company?.id || profile?.empresa_id;
       if (targetEmpresaId && typeof fetchGerenteData === 'function') {
-        fetchGerenteData(targetEmpresaId);
+        fetchGerenteData(targetEmpresaId, filtroMes);
       }
     } catch (err) {
       console.error('Erro ao corrigir venda:', err);
@@ -26326,6 +26381,72 @@ export default function Dashboard({ session, profileDataProps }) {
                       <option value="Serviços" className="bg-[#111] text-white">Serviços</option>
                     </select>
                   </div>
+
+                  {/* SELETORES: VENDEDOR & FILIAL (SINCRONIZAÇÃO TOTAL) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                        VENDEDOR RESPONSÁVEL <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={vendaNewVendedorId}
+                        onChange={(e) => setVendaNewVendedorId(e.target.value)}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none font-medium cursor-pointer transition-all"
+                      >
+                        <option value="" className="bg-[#111] text-gray-500">
+                          {editingVenda?.vendedor_nome ? `Manter: ${editingVenda.vendedor_nome}` : 'Selecione o Vendedor...'}
+                        </option>
+                        {/* Lista unificada de vendedores e colaboradores */}
+                        {(() => {
+                          const mapa = new Map();
+                          (vendedores || []).forEach(v => {
+                            if (v.id) mapa.set(String(v.id), v.nome || v.name || 'Vendedor');
+                          });
+                          (teamMembers || []).forEach(m => {
+                            if (m.id && !mapa.has(String(m.id))) {
+                              mapa.set(String(m.id), m.nome || m.name || m.email || 'Colaborador');
+                            }
+                          });
+                          return Array.from(mapa.entries()).map(([id, nome]) => (
+                            <option key={id} value={id} className="bg-[#111] text-white">
+                              {nome}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                        FILIAL DE DESTINO <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={vendaNewFilialId}
+                        onChange={(e) => setVendaNewFilialId(e.target.value)}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none font-medium cursor-pointer transition-all"
+                      >
+                        <option value="" className="bg-[#111] text-gray-500">
+                          {editingVenda?.filiais?.nome || editingVenda?.filial_nome ? `Manter: ${editingVenda.filiais?.nome || editingVenda.filial_nome}` : 'Selecione a Filial...'}
+                        </option>
+                        {(filiais || []).map(f => (
+                          <option key={f.id} value={f.id} className="bg-[#111] text-white">
+                            {f.nome || f.name} {f.tipo ? `(${f.tipo})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {editingVenda?.imei && (
+                    <div className="bg-purple-950/20 border border-purple-800/40 rounded-lg p-2.5 flex items-center gap-2 text-xs text-purple-300">
+                      <span className="font-mono font-bold bg-purple-900/60 px-2 py-0.5 rounded text-[11px]">
+                        IMEI: {editingVenda.imei}
+                      </span>
+                      <span className="text-[11px] text-gray-400">
+                        O estoque deste aparelho será sincronizado automaticamente caso a filial seja alterada.
+                      </span>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
