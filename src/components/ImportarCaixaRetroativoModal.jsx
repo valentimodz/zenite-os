@@ -251,6 +251,7 @@ export default function ImportarCaixaRetroativoModal({
         }
 
         // 3. Inserir a venda na tabela 'vendas' com created_at retroativo
+        const precoUnitario = item.quantidade > 0 ? (item.valor_total / item.quantidade) : item.valor_total;
         const payloadVenda = {
           empresa_id: empresaIdFinal,
           filial_id: filialIdFinal,
@@ -261,9 +262,9 @@ export default function ImportarCaixaRetroativoModal({
           quantidade: item.quantidade,
           valor_total: item.valor_total,
           valor_pago: item.valor_total,
-          metodo_pagamento: item.forma_pagamento,
-          forma_pagamento: item.forma_pagamento,
-          status_pagamento: 'PAGO',
+          preco_unitario_vendido: precoUnitario,
+          metodo_pagamento: item.forma_pagamento || 'PIX',
+          status_pagamento: 'concluido',
           imei: item.imei?.trim() || null,
           created_at: dataIsoRetroativa
         };
