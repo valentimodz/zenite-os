@@ -154,7 +154,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
     console.warn('[GeminiService] Backend /api/ai/parse-caixa indisponível, usando fallback direto via SDK no navegador:', err);
   }
 
-  // 2. Fallback resiliente: execução direta no navegador usando @google/genai
+  // 2. Fallback resiliente: execução direta no navegador usando fetch nativo na API REST do Gemini
   const effectiveApiKey =
     customApiKey?.trim() ||
     localStorage.getItem('@zenite_gemini_api_key') ||
@@ -166,35 +166,21 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
     throw new Error('Chave da API Gemini não localizada. Por favor, adicione VITE_GEMINI_API_KEY no .env ou informe sua chave no campo.');
   }
 
-  const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  const MODELOS_DISPONIVEIS = [
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro'
-  ];
-
-  const isHighDemandError = (err) => {
-    const msg = (err?.message || '').toLowerCase();
-    const status = String(err?.status || err?.statusCode || '');
-    return status.includes('503') ||
-      msg.includes('503') ||
-      msg.includes('high demand') ||
-      msg.includes('temporarily overloaded') ||
-      msg.includes('service unavailable') ||
-      msg.includes('resource_exhausted') ||
-      msg.includes('overloaded');
-  };
-
+  const modelosTentativa = ['gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
   let lastError = null;
 
-  for (const modelName of MODELOS_DISPONIVEIS) {
-    for (let tentativa = 1; tentativa <= 2; tentativa++) {
+  for (const modelo of modelosTentativa) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveApiKey}`;
+
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
       try {
-        console.log(`[GeminiClient] Tentando modelo "${modelName}" (tentativa ${tentativa}/2)...`);
-        const response = await ai.models.generateContent({
-          model: modelName,
+        console.log(`[GeminiClient] Chamando REST API modelo "${modelo}" (tentativa ${tentativa}/3)...`);
+
+        const requestBody = {
+          systemInstruction: {
+            parts: [{ text: SYSTEM_INSTRUCTION }]
+          },
           contents: [
             {
               role: 'user',
@@ -211,36 +197,60 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
               ]
             }
           ],
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
+          generationConfig: {
             responseMimeType: 'application/json',
             responseSchema: CAIXA_RESPONSE_SCHEMA,
             temperature: 0.1
           }
+        };
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
         });
 
-        const text = response?.text;
-        if (!text) {
-          throw new Error('A IA não retornou nenhum dado legível a partir do arquivo enviado.');
+        if (res.status === 503) {
+          console.warn(`[GeminiClient] Erro 503 (Sobrecarga Temporária / High Demand). Aguardando 2s antes do retry (${tentativa}/3)...`);
+          await sleep(2000);
+          continue;
         }
 
-        const parsed = JSON.parse(text);
-        parsed._modelo_utilizado = modelName;
+        const data = await res.json();
+
+        if (!res.ok) {
+          const errMessage = data?.error?.message || `Erro HTTP ${res.status}`;
+          if (res.status === 404 || errMessage.includes('no longer available')) {
+            console.warn(`[GeminiClient] Modelo ${modelo} retornou 404: ${errMessage}`);
+            lastError = new Error(errMessage);
+            break;
+          }
+          throw new Error(errMessage);
+        }
+
+        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) {
+          throw new Error('A resposta da API do Gemini não retornou texto estruturado em data.candidates[0].content.parts[0].text.');
+        }
+
+        const parsed = JSON.parse(rawText);
+        parsed._modelo_utilizado = modelo;
         return parsed;
+
       } catch (err) {
         lastError = err;
-        console.warn(`[GeminiClient] Falha no modelo ${modelName} (tentativa ${tentativa}):`, err?.message || err);
-
-        if (isHighDemandError(err)) {
-          console.warn(`[GeminiClient] Erro 503 / High Demand detectado. Aguardando 2 segundos para retry...`);
+        const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('503') || msg.includes('high demand') || msg.includes('temporarily overloaded')) {
+          console.warn(`[GeminiClient] Erro 503 detectado: ${err.message}. Aguardando 2 segundos...`);
           await sleep(2000);
         } else {
-          // Se for outro tipo de erro (ex: 404), passa para o próximo modelo oficial
           break;
         }
       }
     }
   }
 
-  throw new Error(`Falha ao processar a folha após tentar os modelos (${MODELOS_DISPONIVEIS.join(', ')}): ${lastError?.message || 'Serviço temporariamente indisponível'}`);
+  throw new Error(`Falha ao processar a folha com a IA do Gemini: ${lastError?.message || 'Serviço temporariamente indisponível'}`);
 }
