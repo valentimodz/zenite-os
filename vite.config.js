@@ -75,6 +75,52 @@ export default defineConfig({
             return;
           }
 
+          // ROUTE: AI Parse Caixa (Gemini 2.5 Flash)
+          if (pathname === '/api/ai/parse-caixa') {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Headers', '*');
+
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', async () => {
+              try {
+                const payload = body ? JSON.parse(body) : {};
+                const { fileBase64, mimeType, apiKey } = payload;
+
+                if (!fileBase64) {
+                  res.statusCode = 400;
+                  res.end(JSON.stringify({ error: 'Nenhum arquivo enviado para processamento.' }));
+                  return;
+                }
+
+                const effectiveApiKey =
+                  apiKey ||
+                  getEnvVar('VITE_GEMINI_API_KEY') ||
+                  getEnvVar('VITE_GOOGLE_GENAI_API_KEY') ||
+                  getEnvVar('GEMINI_API_KEY') ||
+                  process.env.VITE_GEMINI_API_KEY ||
+                  process.env.GEMINI_API_KEY ||
+                  '';
+
+                const { parseCaixaComGemini } = await import('./src/services/geminiBackend.cjs');
+                const result = await parseCaixaComGemini({
+                  fileBase64,
+                  mimeType,
+                  apiKey: effectiveApiKey
+                });
+
+                res.statusCode = 200;
+                res.end(JSON.stringify(result));
+              } catch (aiErr) {
+                console.error('Erro ao processar caixa com Gemini:', aiErr);
+                res.statusCode = 500;
+                res.end(JSON.stringify({ error: aiErr.message || 'Erro ao processar documento com IA.' }));
+              }
+            });
+            return;
+          }
+
           if (
             pathname.startsWith('/api/super-admin/') || 
             pathname.startsWith('/api/fiscal/') || 

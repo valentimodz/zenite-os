@@ -30,6 +30,7 @@ import ModalEntradaAparelhosLote from './ModalEntradaAparelhosLote';
 import ModalDetalheRelatorio from './ModalDetalheRelatorio';
 import ModalEntradaEstoqueRapida from './ModalEntradaEstoqueRapida';
 import ModalMetasFilial from './ModalMetasFilial';
+import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1167,6 +1168,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [entradaLoteItens, setEntradaLoteItens] = useState([]);
   const [entradaSubTab, setEntradaSubTab] = useState('conferencia'); // 'conferencia' | 'catalogo'
   const [isModalEntradaEstoqueRapidaOpen, setIsModalEntradaEstoqueRapidaOpen] = useState(false);
+  const [isImportarCaixaModalOpen, setIsImportarCaixaModalOpen] = useState(false);
 
   // Vendas e Fechamentos Globais
   const [vendas, setVendas] = useState([]);
@@ -21603,6 +21605,34 @@ export default function Dashboard({ session, profileDataProps }) {
                                 }
                               }}
                             />
+
+                            {/* NOVO RECURSO: IMPORTAÇÃO DE CAIXA RETROATIVO COM IA (PDF / FOTO) */}
+                            <div className="bg-gradient-to-r from-[#140026] to-[#0A0A0A] border border-[#6A0DAD]/40 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg shadow-purple-950/20">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="p-1 rounded bg-[#6A0DAD] text-white">
+                                    <Sparkles size={14} className="text-yellow-300" />
+                                  </span>
+                                  <h4 className="text-sm font-extrabold text-white">
+                                    Importação Inteligente de Caixa Diário via IA (PDF / Foto)
+                                  </h4>
+                                  <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-[#6A0DAD]/30 text-purple-200 border border-[#6A0DAD]/50">
+                                    Gemini 2.5 Flash
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-400 max-w-xl">
+                                  Faça upload de folhas físicas escaneadas ou fotos de celular do fechamento de caixa. A IA extrai produtos, vendedores, valores e abre a tela de bipagem de IMEIs para registrar tudo no Supabase com a data retroativa original.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setIsImportarCaixaModalOpen(true)}
+                                className="bg-[#6A0DAD] hover:bg-[#500885] text-white text-xs font-extrabold py-2.5 px-5 rounded-lg transition-all shadow-md shadow-purple-950/40 flex items-center justify-center gap-2 shrink-0 cursor-pointer self-start sm:self-auto"
+                              >
+                                <Upload size={14} />
+                                <span>Abrir Importador IA</span>
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -21997,13 +22027,25 @@ export default function Dashboard({ session, profileDataProps }) {
                           className="bg-black text-white text-xs font-bold focus:outline-none"
                         />
                       </div>
-                      <button
-                        onClick={() => setModalRelatorioAberto(true)}
-                        className="flex items-center gap-2 border border-[#222222] hover:border-[#6A0DAD] hover:text-purple-300 bg-black text-xs font-bold py-1.5 px-4 rounded-lg transition-all ml-auto self-start shadow-sm shadow-purple-950/20 cursor-pointer"
-                      >
-                        <BarChart3 size={14} className="text-[#6A0DAD]" />
-                        📊 Detalhar Relatório Financeiro
-                      </button>
+                      <div className="flex items-center gap-2.5 ml-auto self-start">
+                        <button
+                          type="button"
+                          onClick={() => setIsImportarCaixaModalOpen(true)}
+                          className="flex items-center gap-2 border border-[#6A0DAD]/60 hover:border-[#6A0DAD] hover:bg-[#6A0DAD]/20 bg-[#6A0DAD]/10 text-purple-300 hover:text-white text-xs font-bold py-1.5 px-4 rounded-lg transition-all shadow-sm shadow-purple-950/30 cursor-pointer"
+                          title="Fazer upload de folha física de fechamento de caixa diário (PDF ou Foto) com extração por IA"
+                        >
+                          <Sparkles size={14} className="text-yellow-400" />
+                          <span>Importar Caixa via IA (PDF / Foto)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setModalRelatorioAberto(true)}
+                          className="flex items-center gap-2 border border-[#222222] hover:border-[#6A0DAD] hover:text-purple-300 bg-black text-xs font-bold py-1.5 px-4 rounded-lg transition-all shadow-sm shadow-purple-950/20 cursor-pointer"
+                        >
+                          <BarChart3 size={14} className="text-[#6A0DAD]" />
+                          📊 Detalhar Relatório Financeiro
+                        </button>
+                      </div>
                     </div>
 
                     {/* 1. SEÇÃO DE SESSÕES E FECHAMENTOS DE CAIXA (ABERTURA + FECHAMENTO) */}
@@ -27493,6 +27535,24 @@ export default function Dashboard({ session, profileDataProps }) {
             }
             window.dispatchEvent(new Event('estoque_updated'));
             window.dispatchEvent(new Event('produtos_updated'));
+          }}
+        />
+
+        {/* Modal de Importação de Caixa e Vendas Retroativas via IA (Gemini 2.5 Flash) */}
+        <ImportarCaixaRetroativoModal
+          isOpen={isImportarCaixaModalOpen}
+          onClose={() => setIsImportarCaixaModalOpen(false)}
+          perfilUsuario={profile}
+          company={company}
+          filiais={filiais}
+          onSuccess={(qtdVendas, dataCaixa) => {
+            showToast(`Sucesso! ${qtdVendas} vendas retroativas importadas com a data ${dataCaixa}!`, 'success');
+            const targetEmpId = profile?.empresa_id || company?.id || activeEmpresaId;
+            if (targetEmpId && typeof fetchGerenteData === 'function') {
+              fetchGerenteData(targetEmpId, filtroMes);
+            }
+            window.dispatchEvent(new Event('vendas_updated'));
+            window.dispatchEvent(new Event('estoque_updated'));
           }}
         />
 
