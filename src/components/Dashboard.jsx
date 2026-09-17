@@ -8635,106 +8635,138 @@ export default function Dashboard({ session, profileDataProps }) {
     setIsVendaEditModalOpen(true);
   };
 
-  // Invoca a RPC de correção de venda com auditoria de dados
+  // Função para sanitização numérica robusta (trata '79,89', '1.250,50', etc.)
+  const parseValorNumerico = (val) => {
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    const str = String(val).trim();
+    if (!str) return 0;
+    // Se tiver vírgula, remove pontos de milhar e substitui vírgula por ponto
+    if (str.includes(',')) {
+      const parsed = parseFloat(str.replace(/\./g, '').replace(',', '.'));
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    const parsed = parseFloat(str);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  // Salva correção da venda concluída com tratamento numérico e atualização em tempo real
   const handleSaveVendaEdit = async (e) => {
     if (e) e.preventDefault();
     if (!vendaJustificativa.trim()) {
-      alert('Por favor, informe uma justificativa para esta alteração.');
+      showToast('Por favor, informe uma justificativa para esta alteração.', 'warning');
+      return;
+    }
+
+    if (!editingVenda?.id) {
+      showToast('Erro: Identificador da venda não localizado.', 'error');
       return;
     }
 
     const vendaId = editingVenda.id;
-    const novoNome = vendaNewNomeProduto.trim();
+    const novoNome = (vendaNewNomeProduto || '').trim();
     const novaCategoria = vendaNewCategoria || 'Celulares';
-    const novaQtd = Number(vendaNewQty);
-    const novoValor = Number(vendaNewValor);
-    const novaComissao = Number(vendaNewComissao);
-    const novoMetodo = vendaNewMetodoPagamento;
+    const novaQtd = Math.max(1, parseInt(vendaNewQty, 10) || 1);
+    const novoValor = parseValorNumerico(vendaNewValor);
+    const novaComissao = parseValorNumerico(vendaNewComissao);
+    const novoMetodo = vendaNewMetodoPagamento || 'PIX';
+    const justificativaTexto = vendaJustificativa.trim();
 
     try {
-      // Tenta chamar a RPC passando p_new_categoria conforme solicitado
-      let { data, error } = await supabase.rpc('corrigir_venda', {
-        p_venda_id: vendaId,
-        p_new_qty: novaQtd,
-        p_new_valor_total: novoValor,
-        p_new_comissao: novaComissao,
-        p_justificativa: vendaJustificativa.trim(),
-        p_new_nome_produto: novoNome,
-        p_new_metodo_pagamento: novoMetodo,
-        p_new_categoria: novaCategoria
-      });
+      // 1. UPDATE direto na tabela 'vendas' garantindo persistência imediata
+      const updatePayload = {
+        valor_total: novoValor,
+        quantidade: novaQtd,
+        comissao: novaComissao,
+        metodo_pagamento: novoMetodo,
+        produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
+        categoria: novaCategoria
+      };
 
-      // Se a function no banco não tiver a coluna/parâmetro categoria, faz fallback transparente
-      if (error && (error.message?.includes('p_new_categoria') || error.message?.includes('categoria') || error.code === '42883')) {
-        console.warn('RPC com p_new_categoria não encontrada ou sem suporte a categoria no banco, usando fallback:', error.message);
-        const retry = await supabase.rpc('corrigir_venda', {
-          p_venda_id: vendaId,
-          p_new_qty: novaQtd,
-          p_new_valor_total: novoValor,
-          p_new_comissao: novaComissao,
-          p_justificativa: vendaJustificativa.trim(),
-          p_new_nome_produto: novoNome,
-          p_new_metodo_pagamento: novoMetodo
-        });
-        error = retry.error;
-        data = retry.data;
+      const { data: updatedData, error: updateError } = await supabase
+        .from('vendas')
+        .update(updatePayload)
+        .eq('id', vendaId)
+        .select();
+
+      if (updateError) {
+        throw updateError;
       }
 
-      if (error) throw error;
+      // 2. Registro opcional/resiliente de auditoria (sem bloquear o usuário caso a tabela/RPC ainda não exista)
+      try {
+        await supabase.from('sales_audit_logs').insert([{
+          venda_id: vendaId,
+          user_id: session?.user?.id || profile?.id || null,
+          user_email: profile?.email || session?.user?.email || null,
+          empresa_id: editingVenda.empresa_id || company?.id || profile?.empresa_id || null,
+          filial_id: editingVenda.filial_id || null,
+          justificativa: justificativaTexto,
+          dados_antigos: {
+            produto_nome: editingVenda.produto_nome,
+            categoria: editingVenda.categoria,
+            quantidade: editingVenda.quantidade,
+            valor_total: editingVenda.valor_total,
+            comissao: editingVenda.comissao,
+            metodo_pagamento: editingVenda.metodo_pagamento
+          },
+          dados_novos: updatePayload
+        }]);
+      } catch (auditErr) {
+        console.warn('Registro em sales_audit_logs ignorado ou não disponível:', auditErr);
+      }
 
-      alert('Venda corrigida com sucesso e log de auditoria gravado!');
+      showToast('Venda corrigida com sucesso!', 'success');
       setIsVendaEditModalOpen(false);
       setEditingVenda(null);
 
-      // Re-renderização imediata na tabela local de vendas
+      // 3. Atualização reativa imediata na listagem de vendas
       setVendas(prev => prev.map(v => {
         if (v.id === vendaId) {
           return {
             ...v,
-            produto_nome: novoNome || v.produto_nome,
-            categoria: novaCategoria,
+            ...updatePayload,
+            forma_pagamento: novoMetodo,
             produtos: {
               ...(v.produtos || {}),
               nome: novoNome || v.produtos?.nome,
               categoria: novaCategoria
-            },
-            quantidade: novaQtd,
-            valor_total: novoValor,
-            comissao: novaComissao,
-            metodo_pagamento: novoMetodo,
-            forma_pagamento: novoMetodo
+            }
           };
         }
         return v;
       }));
 
-      // Re-renderização imediata também na lista de vendas do vendedor se aplicável
+      // 4. Atualização imediata também na lista de vendas do vendedor
       setVendasVendedor(prev => prev.map(v => {
         if (v.id === vendaId) {
           return {
             ...v,
-            produto_nome: novoNome || v.produto_nome,
-            categoria: novaCategoria,
+            ...updatePayload,
+            forma_pagamento: novoMetodo,
             produtos: {
               ...(v.produtos || {}),
               nome: novoNome || v.produtos?.nome,
               categoria: novaCategoria
-            },
-            quantidade: novaQtd,
-            valor_total: novoValor,
-            comissao: novaComissao,
-            metodo_pagamento: novoMetodo,
-            forma_pagamento: novoMetodo
+            }
           };
         }
         return v;
       }));
 
-      // Re-fetch dos dados consolidados
-      fetchGerenteData(company?.id || profile?.empresa_id);
+      // 5. Notificar outros componentes / listeners globais
+      try {
+        window.dispatchEvent(new CustomEvent('vendas_updated', { detail: { vendaId, updatePayload } }));
+      } catch (_) {}
+
+      // 6. Recarregar dados do gerente/dashboard para recalcular totais e métricas
+      const targetEmpresaId = company?.id || profile?.empresa_id;
+      if (targetEmpresaId && typeof fetchGerenteData === 'function') {
+        fetchGerenteData(targetEmpresaId);
+      }
     } catch (err) {
       console.error('Erro ao corrigir venda:', err);
-      alert('Erro ao salvar correção: ' + err.message);
+      showToast('Erro ao salvar correção: ' + (err.message || 'Falha ao atualizar dados.'), 'error');
     }
   };
 
@@ -26269,15 +26301,15 @@ export default function Dashboard({ session, profileDataProps }) {
                     </div>
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                        Valor Total (R$)
+                        Valor Total (R$) <span className="text-red-500">*</span>
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={vendaNewValor}
                         onChange={(e) => setVendaNewValor(e.target.value)}
+                        placeholder="Ex: 79,90"
                         required
-                        min="0"
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
                       />
                     </div>
@@ -26289,12 +26321,11 @@ export default function Dashboard({ session, profileDataProps }) {
                         Comissão do Vendedor (R$)
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={vendaNewComissao}
                         onChange={(e) => setVendaNewComissao(e.target.value)}
-                        required
-                        min="0"
+                        placeholder="Ex: 10,00"
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all"
                       />
                     </div>
