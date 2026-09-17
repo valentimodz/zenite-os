@@ -637,6 +637,24 @@ function ProductTableRow({
                         {corImei && (
                           <ColorBadge cor={corImei} />
                         )}
+                        {(() => {
+                          const precoItem = parseFloat(item?.preco_venda ?? p.preco_venda ?? p.preco ?? 0);
+                          return (
+                            <span
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onOpenEditImeiModal && typeof item === 'object') {
+                                  onOpenEditImeiModal(item.id ? item : { ...item, produto_id: p.id, preco_venda: precoItem });
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-800/40 px-1.5 py-0.5 rounded cursor-pointer hover:border-emerald-500 transition-colors"
+                              title="Clique para editar o preço individual deste IMEI"
+                            >
+                              <span>R$ {precoItem.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                              <Edit2 size={9} className="text-emerald-500 opacity-60 hover:opacity-100" />
+                            </span>
+                          );
+                        })()}
                         <span className="bg-emerald-950 text-emerald-400 text-[10px] px-1.5 py-0.5 rounded border border-emerald-800 font-medium">
                           {statusImei}
                         </span>
@@ -648,7 +666,7 @@ function ProductTableRow({
                               onOpenEditImeiModal(item.id ? item : { ...item, produto_id: p.id });
                             }}
                             className="text-gray-500 hover:text-[#6A0DAD] p-1 rounded hover:bg-purple-950/30 transition-colors cursor-pointer ml-0.5"
-                            title="Editar Cor deste IMEI"
+                            title="Editar Cor e Preço deste IMEI"
                           >
                             <Edit2 size={12} />
                           </button>
@@ -1381,33 +1399,40 @@ export default function Dashboard({ session, profileDataProps }) {
     setIsEditImeiModalOpen(true);
   };
 
-  const handleSaveImeiCor = async (imeiIdOrNumber, novaCor, produtoId, numeroImeiFallback = null) => {
-    if (!imeiIdOrNumber || !novaCor) return;
+  const handleSaveImeiCor = async (imeiIdOrNumber, novaCor, produtoId, numeroImeiFallback = null, novoPreco = null) => {
+    if (!imeiIdOrNumber) return;
 
     const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
     const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
 
     const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
-    const corTrimmed = String(novaCor).trim();
+    const corTrimmed = novaCor ? String(novaCor).trim() : null;
     const targetStr = String(imeiIdOrNumber).trim();
     const imeiStr = numeroImeiFallback ? String(numeroImeiFallback).trim() : null;
+    const precoNum = (novoPreco !== null && novoPreco !== undefined && !isNaN(Number(novoPreco))) ? Number(novoPreco) : null;
 
     const isUuid = targetStr !== 'undefined' && targetStr !== 'null' && targetStr.length > 10 && targetStr.includes('-');
 
     // 1. Atualizar banco apenas se for chamado diretamente (fora do Modal que já fez o update ou como garantia)
     try {
-      let query = dbClient.from('imeis').update({ cor: corTrimmed });
-      if (isUuid) {
-        query = query.eq('id', targetStr);
-      } else {
-        query = query.eq('imei', targetStr);
-      }
-      const { error } = await query;
-      if (error) {
-        console.warn("[Dashboard] Aviso no update de cor do IMEI:", error);
+      const updateData = {};
+      if (corTrimmed) updateData.cor = corTrimmed;
+      if (precoNum !== null) updateData.preco_venda = precoNum;
+
+      if (Object.keys(updateData).length > 0) {
+        let query = dbClient.from('imeis').update(updateData);
+        if (isUuid) {
+          query = query.eq('id', targetStr);
+        } else {
+          query = query.eq('imei', targetStr);
+        }
+        const { error } = await query;
+        if (error) {
+          console.warn("[Dashboard] Aviso no update do IMEI:", error);
+        }
       }
     } catch (err) {
-      console.warn("[Dashboard] Exceção no update de cor do IMEI:", err);
+      console.warn("[Dashboard] Exceção no update do IMEI:", err);
     }
 
     // 2. Atualização reativa imediata dos estados locais (compatível com id ou número de IMEI)
@@ -1419,26 +1444,43 @@ export default function Dashboard({ session, profileDataProps }) {
       return false;
     };
 
+    const updateImeiObj = (im) => {
+      const updated = { ...im };
+      if (corTrimmed) updated.cor = corTrimmed;
+      if (precoNum !== null) updated.preco_venda = precoNum;
+      return updated;
+    };
+
     if (produtoId) {
       setProductImeisMap(prev => {
         const currentList = prev[produtoId] || [];
-        const updatedList = currentList.map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im);
+        const updatedList = currentList.map(im => matchImei(im) ? updateImeiObj(im) : im);
         return { ...prev, [produtoId]: updatedList };
       });
     } else {
       setProductImeisMap(prev => {
         const newMap = { ...prev };
         Object.keys(newMap).forEach(key => {
-          newMap[key] = (newMap[key] || []).map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im);
+          newMap[key] = (newMap[key] || []).map(im => matchImei(im) ? updateImeiObj(im) : im);
         });
         return newMap;
       });
     }
 
-    setDisponiveisImeis(prev => (prev || []).map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im));
-    setUltimosRecebidos(prev => (prev || []).map(im => matchImei(im) ? { ...im, cor: corTrimmed } : im));
+    setDisponiveisImeis(prev => (prev || []).map(im => matchImei(im) ? updateImeiObj(im) : im));
+    setUltimosRecebidos(prev => (prev || []).map(im => matchImei(im) ? updateImeiObj(im) : im));
 
-    showToast(`Cor do IMEI alterada para "${corTrimmed}" com sucesso!`, "success");
+    // Atualizar no estoqueConsolidadoLista
+    setEstoqueConsolidadoLista(prev => (prev || []).map(prod => {
+      if (prod.imeis || prod.imeis_db) {
+        const updatedImeis = (prod.imeis || []).map(im => matchImei(im) ? updateImeiObj(im) : im);
+        const updatedImeisDb = (prod.imeis_db || []).map(im => matchImei(im) ? updateImeiObj(im) : im);
+        return { ...prod, imeis: updatedImeis, imeis_db: updatedImeisDb };
+      }
+      return prod;
+    }));
+
+    showToast("Dados do IMEI (cor e preço individual) atualizados com sucesso!", "success");
   };
 
   // Estados para Edição de Informações do Colaborador (Nome, E-mail, Telefone, CPF, Senha, Role, Filial)
@@ -4159,7 +4201,8 @@ export default function Dashboard({ session, profileDataProps }) {
             status,
             vendido,
             imei,
-            cor
+            cor,
+            preco_venda
           )
         `)
         .eq('empresa_id', targetEmpresaId);
@@ -4226,7 +4269,7 @@ export default function Dashboard({ session, profileDataProps }) {
         .from('produtos')
         .select(`
           id, nome, filial_id, categoria, cor, preco, preco_venda, preco_custo, quantidade, imei, status, codigo_barras, tipo,
-          imeis(id, produto_id, filial_id, empresa_id, status, vendido, imei, cor)
+          imeis(id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, preco_venda)
         `)
         .order('created_at', { ascending: false })
         .limit(100);
@@ -11032,19 +11075,25 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     const corDoItem = produto.cor || produto.color || availableImeis.find(i => i.cor)?.cor || null;
-    const precoOriginalItem = parseFloat(produto.preco_venda || produto.preco || 0);
+    const matchedImeiObj = imei ? (
+      (availableImeis || []).find(i => String(i.imei) === String(imei)) ||
+      (disponiveisImeis || []).find(i => String(i.imei) === String(imei)) ||
+      ((produto.imeis_db || []).find(i => String(i.imei) === String(imei)))
+    ) : null;
+    const valorItem = Number(matchedImeiObj?.preco_venda) || Number(produto.preco_venda) || Number(produto.preco) || 0;
+    const precoOriginalItem = valorItem;
 
     const novoItem = {
       cartId: crypto.randomUUID(),
-      produto: { ...produto, cor: corDoItem || produto.cor },
+      produto: { ...produto, cor: corDoItem || produto.cor, preco: valorItem, preco_venda: valorItem },
       quantidade: 1,
       imei: imei,
       cor: corDoItem,
       availableImeis: availableImeis,
-      preco_original: precoOriginalItem,
-      valorUnitario: precoOriginalItem,
-      valor_unitario: precoOriginalItem,
-      valor_total: precoOriginalItem * 1,
+      preco_original: valorItem,
+      valorUnitario: valorItem,
+      valor_unitario: valorItem,
+      valor_total: valorItem * 1,
       vendaTrainee: pdvVendaTrainee,
       origenFilialNome: origenFilialNome || null
     };
@@ -11225,7 +11274,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (imeiRows) {
         const prodRelacionado = imeiRows.produto || imeiRows.produtos;
-        const precoObtido = parseFloat(prodRelacionado?.preco_venda || prodRelacionado?.preco || 0);
+        const precoObtido = Number(imeiRows.preco_venda) || Number(prodRelacionado?.preco_venda) || Number(prodRelacionado?.preco) || 0;
         const p = listaProdutosPdvDinamica.find(prod =>
           prod.id === imeiRows.produto_id ||
           (prod.nome && prodRelacionado?.nome && prod.nome.toLowerCase().trim() === prodRelacionado.nome.toLowerCase().trim())
@@ -11235,7 +11284,8 @@ export default function Dashboard({ session, profileDataProps }) {
             ...p,
             cor: imeiRows.cor || p.cor,
             preco: precoObtido > 0 ? precoObtido : (parseFloat(p.preco_venda || p.preco || 0)),
-            preco_venda: precoObtido > 0 ? precoObtido : (parseFloat(p.preco_venda || p.preco || 0))
+            preco_venda: precoObtido > 0 ? precoObtido : (parseFloat(p.preco_venda || p.preco || 0)),
+            imeis_db: [imeiRows]
           };
           matchedImeiString = imeiRows.imei;
         } else if (prodRelacionado) {
@@ -11245,7 +11295,8 @@ export default function Dashboard({ session, profileDataProps }) {
             cor: imeiRows.cor || prodRelacionado.cor,
             preco: precoObtido,
             preco_venda: precoObtido,
-            tipo: prodRelacionado.tipo || 'CELULAR'
+            tipo: prodRelacionado.tipo || 'CELULAR',
+            imeis_db: [imeiRows]
           };
           matchedImeiString = imeiRows.imei;
         }
@@ -11379,19 +11430,19 @@ export default function Dashboard({ session, profileDataProps }) {
         (catalogoProdutos || []).find(c => String(c.id) === String(serialData.produto_id));
 
       const prodName = prodPai?.nome || 'Aparelho Celular';
-      const precoObtido = parseFloat(prodPai?.preco_venda || prodPai?.preco || 0);
+      const valorItem = Number(serialData.preco_venda) || Number(prodPai?.preco_venda) || Number(prodPai?.preco) || 0;
 
       const novoItem = {
         cartId: crypto.randomUUID(),
-        produto: prodPai ? { ...prodPai, cor: serialData.cor || prodPai.cor, preco: precoObtido, preco_venda: precoObtido } : { id: serialData.produto_id, nome: prodName, preco: precoObtido, preco_venda: precoObtido, cor: serialData.cor },
+        produto: prodPai ? { ...prodPai, cor: serialData.cor || prodPai.cor, preco: valorItem, preco_venda: valorItem } : { id: serialData.produto_id, nome: prodName, preco: valorItem, preco_venda: valorItem, cor: serialData.cor },
         quantidade: 1,
         imei: serialData.imei,
         cor: serialData.cor || prodPai?.cor || null,
         availableImeis: [serialData],
-        preco_original: precoObtido,
-        valorUnitario: precoObtido,
-        valor_unitario: precoObtido,
-        valor_total: precoObtido * 1,
+        preco_original: valorItem,
+        valorUnitario: valorItem,
+        valor_unitario: valorItem,
+        valor_total: valorItem * 1,
         vendaTrainee: pdvVendaTrainee
       };
 
@@ -25984,12 +26035,15 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     const imeiCompleto = matchedImeiObj.imei || matchedImeiObj.numero_imei;
                     const autoCorIdentificada = matchedImeiObj.cor || corEscolhida || null;
+                    const valorItem = Number(matchedImeiObj.preco_venda) || Number(imeiValidationModalProd.preco_venda) || Number(imeiValidationModalProd.preco) || 0;
 
                     // 3. Inserção no Carrinho com o IMEI completo validado
                     handleAddToCart({
                       ...imeiValidationModalProd,
                       imei: imeiCompleto,
                       cor: autoCorIdentificada,
+                      preco: valorItem,
+                      preco_venda: valorItem,
                       imeis_db: [matchedImeiObj]
                     }, imeiCompleto, autoCorIdentificada);
 
@@ -26045,6 +26099,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       {imeiValidationModalProd.imeis_db.map((imObj, idx) => {
                         const imNum = String(imObj.imei || imObj.numero_imei || '').trim();
                         const isSelected = imeiValidationDigits && imNum.endsWith(imeiValidationDigits);
+                        const imPreco = Number(imObj.preco_venda || 0);
                         return (
                           <button
                             key={imObj.id || idx}
@@ -26054,13 +26109,18 @@ export default function Dashboard({ session, profileDataProps }) {
                               setImeiValidationDigits(last4);
                               if (imeiValidationError) setImeiValidationError('');
                             }}
-                            className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold border transition-all cursor-pointer ${isSelected
+                            className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold border transition-all cursor-pointer flex items-center gap-1 ${isSelected
                               ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                               : 'bg-muted/40 hover:bg-muted text-foreground border-border hover:border-primary/50'
                               }`}
-                            title={`Clique para selecionar IMEI final ${imNum.slice(-4)}`}
+                            title={`Clique para selecionar IMEI final ${imNum.slice(-4)}${imPreco > 0 ? ` (R$ ${imPreco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})` : ''}`}
                           >
-                            ...{imNum.slice(-4)}
+                            <span>...{imNum.slice(-4)}</span>
+                            {imPreco > 0 && imPreco !== Number(imeiValidationModalProd.preco || 0) && (
+                              <span className={`text-[9px] px-1 rounded ${isSelected ? 'bg-primary-foreground/20 text-white' : 'bg-primary/20 text-primary font-semibold'}`}>
+                                R$ {imPreco.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -27625,6 +27685,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         type="button"
                         disabled={isVariantSemEstoque}
                         onClick={() => {
+                          const variantPreco = Number(v.preco_venda || v.preco || (v.imeis && v.imeis[0]?.preco_venda) || selectedVariantModalProd.preco_venda || selectedVariantModalProd.preco || 0);
                           const chosenProd = {
                             ...selectedVariantModalProd,
                             ...v,
@@ -27633,7 +27694,8 @@ export default function Dashboard({ session, profileDataProps }) {
                             cor: v.cor || selectedVariantModalProd.cor,
                             sku: v.sku || selectedVariantModalProd.sku,
                             codigo_barras: v.codigo_barras || selectedVariantModalProd.codigo_barras,
-                            preco: selectedVariantModalProd.preco,
+                            preco: variantPreco,
+                            preco_venda: variantPreco,
                             estoque_local: v.estoque,
                             quantidade: v.estoque
                           };
@@ -27687,7 +27749,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             {isVariantSemEstoque ? 'Esgotado' : `${v.estoque} un.`}
                           </span>
                           <span className="text-[10px] text-primary font-bold">
-                            R$ {Number(selectedVariantModalProd.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            R$ {Number(v.preco || v.preco_venda || (v.imeis && v.imeis[0]?.preco_venda) || selectedVariantModalProd.preco || selectedVariantModalProd.preco_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                           </span>
                         </div>
                       </button>

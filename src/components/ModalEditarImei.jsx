@@ -31,17 +31,26 @@ import { supabase } from '../supabaseClient';
  */
 export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSuccess, recarregarLista, fetchProdutos }) {
   const [corSelecionada, setCorSelecionada] = useState('');
+  const [precoVenda, setPrecoVenda] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (imeiObj && imeiObj.cor) {
-      // Tentar encontrar uma correspondência exata ou insensível a maiúsculas
-      const corEncontrada = CORES_PADRONIZADAS.find(
-        c => c.toLowerCase() === String(imeiObj.cor).trim().toLowerCase()
-      );
-      setCorSelecionada(corEncontrada || imeiObj.cor || 'Preto');
+    if (imeiObj) {
+      if (imeiObj.cor) {
+        // Tentar encontrar uma correspondência exata ou insensível a maiúsculas
+        const corEncontrada = CORES_PADRONIZADAS.find(
+          c => c.toLowerCase() === String(imeiObj.cor).trim().toLowerCase()
+        );
+        setCorSelecionada(corEncontrada || imeiObj.cor || 'Preto');
+      } else {
+        setCorSelecionada('Preto');
+      }
+
+      const precoAtual = imeiObj.preco_venda ?? imeiObj.preco ?? imeiObj.produto?.preco_venda ?? imeiObj.produto?.preco ?? '';
+      setPrecoVenda(precoAtual !== '' && precoAtual !== null && precoAtual !== undefined ? String(precoAtual) : '');
     } else {
       setCorSelecionada('Preto');
+      setPrecoVenda('');
     }
   }, [imeiObj]);
 
@@ -49,7 +58,7 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
 
   const handleConfirmSave = async (e) => {
     e.preventDefault();
-    if (!corSelecionada || isSaving) return;
+    if (isSaving) return;
 
     // 1. Identificar se existe um UUID ou número de IMEI válido
     const targetUuid = (imeiObj.id || imeiObj.imei_id || imeiObj.id_imei) ? String(imeiObj.id || imeiObj.imei_id || imeiObj.id_imei).trim() : null;
@@ -67,11 +76,22 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
 
     setIsSaving(true);
     try {
-      const corTrimmed = String(corSelecionada).trim();
+      const corTrimmed = String(corSelecionada || '').trim();
+      let precoNum = null;
+      if (precoVenda !== '' && precoVenda !== null && precoVenda !== undefined) {
+        const parsed = parseFloat(String(precoVenda).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
+        if (!isNaN(parsed) && parsed >= 0) {
+          precoNum = parsed;
+        }
+      }
+
+      const updateData = { cor: corTrimmed };
+      if (precoNum !== null) {
+        updateData.preco_venda = precoNum;
+      }
 
       // 2. Executar o UPDATE na tabela 'imeis':
-      // Se houver UUID válido, busca por id. Caso contrário, busca pela coluna 'imei'
-      let query = supabase.from('imeis').update({ cor: corTrimmed });
+      let query = supabase.from('imeis').update(updateData);
       if (isValidoUuid) {
         query = query.eq('id', targetUuid);
       } else {
@@ -82,8 +102,8 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
 
       // Se houver erro, alertar e NÃO fechar o modal
       if (error) {
-        console.error("[ModalEditarImei] Erro ao atualizar cor do IMEI no Supabase:", error, { targetUuid, numeroImeiLimpo, imeiObj });
-        alert(`Erro ao salvar cor do aparelho: ${error.message || 'Falha na comunicação com o banco de dados.'}`);
+        console.error("[ModalEditarImei] Erro ao atualizar aparelho no Supabase:", error, { targetUuid, numeroImeiLimpo, imeiObj });
+        alert(`Erro ao salvar aparelho: ${error.message || 'Falha na comunicação com o banco de dados.'}`);
         return;
       }
 
@@ -94,10 +114,10 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
       const prodId = imeiObj.produto_id || imeiObj.produto_catalogo_id;
 
       if (typeof onSave === 'function') {
-        await onSave(idParaCallback, corTrimmed, prodId, numeroImeiLimpo);
+        await onSave(idParaCallback, corTrimmed, prodId, numeroImeiLimpo, precoNum);
       }
       if (typeof onSuccess === 'function') {
-        onSuccess(idParaCallback, corTrimmed, prodId, numeroImeiLimpo);
+        onSuccess(idParaCallback, corTrimmed, prodId, numeroImeiLimpo, precoNum);
       }
       if (typeof recarregarLista === 'function') {
         recarregarLista();
@@ -106,8 +126,8 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
         fetchProdutos();
       }
     } catch (err) {
-      console.error("[ModalEditarImei] Falha inesperada ao atualizar cor:", err);
-      alert(`Falha inesperada ao atualizar cor: ${err.message || 'Erro interno.'}`);
+      console.error("[ModalEditarImei] Falha inesperada ao atualizar dados do IMEI:", err);
+      alert(`Falha inesperada ao atualizar: ${err.message || 'Erro interno.'}`);
     } finally {
       setIsSaving(false);
     }
@@ -192,6 +212,29 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
             </select>
           </div>
 
+          {/* Campo 3: Preço de Venda Individual do Aparelho */}
+          <div>
+            <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+              <span>Preço de Venda do Aparelho (R$)</span>
+              <span className="text-[10px] text-purple-400 font-semibold">Valor Individual</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-2.5 text-xs text-gray-500 font-mono">R$</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={precoVenda}
+                onChange={(e) => setPrecoVenda(e.target.value)}
+                placeholder="0,00"
+                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-xl pl-9 pr-4 py-2.5 text-sm text-white font-mono outline-none transition-all font-semibold"
+              />
+            </div>
+            <p className="mt-1 text-[10px] text-gray-500">
+              Personalize o preço específico deste IMEI (se vazio, usa o preço de tabela do modelo).
+            </p>
+          </div>
+
           {/* Botões de Ação */}
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#222222]">
             <button
@@ -215,7 +258,7 @@ export default function ModalEditarImei({ imeiObj, isOpen, onClose, onSave, onSu
               ) : (
                 <>
                   <Check size={14} />
-                  <span>Salvar Cor do IMEI</span>
+                  <span>Salvar Dados do IMEI</span>
                 </>
               )}
             </button>
