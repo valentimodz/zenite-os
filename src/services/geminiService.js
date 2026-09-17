@@ -167,37 +167,79 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   }
 
   const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  const MODELOS_FALLBACK = [
+    'gemini-3.6-flash',
+    'gemini-3.6-pro',
+    'gemini-3-flash'
+  ];
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Data
+  const isHighDemandError = (err) => {
+    const msg = (err?.message || '').toLowerCase();
+    const status = String(err?.status || err?.statusCode || '');
+    return status.includes('503') ||
+      msg.includes('503') ||
+      msg.includes('high demand') ||
+      msg.includes('temporarily overloaded') ||
+      msg.includes('service unavailable') ||
+      msg.includes('resource_exhausted') ||
+      msg.includes('overloaded');
+  };
+
+  let lastError = null;
+
+  for (const modelName of MODELOS_FALLBACK) {
+    for (let tentativa = 1; tentativa <= 2; tentativa++) {
+      try {
+        console.log(`[GeminiClient] Tentando modelo "${modelName}" (tentativa ${tentativa}/2)...`);
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: mimeType,
+                    data: base64Data
+                  }
+                },
+                {
+                  text: 'Analise detalhadamente esta folha de fechamento de caixa e extraia a data, a filial e todas as vendas detalhadas de aparelhos e acessórios.'
+                }
+              ]
             }
-          },
-          {
-            text: 'Analise detalhadamente esta folha de fechamento de caixa e extraia a data, a filial e todas as vendas detalhadas de aparelhos e acessórios.'
+          ],
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: 'application/json',
+            responseSchema: CAIXA_RESPONSE_SCHEMA,
+            temperature: 0.1
           }
-        ]
-      }
-    ],
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      responseMimeType: 'application/json',
-      responseSchema: CAIXA_RESPONSE_SCHEMA,
-      temperature: 0.1
-    }
-  });
+        });
 
-  const text = response?.text;
-  if (!text) {
-    throw new Error('A IA não retornou nenhum dado legível a partir do arquivo enviado.');
+        const text = response?.text;
+        if (!text) {
+          throw new Error('A IA não retornou nenhum dado legível a partir do arquivo enviado.');
+        }
+
+        const parsed = JSON.parse(text);
+        parsed._modelo_utilizado = modelName;
+        return parsed;
+      } catch (err) {
+        lastError = err;
+        console.warn(`[GeminiClient] Falha no modelo ${modelName} (tentativa ${tentativa}):`, err?.message || err);
+
+        if (isHighDemandError(err)) {
+          console.warn(`[GeminiClient] Erro 503 / High Demand detectado. Aguardando 2 segundos para retry...`);
+          await sleep(2000);
+        } else {
+          // Se for outro tipo de erro fatal, interrompe tentativa com este modelo
+          break;
+        }
+      }
+    }
   }
 
-  return JSON.parse(text);
+  throw new Error(`Falha ao processar a folha após tentar os modelos (${MODELOS_FALLBACK.join(', ')}): ${lastError?.message || 'Serviço temporariamente indisponível'}`);
 }

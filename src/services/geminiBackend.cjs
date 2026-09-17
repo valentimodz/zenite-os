@@ -96,46 +96,88 @@ REGRAS RÍGIDAS DE RECONHECIMENTO:
    - Garanta que valor_total e quantidade sejam numéricos puros (ex: 79.90, e não "R$ 79,90").
    - Trate vírgulas como decimais.`;
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const MODELOS_FALLBACK = [
+  'gemini-3.6-flash',
+  'gemini-3.6-pro',
+  'gemini-3-flash'
+];
+
+function isHighDemandError(err) {
+  const msg = (err?.message || '').toLowerCase();
+  const status = String(err?.status || err?.statusCode || '');
+  return status.includes('503') ||
+    msg.includes('503') ||
+    msg.includes('high demand') ||
+    msg.includes('temporarily overloaded') ||
+    msg.includes('service unavailable') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('overloaded');
+}
+
 async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
   if (!apiKey) {
     throw new Error('Chave da API Gemini não fornecida. Configure VITE_GEMINI_API_KEY no arquivo .env ou informe-a no modal.');
   }
 
   const ai = new GoogleGenAI({ apiKey });
+  let lastError = null;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType || 'application/pdf',
-              data: fileBase64
+  for (const modelName of MODELOS_FALLBACK) {
+    for (let tentativa = 1; tentativa <= 2; tentativa++) {
+      try {
+        console.log(`[GeminiBackend] Tentando modelo "${modelName}" (tentativa ${tentativa}/2)...`);
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: mimeType || 'application/pdf',
+                    data: fileBase64
+                  }
+                },
+                {
+                  text: 'Analise detalhadamente esta folha de fechamento de caixa e extraia a data, a filial e todas as vendas detalhadas de aparelhos e acessórios.'
+                }
+              ]
             }
-          },
-          {
-            text: 'Analise detalhadamente esta folha de fechamento de caixa e extraia a data, a filial e todas as vendas detalhadas de aparelhos e acessórios.'
+          ],
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: 'application/json',
+            responseSchema: CAIXA_RESPONSE_SCHEMA,
+            temperature: 0.1
           }
-        ]
-      }
-    ],
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      responseMimeType: 'application/json',
-      responseSchema: CAIXA_RESPONSE_SCHEMA,
-      temperature: 0.1
-    }
-  });
+        });
 
-  const rawText = response?.text;
-  if (!rawText) {
-    throw new Error('A IA não retornou conteúdo legível para o arquivo enviado.');
+        const rawText = response?.text;
+        if (!rawText) {
+          throw new Error('A IA não retornou conteúdo legível para o arquivo enviado.');
+        }
+
+        const parsed = JSON.parse(rawText);
+        parsed._modelo_utilizado = modelName;
+        return parsed;
+      } catch (err) {
+        lastError = err;
+        console.warn(`[GeminiBackend] Falha no modelo ${modelName} (tentativa ${tentativa}):`, err?.message || err);
+
+        if (isHighDemandError(err)) {
+          console.warn(`[GeminiBackend] Erro 503 / High Demand detectado. Aguardando 2 segundos para retry...`);
+          await sleep(2000);
+        } else {
+          // Se for erro não recuperável (ex: chave inválida ou JSON mal formatado), interrompe
+          break;
+        }
+      }
+    }
   }
 
-  const parsed = JSON.parse(rawText);
-  return parsed;
+  throw new Error(`Falha ao processar a folha após tentar os modelos (${MODELOS_FALLBACK.join(', ')}): ${lastError?.message || 'Serviço temporariamente indisponível'}`);
 }
 
 module.exports = {
