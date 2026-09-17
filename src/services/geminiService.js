@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
 /**
- * Schema estrito para estruturação de dados de fechamento de caixa diário via Gemini 2.5 Flash
+ * Schema estrito para estruturação de dados de fechamento de caixa diário via Gemini 3.6 Flash
  */
 export const CAIXA_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -169,7 +169,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.6-flash',
     contents: [
       {
         role: 'user',
