@@ -264,7 +264,7 @@ export default function ImportarCaixaRetroativoModal({
           valor_pago: item.valor_total,
           preco_unitario_vendido: precoUnitario,
           metodo_pagamento: item.forma_pagamento || 'PIX',
-          status_pagamento: 'concluido',
+          status_pagamento: 'PAGO',
           imei: item.imei?.trim() || null,
           created_at: dataIsoRetroativa
         };
