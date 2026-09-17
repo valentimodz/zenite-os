@@ -4378,7 +4378,7 @@ export default function Dashboard({ session, profileDataProps }) {
           .eq('empresa_id', empId)
           .eq('filial_id', filialId) // 1. O MURO: Isola estritamente a loja ativa do vendedor
           .eq('vendido', false)
-          .eq('status', 'disponivel') // 2. O FILTRO FANTASMA: Garante que não conte transferências ou defeitos
+          .in('status', ['disponivel', 'DISPONIVEL', 'disponível', 'DISPONÍVEL']) // 2. O FILTRO: Garante apenas IMEIs ativos/disponíveis
           .order('created_at', { ascending: false });
         if (imeisRes.data) {
           imeisDataGlobal = imeisRes.data;
@@ -13762,9 +13762,12 @@ export default function Dashboard({ session, profileDataProps }) {
       const pNome = modeloPai.nome.toLowerCase().trim();
 
       if (isCelular) {
-        // Coletar todos os IMEIs correspondentes da filial
+        // Coletar todos os IMEIs correspondentes da filial estritamente com status DISPONIVEL
         const allProdImeis = (disponiveisImeis || []).filter(im => {
-          if (im.vendido || im.status === 'VENDIDO' || im.status === 'EM_TRANSITO') return false;
+          if (im.vendido) return false;
+          const st = String(im.status || '').toUpperCase().trim();
+          const isAtivoDisponivel = st === 'DISPONIVEL' || st === 'DISPONÍVEL' || st.includes('DISPONIV');
+          if (!isAtivoDisponivel) return false;
 
           let imNome = im.produtos?.nome || im.produtos_catalogo?.nome;
           if (!imNome) {
@@ -13852,7 +13855,7 @@ export default function Dashboard({ session, profileDataProps }) {
           });
         }
 
-        const variacoesDisponiveis = Object.values(corMap);
+        const variacoesDisponiveis = Object.values(corMap).filter(v => (v.estoque || 0) > 0);
         const estoqueTotal = variacoesDisponiveis.reduce((acc, v) => acc + (v.estoque || 0), 0);
         const uniqueCores = Array.from(new Set(variacoesDisponiveis.map(v => v.cor).filter(Boolean)));
 
@@ -13994,7 +13997,11 @@ export default function Dashboard({ session, profileDataProps }) {
       return catUpper.includes(pdvCatUpper) || nomeLower.includes(pdvCatLower) || (p.tipo && String(p.tipo).toUpperCase().includes(pdvCatUpper));
     })();
 
-    return matchesSearch && matchesCat;
+    // 4. Não renderizar cards zerados na grade do PDV (quantidade/estoque > 0, exceto SERVICO)
+    const estoqueLocal = Number(p.estoqueTotal ?? p.total_estoque ?? p.estoque_local ?? p.quantidade_local ?? p.estoque ?? p.quantidade ?? 0);
+    const hasEstoque = p.categoria === 'SERVICO' || estoqueLocal > 0;
+
+    return matchesSearch && matchesCat && hasEstoque;
   });
 
   // --- VISÃO DE TRANSFERÊNCIAS (COMPARTILHADA) ---
