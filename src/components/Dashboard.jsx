@@ -13708,6 +13708,39 @@ export default function Dashboard({ session, profileDataProps }) {
     return matchesFilial && matchesCategoria && matchesStatus && matchesSearch;
   });
 
+  // Função para extrair o nome base do smartphone removendo a cor do final do nome se existir
+  const extrairNomeBaseModelo = React.useCallback((nome, cor) => {
+    if (!nome) return '';
+    let base = String(nome).trim();
+
+    // Se tiver cor explícita e ela estiver no final ou separada por hífen/barra
+    if (cor && typeof cor === 'string' && cor.trim()) {
+      const c = cor.trim();
+      const escaped = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regexCor = new RegExp(`[\\s\\-\\–\\/]+${escaped}\\s*$`, 'i');
+      base = base.replace(regexCor, '').trim();
+    }
+
+    // Lista de cores comuns que podem estar no nome do produto
+    const coresComuns = [
+      'PRETO', 'PRETA', 'BLACK', 'BRANCO', 'BRANCA', 'WHITE', 'AZUL', 'BLUE', 'AZUL ESCURO',
+      'VERMELHO', 'VERMELHA', 'RED', 'VERDE', 'GREEN', 'DOURADO', 'DOURADA', 'GOLD',
+      'PRATA', 'SILVER', 'CINZA', 'GRAY', 'GREY', 'GRAFITE', 'GRAPHITE', 'ROSA', 'PINK',
+      'ROSE', 'LILAS', 'LILÁS', 'PURPLE', 'ROXO', 'AMARELO', 'YELLOW', 'TITANIO', 'TITÂNIO',
+      'TITANIUM', 'MIDNIGHT', 'STARLIGHT', 'ESTELAR', 'MEIA-NOITE', 'AZUL BEBE', 'AZUL MARINHO'
+    ];
+
+    for (const c of coresComuns) {
+      const regex = new RegExp(`[\\s\\-\\–\\/]+${c}\\s*$`, 'i');
+      if (regex.test(base)) {
+        base = base.replace(regex, '').trim();
+        break;
+      }
+    }
+
+    return base || String(nome).trim();
+  }, []);
+
   // Utilidade de Agrupamento por Modelo utilizando .reduce() com chave única pelo nome principal do produto
   const agruparPorModelo = React.useCallback((produtosArray) => {
     if (!Array.isArray(produtosArray) || produtosArray.length === 0) return [];
@@ -13715,12 +13748,14 @@ export default function Dashboard({ session, profileDataProps }) {
     // .reduce() acumulador agrupando pelo nome principal do produto
     const accModelos = (produtosArray || []).reduce((acc, p) => {
       if (!p || !p.nome) return acc;
-      const nomeBase = String(p.nome).trim();
-      const nomeKey = nomeBase.toLowerCase();
 
       const isCelular = (p.tipo && String(p.tipo).toUpperCase().includes('CELULAR')) ||
         (p.categoria && String(p.categoria).toUpperCase().includes('CELULAR')) ||
         p.categoria === 'IOS' || p.categoria === 'ANDROID';
+
+      // Para celulares, utiliza o nome base do modelo (ex: "GALAXY A07 128GB") unificando cores
+      const nomeBase = isCelular ? extrairNomeBaseModelo(p.nome, p.cor) : String(p.nome).trim();
+      const nomeKey = nomeBase.toLowerCase().trim();
 
       // Chave única do acumulador (acc) baseada no nome principal do produto
       if (!acc[nomeKey]) {
@@ -13742,9 +13777,14 @@ export default function Dashboard({ session, profileDataProps }) {
           variacoesDisponiveis: [],
           variants: [],
           uniqueCores: [],
+          allProductIds: new Set(),
           rawItems: []
         };
       }
+
+      // Adiciona os IDs aos rastreadores do modelo
+      if (p.id) acc[nomeKey].allProductIds.add(String(p.id));
+      if (p.catalogo_id) acc[nomeKey].allProductIds.add(String(p.catalogo_id));
 
       // Evita duplicar o mesmo registro bruto se ele tiver o mesmo ID
       const jaExisteRaw = acc[nomeKey].rawItems.some(r => r.id && p.id && String(r.id) === String(p.id));
@@ -13760,6 +13800,7 @@ export default function Dashboard({ session, profileDataProps }) {
       const pId = String(modeloPai.id || '');
       const pCatId = String(modeloPai.catalogo_id || '');
       const pNome = modeloPai.nome.toLowerCase().trim();
+      const allIds = modeloPai.allProductIds || new Set([pId, pCatId]);
 
       if (isCelular) {
         // Coletar todos os IMEIs correspondentes da filial estritamente com status DISPONIVEL
@@ -13775,11 +13816,17 @@ export default function Dashboard({ session, profileDataProps }) {
             if (prodDono) imNome = prodDono.nome;
           }
 
-          return (String(im.produto_id) === pId) ||
+          const matchId = allIds.has(String(im.produto_id)) ||
+            allIds.has(String(im.produto_catalogo_id)) ||
+            (String(im.produto_id) === pId) ||
             (String(im.produto_id) === pCatId) ||
             (String(im.produto_catalogo_id) === pId) ||
-            (String(im.produto_catalogo_id) === pCatId) ||
-            (imNome && pNome && imNome.toLowerCase().trim() === pNome);
+            (String(im.produto_catalogo_id) === pCatId);
+
+          const imNomeBase = imNome ? extrairNomeBaseModelo(imNome, im.cor).toLowerCase().trim() : '';
+          const matchNome = (imNome && pNome && (imNome.toLowerCase().trim() === pNome || imNomeBase === pNome));
+
+          return matchId || matchNome;
         });
 
         const localProdImeis = allProdImeis.filter(im => {
@@ -13861,6 +13908,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         return {
           ...modeloPai,
+          allProductIds: Array.from(allIds),
           variacoesDisponiveis: variacoesDisponiveis,
           variants: variacoesDisponiveis,
           estoqueTotal: estoqueTotal,
@@ -14835,13 +14883,13 @@ export default function Dashboard({ session, profileDataProps }) {
                           }
 
                           // FLUXO DE VENDA SEGURA (OBRIGATÓRIO):
-                          // Se variacoesDisponiveis.length > 1, abre o modal de seleção de variações
-                          if (temMultiplasVariacoes) {
+                          // Se for smartphone com variações de cor/opções, ou qualquer item com múltiplas variações, abre o modal de opções/cor
+                          if (temMultiplasVariacoes || (isCelularCard && variacoes.length > 0)) {
                             setSelectedVariantModalProd(prod);
                             return;
                           }
 
-                          // Se for celular com variante única
+                          // Se for celular sem variantes cadastradas (caso fallback)
                           if (isCelularCard) {
                             const singleVariant = variacoes[0] || prod;
                             const targetImeis = (singleVariant.imeis && singleVariant.imeis.length > 0) ? singleVariant.imeis : (prod.imeis_db || []);
@@ -14893,8 +14941,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                 {filiais.find(f => String(f.id) === String(prod.filial_id) || (f.nome && f.nome.toLowerCase().trim() === String(prod.filial_nome || '').toLowerCase().trim()))?.nome || prod.filial_nome || activeFilialNome || 'Filial Atual'}
                               </span>
 
-                              {/* UI do Card: se variacoesDisponiveis.length > 1, exibe botão/badge 'Ver Opções' */}
-                              {temMultiplasVariacoes ? (
+                              {/* UI do Card: se celular ou tem variações, exibe botão 'Escolher Cor' / 'Ver Opções' */}
+                              {(isCelularCard || temMultiplasVariacoes) ? (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -14910,7 +14958,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   className="inline-flex items-center gap-1 text-[9px] font-extrabold text-primary bg-primary/10 hover:bg-primary hover:text-primary-foreground border border-primary/30 px-2 py-0.5 rounded-full transition-all cursor-pointer shadow-xs"
                                 >
                                   <Layers size={10} />
-                                  <span>Ver Opções ({variacoes.length})</span>
+                                  <span>{isCelularCard ? 'Escolher Cor' : `Ver Opções (${variacoes.length})`}</span>
                                 </button>
                               ) : prod.cor ? (
                                 <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-700 dark:text-purple-200 bg-purple-100 dark:bg-purple-950/60 border border-purple-300 dark:border-purple-600/40 px-1.5 py-0.5 rounded w-fit shadow-sm">
@@ -14945,17 +14993,17 @@ export default function Dashboard({ session, profileDataProps }) {
                                   setIsModalAbrirCaixaOpen(true);
                                   return;
                                 }
-                                if (temMultiplasVariacoes) {
+                                if (temMultiplasVariacoes || (isCelularCard && variacoes.length > 0)) {
                                   setSelectedVariantModalProd(prod);
                                 } else {
                                   handleVerMultiloja(prod);
                                 }
                               }}
                               className="px-2.5 py-1 bg-primary/15 hover:bg-primary text-primary hover:text-primary-foreground disabled:opacity-30 disabled:cursor-not-allowed text-[10px] font-extrabold rounded-lg border border-primary/30 hover:border-primary transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-                              title={temMultiplasVariacoes ? "Ver cores e opções disponíveis" : "Ver estoque e reservar de outras lojas da rede"}
+                              title={(temMultiplasVariacoes || isCelularCard) ? "Ver cores e opções disponíveis" : "Ver estoque e reservar de outras lojas da rede"}
                             >
                               <Store size={11} />
-                              Rede
+                              {(temMultiplasVariacoes || isCelularCard) ? "Opções" : "Rede"}
                             </button>
                             <span className={`text-[10px] font-medium ${isSemEstoque ? 'text-destructive font-bold' : 'text-foreground-muted'}`}>
                               {prod.categoria === 'SERVICO' ? 'Disponibilidade total' : `Estoque: ${prod.estoque} un.`}
@@ -25863,8 +25911,10 @@ export default function Dashboard({ session, profileDataProps }) {
                     const filialAtualId = activeFilialId || company?.id || profile?.filial_id;
                     const prodId = imeiValidationModalProd.id;
                     const catId = imeiValidationModalProd.catalogo_id;
+                    const corEscolhida = (imeiValidationModalProd.cor || imeiValidationModalProd.corReal || '').trim();
+                    const allModelIds = Array.isArray(imeiValidationModalProd.allProductIds) ? imeiValidationModalProd.allProductIds : [];
 
-                    // 1. Busca Direta no Supabase dos IMEIs do produto_id correto, na filial_id atual e com status Disponivel/DISPONÍVEL
+                    // 1. Busca Direta no Supabase dos IMEIs na filial_id atual com status DISPONIVEL
                     let query = supabase
                       .from('imeis')
                       .select('*')
@@ -25884,8 +25934,16 @@ export default function Dashboard({ session, profileDataProps }) {
                         if (!isDisponivel) return false;
 
                         const matchProd = String(im.produto_id) === String(prodId) ||
-                          (catId && String(im.produto_id) === String(catId));
-                        return matchProd;
+                          (catId && String(im.produto_id) === String(catId)) ||
+                          (allModelIds.length > 0 && allModelIds.includes(String(im.produto_id)));
+                        if (!matchProd) return false;
+
+                        // Se uma cor específica foi selecionada, filtra pela cor do IMEI
+                        if (corEscolhida) {
+                          const imCor = (im.cor || im.nome_cor || '').trim();
+                          if (imCor && imCor.toLowerCase() !== corEscolhida.toLowerCase()) return false;
+                        }
+                        return true;
                       });
                     }
 
@@ -25901,8 +25959,15 @@ export default function Dashboard({ session, profileDataProps }) {
                         if (statusClean && statusClean !== 'disponível' && statusClean !== 'disponivel') return false;
 
                         const matchProd = String(im.produto_id) === String(prodId) ||
-                          (catId && String(im.produto_id) === String(catId));
-                        return matchProd;
+                          (catId && String(im.produto_id) === String(catId)) ||
+                          (allModelIds.length > 0 && allModelIds.includes(String(im.produto_id)));
+                        if (!matchProd) return false;
+
+                        if (corEscolhida) {
+                          const imCor = (im.cor || im.nome_cor || '').trim();
+                          if (imCor && imCor.toLowerCase() !== corEscolhida.toLowerCase()) return false;
+                        }
+                        return true;
                       });
                     }
 
@@ -25913,12 +25978,12 @@ export default function Dashboard({ session, profileDataProps }) {
                     });
 
                     if (!matchedImeiObj) {
-                      setImeiValidationError('IMEI não encontrado para este modelo no estoque local.');
+                      setImeiValidationError(`IMEI final ${digits} não encontrado para este modelo ${corEscolhida ? `na cor ${corEscolhida}` : ''} no estoque local.`);
                       return;
                     }
 
                     const imeiCompleto = matchedImeiObj.imei || matchedImeiObj.numero_imei;
-                    const autoCorIdentificada = matchedImeiObj.cor || null;
+                    const autoCorIdentificada = matchedImeiObj.cor || corEscolhida || null;
 
                     // 3. Inserção no Carrinho com o IMEI completo validado
                     handleAddToCart({
@@ -25938,11 +26003,21 @@ export default function Dashboard({ session, profileDataProps }) {
                 }}
                 className="p-6 space-y-4"
               >
-                {/* Detalhes do Produto Base (Sem seletores ou badges de cor) */}
+                {/* Detalhes do Produto Selecionado e Cor */}
                 <div className="bg-[#111111] border border-[#222222] rounded-xl p-3.5 flex items-center justify-between">
                   <div className="space-y-1">
                     <h4 className="text-xs font-bold text-white leading-tight">{imeiValidationModalProd.nome}</h4>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {imeiValidationModalProd.cor ? (
+                        <span className="text-[10px] font-bold text-purple-300 bg-purple-950/60 border border-purple-800/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Tag size={10} className="text-purple-400" />
+                          Cor: {imeiValidationModalProd.cor}
+                        </span>
+                      ) : (
+                        <span className="text-[9px] text-gray-500 font-mono">
+                          (Todas as cores)
+                        </span>
+                      )}
                       <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/30 px-1.5 py-0.5 rounded">
                         {(() => {
                           const count = Number(
@@ -25953,15 +26028,45 @@ export default function Dashboard({ session, profileDataProps }) {
                           return `${count} un. disponível${count !== 1 ? 'is' : ''}`;
                         })()}
                       </span>
-                      <span className="text-[9px] text-gray-500 font-mono">
-                        (Todas as cores)
-                      </span>
                     </div>
                   </div>
                   <span className="font-mono font-bold text-xs text-white">
                     R$ {Number(imeiValidationModalProd.preco || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
+
+                {/* Seleção Rápida de IMEI disponível na cor */}
+                {Array.isArray(imeiValidationModalProd.imeis_db) && imeiValidationModalProd.imeis_db.length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-bold text-gray-400 block">
+                      IMEIs disponíveis em estoque ({imeiValidationModalProd.cor || 'Geral'}):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 bg-black/40 border border-border/50 rounded-lg">
+                      {imeiValidationModalProd.imeis_db.map((imObj, idx) => {
+                        const imNum = String(imObj.imei || imObj.numero_imei || '').trim();
+                        const isSelected = imeiValidationDigits && imNum.endsWith(imeiValidationDigits);
+                        return (
+                          <button
+                            key={imObj.id || idx}
+                            type="button"
+                            onClick={() => {
+                              const last4 = imNum.length >= 4 ? imNum.slice(-4) : imNum;
+                              setImeiValidationDigits(last4);
+                              if (imeiValidationError) setImeiValidationError('');
+                            }}
+                            className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold border transition-all cursor-pointer ${isSelected
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                              : 'bg-muted/40 hover:bg-muted text-foreground border-border hover:border-primary/50'
+                              }`}
+                            title={`Clique para selecionar IMEI final ${imNum.slice(-4)}`}
+                          >
+                            ...{imNum.slice(-4)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Input 4 Dígitos */}
                 <div className="space-y-2">
