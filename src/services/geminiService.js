@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
 /**
- * Schema estrito para estruturação de dados de fechamento de caixa diário via Gemini 3.6 Flash
+ * Schema estrito para estruturação de dados de fechamento de caixa diário via Gemini 2.0 Flash
  */
 export const CAIXA_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -168,10 +168,11 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
 
   const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  const MODELOS_FALLBACK = [
-    'gemini-3.6-flash',
-    'gemini-3.6-pro',
-    'gemini-3-flash'
+  const MODELOS_DISPONIVEIS = [
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
   ];
 
   const isHighDemandError = (err) => {
@@ -188,7 +189,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
 
   let lastError = null;
 
-  for (const modelName of MODELOS_FALLBACK) {
+  for (const modelName of MODELOS_DISPONIVEIS) {
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       try {
         console.log(`[GeminiClient] Tentando modelo "${modelName}" (tentativa ${tentativa}/2)...`);
@@ -234,12 +235,12 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
           console.warn(`[GeminiClient] Erro 503 / High Demand detectado. Aguardando 2 segundos para retry...`);
           await sleep(2000);
         } else {
-          // Se for outro tipo de erro fatal, interrompe tentativa com este modelo
+          // Se for outro tipo de erro (ex: 404), passa para o próximo modelo oficial
           break;
         }
       }
     }
   }
 
-  throw new Error(`Falha ao processar a folha após tentar os modelos (${MODELOS_FALLBACK.join(', ')}): ${lastError?.message || 'Serviço temporariamente indisponível'}`);
+  throw new Error(`Falha ao processar a folha após tentar os modelos (${MODELOS_DISPONIVEIS.join(', ')}): ${lastError?.message || 'Serviço temporariamente indisponível'}`);
 }

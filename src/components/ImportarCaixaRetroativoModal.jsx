@@ -332,7 +332,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 flex items-center gap-1">
-                  ⚡ Gemini 3.6 Flash
+                  ⚡ Gemini 2.0 Flash
                 </span>
               </div>
               <p className="text-xs text-gray-400">
@@ -456,7 +456,7 @@ export default function ImportarCaixaRetroativoModal({
                   {isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin text-yellow-300" />
-                      <span>Analisando documento com Gemini 3.6 Flash...</span>
+                      <span>Analisando documento com Gemini 2.0 Flash...</span>
                     </>
                   ) : (
                     <>

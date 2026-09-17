@@ -21617,7 +21617,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                     Importação Inteligente de Caixa Diário via IA (PDF / Foto)
                                   </h4>
                                   <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-[#6A0DAD]/30 text-purple-200 border border-[#6A0DAD]/50">
-                                    Gemini 3.6 Flash
+                                    Gemini 2.0 Flash
                                   </span>
                                 </div>
                                 <p className="text-xs text-gray-400 max-w-xl">
@@ -27538,7 +27538,7 @@ export default function Dashboard({ session, profileDataProps }) {
           }}
         />
 
-        {/* Modal de Importação de Caixa e Vendas Retroativas via IA (Gemini 3.6 Flash) */}
+        {/* Modal de Importação de Caixa e Vendas Retroativas via IA (Gemini 2.0 Flash) */}
         <ImportarCaixaRetroativoModal
           isOpen={isImportarCaixaModalOpen}
           onClose={() => setIsImportarCaixaModalOpen(false)}

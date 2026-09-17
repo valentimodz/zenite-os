@@ -75,7 +75,7 @@ export default defineConfig({
             return;
           }
 
-          // ROUTE: AI Parse Caixa (Gemini 3.6 Flash)
+          // ROUTE: AI Parse Caixa (Gemini 2.0 Flash)
           if (pathname === '/api/ai/parse-caixa') {
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Access-Control-Allow-Origin', '*');

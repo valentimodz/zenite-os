@@ -98,10 +98,11 @@ REGRAS RÍGIDAS DE RECONHECIMENTO:
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-const MODELOS_FALLBACK = [
-  'gemini-3.6-flash',
-  'gemini-3.6-pro',
-  'gemini-3-flash'
+const MODELOS_DISPONIVEIS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
 ];
 
 function isHighDemandError(err) {
@@ -124,7 +125,7 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
   const ai = new GoogleGenAI({ apiKey });
   let lastError = null;
 
-  for (const modelName of MODELOS_FALLBACK) {
+  for (const modelName of MODELOS_DISPONIVEIS) {
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       try {
         console.log(`[GeminiBackend] Tentando modelo "${modelName}" (tentativa ${tentativa}/2)...`);
@@ -170,14 +171,14 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
           console.warn(`[GeminiBackend] Erro 503 / High Demand detectado. Aguardando 2 segundos para retry...`);
           await sleep(2000);
         } else {
-          // Se for erro não recuperável (ex: chave inválida ou JSON mal formatado), interrompe
+          // Se for erro não recuperável (ex: modelo não suporta ou chave inválida), passa para o próximo modelo da lista
           break;
         }
       }
     }
   }
 
-  throw new Error(`Falha ao processar a folha após tentar os modelos (${MODELOS_FALLBACK.join(', ')}): ${lastError?.message || 'Serviço temporariamente indisponível'}`);
+  throw new Error(`Falha ao processar a folha após tentar os modelos (${MODELOS_DISPONIVEIS.join(', ')}): ${lastError?.message || 'Serviço temporariamente indisponível'}`);
 }
 
 module.exports = {
