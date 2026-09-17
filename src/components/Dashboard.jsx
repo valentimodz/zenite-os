@@ -11032,7 +11032,7 @@ export default function Dashboard({ session, profileDataProps }) {
     }
 
     const corDoItem = produto.cor || produto.color || availableImeis.find(i => i.cor)?.cor || null;
-    const precoOriginalItem = parseFloat(produto.preco) || 0;
+    const precoOriginalItem = parseFloat(produto.preco_venda || produto.preco || 0);
 
     const novoItem = {
       cartId: crypto.randomUUID(),
@@ -11043,6 +11043,8 @@ export default function Dashboard({ session, profileDataProps }) {
       availableImeis: availableImeis,
       preco_original: precoOriginalItem,
       valorUnitario: precoOriginalItem,
+      valor_unitario: precoOriginalItem,
+      valor_total: precoOriginalItem * 1,
       vendaTrainee: pdvVendaTrainee,
       origenFilialNome: origenFilialNome || null
     };
@@ -11202,21 +11204,49 @@ export default function Dashboard({ session, profileDataProps }) {
     let matchedByImei = null;
     let matchedImeiString = '';
     try {
-      const { data: imeiRows } = await supabase
+      let { data: imeiRows } = await supabase
         .from('imeis')
-        .select('*, produtos!produto_id(*)')
+        .select('*, produto:produtos(*)')
         .eq('imei', query)
         .eq('status', 'DISPONIVEL')
         .eq('vendido', false)
         .maybeSingle();
 
+      if (!imeiRows) {
+        const { data: fallbackImei } = await supabase
+          .from('imeis')
+          .select('*, produtos!produto_id(*)')
+          .eq('imei', query)
+          .eq('status', 'DISPONIVEL')
+          .eq('vendido', false)
+          .maybeSingle();
+        imeiRows = fallbackImei;
+      }
+
       if (imeiRows) {
+        const prodRelacionado = imeiRows.produto || imeiRows.produtos;
+        const precoObtido = parseFloat(prodRelacionado?.preco_venda || prodRelacionado?.preco || 0);
         const p = listaProdutosPdvDinamica.find(prod =>
           prod.id === imeiRows.produto_id ||
-          (prod.nome && imeiRows.produtos?.nome && prod.nome.toLowerCase().trim() === imeiRows.produtos.nome.toLowerCase().trim())
+          (prod.nome && prodRelacionado?.nome && prod.nome.toLowerCase().trim() === prodRelacionado.nome.toLowerCase().trim())
         );
         if (p) {
-          matchedByImei = p;
+          matchedByImei = {
+            ...p,
+            cor: imeiRows.cor || p.cor,
+            preco: precoObtido > 0 ? precoObtido : (parseFloat(p.preco_venda || p.preco || 0)),
+            preco_venda: precoObtido > 0 ? precoObtido : (parseFloat(p.preco_venda || p.preco || 0))
+          };
+          matchedImeiString = imeiRows.imei;
+        } else if (prodRelacionado) {
+          matchedByImei = {
+            ...prodRelacionado,
+            id: imeiRows.produto_id || prodRelacionado.id,
+            cor: imeiRows.cor || prodRelacionado.cor,
+            preco: precoObtido,
+            preco_venda: precoObtido,
+            tipo: prodRelacionado.tipo || 'CELULAR'
+          };
           matchedImeiString = imeiRows.imei;
         }
       }
@@ -11286,6 +11316,7 @@ export default function Dashboard({ session, profileDataProps }) {
     const stringToScan = typeof inputOverride === 'string' ? inputOverride : pdvScanImei;
     const rawInput = stringToScan.replace(/[\r\n]/g, '').trim();
     if (!rawInput) return;
+    const cleanDigits = rawInput.replace(/\D/g, '');
 
     // 1. Consulta prioritária na tabela 'imeis' com produto vinculado
     let serialData = null;
@@ -11348,17 +11379,19 @@ export default function Dashboard({ session, profileDataProps }) {
         (catalogoProdutos || []).find(c => String(c.id) === String(serialData.produto_id));
 
       const prodName = prodPai?.nome || 'Aparelho Celular';
-      const prodPreco = parseFloat(prodPai?.preco || prodPai?.preco_venda || 0);
+      const precoObtido = parseFloat(prodPai?.preco_venda || prodPai?.preco || 0);
 
       const novoItem = {
         cartId: crypto.randomUUID(),
-        produto: prodPai ? { ...prodPai, cor: serialData.cor || prodPai.cor } : { id: serialData.produto_id, nome: prodName, preco: prodPreco, cor: serialData.cor },
+        produto: prodPai ? { ...prodPai, cor: serialData.cor || prodPai.cor, preco: precoObtido, preco_venda: precoObtido } : { id: serialData.produto_id, nome: prodName, preco: precoObtido, preco_venda: precoObtido, cor: serialData.cor },
         quantidade: 1,
         imei: serialData.imei,
         cor: serialData.cor || prodPai?.cor || null,
         availableImeis: [serialData],
-        preco_original: prodPreco,
-        valorUnitario: prodPreco,
+        preco_original: precoObtido,
+        valorUnitario: precoObtido,
+        valor_unitario: precoObtido,
+        valor_total: precoObtido * 1,
         vendaTrainee: pdvVendaTrainee
       };
 
