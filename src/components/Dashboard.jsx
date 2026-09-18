@@ -11702,45 +11702,37 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    // 1.1 Regra de Negócio: Validação de Cliente Obrigatório para Boleto/Crediário/Financeiras
-    const metodosParaVerificar = [
-      pdvMetodoPagamento,
-      pdvNovoMetodo,
-      ...(pdvListaPagamentos || []).map(p => p.metodo),
-      ...(pdvListaPagamentos || []).map(p => p.label),
-      pdvFinanceiraParceira,
-      pdvNovoFinanceira
-    ].map(m => String(m || '').trim().toUpperCase());
+    // 1.1 Regra de Negócio Estrita: Validação de Cliente Obrigatório EXCLUSIVAMENTE para Boleto/Crediário/AIVA
+    const pagamentosEfetivos = (pdvListaPagamentos && pdvListaPagamentos.length > 0)
+      ? pdvListaPagamentos
+      : [{ metodo: pdvMetodoPagamento, label: pdvMetodoPagamento }];
 
-    const isBoletoCrediarioOuFinanceira = metodosParaVerificar.some(m =>
-      m.includes('BOLETO') ||
-      m.includes('CREDIARIO') ||
-      m.includes('CREDIÁRIO') ||
-      m.includes('CARNE') ||
-      m.includes('CARNÊ') ||
-      m.includes('PAYJOY') ||
-      m.includes('WATU') ||
-      m.includes('UMA') ||
-      m.includes('PARCELAMENTO PRÓPRIO') ||
-      m.includes('PARCELAMENTO PROPRIO') ||
-      m.includes('FINANCIAMENTO')
-    );
+    const temPagamentoCrediario = pagamentosEfetivos.some(p => {
+      const m = String(p.metodo || p.label || '').toUpperCase();
+      return ['BOLETO', 'CREDIARIO', 'CREDIÁRIO', 'PROMISSORIA', 'PROMISSÓRIA', 'AIVA', 'CARNE', 'CARNÊ', 'PAYJOY', 'WATU', 'UMA', 'FINANCIAMENTO'].some(cred => m.includes(cred));
+    });
 
-    if (isBoletoCrediarioOuFinanceira) {
+    if (temPagamentoCrediario) {
       const nomeClienteRaw = (pdvClienteNome || pdvClienteSearchInput || '').trim();
       const cpfClienteRaw = (pdvClienteCpfCnpj || '').replace(/\D/g, '');
-      const isConsumidorFinal = !nomeClienteRaw || nomeClienteRaw.toLowerCase() === 'consumidor final';
-      const temClienteIdentificado = (selectedPdvClienteId !== null && selectedPdvClienteId !== undefined && String(selectedPdvClienteId).trim() !== '') || (!isConsumidorFinal && nomeClienteRaw.length >= 2);
-      const temCpfValido = cpfClienteRaw.length === 11 || cpfClienteRaw.length === 14;
+      const isConsumidorGenerico = !cpfClienteRaw ||
+        pdvClienteCpfCnpj.trim() === '000.000.000-01' ||
+        cpfClienteRaw === '00000000001' ||
+        !nomeClienteRaw ||
+        nomeClienteRaw.toLowerCase() === 'consumidor final' ||
+        nomeClienteRaw.toLowerCase() === 'consumidor balcão' ||
+        nomeClienteRaw.toLowerCase() === 'consumidor balcao' ||
+        selectedPdvClienteId === '00000000-0000-0000-0000-000000000000';
 
-      if (!temClienteIdentificado || isConsumidorFinal || !temCpfValido) {
+      const temCpfValido = (cpfClienteRaw.length === 11 || cpfClienteRaw.length === 14) && cpfClienteRaw !== '00000000001';
+
+      if (isConsumidorGenerico || !temCpfValido) {
         const msgAviso = "Identificação obrigatória: Vendas no Boleto/Crediário exigem cadastro completo do cliente (Nome e CPF).";
         toastHelper.warning(msgAviso);
-        // Focar no input de cliente ou abrir o dropdown para agilizar a identificação
         setTimeout(() => {
           const nomeInput = document.getElementById('pdv-cliente-busca-input');
           const cpfInput = document.getElementById('pdv-cliente-cpf-input');
-          if (isConsumidorFinal || !temClienteIdentificado) {
+          if (isConsumidorGenerico) {
             nomeInput?.focus();
             setIsPdvClienteDropdownOpen(true);
           } else if (!temCpfValido) {
@@ -11768,9 +11760,13 @@ export default function Dashboard({ session, profileDataProps }) {
     const nomeClienteRaw = (pdvClienteNome || pdvClienteSearchInput || '').trim();
     const isConsumidorBalcao = !nomeClienteRaw || 
       nomeClienteRaw.toLowerCase() === 'consumidor balcão' || 
+      nomeClienteRaw.toLowerCase() === 'consumidor balcao' ||
       nomeClienteRaw.toLowerCase() === 'consumidor final' ||
       nomeClienteRaw.toLowerCase() === 'consumidor' ||
-      nomeClienteRaw.toLowerCase() === 'cliente balcão';
+      nomeClienteRaw.toLowerCase() === 'cliente balcão' ||
+      nomeClienteRaw.toLowerCase() === 'cliente balcao' ||
+      pdvClienteCpfCnpj.trim() === '000.000.000-01' ||
+      selectedPdvClienteId === '00000000-0000-0000-0000-000000000000';
 
     if (carrinhoTemCritico) {
       // ESTEIRA CRÍTICA (Aparelhos / Alto Valor / IMEI / Serial):
