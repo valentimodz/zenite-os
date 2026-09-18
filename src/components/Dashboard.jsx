@@ -8775,12 +8775,12 @@ export default function Dashboard({ session, profileDataProps }) {
     const novoValor = parseValorNumerico(vendaNewValor);
     const novaComissao = parseValorNumerico(vendaNewComissao);
     const novoMetodo = vendaNewMetodoPagamento || 'PIX';
-    const isBoletoOuCrediario = novoMetodo === 'Boleto' || novoMetodo === 'Crediário / Carnê';
+    const isBoleto = novoMetodo?.toLowerCase() === 'boleto';
 
     let resolvedFinanceira = null;
-    if (isBoletoOuCrediario) {
+    if (isBoleto) {
       if (!vendaNewFinanceira) {
-        showToast('Por favor, selecione a Financeira do Boleto / Carnê.', 'warning');
+        showToast('Por favor, selecione a Financeira do Boleto.', 'warning');
         return;
       }
       if (vendaNewFinanceira === 'Outra') {
@@ -27131,20 +27131,18 @@ export default function Dashboard({ session, profileDataProps }) {
                         <option value="Cartão de Débito" className="bg-[#111] text-white">Cartão de Débito</option>
                         <option value="Dinheiro" className="bg-[#111] text-white">Dinheiro</option>
                         <option value="Boleto" className="bg-[#111] text-white">Boleto</option>
-                        <option value="Crediário / Carnê" className="bg-[#111] text-white">Crediário / Carnê</option>
-                        <option value="Múltiplos / Outro" className="bg-[#111] text-white">Múltiplos / Outro</option>
                       </select>
                     </div>
                   </div>
 
-                  {/* FINANCEIRA DO BOLETO / CARNÊ CONDICIONAL */}
-                  {(vendaNewMetodoPagamento === 'Boleto' || vendaNewMetodoPagamento === 'Crediário / Carnê') && (
-                    <div className="space-y-1 animate-fadeIn">
+                  {/* CONDICIONAL DA FINANCEIRA DO BOLETO */}
+                  {vendaNewMetodoPagamento?.toLowerCase() === 'boleto' && (
+                    <div className="space-y-1 col-span-2 animate-fadeIn">
                       <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider block">
-                        Financeira do Boleto / Carnê *
+                        Financeira do Boleto *
                       </label>
                       <select
-                        value={vendaNewFinanceira}
+                        value={vendaNewFinanceira || ''}
                         onChange={(e) => setVendaNewFinanceira(e.target.value)}
                         required
                         className="w-full bg-[#18181f] border border-purple-500/40 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-purple-500 cursor-pointer"
@@ -27161,7 +27159,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         <input
                           type="text"
                           placeholder="Digite o nome da financeira..."
-                          value={vendaNewOutraFinanceiraNome}
+                          value={vendaNewOutraFinanceiraNome || ''}
                           onChange={(e) => setVendaNewOutraFinanceiraNome(e.target.value)}
                           required
                           className="w-full bg-[#18181f] border border-white/20 rounded-lg p-2.5 text-white text-sm mt-2 focus:outline-none focus:border-purple-500 placeholder:text-gray-500"
