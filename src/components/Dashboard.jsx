@@ -25756,6 +25756,7 @@ export default function Dashboard({ session, profileDataProps }) {
           fetchProdutos={() => {
             if (activeFilialId) fetchProdutosPDV(activeFilialId);
           }}
+          showToast={showToast}
         />
 
         {/* MODAL DE CONFIRMAÇÃO DE FINALIZAÇÃO DE CHAMADO S.O.S */}
