@@ -8723,6 +8723,23 @@ export default function Dashboard({ session, profileDataProps }) {
     setIsVendaEditModalOpen(true);
   };
 
+  const handleCloseEditVenda = () => {
+    setIsVendaEditModalOpen(false);
+    setEditingVenda(null);
+  };
+
+  // Fechamento via Teclado (ESC) para o Modal "Corrigir Venda Concluída"
+  useEffect(() => {
+    if (!isVendaEditModalOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        handleCloseEditVenda();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isVendaEditModalOpen]);
+
   // Função para sanitização numérica robusta (trata '79,89', '1.250,50', etc.)
   const parseValorNumerico = (val) => {
     if (val === null || val === undefined || val === '') return 0;
@@ -26930,22 +26947,33 @@ export default function Dashboard({ session, profileDataProps }) {
 
         {/* MODAL DE EDIÇÃO DE VENDA CONSOLIDADA COM AUDITORIA */}
         {isVendaEditModalOpen && editingVenda && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 w-full max-w-md rounded-xl overflow-hidden shadow-2xl animate-scaleUp">
-              <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] p-5 border-b border-[#222222] flex justify-between items-center">
+          <div
+            className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn"
+            onClick={handleCloseEditVenda}
+          >
+            <div
+              className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-[#121217] border border-white/10 shadow-2xl animate-scaleUp"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Cabeçalho */}
+              <div className="bg-gradient-to-r from-[#0A001A] to-[#121217] p-5 border-b border-white/10 flex justify-between items-center shrink-0">
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
                   <Edit2 size={16} className="text-[#6A0DAD]" />
                   Corrigir Venda Concluída
                 </h3>
                 <button
-                  onClick={() => { setIsVendaEditModalOpen(false); setEditingVenda(null); }}
-                  className="text-gray-500 hover:text-white transition-colors"
+                  type="button"
+                  onClick={handleCloseEditVenda}
+                  className="text-gray-400 hover:text-white transition-colors cursor-pointer"
                 >
                   <X size={18} />
                 </button>
               </div>
-              <form onSubmit={handleSaveVendaEdit}>
-                <div className="p-5 space-y-4">
+
+              {/* Formulário com Corpo Rolável e Rodapé Fixo */}
+              <form onSubmit={handleSaveVendaEdit} className="flex flex-col flex-1 overflow-hidden">
+                {/* Corpo onde ficam os inputs (com scroll vertical) */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-4 pr-3 custom-scrollbar">
                   <div className="space-y-1.5">
                     <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
                       PRODUTO / DESCRIÇÃO <span className="text-red-500">*</span>
@@ -27162,18 +27190,19 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 </div>
 
-                <div className="bg-[#050505] p-4 border-t border-[#222222] flex justify-end gap-3">
+                {/* Rodapé Fixo */}
+                <div className="p-4 border-t border-white/10 flex justify-end gap-3 bg-[#121217] shrink-0">
                   <button
                     type="button"
-                    onClick={() => { setIsVendaEditModalOpen(false); setEditingVenda(null); }}
-                    className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
+                    onClick={handleCloseEditVenda}
+                    className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all cursor-pointer"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
                     disabled={!vendaJustificativa.trim()}
-                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-xs font-bold transition-all"
+                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-xs font-bold transition-all cursor-pointer"
                   >
                     Salvar Correção
                   </button>
