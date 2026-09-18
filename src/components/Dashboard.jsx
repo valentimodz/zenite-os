@@ -1260,6 +1260,15 @@ export default function Dashboard({ session, profileDataProps }) {
   const [pdvNovoValor, setPdvNovoValor] = useState('');
   const [pdvNovoParcelas, setPdvNovoParcelas] = useState(1);
   const [pdvNovoFinanceira, setPdvNovoFinanceira] = useState('PayJoy');
+  const [pdvOutraFinanceiraNome, setPdvOutraFinanceiraNome] = useState('');
+
+  // Estados específicos para Método de Pagamento "📱 APARELHO NA TROCA"
+  const [pdvTrocaModelo, setPdvTrocaModelo] = useState('');
+  const [pdvTrocaCapacidade, setPdvTrocaCapacidade] = useState('');
+  const [pdvTrocaCor, setPdvTrocaCor] = useState('');
+  const [pdvTrocaImei, setPdvTrocaImei] = useState('');
+  const [pdvTrocaValor, setPdvTrocaValor] = useState('');
+  const [pdvTrocaEntradaEstoque, setPdvTrocaEntradaEstoque] = useState(true);
 
   // Configurações Fiscais
   const [fiscalCnpj, setFiscalCnpj] = useState('');
@@ -11134,6 +11143,18 @@ export default function Dashboard({ session, profileDataProps }) {
     setPdvStatusPagamento('PAGO');
     setPdvDataVencimentoRestante('');
     setPdvValorPagoCustom('');
+    setPdvListaPagamentos([]);
+    setPdvNovoMetodo('pix');
+    setPdvNovoValor('');
+    setPdvNovoParcelas(1);
+    setPdvNovoFinanceira('PayJoy');
+    setPdvOutraFinanceiraNome('');
+    setPdvTrocaModelo('');
+    setPdvTrocaCapacidade('');
+    setPdvTrocaCor('');
+    setPdvTrocaImei('');
+    setPdvTrocaValor('');
+    setPdvTrocaEntradaEstoque(true);
     setIsQuickClientFormOpen(true);
 
     try {
@@ -11709,7 +11730,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const temPagamentoCrediario = pagamentosEfetivos.some(p => {
       const m = String(p.metodo || p.label || '').toUpperCase();
-      return ['BOLETO', 'CREDIARIO', 'CREDIÁRIO', 'PROMISSORIA', 'PROMISSÓRIA', 'AIVA', 'CARNE', 'CARNÊ', 'PAYJOY', 'WATU', 'UMA', 'FINANCIAMENTO'].some(cred => m.includes(cred));
+      return ['BOLETO', 'CREDIARIO', 'CREDIÁRIO', 'PROMISSORIA', 'PROMISSÓRIA', 'AIVA', 'CARNE', 'CARNÊ', 'PAYJOY', 'WATU', 'UME', 'UMA', 'FINANCIAMENTO'].some(cred => m.includes(cred));
     });
 
     if (temPagamentoCrediario) {
@@ -12318,16 +12339,26 @@ export default function Dashboard({ session, profileDataProps }) {
                 'cartao_credito': 'CARTAO_CREDITO',
                 'cartao_debito': 'CARTAO_DEBITO',
                 'dinheiro': 'DINHEIRO',
-                'boleto': 'BOLETO'
+                'boleto': 'BOLETO',
+                'troca': 'TROCA'
               };
               const metodoResolved = mapMetodo[pag.metodo?.toLowerCase()] || 'DINHEIRO';
-              await supabase.from('vendas_pagamentos').insert({
+              const vpPayload = {
                 venda_id: rpcRes.venda_id,
                 valor_pago: pag.valor,
                 metodo_pagamento: metodoResolved,
                 parcelas: (pag.metodo === 'cartao_credito' || pag.metodo === 'cartao') ? (pag.parcelas || 1) : 1,
                 tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
-              });
+              };
+              if (pag.metodo_detalhe || pag.financeira) {
+                vpPayload.metodo_detalhe = pag.metodo_detalhe || pag.financeira;
+              }
+              const { error: vpErr } = await supabase.from('vendas_pagamentos').insert(vpPayload);
+              if (vpErr && vpErr.message?.includes('metodo_detalhe')) {
+                // Fallback caso a coluna metodo_detalhe não exista na tabela vendas_pagamentos
+                delete vpPayload.metodo_detalhe;
+                await supabase.from('vendas_pagamentos').insert(vpPayload);
+              }
             }
           } else if (actualValorPago > 0) {
             const mapMetodo = {
@@ -12336,7 +12367,8 @@ export default function Dashboard({ session, profileDataProps }) {
               'cartao_credito': 'CARTAO_CREDITO',
               'cartao_debito': 'CARTAO_DEBITO',
               'dinheiro': 'DINHEIRO',
-              'boleto': 'BOLETO'
+              'boleto': 'BOLETO',
+              'troca': 'TROCA'
             };
             const metodoResolved = mapMetodo[metodoEfetivo?.toLowerCase()] || 'DINHEIRO';
             await supabase.from('vendas_pagamentos').insert({
@@ -12468,6 +12500,89 @@ export default function Dashboard({ session, profileDataProps }) {
           const stored = storedStr ? JSON.parse(storedStr) : [];
           localStorage.setItem('zenite_descontos_logs', JSON.stringify([novoLogDesconto, ...stored.filter(x => x.id !== novoLogDesconto.id)]));
         } catch (e) { }
+      }
+
+      // 3. Persistência de Seminovo no Estoque para pagamentos via "📱 APARELHO NA TROCA"
+      if (pdvListaPagamentos && pdvListaPagamentos.length > 0) {
+        for (const pag of pdvListaPagamentos) {
+          if (pag.metodo === 'troca' && pag.troca_dados && pag.troca_dados.dar_entrada_estoque) {
+            try {
+              const valorAvaliado = parseFloat(pag.troca_dados.valor) || parseFloat(pag.valor) || 0;
+              const modeloNome = (pag.troca_dados.modelo || 'Aparelho Seminovo').trim();
+              const corSeminovo = (pag.troca_dados.cor || 'Padrão').trim();
+              const capacidadeSeminovo = (pag.troca_dados.capacidade || '').trim();
+              const imeiSeminovo = (pag.troca_dados.imei || '').trim();
+
+              const nomeCompletoProduto = [modeloNome, capacidadeSeminovo].filter(Boolean).join(' ');
+
+              // 1. Localizar ou cadastrar o produto na tabela produtos da filial atual
+              let produtoIdAlvo = null;
+              const { data: prodExistente } = await supabase
+                .from('produtos')
+                .select('id, quantidade')
+                .eq('empresa_id', empresaId)
+                .eq('filial_id', activeFilialId)
+                .ilike('nome', nomeCompletoProduto)
+                .maybeSingle();
+
+              if (prodExistente && prodExistente.id) {
+                produtoIdAlvo = prodExistente.id;
+                // Incrementar quantidade do produto
+                await supabase
+                  .from('produtos')
+                  .update({
+                    quantidade: (prodExistente.quantidade || 0) + 1,
+                    preco_custo: valorAvaliado > 0 ? valorAvaliado : undefined,
+                    tipo: 'SEMINOVO'
+                  })
+                  .eq('id', produtoIdAlvo);
+              } else {
+                const { data: novoProduto, error: prodErr } = await supabase
+                  .from('produtos')
+                  .insert({
+                    empresa_id: empresaId,
+                    filial_id: activeFilialId,
+                    nome: nomeCompletoProduto,
+                    tipo: 'SEMINOVO',
+                    categoria: 'CELULAR',
+                    preco_custo: valorAvaliado,
+                    preco: valorAvaliado,
+                    quantidade: 1
+                  })
+                  .select('id')
+                  .single();
+
+                if (!prodErr && novoProduto) {
+                  produtoIdAlvo = novoProduto.id;
+                }
+              }
+
+              // 2. Se possuir IMEI (ou produtoIdAlvo), inserir o registro na tabela imeis
+              if (produtoIdAlvo) {
+                const imeiPayload = {
+                  empresa_id: empresaId,
+                  filial_id: activeFilialId,
+                  produto_id: produtoIdAlvo,
+                  imei: imeiSeminovo || `SEMINOVO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                  status: 'DISPONIVEL',
+                  vendido: false,
+                  cor: corSeminovo,
+                  preco_custo: valorAvaliado,
+                  preco_compra: valorAvaliado,
+                  preco_venda: valorAvaliado,
+                  tipo: 'SEMINOVO'
+                };
+
+                const { error: imeiErr } = await supabase.from('imeis').insert(imeiPayload);
+                if (imeiErr) {
+                  console.warn("Aviso ao cadastrar IMEI de seminovo no estoque:", imeiErr);
+                }
+              }
+            } catch (errTrocaEstoque) {
+              console.error("Erro ao dar entrada do seminovo no estoque:", errTrocaEstoque);
+            }
+          }
+        }
       }
 
       setModalSucessoVenda({ venda: createdVendaIds, dadosRecibo });
@@ -15662,7 +15777,12 @@ export default function Dashboard({ session, profileDataProps }) {
                   const faltaPagar = Math.max(0, totalCarrinhoLiquido - totalJaPago);
 
                   const handleAdicionarPagamentoPdv = () => {
-                    const valNum = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
+                    let valNum = 0;
+                    if (pdvNovoMetodo === 'troca') {
+                      valNum = parseFloat(pdvTrocaValor) || 0;
+                    } else {
+                      valNum = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
+                    }
 
                     if (!valNum || valNum <= 0) {
                       showToast('Por favor, informe um valor de pagamento válido (maior que R$ 0,00).', 'error');
@@ -15674,6 +15794,11 @@ export default function Dashboard({ session, profileDataProps }) {
                         const msgBloqueio = '❌ A forma de pagamento BOLETO exige a presença de um celular Android no carrinho e proíbe iPhones/Apple ou apenas acessórios.';
                         showToast(msgBloqueio, 'error');
                         alert(msgBloqueio);
+                        return;
+                      }
+
+                      if (pdvNovoFinanceira === 'Outra' && !pdvOutraFinanceiraNome.trim()) {
+                        showToast('Por favor, digite o nome da financeira.', 'error');
                         return;
                       }
 
@@ -15689,17 +15814,36 @@ export default function Dashboard({ session, profileDataProps }) {
                       }
                     }
 
+                    // Validação de Aparelho na Troca
+                    if (pdvNovoMetodo === 'troca') {
+                      if (!pdvTrocaModelo.trim()) {
+                        showToast('Por favor, informe o Modelo do aparelho dado na troca.', 'error');
+                        return;
+                      }
+                      if (pdvTrocaImei.trim() && !/^\d{15}$/.test(pdvTrocaImei.trim())) {
+                        showToast('O IMEI do aparelho dado na troca deve conter 15 dígitos numéricos.', 'error');
+                        return;
+                      }
+                    }
+
                     if (pdvNovoMetodo !== 'dinheiro' && valNum > (faltaPagar + 0.01)) {
                       showToast(`O valor informado (R$ ${valNum.toFixed(2)}) excede o saldo restante a pagar (R$ ${faltaPagar.toFixed(2)}).`, 'error');
                       return;
                     }
 
                     let labelMetodo = 'Pix';
+                    let financeiraFinal = null;
                     if (pdvNovoMetodo === 'pix') labelMetodo = '⚡ Pix';
                     else if (pdvNovoMetodo === 'dinheiro') labelMetodo = '💵 Dinheiro';
                     else if (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') labelMetodo = `💳 Crédito (${pdvNovoParcelas}x)`;
                     else if (pdvNovoMetodo === 'cartao_debito') labelMetodo = '💳 Débito (À Vista)';
-                    else if (pdvNovoMetodo === 'boleto') labelMetodo = `📄 Boleto (${pdvNovoFinanceira})`;
+                    else if (pdvNovoMetodo === 'boleto') {
+                      financeiraFinal = pdvNovoFinanceira === 'Outra' ? (pdvOutraFinanceiraNome.trim() || 'Outra') : pdvNovoFinanceira;
+                      labelMetodo = `📄 Boleto (${financeiraFinal})`;
+                    } else if (pdvNovoMetodo === 'troca') {
+                      const descAparelho = [pdvTrocaModelo.trim(), pdvTrocaCapacidade.trim(), pdvTrocaCor.trim()].filter(Boolean).join(' ');
+                      labelMetodo = `📱 Aparelho na Troca (${descAparelho || 'Seminovo'})`;
+                    }
 
                     const novoItem = {
                       id: Date.now().toString() + Math.random().toString(36).substring(2, 5),
@@ -15707,11 +15851,32 @@ export default function Dashboard({ session, profileDataProps }) {
                       label: labelMetodo,
                       valor: valNum,
                       parcelas: (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') ? pdvNovoParcelas : 1,
-                      financeira: pdvNovoMetodo === 'boleto' ? pdvNovoFinanceira : null
+                      financeira: financeiraFinal,
+                      metodo_detalhe: financeiraFinal || (pdvNovoMetodo === 'troca' ? pdvTrocaModelo.trim() : null),
+                      // Dados adicionais caso seja troca
+                      troca_dados: pdvNovoMetodo === 'troca' ? {
+                        modelo: pdvTrocaModelo.trim(),
+                        capacidade: pdvTrocaCapacidade.trim(),
+                        cor: pdvTrocaCor.trim(),
+                        imei: pdvTrocaImei.trim(),
+                        valor: valNum,
+                        dar_entrada_estoque: pdvTrocaEntradaEstoque
+                      } : null
                     };
 
                     const novaLista = [...pdvListaPagamentos, novoItem];
                     setPdvListaPagamentos(novaLista);
+
+                    // Limpar formulário de troca caso tenha sido adicionado
+                    if (pdvNovoMetodo === 'troca') {
+                      setPdvTrocaModelo('');
+                      setPdvTrocaCapacidade('');
+                      setPdvTrocaCor('');
+                      setPdvTrocaImei('');
+                      setPdvTrocaValor('');
+                      setPdvTrocaEntradaEstoque(true);
+                      setPdvNovoMetodo('pix');
+                    }
 
                     const novoJaPago = novaLista.reduce((sum, p) => sum + p.valor, 0);
                     const novoFaltaPagar = Math.max(0, totalCarrinhoLiquido - novoJaPago);
@@ -15792,7 +15957,8 @@ export default function Dashboard({ session, profileDataProps }) {
                               { value: 'cartao_credito', label: '💳 Crédito' },
                               { value: 'cartao_debito', label: '💳 Débito' },
                               { value: 'dinheiro', label: '💵 Dinheiro' },
-                              ...(eElegivelBoleto ? [{ value: 'boleto', label: '📄 Boleto' }] : [])
+                              ...(eElegivelBoleto ? [{ value: 'boleto', label: '📄 Boleto' }] : []),
+                              { value: 'troca', label: '📱 APARELHO NA TROCA' }
                             ];
 
                             return (
@@ -15870,14 +16036,14 @@ export default function Dashboard({ session, profileDataProps }) {
                             </div>
                           )}
 
-                          {/* Se for Boleto: Financeira */}
+                          {/* Se for Boleto: Financeira ['PayJoy', 'Watu', 'Ume', 'Aiva', 'Outra'] */}
                           {pdvNovoMetodo === 'boleto' && (
-                            <div className="space-y-1 animate-fadeIn">
+                            <div className="space-y-2 animate-fadeIn">
                               <label className="block text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
                                 Financeira do Boleto
                               </label>
-                              <div className="grid grid-cols-4 gap-1">
-                                {['PayJoy', 'Watu', 'Uma', 'Outra'].map((fin) => (
+                              <div className="grid grid-cols-5 gap-1">
+                                {['PayJoy', 'Watu', 'Ume', 'Aiva', 'Outra'].map((fin) => (
                                   <button
                                     key={fin}
                                     type="button"
@@ -15894,37 +16060,178 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </button>
                                 ))}
                               </div>
+
+                              {/* Input textual obrigatório ao selecionar 'Outra' */}
+                              {pdvNovoFinanceira === 'Outra' && (
+                                <div className="space-y-1 pt-1 animate-fadeIn">
+                                  <label className="block text-[9px] font-bold text-amber-500 uppercase tracking-wide">
+                                    Nome da Financeira <span className="text-destructive">*</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Digite o nome da financeira..."
+                                    value={pdvOutraFinanceiraNome}
+                                    onChange={(e) => {
+                                      setPdvOutraFinanceiraNome(e.target.value);
+                                      setPdvFinanceiraCustomInput(e.target.value);
+                                    }}
+                                    required
+                                    className="w-full bg-surface-elevated border border-amber-500/50 focus:border-amber-400 rounded-lg px-3 py-1.5 text-xs text-foreground outline-none font-medium"
+                                  />
+                                </div>
+                              )}
                             </div>
                           )}
 
-                          {/* Campo de Valor e Botão Adicionar */}
-                          <div className="space-y-1">
-                            <label className="block text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
-                              Valor a Pagar nesta Forma (R$)
-                            </label>
-                            <div className="flex gap-2">
-                              <div className="relative flex-1">
-                                <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono font-bold">R$</span>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min="0.01"
-                                  value={pdvNovoValor !== '' ? pdvNovoValor : faltaPagar.toFixed(2)}
-                                  onChange={(e) => setPdvNovoValor(e.target.value)}
-                                  className="w-full bg-surface-elevated border border-border focus:border-primary rounded-lg pl-9 pr-3 py-1.5 text-xs text-foreground font-mono font-bold outline-none"
-                                  placeholder={faltaPagar.toFixed(2)}
-                                />
+                          {/* Se for "📱 APARELHO NA TROCA": Exibir campos específicos */}
+                          {pdvNovoMetodo === 'troca' && (
+                            <div className="p-3 bg-purple-950/20 border border-purple-800/40 rounded-xl space-y-2.5 animate-fadeIn">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300 border-b border-purple-800/30 pb-1.5">
+                                <Smartphone size={14} className="text-purple-400" />
+                                <span>Dados do Aparelho Usado na Troca</span>
                               </div>
-                              <button
-                                type="button"
-                                onClick={handleAdicionarPagamentoPdv}
-                                className="bg-primary hover:bg-[#500885] text-primary-foreground px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1 shadow-md cursor-pointer"
-                              >
-                                <Plus size={14} />
-                                <span>Adicionar</span>
-                              </button>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {/* Modelo (Obrigatório) */}
+                                <div>
+                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                    Modelo <span className="text-destructive">*</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: iPhone 12, Moto G22"
+                                    value={pdvTrocaModelo}
+                                    onChange={(e) => setPdvTrocaModelo(e.target.value)}
+                                    required
+                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                                  />
+                                </div>
+
+                                {/* Armazenamento / Capacidade */}
+                                <div>
+                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                    Capacidade / Armazenamento
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: 64GB, 128GB, 256GB"
+                                    value={pdvTrocaCapacidade}
+                                    onChange={(e) => setPdvTrocaCapacidade(e.target.value)}
+                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {/* Cor do Aparelho */}
+                                <div>
+                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                    Cor do Aparelho
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: Preto, Azul, Branco"
+                                    value={pdvTrocaCor}
+                                    onChange={(e) => setPdvTrocaCor(e.target.value)}
+                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                                  />
+                                </div>
+
+                                {/* IMEI (15 dígitos) */}
+                                <div>
+                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                    IMEI (15 dígitos)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    maxLength={15}
+                                    placeholder="Opcional (15 dígitos numéricos)"
+                                    value={pdvTrocaImei}
+                                    onChange={(e) => setPdvTrocaImei(e.target.value.replace(/\D/g, ''))}
+                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Valor Pago / Avaliado (R$) */}
+                              <div>
+                                <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5 flex justify-between">
+                                  <span>Valor Pago / Avaliado (R$) <span className="text-destructive">*</span></span>
+                                  <span className="text-[9px] text-emerald-400 font-semibold">Abaterá o total da venda</span>
+                                </label>
+                                <div className="relative">
+                                  <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono font-bold">R$</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0.01"
+                                    required
+                                    value={pdvTrocaValor}
+                                    onChange={(e) => setPdvTrocaValor(e.target.value)}
+                                    placeholder={faltaPagar.toFixed(2)}
+                                    className="w-full bg-black border border-purple-800/50 focus:border-emerald-500 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white font-mono font-bold outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Checkbox: Entrada no Estoque */}
+                              <div className="flex items-center gap-2 pt-1">
+                                <input
+                                  type="checkbox"
+                                  id="pdvTrocaEntradaEstoqueCheck"
+                                  checked={pdvTrocaEntradaEstoque}
+                                  onChange={(e) => setPdvTrocaEntradaEstoque(e.target.checked)}
+                                  className="w-4 h-4 rounded border-purple-800 text-purple-600 focus:ring-purple-500 bg-black cursor-pointer"
+                                />
+                                <label htmlFor="pdvTrocaEntradaEstoqueCheck" className="text-xs text-gray-300 select-none cursor-pointer font-medium">
+                                  Dar entrada deste seminovo no estoque da filial
+                                </label>
+                              </div>
+
+                              {/* Botão Adicionar Troca */}
+                              <div className="pt-1">
+                                <button
+                                  type="button"
+                                  onClick={handleAdicionarPagamentoPdv}
+                                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                                >
+                                  <Plus size={14} />
+                                  <span>Adicionar Aparelho na Troca (R$ {parseFloat(pdvTrocaValor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})</span>
+                                </button>
+                              </div>
                             </div>
-                          </div>
+                          )}
+
+                          {/* Campo de Valor e Botão Adicionar (para métodos tradicionais exceto troca) */}
+                          {pdvNovoMetodo !== 'troca' && (
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
+                                Valor a Pagar nesta Forma (R$)
+                              </label>
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono font-bold">R$</span>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0.01"
+                                    value={pdvNovoValor !== '' ? pdvNovoValor : faltaPagar.toFixed(2)}
+                                    onChange={(e) => setPdvNovoValor(e.target.value)}
+                                    className="w-full bg-surface-elevated border border-border focus:border-primary rounded-lg pl-9 pr-3 py-1.5 text-xs text-foreground font-mono font-bold outline-none"
+                                    placeholder={faltaPagar.toFixed(2)}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleAdicionarPagamentoPdv}
+                                  className="bg-primary hover:bg-[#500885] text-primary-foreground px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 flex items-center gap-1 shadow-md cursor-pointer"
+                                >
+                                  <Plus size={14} />
+                                  <span>Adicionar</span>
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="bg-emerald-500/15 border border-emerald-600/30 p-3 rounded-xl text-center text-xs text-emerald-900 dark:text-emerald-200 font-bold flex items-center justify-center gap-2 shadow-sm">
