@@ -19381,27 +19381,33 @@ export default function Dashboard({ session, profileDataProps }) {
                           // Agrupamento por Vendedor com Ticket Médio e Comissões Geradas
                           const vendedorMap = {};
                           vendasMes.forEach(s => {
-                            const vId = s.vendedor_id || s.profiles?.id || 'outros';
-                            const teamMember = (teamMembers || []).find(m => String(m.id) === String(vId));
-                            const vNome = teamMember?.nome || s.profiles?.nome || s.vendedor?.nome || s.vendedor_nome || 'Vendedor';
-                            if (!vendedorMap[vId]) {
-                              vendedorMap[vId] = { id: vId, nome: vNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
+                            const key = s.vendedor_id ? String(s.vendedor_id) : 'sem_vendedor';
+                            const profileMatch = s.vendedor_id
+                              ? (teamMembers || []).find(p => String(p.id) === String(s.vendedor_id)) || (vendedores || []).find(p => String(p.id) === String(s.vendedor_id))
+                              : null;
+                            const vNome = s.vendedor_id
+                              ? (profileMatch?.nome || s.profiles?.nome || s.vendedor?.nome || 'Vendedor')
+                              : 'Vendas de Balcão / Sem Vendedor';
+
+                            if (!vendedorMap[key]) {
+                              vendedorMap[key] = { id: key, nome: vNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
                             }
                             const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
-                            vendedorMap[vId].totalVendido += val;
-                            vendedorMap[vId].qtdVendas += 1;
-                            vendedorMap[vId].comissaoTotal += (parseFloat(s.comissao_vendedor || s.comissao || 0));
+                            vendedorMap[key].totalVendido += val;
+                            vendedorMap[key].qtdVendas += 1;
+                            vendedorMap[key].comissaoTotal += (parseFloat(s.comissao_vendedor || s.comissao || 0));
 
                             const tId = s.treener_id || s.trainee_id;
                             if (tId && (s.teve_participacao_trainee || Number(s.comissao_trainee) > 0)) {
-                              const traineeMember = (teamMembers || []).find(m => String(m.id) === String(tId));
+                              const traineeKey = String(tId);
+                              const traineeMember = (teamMembers || []).find(p => String(p.id) === traineeKey) || (vendedores || []).find(p => String(p.id) === traineeKey);
                               const tNome = traineeMember?.nome || 'Trainee';
-                              if (!vendedorMap[tId]) {
-                                vendedorMap[tId] = { id: tId, nome: tNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
+                              if (!vendedorMap[traineeKey]) {
+                                vendedorMap[traineeKey] = { id: traineeKey, nome: tNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
                               }
-                              vendedorMap[tId].totalVendido += val;
-                              vendedorMap[tId].qtdVendas += 1;
-                              vendedorMap[tId].comissaoTotal += (parseFloat(s.comissao_trainee) || 0);
+                              vendedorMap[traineeKey].totalVendido += val;
+                              vendedorMap[traineeKey].qtdVendas += 1;
+                              vendedorMap[traineeKey].comissaoTotal += (parseFloat(s.comissao_trainee) || 0);
                             }
                           });
 
@@ -19658,7 +19664,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                                   descAmount = pBase - pVendido;
                                                 }
                                               }
-                                              const vendedorExibido = sale.vendedor_nome || sale.profiles?.nome || sale.vendedor?.nome || 'Vendedor';
+                                              const profileSale = sale.vendedor_id ? (teamMembers || []).find(p => String(p.id) === String(sale.vendedor_id)) || (vendedores || []).find(p => String(p.id) === String(sale.vendedor_id)) : null;
+                                              const vendedorExibido = sale.vendedor_id ? (profileSale?.nome || sale.profiles?.nome || sale.vendedor?.nome || 'Vendedor') : 'Vendas de Balcão / Sem Vendedor';
                                               const autorizadorExibido = sale.desconto_autorizado_por || sale.autorizador?.nome || 'Gerente / Dono';
                                               return (
                                                 <tr key={sale.id || sIdx} className="hover:bg-white/5 transition-colors">

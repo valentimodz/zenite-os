@@ -130,50 +130,101 @@ export default function RankingVendedores({
       return String(v.filial_id) === String(filtroFilial);
     });
 
-    const data = vendedores
-      .filter(colab => {
-        if (!filtroFilial || filtroFilial === 'TODAS') return true;
-        return String(colab.filial_id) === String(filtroFilial);
-      })
-      .map(colab => {
-        // Pega as vendas onde o colaborador foi vendedor ou trainee
-        const vendasColab = vendasFiltradas.filter(v =>
-          String(v.vendedor_id) === String(colab.id) ||
-          String(v.usuario_id) === String(colab.id) ||
-          String(v.treener_id) === String(colab.id) ||
-          String(v.trainee_id) === String(colab.id)
-        );
+    // 1. Agrupamento rigoroso por vendedor_id (Map/Reduce)
+    const rankingMap = {};
 
-        const transacoes = vendasColab.length;
-        const volume = vendasColab.reduce((acc, v) => {
-          const val = parseFloat(v.valor_total || v.valor_vendido || v.total || (v.preco * v.quantidade) || v.valor_pago || 0);
-          return acc + (isNaN(val) ? 0 : val);
-        }, 0);
+    vendasFiltradas.forEach(v => {
+      const key = v.vendedor_id ? String(v.vendedor_id) : 'sem_vendedor';
+      const val = parseFloat(v.valor_total || v.valor_vendido || v.total || (v.preco * v.quantidade) || v.valor_pago || 0);
+      const safeVal = isNaN(val) ? 0 : val;
+      const comissaoVend = parseFloat(v.comissao || 0);
 
-        // Separa a comissão pela função exercida na venda
-        const comissaoAcumulada = vendasColab.reduce((acc, v) => {
-          let ganho = 0;
-          if (String(v.vendedor_id) === String(colab.id) || String(v.usuario_id) === String(colab.id)) {
-            ganho += parseFloat(v.comissao || 0);
-          }
-          if (String(v.treener_id) === String(colab.id) || String(v.trainee_id) === String(colab.id)) {
-            ganho += parseFloat(v.comissao_trainee || 0);
-          }
-          return acc + (isNaN(ganho) ? 0 : ganho);
-        }, 0);
+      if (!rankingMap[key]) {
+        let vendedorNome = 'Vendas de Balcão / Sem Vendedor';
+        let vendedorCargo = 'Balcão / Geral';
+        let filialIdColab = v.filial_id || null;
 
-        const ticketMedio = transacoes > 0 ? volume / transacoes : 0;
-        const filialObj = filiais?.find(f => String(f.id) === String(colab.filial_id));
+        if (key !== 'sem_vendedor') {
+          const profile = (vendedores || []).find(p => String(p.id) === key);
+          vendedorNome = profile?.nome || (v.profiles?.nome) || 'Vendedor';
+          vendedorCargo = profile?.role === 'TRAINEE' || profile?.is_treinner ? 'Trainee' : 'Profissional';
+          filialIdColab = profile?.filial_id || v.filial_id;
+        }
 
-        return {
-          ...colab,
-          transacoes,
-          volume,
-          ticketMedio,
-          comissaoAcumulada,
-          filialNome: filialObj?.nome || 'Rede Cred'
+        const filialObj = filiais?.find(f => String(f.id) === String(filialIdColab));
+
+        rankingMap[key] = {
+          id: key,
+          nome: vendedorNome,
+          cargo: vendedorCargo,
+          filial_id: filialIdColab,
+          filialNome: filialObj?.nome || (key === 'sem_vendedor' ? 'Balcão' : 'Rede Cred'),
+          transacoes: 0,
+          volume: 0,
+          ticketMedio: 0,
+          comissaoAcumulada: 0,
+          isSemVendedor: key === 'sem_vendedor'
         };
-      });
+      }
+
+      rankingMap[key].transacoes += 1;
+      rankingMap[key].volume += safeVal;
+      rankingMap[key].comissaoAcumulada += (isNaN(comissaoVend) ? 0 : comissaoVend);
+
+      // Trainee participante
+      const tId = v.treener_id || v.trainee_id;
+      if (tId && (v.teve_participacao_trainee || Number(v.comissao_trainee) > 0)) {
+        const traineeKey = String(tId);
+        const traineeProfile = (vendedores || []).find(p => String(p.id) === traineeKey);
+        const traineeNome = traineeProfile?.nome || 'Trainee';
+        const comissaoTrainee = parseFloat(v.comissao_trainee || 0);
+        const filialObj = filiais?.find(f => String(f.id) === String(traineeProfile?.filial_id || v.filial_id));
+
+        if (!rankingMap[traineeKey]) {
+          rankingMap[traineeKey] = {
+            id: traineeKey,
+            nome: traineeNome,
+            cargo: 'Trainee',
+            filial_id: traineeProfile?.filial_id || v.filial_id,
+            filialNome: filialObj?.nome || 'Rede Cred',
+            transacoes: 0,
+            volume: 0,
+            ticketMedio: 0,
+            comissaoAcumulada: 0,
+            isSemVendedor: false
+          };
+        }
+        rankingMap[traineeKey].transacoes += 1;
+        rankingMap[traineeKey].volume += safeVal;
+        rankingMap[traineeKey].comissaoAcumulada += (isNaN(comissaoTrainee) ? 0 : comissaoTrainee);
+      }
+    });
+
+    // Também incluir colaboradores cadastrados que não tenham realizado vendas no período (volume 0)
+    vendedores.forEach(colab => {
+      const colabKey = String(colab.id);
+      if (filtroFilial && filtroFilial !== 'TODAS' && String(colab.filial_id) !== String(filtroFilial)) {
+        return;
+      }
+      if (!rankingMap[colabKey]) {
+        const filialObj = filiais?.find(f => String(f.id) === String(colab.filial_id));
+        rankingMap[colabKey] = {
+          ...colab,
+          cargo: colab.role === 'TRAINEE' || colab.is_treinner ? 'Trainee' : 'Profissional',
+          filialNome: filialObj?.nome || 'Rede Cred',
+          transacoes: 0,
+          volume: 0,
+          ticketMedio: 0,
+          comissaoAcumulada: 0,
+          isSemVendedor: false
+        };
+      }
+    });
+
+    const data = Object.values(rankingMap).map(item => ({
+      ...item,
+      ticketMedio: item.transacoes > 0 ? item.volume / item.transacoes : 0
+    }));
 
     // Ordenação estrita por Volume decrescente (b.volume - a.volume)
     return data.sort((a, b) => b.volume - a.volume);
@@ -263,11 +314,13 @@ export default function RankingVendedores({
                 <td className="py-3 px-4 text-gray-400 text-[11px]">{colab.filialNome}</td>
                 <td className="py-3 px-4">
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    colab.role === 'TRAINEE' || colab.is_treinner
+                    colab.isSemVendedor
+                      ? 'bg-gray-900 text-gray-400 border border-gray-700'
+                      : colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee'
                       ? 'bg-purple-950/40 text-purple-400 border border-purple-800/40'
                       : 'bg-emerald-950/30 text-emerald-500 border border-emerald-800/30'
                   }`}>
-                    {colab.role === 'TRAINEE' || colab.is_treinner ? 'Trainee' : 'Profissional'}
+                    {colab.isSemVendedor ? 'Balcão' : (colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee' ? 'Trainee' : 'Profissional')}
                   </span>
                 </td>
                 <td className="py-3 px-4 text-center font-mono font-bold text-gray-300">{colab.transacoes}</td>
