@@ -974,6 +974,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [vendaNewValor, setVendaNewValor] = useState('');
   const [vendaNewComissao, setVendaNewComissao] = useState('');
   const [vendaNewMetodoPagamento, setVendaNewMetodoPagamento] = useState('PIX');
+  const [vendaNewFinanceira, setVendaNewFinanceira] = useState('PayJoy');
+  const [vendaNewOutraFinanceiraNome, setVendaNewOutraFinanceiraNome] = useState('');
   const [vendaNewVendedorId, setVendaNewVendedorId] = useState('');
   const [vendaNewFilialId, setVendaNewFilialId] = useState('');
   const [vendaJustificativa, setVendaJustificativa] = useState('');
@@ -8688,6 +8690,23 @@ export default function Dashboard({ session, profileDataProps }) {
     const metodoInicial = venda.metodo_pagamento || venda.forma_pagamento || 'PIX';
     setVendaNewMetodoPagamento(metodoInicial);
 
+    // Identificar Financeira inicial
+    const finInicial = (venda.financeira || venda.metodo_detalhe || venda.financeira_parceira || '').trim();
+    const financeirasPadrao = ['PayJoy', 'Watu', 'Ume', 'Aiva'];
+    if (finInicial) {
+      const matchPadrao = financeirasPadrao.find(f => f.toLowerCase() === finInicial.toLowerCase());
+      if (matchPadrao) {
+        setVendaNewFinanceira(matchPadrao);
+        setVendaNewOutraFinanceiraNome('');
+      } else {
+        setVendaNewFinanceira('Outra');
+        setVendaNewOutraFinanceiraNome(finInicial);
+      }
+    } else {
+      setVendaNewFinanceira('PayJoy');
+      setVendaNewOutraFinanceiraNome('');
+    }
+
     // Identificar Vendedor inicial
     const vendedorIdInicial = venda.vendedor_id || (
       (vendedores || []).find(v => (v.nome || v.name) === venda.vendedor_nome)?.id ||
@@ -8739,6 +8758,25 @@ export default function Dashboard({ session, profileDataProps }) {
     const novoValor = parseValorNumerico(vendaNewValor);
     const novaComissao = parseValorNumerico(vendaNewComissao);
     const novoMetodo = vendaNewMetodoPagamento || 'PIX';
+    const isBoletoOuCrediario = novoMetodo === 'Boleto' || novoMetodo === 'Crediário / Carnê';
+
+    let resolvedFinanceira = null;
+    if (isBoletoOuCrediario) {
+      if (!vendaNewFinanceira) {
+        showToast('Por favor, selecione a Financeira do Boleto / Carnê.', 'warning');
+        return;
+      }
+      if (vendaNewFinanceira === 'Outra') {
+        if (!vendaNewOutraFinanceiraNome.trim()) {
+          showToast('Por favor, digite o nome da financeira.', 'warning');
+          return;
+        }
+        resolvedFinanceira = vendaNewOutraFinanceiraNome.trim();
+      } else {
+        resolvedFinanceira = vendaNewFinanceira;
+      }
+    }
+
     const justificativaTexto = vendaJustificativa.trim();
 
     // Obter Vendedor e Filial selecionados
@@ -8759,6 +8797,10 @@ export default function Dashboard({ session, profileDataProps }) {
         quantidade: novaQtd,
         comissao: novaComissao,
         metodo_pagamento: novoMetodo,
+        forma_pagamento: novoMetodo,
+        financeira: resolvedFinanceira,
+        financeira_parceira: resolvedFinanceira,
+        metodo_detalhe: resolvedFinanceira,
         produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
         categoria: novaCategoria,
         vendedor_id: novoVendedorId,
@@ -8775,7 +8817,45 @@ export default function Dashboard({ session, profileDataProps }) {
         .select();
 
       if (updateError) {
-        throw updateError;
+        // Se alguma coluna nova não existir na tabela vendas, tenta salvar sem as variantes redundantes
+        if (updateError.message?.includes('financeira') || updateError.message?.includes('metodo_detalhe')) {
+          const fallbackPayload = { ...updatePayload };
+          delete fallbackPayload.financeira;
+          delete fallbackPayload.financeira_parceira;
+          delete fallbackPayload.metodo_detalhe;
+          const { error: fallbackErr } = await supabase
+            .from('vendas')
+            .update(fallbackPayload)
+            .eq('id', vendaId);
+          if (fallbackErr) throw fallbackErr;
+        } else {
+          throw updateError;
+        }
+      }
+
+      // 1.1 Atualizar também na tabela vendas_pagamentos vinculada
+      try {
+        const pagUpdatePayload = {
+          metodo_pagamento: novoMetodo === 'Boleto' || novoMetodo === 'Crediário / Carnê' ? 'BOLETO' : (novoMetodo === 'Cartão de Crédito' ? 'CARTAO_CREDITO' : (novoMetodo === 'Cartão de Débito' ? 'CARTAO_DEBITO' : (novoMetodo === 'Dinheiro' ? 'DINHEIRO' : novoMetodo))),
+          valor_pago: novoValor
+        };
+        if (resolvedFinanceira) {
+          pagUpdatePayload.metodo_detalhe = resolvedFinanceira;
+        }
+        const { error: vpUpdateErr } = await supabase
+          .from('vendas_pagamentos')
+          .update(pagUpdatePayload)
+          .eq('venda_id', vendaId);
+
+        if (vpUpdateErr && vpUpdateErr.message?.includes('metodo_detalhe')) {
+          delete pagUpdatePayload.metodo_detalhe;
+          await supabase
+            .from('vendas_pagamentos')
+            .update(pagUpdatePayload)
+            .eq('venda_id', vendaId);
+        }
+      } catch (vpErr) {
+        console.warn('Aviso ao sincronizar vendas_pagamentos:', vpErr);
       }
 
       // 2. Sincronização de Estoque / IMEI (Se a venda possuir 'imei' vinculado e a filial mudou)
@@ -27028,6 +27108,45 @@ export default function Dashboard({ session, profileDataProps }) {
                       </select>
                     </div>
                   </div>
+
+                  {/* FINANCEIRA DO BOLETO / CARNÊ CONDICIONAL */}
+                  {(vendaNewMetodoPagamento === 'Boleto' || vendaNewMetodoPagamento === 'Crediário / Carnê') && (
+                    <div className="bg-[#110022]/40 border border-[#6A0DAD]/40 rounded-xl p-4 space-y-3 animate-fadeIn">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-purple-300 uppercase tracking-wider mb-1.5">
+                          FINANCEIRA DO BOLETO / CARNÊ <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          value={vendaNewFinanceira}
+                          onChange={(e) => setVendaNewFinanceira(e.target.value)}
+                          required
+                          className="w-full bg-black border border-[#6A0DAD]/50 focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none font-medium cursor-pointer transition-all"
+                        >
+                          <option value="PayJoy" className="bg-[#111] text-white">PayJoy</option>
+                          <option value="Watu" className="bg-[#111] text-white">Watu</option>
+                          <option value="Ume" className="bg-[#111] text-white">Ume</option>
+                          <option value="Aiva" className="bg-[#111] text-white">Aiva</option>
+                          <option value="Outra" className="bg-[#111] text-white">Outra</option>
+                        </select>
+                      </div>
+
+                      {vendaNewFinanceira === 'Outra' && (
+                        <div>
+                          <label className="block text-[10px] font-semibold text-purple-300 uppercase tracking-wider mb-1.5">
+                            Especifique a Financeira <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Digite o nome da financeira..."
+                            value={vendaNewOutraFinanceiraNome}
+                            onChange={(e) => setVendaNewOutraFinanceiraNome(e.target.value)}
+                            required
+                            className="w-full bg-black border border-[#6A0DAD]/50 focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-sm outline-none transition-all placeholder:text-gray-600"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
