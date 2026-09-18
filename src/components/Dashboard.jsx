@@ -27139,39 +27139,33 @@ export default function Dashboard({ session, profileDataProps }) {
 
                   {/* FINANCEIRA DO BOLETO / CARNÊ CONDICIONAL */}
                   {(vendaNewMetodoPagamento === 'Boleto' || vendaNewMetodoPagamento === 'Crediário / Carnê') && (
-                    <div className="bg-[#110022]/40 border border-[#6A0DAD]/40 rounded-xl p-4 space-y-3 animate-fadeIn">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-purple-300 uppercase tracking-wider mb-1.5">
-                          FINANCEIRA DO BOLETO / CARNÊ <span className="text-red-500">*</span>
-                        </label>
-                        <select
-                          value={vendaNewFinanceira}
-                          onChange={(e) => setVendaNewFinanceira(e.target.value)}
-                          required
-                          className="w-full bg-black border border-[#6A0DAD]/50 focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none font-medium cursor-pointer transition-all"
-                        >
-                          <option value="PayJoy" className="bg-[#111] text-white">PayJoy</option>
-                          <option value="Watu" className="bg-[#111] text-white">Watu</option>
-                          <option value="Ume" className="bg-[#111] text-white">Ume</option>
-                          <option value="Aiva" className="bg-[#111] text-white">Aiva</option>
-                          <option value="Outra" className="bg-[#111] text-white">Outra</option>
-                        </select>
-                      </div>
+                    <div className="space-y-1 animate-fadeIn">
+                      <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider block">
+                        Financeira do Boleto / Carnê *
+                      </label>
+                      <select
+                        value={vendaNewFinanceira}
+                        onChange={(e) => setVendaNewFinanceira(e.target.value)}
+                        required
+                        className="w-full bg-[#18181f] border border-purple-500/40 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-purple-500 cursor-pointer"
+                      >
+                        <option value="">Selecione a financeira...</option>
+                        <option value="PayJoy">PayJoy</option>
+                        <option value="Watu">Watu</option>
+                        <option value="Ume">Ume</option>
+                        <option value="Aiva">Aiva</option>
+                        <option value="Outra">Outra</option>
+                      </select>
 
                       {vendaNewFinanceira === 'Outra' && (
-                        <div>
-                          <label className="block text-[10px] font-semibold text-purple-300 uppercase tracking-wider mb-1.5">
-                            Especifique a Financeira <span className="text-red-500">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="Digite o nome da financeira..."
-                            value={vendaNewOutraFinanceiraNome}
-                            onChange={(e) => setVendaNewOutraFinanceiraNome(e.target.value)}
-                            required
-                            className="w-full bg-black border border-[#6A0DAD]/50 focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-sm outline-none transition-all placeholder:text-gray-600"
-                          />
-                        </div>
+                        <input
+                          type="text"
+                          placeholder="Digite o nome da financeira..."
+                          value={vendaNewOutraFinanceiraNome}
+                          onChange={(e) => setVendaNewOutraFinanceiraNome(e.target.value)}
+                          required
+                          className="w-full bg-[#18181f] border border-white/20 rounded-lg p-2.5 text-white text-sm mt-2 focus:outline-none focus:border-purple-500 placeholder:text-gray-500"
+                        />
                       )}
                     </div>
                   )}
