@@ -6225,6 +6225,7 @@ export default function Dashboard({ session, profileDataProps }) {
     let pix = 0;
     let boleto = 0;
     let troca = 0;
+    const contratosFinanciadoras = {};
 
     vendasSessaoDetalhe.forEach(sale => {
       const val = parseFloat(sale.valor_total || 0);
@@ -6239,6 +6240,8 @@ export default function Dashboard({ session, profileDataProps }) {
         pix += val;
       } else if (mp === 'boleto') {
         boleto += val;
+        const finNome = (sale.financeira || sale.financeira_parceira || sale.metodo_detalhe || 'Outra').trim();
+        contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + val;
       } else if (mp === 'troca') {
         troca += val;
       } else {
@@ -6257,6 +6260,8 @@ export default function Dashboard({ session, profileDataProps }) {
       boleto: Number(boleto.toFixed(2)),
       troca: Number(troca.toFixed(2)),
       outros: Number((boleto + troca).toFixed(2)),
+      contratosFinanciadoras,
+      totalFinanciadoras: Number(boleto.toFixed(2)),
       total: Number((especie + cartao + pix + boleto + troca).toFixed(2))
     };
   }, [vendasSessaoDetalhe]);
@@ -6293,25 +6298,36 @@ export default function Dashboard({ session, profileDataProps }) {
       const targetEmpresaId = modalDetalheCaixa.empresa_id || profile?.empresa_id || company?.id || activeEmpresaId;
       const targetOperadorId = modalDetalheCaixa.operador_id || session?.user?.id;
 
-      // Inserir registro na tabela fechamentos
+      // Inserir registro na tabela fechamentos com total_dinheiro_gaveta e total_financiadoras
       try {
-        await supabase
+        const fechamentoGerencialPayload = {
+          empresa_id: targetEmpresaId,
+          filial_id: modalDetalheCaixa.filial_id,
+          vendedor_id: targetOperadorId,
+          caixa_id: modalDetalheCaixa.id || null,
+          valor_dinheiro: valDinheiro,
+          valor_cartao: valCartao,
+          valor_pix: valPix,
+          valor_boleto: valOutros,
+          valor_troca: 0,
+          total_dinheiro_gaveta: valDinheiro,
+          total_financiadoras: valOutros,
+          qtd_transferencias_saida: 0,
+          qtd_transferencias_entrada: 0,
+          comprovante_url: null,
+          observacoes: obsFinal
+        };
+
+        const { error: insErr } = await supabase
           .from('fechamentos')
-          .insert({
-            empresa_id: targetEmpresaId,
-            filial_id: modalDetalheCaixa.filial_id,
-            vendedor_id: targetOperadorId,
-            caixa_id: modalDetalheCaixa.id || null,
-            valor_dinheiro: valDinheiro,
-            valor_cartao: valCartao,
-            valor_pix: valPix,
-            valor_boleto: valOutros,
-            valor_troca: 0,
-            qtd_transferencias_saida: 0,
-            qtd_transferencias_entrada: 0,
-            comprovante_url: null,
-            observacoes: obsFinal
-          });
+          .insert(fechamentoGerencialPayload);
+
+        if (insErr && (insErr.message?.includes('total_dinheiro_gaveta') || insErr.message?.includes('total_financiadoras'))) {
+          const fallbackGerencial = { ...fechamentoGerencialPayload };
+          delete fallbackGerencial.total_dinheiro_gaveta;
+          delete fallbackGerencial.total_financiadoras;
+          await supabase.from('fechamentos').insert(fallbackGerencial);
+        }
       } catch (insertFechErr) {
         console.warn('[Dashboard] Aviso ao registrar em fechamentos:', insertFechErr);
       }
@@ -8852,9 +8868,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // 1.1 Atualizar também na tabela vendas_pagamentos vinculada
       try {
+        const isBoletoMetodo = novoMetodo === 'Boleto' || novoMetodo === 'Crediário / Carnê' || novoMetodo?.toLowerCase() === 'boleto';
         const pagUpdatePayload = {
-          metodo_pagamento: novoMetodo === 'Boleto' || novoMetodo === 'Crediário / Carnê' ? 'BOLETO' : (novoMetodo === 'Cartão de Crédito' ? 'CARTAO_CREDITO' : (novoMetodo === 'Cartão de Débito' ? 'CARTAO_DEBITO' : (novoMetodo === 'Dinheiro' ? 'DINHEIRO' : novoMetodo))),
-          valor_pago: novoValor
+          metodo_pagamento: isBoletoMetodo ? 'BOLETO' : (novoMetodo === 'Cartão de Crédito' ? 'CARTAO_CREDITO' : (novoMetodo === 'Cartão de Débito' ? 'CARTAO_DEBITO' : (novoMetodo === 'Dinheiro' ? 'DINHEIRO' : novoMetodo))),
+          valor_pago: novoValor,
+          financeira: isBoletoMetodo ? resolvedFinanceira : null,
+          status_repasse: isBoletoMetodo ? 'PENDENTE' : null
         };
         if (resolvedFinanceira) {
           pagUpdatePayload.metodo_detalhe = resolvedFinanceira;
@@ -8864,11 +8883,15 @@ export default function Dashboard({ session, profileDataProps }) {
           .update(pagUpdatePayload)
           .eq('venda_id', vendaId);
 
-        if (vpUpdateErr && vpUpdateErr.message?.includes('metodo_detalhe')) {
-          delete pagUpdatePayload.metodo_detalhe;
+        if (vpUpdateErr) {
+          console.warn('Tentando fallback de update em vendas_pagamentos:', vpUpdateErr);
+          const fallbackPagPayload = { ...pagUpdatePayload };
+          if (vpUpdateErr.message?.includes('metodo_detalhe')) delete fallbackPagPayload.metodo_detalhe;
+          if (vpUpdateErr.message?.includes('financeira')) delete fallbackPagPayload.financeira;
+          if (vpUpdateErr.message?.includes('status_repasse')) delete fallbackPagPayload.status_repasse;
           await supabase
             .from('vendas_pagamentos')
-            .update(pagUpdatePayload)
+            .update(fallbackPagPayload)
             .eq('venda_id', vendaId);
         }
       } catch (vpErr) {
@@ -12363,6 +12386,7 @@ export default function Dashboard({ session, profileDataProps }) {
             metodo_pagamento: metodoEfetivo,
             forma_pagamento: metodoEfetivo,
             parcelas: parcelasEfetivo,
+            financeira: (metodoEfetivo?.toLowerCase() === 'boleto' || metodoEfetivo?.toLowerCase() === 'crediario') ? resolvedFinanceira : null,
             financeira_parceira: resolvedFinanceira,
             valor_pago: actualValorPago,
             status_pagamento: pdvStatusPagamento,
@@ -12440,21 +12464,27 @@ export default function Dashboard({ session, profileDataProps }) {
                 'troca': 'TROCA'
               };
               const metodoResolved = mapMetodo[pag.metodo?.toLowerCase()] || 'DINHEIRO';
+              const isBoletoPag = metodoResolved === 'BOLETO' || pag.metodo?.toUpperCase() === 'BOLETO';
               const vpPayload = {
                 venda_id: rpcRes.venda_id,
                 valor_pago: pag.valor,
                 metodo_pagamento: metodoResolved,
                 parcelas: (pag.metodo === 'cartao_credito' || pag.metodo === 'cartao') ? (pag.parcelas || 1) : 1,
+                financeira: isBoletoPag ? (pag.financeira || pag.metodo_detalhe || null) : null,
+                status_repasse: isBoletoPag ? 'PENDENTE' : null,
                 tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
               };
               if (pag.metodo_detalhe || pag.financeira) {
                 vpPayload.metodo_detalhe = pag.metodo_detalhe || pag.financeira;
               }
               const { error: vpErr } = await supabase.from('vendas_pagamentos').insert(vpPayload);
-              if (vpErr && vpErr.message?.includes('metodo_detalhe')) {
-                // Fallback caso a coluna metodo_detalhe não exista na tabela vendas_pagamentos
-                delete vpPayload.metodo_detalhe;
-                await supabase.from('vendas_pagamentos').insert(vpPayload);
+              if (vpErr) {
+                console.warn('Fallback insert em vendas_pagamentos:', vpErr);
+                const fallbackVpPayload = { ...vpPayload };
+                if (vpErr.message?.includes('metodo_detalhe')) delete fallbackVpPayload.metodo_detalhe;
+                if (vpErr.message?.includes('financeira')) delete fallbackVpPayload.financeira;
+                if (vpErr.message?.includes('status_repasse')) delete fallbackVpPayload.status_repasse;
+                await supabase.from('vendas_pagamentos').insert(fallbackVpPayload);
               }
             }
           } else if (actualValorPago > 0) {
@@ -12468,13 +12498,28 @@ export default function Dashboard({ session, profileDataProps }) {
               'troca': 'TROCA'
             };
             const metodoResolved = mapMetodo[metodoEfetivo?.toLowerCase()] || 'DINHEIRO';
-            await supabase.from('vendas_pagamentos').insert({
+            const isBoletoSingle = metodoResolved === 'BOLETO';
+            const vpSinglePayload = {
               venda_id: rpcRes.venda_id,
               valor_pago: actualValorPago,
               metodo_pagamento: metodoResolved,
               parcelas: isCartaoEfetivo ? (parcelasEfetivo || 1) : 1,
+              financeira: isBoletoSingle ? resolvedFinanceira : null,
+              status_repasse: isBoletoSingle ? 'PENDENTE' : null,
               tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
-            });
+            };
+            if (isBoletoSingle && resolvedFinanceira) {
+              vpSinglePayload.metodo_detalhe = resolvedFinanceira;
+            }
+            const { error: vpSingleErr } = await supabase.from('vendas_pagamentos').insert(vpSinglePayload);
+            if (vpSingleErr) {
+              console.warn('Fallback insert single em vendas_pagamentos:', vpSingleErr);
+              const fallbackVpSingle = { ...vpSinglePayload };
+              if (vpSingleErr.message?.includes('metodo_detalhe')) delete fallbackVpSingle.metodo_detalhe;
+              if (vpSingleErr.message?.includes('financeira')) delete fallbackVpSingle.financeira;
+              if (vpSingleErr.message?.includes('status_repasse')) delete fallbackVpSingle.status_repasse;
+              await supabase.from('vendas_pagamentos').insert(fallbackVpSingle);
+            }
           }
         } catch (clientUpdateErr) {
           console.error('Erro ao atualizar dados estendidos e pagamentos na venda:', clientUpdateErr);
@@ -13187,6 +13232,7 @@ export default function Dashboard({ session, profileDataProps }) {
     let pix = 0;
     let boleto = 0;
     let troca = 0;
+    const contratosFinanciadoras = {};
 
     const sourceSales = (vendasVendedor && vendasVendedor.length > 0) ? vendasVendedor : (vendas || []);
 
@@ -13207,6 +13253,8 @@ export default function Dashboard({ session, profileDataProps }) {
           pix += val;
         } else if (mp === 'boleto') {
           boleto += val;
+          const finNome = (sale.financeira || sale.financeira_parceira || sale.metodo_detalhe || 'Outra').trim();
+          contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + val;
         } else if (mp === 'troca') {
           troca += val;
         } else {
@@ -13225,6 +13273,8 @@ export default function Dashboard({ session, profileDataProps }) {
       pix: Number(pix.toFixed(2)),
       boleto: Number(boleto.toFixed(2)),
       troca: Number(troca.toFixed(2)),
+      contratosFinanciadoras,
+      totalFinanciadoras: Number(boleto.toFixed(2)),
       total: Number((especie + cartao + pix + boleto + troca).toFixed(2))
     };
   }, [vendasVendedor, vendas, activeFilialId]);
@@ -13265,23 +13315,36 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const dataFechamentoISO = new Date().toISOString();
 
-      // 1. Inserir registro detalhado na tabela fechamentos
-      const { error } = await supabase
+      // 1. Inserir registro detalhado na tabela fechamentos com total_dinheiro_gaveta e total_financiadoras
+      const fechamentoPayload = {
+        empresa_id: profile.empresa_id,
+        filial_id: activeFilialId,
+        vendedor_id: session.user.id,
+        valor_dinheiro: dinero,
+        valor_cartao: cartao,
+        valor_pix: pix,
+        valor_boleto: boleto,
+        valor_troca: troca,
+        total_dinheiro_gaveta: dinero,
+        total_financiadoras: boleto,
+        qtd_transferencias_saida: fechamentoQtdSaida,
+        qtd_transferencias_entrada: fechamentoQtdEntrada,
+        comprovante_url: fechamentoComprovante,
+        observacoes: fechamentoObs
+      };
+
+      let { error } = await supabase
         .from('fechamentos')
-        .insert({
-          empresa_id: profile.empresa_id,
-          filial_id: activeFilialId,
-          vendedor_id: session.user.id,
-          valor_dinheiro: dinero,
-          valor_cartao: cartao,
-          valor_pix: pix,
-          valor_boleto: boleto,
-          valor_troca: troca,
-          qtd_transferencias_saida: fechamentoQtdSaida,
-          qtd_transferencias_entrada: fechamentoQtdEntrada,
-          comprovante_url: fechamentoComprovante,
-          observacoes: fechamentoObs
-        });
+        .insert(fechamentoPayload);
+
+      if (error && (error.message?.includes('total_dinheiro_gaveta') || error.message?.includes('total_financiadoras'))) {
+        console.warn('Fallback fechamentos sem colunas novas:', error);
+        const fallbackFechamento = { ...fechamentoPayload };
+        delete fallbackFechamento.total_dinheiro_gaveta;
+        delete fallbackFechamento.total_financiadoras;
+        const resFallback = await supabase.from('fechamentos').insert(fallbackFechamento);
+        error = resFallback.error;
+      }
 
       if (error) throw error;
 
@@ -23950,7 +24013,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             <div className="grid grid-cols-3 gap-4">
                               <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                  Espécie (R$)
+                                  Total em Gaveta / Dinheiro Físico (R$)
                                 </label>
                                 <input
                                   type="number"
@@ -23961,6 +24024,7 @@ export default function Dashboard({ session, profileDataProps }) {
                                   className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
                                   placeholder="0.00"
                                 />
+                                <span className="text-[9px] text-gray-500 mt-0.5 block">Apenas cédulas/moedas</span>
                               </div>
                               <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
@@ -23992,7 +24056,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               </div>
                               <div>
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                  Boleto (R$)
+                                  Boleto / Financiadoras (R$)
                                 </label>
                                 <input
                                   type="number"
@@ -24018,6 +24082,45 @@ export default function Dashboard({ session, profileDataProps }) {
                                   placeholder="0.00"
                                 />
                               </div>
+                            </div>
+
+                            {/* CARD INFORMATIVO DE CONTRATOS (FINANCIADORAS) */}
+                            <div className="bg-[#111115] border border-purple-900/40 rounded-xl p-4 space-y-2.5 shadow-sm">
+                              <div className="flex items-center justify-between border-b border-purple-900/30 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <FileText size={15} className="text-purple-400" />
+                                  <h4 className="text-xs font-bold text-purple-200">
+                                    Contratos de Financiadoras (Previsão de Repasse Bancário)
+                                  </h4>
+                                </div>
+                                <span className="font-mono font-extrabold text-xs text-purple-300 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/40">
+                                  Total: R$ {(vendasEsperadasHoje.totalFinanciadoras || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+
+                              {/* Somatório do turno agrupado por financeira */}
+                              {Object.keys(vendasEsperadasHoje.contratosFinanciadoras || {}).length > 0 ? (
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                                  {Object.entries(vendasEsperadasHoje.contratosFinanciadoras).map(([finNome, finTotal]) => (
+                                    <div key={finNome} className="bg-black/50 border border-purple-900/30 px-2.5 py-1.5 rounded-lg flex items-center justify-between">
+                                      <span className="text-[11px] font-bold text-gray-300">{finNome}:</span>
+                                      <span className="text-[11px] font-mono font-black text-emerald-400">
+                                        R$ {Number(finTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-[11px] text-gray-500 italic py-1">
+                                  Nenhum contrato de financiadora registrado no turno de hoje.
+                                </p>
+                              )}
+
+                              {/* Texto explicativo sutil */}
+                              <p className="text-[10px] text-gray-400/90 leading-tight pt-1 border-t border-purple-900/20 flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0"></span>
+                                <span>Valores repassados mensalmente via depósito em conta bancária PJ. (Não compõem dinheiro físico na gaveta)</span>
+                              </p>
                             </div>
 
                             {/* Comprovante Upload */}
@@ -24715,6 +24818,29 @@ export default function Dashboard({ session, profileDataProps }) {
                                 R$ {(Number(modalDetalheCaixa.saldo_inicial || 0) + totaisVendasSessaoDetalhe.dinheiro).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                               </strong>
                             </div>
+
+                            {/* Contratos de Financiadoras (Turno Gerencial) */}
+                            {totaisVendasSessaoDetalhe.totalFinanciadoras > 0 && (
+                              <div className="bg-purple-950/20 border border-purple-800/30 rounded-lg p-2.5 mt-2 space-y-1.5">
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="font-bold text-purple-300">Contratos de Financiadoras (Previsão de Repasse PJ):</span>
+                                  <strong className="text-purple-200 font-mono">
+                                    R$ {totaisVendasSessaoDetalhe.totalFinanciadoras.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </strong>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                                  {Object.entries(totaisVendasSessaoDetalhe.contratosFinanciadoras || {}).map(([fin, val]) => (
+                                    <div key={fin} className="flex items-center justify-between bg-black/40 px-2 py-1 rounded text-[10px]">
+                                      <span className="text-gray-300 font-medium">{fin}:</span>
+                                      <span className="text-emerald-400 font-mono font-bold">R$ {Number(val).toFixed(2)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="text-[9px] text-gray-500 italic pt-0.5">
+                                  Valores repassados mensalmente via depósito em conta bancária PJ.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : (
