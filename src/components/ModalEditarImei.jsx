@@ -253,6 +253,10 @@ export default function ModalEditarImei({
           dataVendaIso = new Date().toISOString();
         }
 
+        // Identificar o nome do vendedor para garantir consistência no banco
+        const vendedorObj = (vendedores || []).find(v => String(v.id) === String(vendedorSelecionadoId));
+        const vendedorNomeResolvido = vendedorObj?.nome || vendedorObj?.name || 'Vendedor';
+
         // Chamar a RPC no Supabase
         const { data, error } = await supabase.rpc('baixar_imei_como_vendido', {
           p_imei: imeiParaRpc,
@@ -266,6 +270,33 @@ export default function ModalEditarImei({
           console.error("[ModalEditarImei] Erro na RPC baixar_imei_como_vendido:", error);
           triggerToast(error.message || "Erro ao registrar venda do aparelho.", 'error');
           return;
+        }
+
+        // Garantir que a venda gerada tenha simultaneamente vendedor_id e vendedor_nome
+        try {
+          const vendaCriadaId = data?.venda_id || data?.id || (typeof data === 'string' && data.length > 10 ? data : null);
+          if (vendaCriadaId) {
+            await supabase
+              .from('vendas')
+              .update({
+                vendedor_id: vendedorSelecionadoId,
+                vendedor_nome: vendedorNomeResolvido
+              })
+              .eq('id', vendaCriadaId);
+          } else {
+            // Fallback caso a RPC retorne status booleano: atualiza a venda mais recente deste IMEI
+            await supabase
+              .from('vendas')
+              .update({
+                vendedor_id: vendedorSelecionadoId,
+                vendedor_nome: vendedorNomeResolvido
+              })
+              .or(`imei.eq.${imeiParaRpc},imei_novo.eq.${imeiParaRpc}`)
+              .order('created_at', { ascending: false })
+              .limit(1);
+          }
+        } catch (syncVendaErr) {
+          console.warn("[ModalEditarImei] Aviso ao garantir sincronização de vendedor_id e vendedor_nome na venda:", syncVendaErr);
         }
 
         // Se a cor também foi editada, atualizar a cor no banco

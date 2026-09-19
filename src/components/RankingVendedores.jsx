@@ -130,40 +130,40 @@ export default function RankingVendedores({
       return String(v.filial_id) === String(filtroFilial);
     });
 
-    // 1. Agrupamento rigoroso por vendedor_id (Map/Reduce)
+    // 1. Agrupamento rigoroso por vendedor com fallback seguro (Map/Reduce)
     const rankingMap = {};
 
     vendasFiltradas.forEach(v => {
-      const key = v.vendedor_id ? String(v.vendedor_id) : 'sem_vendedor';
+      const vendedorId = v.vendedor_id;
+      // Buscar o perfil correspondente na lista de profiles carregada da filial/empresa
+      const perfil = (vendedores || []).find(p => vendedorId && String(p.id) === String(vendedorId));
+      
+      // Fallback Seguro: Só categorizar como 'Vendas de Balcão / Sem Vendedor' se TANTO v.vendedor_id QUANTO v.vendedor_nome forem nulos ou vazios
+      const isSemVendedor = !vendedorId && (!v.vendedor_nome || !v.vendedor_nome.trim());
+      const nomeExibicao = (v.vendedor_nome && v.vendedor_nome.trim()) || perfil?.nome || (vendedorId ? 'Vendedor Cadastrado' : 'Vendas de Balcão / Sem Vendedor');
+      
+      // Chave única para o mapa
+      const key = vendedorId ? String(vendedorId) : (isSemVendedor ? 'sem_vendedor' : `nome_${v.vendedor_nome.trim().toLowerCase()}`);
       const val = parseFloat(v.valor_total || v.valor_vendido || v.total || (v.preco * v.quantidade) || v.valor_pago || 0);
       const safeVal = isNaN(val) ? 0 : val;
       const comissaoVend = parseFloat(v.comissao || 0);
 
       if (!rankingMap[key]) {
-        let vendedorNome = 'Vendas de Balcão / Sem Vendedor';
-        let vendedorCargo = 'Balcão / Geral';
-        let filialIdColab = v.filial_id || null;
-
-        if (key !== 'sem_vendedor') {
-          const profile = (vendedores || []).find(p => String(p.id) === key);
-          vendedorNome = profile?.nome || (v.profiles?.nome) || 'Vendedor';
-          vendedorCargo = profile?.role === 'TRAINEE' || profile?.is_treinner ? 'Trainee' : 'Profissional';
-          filialIdColab = profile?.filial_id || v.filial_id;
-        }
-
+        let vendedorCargo = isSemVendedor ? 'Balcão / Geral' : ((perfil?.role === 'TRAINEE' || perfil?.is_treinner) ? 'Trainee' : 'Profissional');
+        let filialIdColab = perfil?.filial_id || v.filial_id || null;
         const filialObj = filiais?.find(f => String(f.id) === String(filialIdColab));
 
         rankingMap[key] = {
-          id: key,
-          nome: vendedorNome,
+          id: vendedorId || key,
+          nome: nomeExibicao,
           cargo: vendedorCargo,
           filial_id: filialIdColab,
-          filialNome: filialObj?.nome || (key === 'sem_vendedor' ? 'Balcão' : 'Rede Cred'),
+          filialNome: filialObj?.nome || (isSemVendedor ? 'Balcão' : 'Rede Cred'),
           transacoes: 0,
           volume: 0,
           ticketMedio: 0,
           comissaoAcumulada: 0,
-          isSemVendedor: key === 'sem_vendedor'
+          isSemVendedor: isSemVendedor
         };
       }
 

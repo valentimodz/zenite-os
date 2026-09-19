@@ -12366,6 +12366,15 @@ export default function Dashboard({ session, profileDataProps }) {
             throw new Error("Tentativa de venda sem vendedor logado.");
           }
 
+          const resolvedVendedorNome = (
+            profile?.nome ||
+            (vendedores || []).find(v => String(v.id) === String(vendedor_id))?.nome ||
+            (teamMembers || []).find(m => String(m.id) === String(vendedor_id))?.nome ||
+            session?.user?.user_metadata?.nome ||
+            session?.user?.email?.split('@')[0] ||
+            'Vendedor'
+          ).trim();
+
           const payloadVendaUpdate = {
             empresa_id: empresaId,
             filial_id: activeFilialId,
@@ -12381,7 +12390,7 @@ export default function Dashboard({ session, profileDataProps }) {
             vendedor_id: vendedor_id,
             usuario_id: vendedor_id,
             criado_por: vendedor_id,
-            vendedor_nome: profile?.nome || session?.user?.email || 'Vendedor',
+            vendedor_nome: resolvedVendedorNome,
             treener_id: selectedTreenerId || null,
             metodo_pagamento: metodoEfetivo,
             forma_pagamento: metodoEfetivo,
@@ -19844,16 +19853,17 @@ export default function Dashboard({ session, profileDataProps }) {
                           // Agrupamento por Vendedor com Ticket Médio e Comissões Geradas
                           const vendedorMap = {};
                           vendasMes.forEach(s => {
-                            const key = s.vendedor_id ? String(s.vendedor_id) : 'sem_vendedor';
-                            const profileMatch = s.vendedor_id
-                              ? (teamMembers || []).find(p => String(p.id) === String(s.vendedor_id)) || (vendedores || []).find(p => String(p.id) === String(s.vendedor_id))
-                              : null;
-                            const vNome = s.vendedor_id
-                              ? (profileMatch?.nome || s.profiles?.nome || s.vendedor?.nome || 'Vendedor')
-                              : 'Vendas de Balcão / Sem Vendedor';
+                            const vendedorId = s.vendedor_id;
+                            const profileMatch = (teamMembers || []).find(p => vendedorId && String(p.id) === String(vendedorId)) ||
+                              (vendedores || []).find(p => vendedorId && String(p.id) === String(vendedorId));
+
+                            // Fallback Seguro: Só categorizar como 'Vendas de Balcão / Sem Vendedor' se TANTO s.vendedor_id QUANTO s.vendedor_nome forem nulos ou vazios
+                            const isSemVendedor = !vendedorId && (!s.vendedor_nome || !s.vendedor_nome.trim());
+                            const nomeExibicao = (s.vendedor_nome && s.vendedor_nome.trim()) || profileMatch?.nome || (vendedorId ? 'Vendedor Cadastrado' : 'Vendas de Balcão / Sem Vendedor');
+                            const key = vendedorId ? String(vendedorId) : (isSemVendedor ? 'sem_vendedor' : `nome_${s.vendedor_nome.trim().toLowerCase()}`);
 
                             if (!vendedorMap[key]) {
-                              vendedorMap[key] = { id: key, nome: vNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
+                              vendedorMap[key] = { id: vendedorId || key, nome: nomeExibicao, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
                             }
                             const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
                             vendedorMap[key].totalVendido += val;
