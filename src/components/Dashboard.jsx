@@ -2949,15 +2949,36 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let qVendas = supabase
           .from('vendas')
-          .select('id, empresa_id, filial_id, vendedor_id, produto_id, produto_nome, quantidade, preco, valor_total, desconto, valor_desconto, percentual_desconto, cliente_nome, created_at')
+          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
           .order('created_at', { ascending: false })
           .limit(200);
-        if (targetEmpresaId) {
+
+        const isGerenteAudit = (profile?.role || '').toUpperCase() === 'GERENTE';
+        const gerenteFilialAudit = profile?.filial_id || activeFilialId;
+
+        if (isGerenteAudit && gerenteFilialAudit) {
+          qVendas = qVendas.eq('filial_id', gerenteFilialAudit);
+        } else if (targetEmpresaId) {
           qVendas = qVendas.eq('empresa_id', targetEmpresaId);
         }
-        let { data: vendasData } = await qVendas;
+        let { data: vendasData, error: vendasErr } = await qVendas;
+
+        if (isGerenteAudit && (!vendasData || vendasData.length === 0 || vendasErr) && targetEmpresaId) {
+          const { data: fbAudit } = await supabase
+            .from('vendas')
+            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+            .eq('empresa_id', targetEmpresaId)
+            .gte('created_at', dtInicio)
+            .lte('created_at', dtFim)
+            .order('created_at', { ascending: false })
+            .limit(200);
+          if (fbAudit && fbAudit.length > 0) {
+            vendasData = fbAudit;
+            vendasErr = null;
+          }
+        }
 
         console.log('Vendas encontradas:', vendasData || []);
 
@@ -3802,31 +3823,64 @@ export default function Dashboard({ session, profileDataProps }) {
         }
 
         try {
-          const isDono = ['DONO', 'OWNER'].includes(profile?.role);
+          const isDono = ['DONO', 'OWNER', 'SUPER_ADMIN'].includes(profile?.role);
+          const isGerente = (profile?.role || '').toUpperCase() === 'GERENTE';
+          const gerenteFilialId = profile?.filial_id || activeFilialId;
+
           let q = supabase
             .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
-            .gte('created_at', dtInicio)
-            .lte('created_at', dtFim)
+            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
             .order('created_at', { ascending: false });
 
-          if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+          if (dtInicio) q = q.gte('created_at', dtInicio);
+          if (dtFim) q = q.lte('created_at', dtFim);
+
+          if (isGerente && gerenteFilialId) {
+            // Respeita filial autorizada do perfil GERENTE
+            q = q.eq('filial_id', gerenteFilialId);
+          } else if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
             q = q.eq('empresa_id', empresaId);
           }
 
-          let { data: dbSales, error: dbErr } = await q;
+          let { data, error } = await q;
 
-          if (dbErr || !dbSales || dbSales.length === 0) {
-            const { data: fallbackSales } = await supabase
+          // Se for GERENTE e a query restrita por filial não retornar dados ou der erro, tentar fallback com empresa_id sem bloquear a visualização
+          if (isGerente && (!data || data.length === 0 || error) && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
+            let fbGerenteQ = supabase
               .from('vendas')
-              .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
-              .order('created_at', { ascending: false })
-              .limit(100);
-            dbSales = fallbackSales || [];
+              .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+              .eq('empresa_id', empresaId)
+              .order('created_at', { ascending: false });
+            if (dtInicio) fbGerenteQ = fbGerenteQ.gte('created_at', dtInicio);
+            if (dtFim) fbGerenteQ = fbGerenteQ.lte('created_at', dtFim);
+
+            const { data: fbData, error: fbErr } = await fbGerenteQ;
+            if (!fbErr && fbData && fbData.length > 0) {
+              data = fbData;
+              error = null;
+            }
           }
 
-          console.log('DEBUG VENDAS RETORNADAS:', dbSales || []);
-          return dbSales || [];
+          // Fallback seguro caso o range de mês esteja vazio (traz os registros recentes)
+          if (!data || data.length === 0 || error) {
+            let fallbackQ = supabase
+              .from('vendas')
+              .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+              .order('created_at', { ascending: false })
+              .limit(100);
+
+            if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
+              fallbackQ = fallbackQ.eq('empresa_id', empresaId);
+            }
+
+            const { data: fallbackSales } = await fallbackQ;
+            if (fallbackSales && fallbackSales.length > 0) {
+              data = fallbackSales;
+            }
+          }
+
+          console.log('DEBUG VENDAS RETORNADAS:', data || []);
+          return data || [];
         } catch (err) {
           console.error("[Dashboard] Erro ao buscar vendas no Supabase:", err);
           return [];

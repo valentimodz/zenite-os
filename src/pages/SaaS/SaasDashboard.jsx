@@ -51,9 +51,9 @@ export default function SaasDashboard({
       const inativas = Math.max(0, total - ativas);
 
       let faturamentoTotal = propVolume;
-      const { data: vendasData } = await supabase.from('vendas').select('valor_total, valor');
+      const { data: vendasData } = await supabase.from('vendas').select('valor_total');
       if (vendasData && vendasData.length > 0) {
-        faturamentoTotal = vendasData.reduce((acc, curr) => acc + (Number(curr.valor_total || curr.valor || 0)), 0);
+        faturamentoTotal = vendasData.reduce((acc, curr) => acc + (Number(curr.valor_total || 0)), 0);
       }
 
       setMetricas({
@@ -83,7 +83,7 @@ export default function SaasDashboard({
       const dataCorte = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
       const { data: vendsData } = await supabase
         .from('vendas')
-        .select('id, produto_id, produto_nome, quantidade, preco, valor_total, created_at')
+        .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
         .gte('created_at', dataCorte)
         .order('created_at', { ascending: false })
         .limit(1000);

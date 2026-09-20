@@ -46,7 +46,7 @@ export default function RankingVendedores({
 
       let query = supabase
         .from('vendas')
-        .select('id, vendedor_id, vendedor_nome, valor_total, valor_vendido, total, valor_pago, preco, quantidade, comissao, comissao_trainee, treener_id, trainee_id, teve_participacao_trainee, filial_id, created_at')
+        .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
         .gte('created_at', dataInicio)
         .lte('created_at', dataFim)
         .order('created_at', { ascending: false });
