@@ -109,7 +109,7 @@ export default function ModalDetalheRelatorio({
         // 1. Buscar vendas com filtros no range de datas
         let queryVendas = supabase
           .from('vendas')
-          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
           .order('created_at', { ascending: false });
 
         if (dataInicioISO) {

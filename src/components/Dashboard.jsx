@@ -2909,7 +2909,7 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let qVendas = supabase
           .from('vendas')
-          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
           .order('created_at', { ascending: false })
@@ -2928,7 +2928,7 @@ export default function Dashboard({ session, profileDataProps }) {
         if (isGerenteAudit && (!vendasData || vendasData.length === 0 || vendasErr) && targetEmpresaId) {
           const { data: fbAudit } = await supabase
             .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
             .eq('empresa_id', targetEmpresaId)
             .gte('created_at', dtInicio)
             .lte('created_at', dtFim)
@@ -3759,12 +3759,13 @@ export default function Dashboard({ session, profileDataProps }) {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const token = currentSession?.access_token;
 
-      // Range dinâmico baseado no seletor de mês
+      // Range dinâmico baseado no seletor de mês abrangendo todo o mês (ex: 2026-09)
       const [anoStr, mesStr] = selectedMonth.split('-');
       const anoNum = parseInt(anoStr, 10);
       const mesNum = parseInt(mesStr, 10);
-      const dtInicio = new Date(anoNum, mesNum - 1, 1, 0, 0, 0, 0).toISOString();
-      const dtFim = new Date(anoNum, mesNum, 0, 23, 59, 59, 999).toISOString();
+      const dtInicio = `${selectedMonth}-01T00:00:00.000Z`;
+      const endDay = new Date(Date.UTC(anoNum, mesNum, 0)).getUTCDate();
+      const dtFim = `${selectedMonth}-${String(endDay).padStart(2, '0')}T23:59:59.999Z`;
 
       const fetchSales = async () => {
         try {
@@ -3772,9 +3773,27 @@ export default function Dashboard({ session, profileDataProps }) {
           const isGerente = (profile?.role || '').toUpperCase() === 'GERENTE';
           const gerenteFilialId = profile?.filial_id || activeFilialId;
 
+          // Consulta principal diretamente da tabela vendas sem INNER JOIN obrigatório (LEFT JOIN nativo)
+          const vendasSelectStr = `
+            id,
+            created_at,
+            vendedor_nome,
+            vendedor_id,
+            valor_total,
+            metodo_pagamento,
+            filial_id,
+            empresa_id,
+            quantidade,
+            comissao,
+            produto_nome,
+            cliente_nome,
+            filiais ( nome ),
+            itens_venda ( id, produto_nome, quantidade )
+          `;
+
           let q = supabase
             .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+            .select(vendasSelectStr)
             .order('created_at', { ascending: false });
 
           if (dtInicio) q = q.gte('created_at', dtInicio);
@@ -3793,7 +3812,7 @@ export default function Dashboard({ session, profileDataProps }) {
           if (isGerente && (!data || data.length === 0 || error) && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
             let fbGerenteQ = supabase
               .from('vendas')
-              .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+              .select(vendasSelectStr)
               .eq('empresa_id', empresaId)
               .order('created_at', { ascending: false });
             if (dtInicio) fbGerenteQ = fbGerenteQ.gte('created_at', dtInicio);
@@ -3810,7 +3829,7 @@ export default function Dashboard({ session, profileDataProps }) {
           if (!data || data.length === 0 || error) {
             let fallbackQ = supabase
               .from('vendas')
-              .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+              .select(vendasSelectStr)
               .order('created_at', { ascending: false })
               .limit(100);
 
@@ -3824,7 +3843,6 @@ export default function Dashboard({ session, profileDataProps }) {
             }
           }
 
-          console.log('DEBUG VENDAS RETORNADAS:', data || []);
           return data || [];
         } catch (err) {
           console.error("[Dashboard] Erro ao buscar vendas no Supabase:", err);
@@ -4452,7 +4470,7 @@ export default function Dashboard({ session, profileDataProps }) {
         try {
           const { data: dbSales, error: dbSalesErr } = await supabase
             .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
             .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
             .order('created_at', { ascending: false })
             .limit(100);
@@ -23272,25 +23290,46 @@ export default function Dashboard({ session, profileDataProps }) {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#222222]/50">
-                            {vendas.filter(sale => {
-                              const date = new Date(sale.created_at);
-                              const [year, month] = filtroMes.split('-');
-                              return date.getMonth() === parseInt(month, 10) - 1 && date.getFullYear() === parseInt(year, 10);
-                            }).length === 0 ? (
-                              <tr>
-                                <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 10 : 9} className="py-6 text-center italic text-gray-600">Nenhuma venda faturada neste mês.</td>
-                              </tr>
-                            ) : (
-                              vendas.filter(sale => {
-                                const date = new Date(sale.created_at);
-                                const [year, month] = filtroMes.split('-');
-                                return date.getMonth() === parseInt(month, 10) - 1 && date.getFullYear() === parseInt(year, 10);
-                              }).map(sale => {
-                                const sellerObj = teamMembers.find(m => String(m.id) === String(sale.vendedor_id));
-                                const vendedorNome = sale.vendedor_nome || sale.vendedor?.nome || sale.profiles?.nome || sellerObj?.nome || sellerObj?.email || (sale.vendedor_id ? `Vendedor #${String(sale.vendedor_id).substring(0, 6)}` : 'Vendedor');
+                            {(() => {
+                              const vendasFiltradasMes = (vendas || []).filter(sale => {
+                                if (!filtroMes) return true;
+                                const raw = String(sale.created_at || sale.data || '');
+                                if (raw.startsWith(filtroMes)) return true;
+                                if (!raw) return true;
+                                const d = new Date(raw);
+                                if (isNaN(d.getTime())) return false;
+                                const [yearStr, monthStr] = filtroMes.split('-');
+                                const y = parseInt(yearStr, 10);
+                                const m = parseInt(monthStr, 10);
+                                // Abrange todo o mês de setembro de 2026 em UTC e horário local
+                                return (d.getUTCFullYear() === y && (d.getUTCMonth() + 1) === m) ||
+                                       (d.getFullYear() === y && (d.getMonth() + 1) === m);
+                              });
 
+                              if (vendasFiltradasMes.length === 0) {
+                                return (
+                                  <tr>
+                                    <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 10 : 9} className="py-6 text-center italic text-gray-600">
+                                      Nenhuma venda faturada neste mês.
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              return vendasFiltradasMes.map(sale => {
+                                // 1. Coluna VENDEDOR: exibir venda.vendedor_nome || 'Venda Balcão'
+                                const vendedorNome = sale.vendedor_nome || sale.vendedor?.nome || sale.profiles?.nome || 'Venda Balcão';
+
+                                // 2. Coluna PRODUTO: exibir o nome do primeiro item de itens_venda ou, caso o array esteja vazio, exibir 'Venda Direta / Aparelho'
+                                const primeiroItemNome = Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0
+                                  ? (sale.itens_venda[0]?.produto_nome || sale.itens_venda[0]?.nome)
+                                  : null;
                                 const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
-                                const produtoNome = sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || prodObj?.nome || (sale.produto_id ? `Produto #${String(sale.produto_id).substring(0, 6)}` : 'Produto Geral');
+                                const produtoNome = primeiroItemNome || sale.produto_nome || prodObj?.nome || 'Venda Direta / Aparelho';
+
+                                // 3. Coluna FILIAL: exibir venda.filiais?.nome || 'Monkey Shop'
+                                const filialNome = sale.filiais?.nome || filiais.find(f => f.id === sale.filial_id)?.nome || 'Monkey Shop';
+
                                 const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
                                 const comissaoFinal = calcularComissaoItem(sale);
 
@@ -23301,16 +23340,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                     </td>
                                     <td className="py-3 font-semibold text-white print:text-black">{vendedorNome}</td>
                                     <td className="py-3 font-semibold text-white print:text-black">{produtoNome}</td>
-                                    <td className="py-3 text-gray-400">
-                                      {filiais.find(f => f.id === sale.filial_id)?.nome || 'Sem filial'}
-                                    </td>
+                                    <td className="py-3 text-gray-400">{filialNome}</td>
                                     <td className="py-3 text-gray-300">
                                       <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-[#111111] border border-[#333333] text-purple-300 uppercase">
                                         {metodoPag}
                                       </span>
                                     </td>
-                                    <td className="py-3 text-center font-bold">{sale.quantidade}</td>
-                                    <td className="py-3 font-mono font-bold text-white print:text-black">R$ {parseFloat(sale.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                    <td className="py-3 text-center font-bold">{sale.quantidade || 1}</td>
+                                    <td className="py-3 font-mono font-bold text-white print:text-black">R$ {parseFloat(sale.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                                     {['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) && (
                                       <td className="py-3 text-gray-400">
                                         {sale.autorizador?.nome || sale.desconto_autorizado_por || '-'}
@@ -23353,8 +23390,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                     </td>
                                   </tr>
                                 );
-                              })
-                            )}
+                              });
+                            })()}
                           </tbody>
                         </table>
                       </div>
