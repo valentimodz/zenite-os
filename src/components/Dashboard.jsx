@@ -2787,102 +2787,39 @@ export default function Dashboard({ session, profileDataProps }) {
     const raw = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
     const targetEmpresaId = (raw && raw !== 'MASTER' && raw !== 'undefined' && raw !== 'null') ? raw : null;
 
-    // Range dinâmico baseado no seletor de mês
+    // Range dinâmico baseado no seletor de mês abrangendo todo o mês (ex: 2026-09)
     const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
     const [anoStr, mesStr] = selectedMonth.split('-');
     const anoNum = parseInt(anoStr, 10);
     const mesNum = parseInt(mesStr, 10);
-    const dtInicio = new Date(anoNum, mesNum - 1, 1, 0, 0, 0, 0).toISOString();
-    const dtFim = new Date(anoNum, mesNum, 0, 23, 59, 59, 999).toISOString();
+    const dtInicio = `${selectedMonth}-01T00:00:00.000Z`;
+    const endDay = new Date(Date.UTC(anoNum, mesNum, 0)).getUTCDate();
+    const dtFim = `${selectedMonth}-${String(endDay).padStart(2, '0')}T23:59:59.999Z`;
 
     setIsLoadingDescontos(true);
     try {
       const allDiscountLogs = [];
 
-      // 1. Buscar da tabela 'itens_venda' usando select('*') puro (evitando HTTP 400 por colunas ausentes)
-      try {
-        let qItens = supabase
-          .from('itens_venda')
-          .select('*')
-          .gte('created_at', dtInicio)
-          .lte('created_at', dtFim)
-          .order('created_at', { ascending: false })
-          .limit(200);
-        if (targetEmpresaId) {
-          qItens = qItens.eq('empresa_id', targetEmpresaId);
-        }
-        let { data: itensData, error: itensErr } = await qItens;
-        if (itensErr && (itensErr.message?.includes('empresa_id') || itensErr.code === '42703')) {
-          // Fallback se itens_venda não tiver coluna empresa_id direta
-          const retryItens = await supabase
-            .from('itens_venda')
-            .select('*')
-            .gte('created_at', dtInicio)
-            .lte('created_at', dtFim)
-            .order('created_at', { ascending: false })
-            .limit(200);
-          itensData = retryItens.data || [];
-          itensErr = null;
-        }
-        if (!itensErr && Array.isArray(itensData) && itensData.length > 0) {
-          itensData.forEach(i => {
-            const qtd = Number(i.quantidade || 1);
-            const pBase = Number(i.preco_base || i.preco_tabela || 0);
-            const pCobrado = Number(i.preco_unitario || i.preco_unitario_vendido || i.preco || 0);
-            let valDesc = Number(i.valor_desconto || i.desconto || 0);
-            if (valDesc <= 0 && pBase > pCobrado && pBase > 0 && pCobrado > 0) {
-              valDesc = (pBase - pCobrado) * qtd;
-            }
-
-            if (valDesc > 0.001 || (pBase > 0 && pCobrado > 0 && pBase > pCobrado + 0.001)) {
-              const valTabela = pBase > 0 ? (pBase * qtd) : (Number(i.valor_total || 0) + valDesc);
-              const valFinal = Number(i.valor_total || (pCobrado * qtd));
-              const percDesc = Number(i.percentual_desconto || 0) || (valTabela > 0 ? (valDesc / valTabela) * 100 : 0);
-
-              const vObj = (vendedores || []).find(v => String(v.id) === String(i.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(i.vendedor_id));
-              const fObj = (filiais || []).find(f => String(f.id) === String(i.filial_id));
-
-              allDiscountLogs.push({
-                id: i.id,
-                venda_id: i.venda_id,
-                vendedor_id: i.vendedor_id,
-                vendedor_nome: vObj?.nome || i.vendedor_nome || 'Vendedor',
-                filial_id: i.filial_id,
-                filial_nome: fObj?.nome || i.filial_nome || 'Filial',
-                cliente_nome: i.cliente_nome || 'Cliente Consumidor',
-                itens_resumo: `${i.produto_nome || i.nome || 'Produto'} (Qtd: ${qtd})`,
-                valor_tabela: valTabela,
-                valor_final: valFinal,
-                valor_desconto: valDesc,
-                percentual_desconto: percDesc,
-                created_at: i.created_at || new Date().toISOString()
-              });
-            }
-          });
-        }
-      } catch (errItens) {
-        console.warn('[Dashboard] Aviso ao buscar itens_venda:', errItens);
-      }
-
-      // 2. Buscar da tabela 'auditoria_descontos' com colunas estritas
+      // 1. Tentar buscar da tabela 'auditoria_descontos' com select('*') protegido para não quebrar por colunas ausentes
       try {
         let qAudit = supabase
           .from('auditoria_descontos')
-          .select('id, venda_id, vendedor_id, vendedor_nome, filial_id, filial_nome, cliente_nome, itens_resumo, valor_tabela, valor_final, valor_desconto, percentual_desconto, created_at')
-          .gte('created_at', dtInicio)
-          .lte('created_at', dtFim)
+          .select('*')
           .order('created_at', { ascending: false })
           .limit(200);
-        if (targetEmpresaId) {
-          qAudit = qAudit.eq('empresa_id', targetEmpresaId);
-        }
+
+        if (dtInicio) qAudit = qAudit.gte('created_at', dtInicio);
+        if (dtFim) qAudit = qAudit.lte('created_at', dtFim);
+        if (targetEmpresaId) qAudit = qAudit.eq('empresa_id', targetEmpresaId);
+
         const { data: auditData, error: auditErr } = await qAudit;
         if (!auditErr && Array.isArray(auditData) && auditData.length > 0) {
           auditData.forEach(a => {
             const vObj = (vendedores || []).find(v => String(v.id) === String(a.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(a.vendedor_id));
             const fObj = (filiais || []).find(f => String(f.id) === String(a.filial_id));
+            const valDesc = Number(a.valor_desconto || a.desconto || 0);
 
-            if (!allDiscountLogs.some(log => log.id === a.id || (log.venda_id && a.venda_id && log.venda_id === a.venda_id))) {
+            if (valDesc > 0) {
               allDiscountLogs.push({
                 id: a.id,
                 venda_id: a.venda_id,
@@ -2891,11 +2828,11 @@ export default function Dashboard({ session, profileDataProps }) {
                 filial_id: a.filial_id,
                 filial_nome: a.filial_nome || fObj?.nome || 'Filial',
                 cliente_nome: a.cliente_nome || 'Cliente Consumidor',
-                itens_resumo: a.itens_resumo || 'Venda com desconto',
-                valor_tabela: Number(a.valor_tabela || 0),
-                valor_final: Number(a.valor_final || 0),
-                valor_desconto: Number(a.valor_desconto || 0),
-                percentual_desconto: Number(a.percentual_desconto || 0),
+                itens_resumo: a.itens_resumo || a.produto_nome || 'Venda com desconto',
+                valor_tabela: Number(a.valor_tabela || (Number(a.valor_final || a.valor_total || 0) + valDesc)),
+                valor_final: Number(a.valor_final || a.valor_total || 0),
+                valor_desconto: valDesc,
+                percentual_desconto: Number(a.percentual_desconto || (valDesc > 0 && a.valor_tabela ? (valDesc / Number(a.valor_tabela)) * 100 : 0)),
                 created_at: a.created_at || new Date().toISOString()
               });
             }
@@ -2905,100 +2842,131 @@ export default function Dashboard({ session, profileDataProps }) {
         console.warn('[Dashboard] Aviso ao buscar auditoria_descontos:', errAudit);
       }
 
-      // 3. Buscar da tabela 'vendas' usando campos estritos no período e comparar com catálogo/preços
-      try {
-        let qVendas = supabase
-          .from('vendas')
-          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
-          .gte('created_at', dtInicio)
-          .lte('created_at', dtFim)
-          .order('created_at', { ascending: false })
-          .limit(200);
-
-        const isGerenteAudit = (profile?.role || '').toUpperCase() === 'GERENTE';
-        const gerenteFilialAudit = profile?.filial_id || activeFilialId;
-
-        if (isGerenteAudit && gerenteFilialAudit) {
-          qVendas = qVendas.eq('filial_id', gerenteFilialAudit);
-        } else if (targetEmpresaId) {
-          qVendas = qVendas.eq('empresa_id', targetEmpresaId);
-        }
-        let { data: vendasData, error: vendasErr } = await qVendas;
-
-        if (isGerenteAudit && (!vendasData || vendasData.length === 0 || vendasErr) && targetEmpresaId) {
-          const { data: fbAudit } = await supabase
+      // 2. Fallback: se auditoria_descontos estiver vazia, buscar as vendas que possuem abatimento direto na tabela 'vendas'
+      if (allDiscountLogs.length === 0) {
+        try {
+          let qVendas = supabase
             .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
-            .eq('empresa_id', targetEmpresaId)
-            .gte('created_at', dtInicio)
-            .lte('created_at', dtFim)
+            .select('id, created_at, vendedor_nome, vendedor_id, valor_total, desconto, filial_id, filiais(nome)')
+            .gt('desconto', 0)
+            .order('created_at', { ascending: false });
+
+          if (dtInicio) qVendas = qVendas.gte('created_at', dtInicio);
+          if (dtFim) qVendas = qVendas.lte('created_at', dtFim);
+          if (targetEmpresaId) qVendas = qVendas.eq('empresa_id', targetEmpresaId);
+
+          let { data: vendasDescData, error: vendasDescErr } = await qVendas;
+
+          // Se a query no intervalo de datas não retornou registros, faz fallback para vendas recentes com desconto
+          if (!vendasDescData || vendasDescData.length === 0 || vendasDescErr) {
+            let fbVendas = supabase
+              .from('vendas')
+              .select('id, created_at, vendedor_nome, vendedor_id, valor_total, desconto, filial_id, filiais(nome)')
+              .gt('desconto', 0)
+              .order('created_at', { ascending: false })
+              .limit(100);
+
+            if (targetEmpresaId) fbVendas = fbVendas.eq('empresa_id', targetEmpresaId);
+            const { data: fbData } = await fbVendas;
+            if (fbData && fbData.length > 0) {
+              vendasDescData = fbData;
+            }
+          }
+
+          if (Array.isArray(vendasDescData) && vendasDescData.length > 0) {
+            vendasDescData.forEach(v => {
+              const valDesc = Number(v.desconto || 0);
+              const valFinal = Number(v.valor_total || 0);
+              const valTabela = valFinal + valDesc;
+              const percDesc = valTabela > 0 ? (valDesc / valTabela) * 100 : 0;
+              const vObj = (vendedores || []).find(vend => String(vend.id) === String(v.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(v.vendedor_id));
+              const filialNome = v.filiais?.nome || filiais.find(f => String(f.id) === String(v.filial_id))?.nome || 'Monkey Shop';
+
+              allDiscountLogs.push({
+                id: v.id,
+                venda_id: v.id,
+                vendedor_id: v.vendedor_id,
+                vendedor_nome: v.vendedor_nome || vObj?.nome || 'Venda Balcão',
+                filial_id: v.filial_id,
+                filial_nome: filialNome,
+                cliente_nome: v.cliente_nome || 'Cliente Balcão',
+                itens_resumo: 'Venda com abatimento no PDV',
+                valor_tabela: valTabela,
+                valor_final: valFinal,
+                valor_desconto: valDesc,
+                percentual_desconto: percDesc,
+                created_at: v.created_at || new Date().toISOString()
+              });
+            });
+          }
+        } catch (errVendasDesc) {
+          console.warn('[Dashboard] Aviso ao buscar fallback de descontos em vendas:', errVendasDesc);
+        }
+      }
+
+      // 3. Fallback adicional via itens_venda caso ainda não haja registros
+      if (allDiscountLogs.length === 0) {
+        try {
+          let qItens = supabase
+            .from('itens_venda')
+            .select('*')
             .order('created_at', { ascending: false })
             .limit(200);
-          if (fbAudit && fbAudit.length > 0) {
-            vendasData = fbAudit;
-            vendasErr = null;
+
+          if (dtInicio) qItens = qItens.gte('created_at', dtInicio);
+          if (dtFim) qItens = qItens.lte('created_at', dtFim);
+          if (targetEmpresaId) qItens = qItens.eq('empresa_id', targetEmpresaId);
+
+          let { data: itensData, error: itensErr } = await qItens;
+          if (itensErr && (itensErr.message?.includes('empresa_id') || itensErr.code === '42703')) {
+            const retryItens = await supabase
+              .from('itens_venda')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .limit(200);
+            itensData = retryItens.data || [];
+            itensErr = null;
           }
-        }
 
-        console.log('Vendas encontradas:', vendasData || []);
-
-        if (!vendasErr && Array.isArray(vendasData) && vendasData.length > 0) {
-          vendasData.forEach(v => {
-            const qtd = Number(v.quantidade || 1);
-            const valFinal = Number(v.valor_total || v.valor_vendido || v.total || (Number(v.preco || 0) * qtd) || 0);
-            let valDesc = Number(v.desconto || v.valor_desconto || v.total_desconto || 0);
-            let valTabela = Number(v.valor_tabela || (v.preco_base ? Number(v.preco_base) * qtd : 0));
-
-            // Comparar com produtos/catálogo se não houver preco_base ou desconto explícito
-            if (valDesc <= 0 && valTabela <= 0) {
-              const prodObj = (produtos || []).find(p => p.id === v.produto_id || p.nome?.toLowerCase() === v.produto_nome?.toLowerCase() || p.nome?.toLowerCase() === v.produtos_descricao?.toLowerCase()) ||
-                (catalogoProdutos || []).find(c => c.id === v.produto_id || c.nome?.toLowerCase() === v.produto_nome?.toLowerCase() || c.nome?.toLowerCase() === v.produtos_descricao?.toLowerCase());
-              if (prodObj && Number(prodObj.preco) > 0) {
-                const pCat = Number(prodObj.preco);
-                const precoUnitCobrado = valFinal / (qtd || 1);
-                if (pCat > precoUnitCobrado + 0.01) {
-                  valDesc = (pCat - precoUnitCobrado) * qtd;
-                  valTabela = pCat * qtd;
-                }
+          if (!itensErr && Array.isArray(itensData) && itensData.length > 0) {
+            itensData.forEach(i => {
+              const qtd = Number(i.quantidade || 1);
+              const pBase = Number(i.preco_base || i.preco_tabela || 0);
+              const pCobrado = Number(i.preco_unitario || i.preco_unitario_vendido || i.preco || 0);
+              let valDesc = Number(i.valor_desconto || i.desconto || 0);
+              if (valDesc <= 0 && pBase > pCobrado && pBase > 0 && pCobrado > 0) {
+                valDesc = (pBase - pCobrado) * qtd;
               }
-            }
 
-            if (valDesc <= 0 && valTabela > valFinal) {
-              valDesc = valTabela - valFinal;
-            }
-            if (valTabela <= 0 && valDesc > 0) {
-              valTabela = valFinal + valDesc;
-            }
+              if (valDesc > 0.001 || (pBase > 0 && pCobrado > 0 && pBase > pCobrado + 0.001)) {
+                const valTabela = pBase > 0 ? (pBase * qtd) : (Number(i.valor_total || 0) + valDesc);
+                const valFinal = Number(i.valor_total || (pCobrado * qtd));
+                const percDesc = Number(i.percentual_desconto || 0) || (valTabela > 0 ? (valDesc / valTabela) * 100 : 0);
 
-            const temDesconto = valDesc > 0.001 || (valTabela > 0 && valFinal > 0 && valTabela > valFinal + 0.01) || Boolean(v.desconto_autorizado_por);
+                const vObj = (vendedores || []).find(v => String(v.id) === String(i.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(i.vendedor_id));
+                const fObj = (filiais || []).find(f => String(f.id) === String(i.filial_id));
 
-            if (temDesconto) {
-              const percDesc = Number(v.percentual_desconto || 0) || (valTabela > 0 ? (valDesc / valTabela) * 100 : 0);
-              const vObj = (vendedores || []).find(vend => String(vend.id) === String(v.vendedor_id || v.usuario_id)) || (teamMembers || []).find(m => String(m.id) === String(v.vendedor_id || v.usuario_id));
-              const fObj = (filiais || []).find(f => String(f.id) === String(v.filial_id));
-
-              if (!allDiscountLogs.some(log => log.id === v.id || log.venda_id === v.id)) {
                 allDiscountLogs.push({
-                  id: v.id,
-                  venda_id: v.id,
-                  vendedor_id: v.vendedor_id || v.usuario_id,
-                  vendedor_nome: v.vendedor_nome || vObj?.nome || 'Vendedor',
-                  filial_id: v.filial_id,
-                  filial_nome: v.filial_nome || fObj?.nome || 'Filial',
-                  cliente_nome: v.cliente_nome || 'Cliente Consumidor',
-                  itens_resumo: v.produtos_descricao || v.itens_resumo || v.produto_nome || 'Venda com desconto',
+                  id: i.id,
+                  venda_id: i.venda_id,
+                  vendedor_id: i.vendedor_id,
+                  vendedor_nome: vObj?.nome || i.vendedor_nome || 'Vendedor',
+                  filial_id: i.filial_id,
+                  filial_nome: fObj?.nome || i.filial_nome || 'Filial',
+                  cliente_nome: i.cliente_nome || 'Cliente Consumidor',
+                  itens_resumo: `${i.produto_nome || i.nome || 'Produto'} (Qtd: ${qtd})`,
                   valor_tabela: valTabela,
                   valor_final: valFinal,
                   valor_desconto: valDesc,
                   percentual_desconto: percDesc,
-                  created_at: v.created_at || new Date().toISOString()
+                  created_at: i.created_at || new Date().toISOString()
                 });
               }
-            }
-          });
+            });
+          }
+        } catch (errItens) {
+          console.warn('[Dashboard] Aviso ao buscar itens_venda:', errItens);
         }
-      } catch (errVendas) {
-        console.warn('[Dashboard] Aviso ao buscar vendas com desconto:', errVendas);
       }
 
       // 4. Incorporar logs locais do localStorage
@@ -14902,28 +14870,49 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // --- VISÃO DE AUDITORIA DE DESCONTOS (GERENTE & ADMIN) ---
   const renderAuditoriaDescontos = () => {
-    const filteredDescontos = descontosLogs.filter(d => {
-      const matchesVendedor = filtroDescontoVendedor ? d.vendedor_id === filtroDescontoVendedor || d.vendedor_nome === filtroDescontoVendedor : true;
-      const matchesFilial = filtroDescontoFilial ? d.filial_id === filtroDescontoFilial || d.filial_nome === filtroDescontoFilial : true;
+    const filteredDescontos = (descontosLogs || []).filter(d => {
+      const isTodasVendedores = !filtroDescontoVendedor || filtroDescontoVendedor === '' || filtroDescontoVendedor === 'todos' || filtroDescontoVendedor === 'ALL';
+      const matchesVendedor = isTodasVendedores
+        ? true
+        : (String(d.vendedor_id) === String(filtroDescontoVendedor) || d.vendedor_nome === filtroDescontoVendedor);
+
+      const isTodasFiliais = !filtroDescontoFilial || filtroDescontoFilial === '' || filtroDescontoFilial === 'todas' || filtroDescontoFilial === 'ALL';
+      const matchesFilial = isTodasFiliais
+        ? true
+        : (String(d.filial_id) === String(filtroDescontoFilial) || d.filial_nome === filtroDescontoFilial);
+
       const searchLower = buscaDesconto.trim().toLowerCase();
       const matchesSearch = !searchLower ||
-        d.vendedor_nome.toLowerCase().includes(searchLower) ||
+        (d.vendedor_nome && d.vendedor_nome.toLowerCase().includes(searchLower)) ||
         (d.cliente_nome && d.cliente_nome.toLowerCase().includes(searchLower)) ||
         (d.itens_resumo && d.itens_resumo.toLowerCase().includes(searchLower));
 
       return matchesVendedor && matchesFilial && matchesSearch;
     });
 
+    // 1. TOTAL EM DESCONTOS: somar o valor financeiro total de abatimentos
     const totalDescontoValor = filteredDescontos.reduce((acc, d) => acc + (Number(d.valor_desconto) || 0), 0);
-    const totalVendasComDesconto = filteredDescontos.length;
-    const mediaDescontoPercent = filteredDescontos.length > 0
-      ? (filteredDescontos.reduce((acc, d) => acc + (Number(d.percentual_desconto) || 0), 0) / filteredDescontos.length)
+
+    // 2. VENDAS C/ DESCONTO: contagem de registros com desconto > 0
+    const vendasComDescontoList = filteredDescontos.filter(d => Number(d.valor_desconto) > 0);
+    const totalVendasComDesconto = vendasComDescontoList.length;
+
+    // 3. DESCONTO MÉDIO: percentagem ou valor médio por venda com desconto
+    const mediaDescontoValor = totalVendasComDesconto > 0 ? (totalDescontoValor / totalVendasComDesconto) : 0;
+    const mediaDescontoPercent = totalVendasComDesconto > 0
+      ? (vendasComDescontoList.reduce((acc, d) => acc + (Number(d.percentual_desconto) || 0), 0) / totalVendasComDesconto)
       : 0;
 
+    // 4. MAIOR CONCESSOR: vendedor que mais concedeu abatimentos em volume
     const vendorMap = {};
     filteredDescontos.forEach(d => {
-      vendorMap[d.vendedor_nome] = (vendorMap[d.vendedor_nome] || 0) + Number(d.valor_desconto || 0);
+      const vNome = d.vendedor_nome || 'Venda Balcão';
+      const desc = Number(d.valor_desconto || 0);
+      if (desc > 0) {
+        vendorMap[vNome] = (vendorMap[vNome] || 0) + desc;
+      }
     });
+
     let topVendor = '-';
     let topVendorAmount = 0;
     Object.entries(vendorMap).forEach(([vNome, amt]) => {
@@ -14988,8 +14977,12 @@ export default function Dashboard({ session, profileDataProps }) {
               <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Desconto Médio</span>
               <TrendingUp size={16} className="text-yellow-400" />
             </div>
-            <p className="text-2xl font-black text-white font-mono">{mediaDescontoPercent.toFixed(1)}%</p>
-            <span className="text-[10px] text-yellow-500/80 mt-1 block">Média percentual por transação</span>
+            <p className="text-2xl font-black text-white font-mono">
+              {mediaDescontoPercent > 0 ? `${mediaDescontoPercent.toFixed(1)}%` : `R$ ${mediaDescontoValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+            </p>
+            <span className="text-[10px] text-yellow-500/80 mt-1 block">
+              {totalVendasComDesconto > 0 ? `Média R$ ${mediaDescontoValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} por venda` : 'Sem abatimentos no período'}
+            </span>
           </div>
 
           <div className="bg-[#0A0A0A] border border-[#222222] p-5 rounded-xl">
