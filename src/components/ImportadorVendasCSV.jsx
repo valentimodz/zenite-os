@@ -49,7 +49,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
         if (!error && data && data.length > 0) {
           setColaboradores(data);
         } else {
-          const { data: usersData } = await supabase.from('usuarios').select('id, nome, email, filial_id, empresa_id');
+          const { data: usersData } = await supabase.from('profiles').select('id, nome, email, filial_id, empresa_id');
           if (usersData) setColaboradores(usersData);
         }
       } catch (err) {
@@ -93,7 +93,7 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           .in('id', missingIds);
 
         if (!data || data.length === 0) {
-          const res = await supabase.from('usuarios').select('id, nome, email, filial_id, empresa_id').in('id', missingIds);
+          const res = await supabase.from('profiles').select('id, nome, email, filial_id, empresa_id').in('id', missingIds);
           data = res.data;
         }
 

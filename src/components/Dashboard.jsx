@@ -1612,37 +1612,18 @@ export default function Dashboard({ session, profileDataProps }) {
         filiaisData = allFiliais || [];
       }
 
-      let { data: imeisData, error: iErr } = targetEmpresaId ? await supabase
+      let { data: rawImeis, error: iErr } = await supabase
         .from('imeis')
-        .select(`
-          id, imei, status, created_at, is_seminovo, filial_id,
-          produtos (
-            nome
-          ),
-          filiais:filial_id (
-            id,
-            nome
-          )
-        `)
-        .eq('empresa_id', targetEmpresaId)
-        .eq('status', 'DISPONIVEL') : { data: null, error: null };
+        .select('id, imei, produto_id, filial_id, status, created_at')
+        .eq('status', 'DISPONIVEL');
 
-      if (!imeisData || imeisData.length === 0) {
-        const { data: allImeis } = await supabase
-          .from('imeis')
-          .select(`
-            id, imei, status, created_at, is_seminovo, filial_id,
-            produtos (
-              nome
-            ),
-            filiais:filial_id (
-              id,
-              nome
-            )
-          `)
-          .eq('status', 'DISPONIVEL');
-        imeisData = allImeis || [];
-      }
+      const catIdToNomeMap = new Map((catData || []).map(c => [String(c.id), c.nome]));
+      const filMap = new Map((filiaisData || []).map(f => [String(f.id), f.nome]));
+      const imeisData = (rawImeis || []).map(im => ({
+        ...im,
+        produtos: { nome: catIdToNomeMap.get(String(im.produto_id)) || 'Aparelho' },
+        filiais: { id: im.filial_id, nome: filMap.get(String(im.filial_id)) || 'Não Alocado' }
+      }));
 
       const uniqueFiliaisMap = new Map();
       filiaisData.forEach(f => {
@@ -1902,27 +1883,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Buscar todos os IMEIs disponíveis e em estoque da empresa com JOIN completo
         const { data, error } = await supabase
           .from('imeis')
-          .select(`
-            id,
-            produto_id,
-            produto_catalogo_id,
-            filial_id,
-            empresa_id,
-            status,
-            imei,
-            cor,
-            preco_compra,
-            is_seminovo,
-            produtos (
-              id,
-              nome,
-              tipo,
-              categoria,
-              cor,
-              preco
-            )
-          `)
-          .eq('empresa_id', targetEmp)
+          .select('id, imei, produto_id, filial_id, status, created_at')
           .eq('status', 'DISPONIVEL');
 
         if (!error && data && data.length > 0) {
@@ -2000,26 +1961,21 @@ export default function Dashboard({ session, profileDataProps }) {
         return;
       }
       try {
-        let { data, error } = await supabase
-          .from('usuarios')
-          .select('id, nome, email, role')
-          .or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`)
-          .eq('status', 'ATIVO');
+        const empId = activeEmpresaId || company?.id;
+        let profQuery = supabase
+          .from('profiles')
+          .select('id, nome, email, role');
 
+        if (activeFilialId && activeFilialId !== 'null' && activeFilialId !== 'undefined') {
+          profQuery = profQuery.or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`);
+        } else if (empId) {
+          profQuery = profQuery.or(`filial_id.is.null,empresa_id.eq.${empId}`);
+        }
+
+        let { data, error } = await profQuery;
         if (error || !data || data.length === 0) {
-          let profQuery = supabase
-            .from('profiles')
-            .select('id, nome, email, role');
-
-          if (activeFilialId && activeFilialId !== 'null' && activeFilialId !== 'undefined') {
-            profQuery = profQuery.or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`);
-          } else if (activeEmpresaId || company?.id) {
-            profQuery = profQuery.or(`filial_id.is.null,empresa_id.eq.${activeEmpresaId || company?.id}`);
-          }
-          const { data: profs } = await profQuery;
-          if (profs && profs.length > 0) {
-            data = profs;
-          }
+          const { data: profs } = await supabase.from('profiles').select('id, nome, email, role');
+          data = profs || [];
         }
 
         // Filtrar estritamente apenas os colaboradores com perfil TRAINEE ou TREENER
@@ -2456,7 +2412,6 @@ export default function Dashboard({ session, profileDataProps }) {
         if (activeEmpresaId) {
           profileData.empresa_id = activeEmpresaId;
           await supabase.from('profiles').update({ empresa_id: activeEmpresaId }).eq('id', session.user.id);
-          await supabase.from('usuarios').update({ empresa_id: activeEmpresaId }).eq('id', session.user.id);
           setProfile(prev => prev ? { ...prev, empresa_id: activeEmpresaId } : prev);
         }
       }
@@ -3587,21 +3542,17 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (isUUID) {
         const { error: errProf } = await supabase.from('profiles').delete().eq('id', colabId);
-        const { error: errUser } = await supabase.from('usuarios').delete().eq('id', colabId);
-
-        if (!errProf || !errUser) {
+        if (!errProf) {
           hardDeleteSuccess = true;
         } else {
-          hardDeleteError = errProf || errUser;
+          hardDeleteError = errProf;
         }
       } else if (colabEmail && colabEmail !== 'N/A') {
         const { error: errProf } = await supabase.from('profiles').delete().eq('email', colabEmail.trim());
-        const { error: errUser } = await supabase.from('usuarios').delete().eq('email', colabEmail.trim());
-
-        if (!errProf || !errUser) {
+        if (!errProf) {
           hardDeleteSuccess = true;
         } else {
-          hardDeleteError = errProf || errUser;
+          hardDeleteError = errProf;
         }
       }
 
@@ -3614,14 +3565,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
         if (isUUID) {
           const { error: errProfInat } = await supabase.from('profiles').update({ status: 'INATIVO' }).eq('id', colabId);
-          const { error: errUserInat } = await supabase.from('usuarios').update({ status: 'INATIVO' }).eq('id', colabId);
-          if (!errProfInat || !errUserInat) softDeleteSuccess = true;
-          else softDeleteError = errProfInat || errUserInat;
+          if (!errProfInat) softDeleteSuccess = true;
+          else softDeleteError = errProfInat;
         } else if (colabEmail && colabEmail !== 'N/A') {
           const { error: errProfInat } = await supabase.from('profiles').update({ status: 'INATIVO' }).eq('email', colabEmail.trim());
-          const { error: errUserInat } = await supabase.from('usuarios').update({ status: 'INATIVO' }).eq('email', colabEmail.trim());
-          if (!errProfInat || !errUserInat) softDeleteSuccess = true;
-          else softDeleteError = errProfInat || errUserInat;
+          if (!errProfInat) softDeleteSuccess = true;
+          else softDeleteError = errProfInat;
         }
       }
 
@@ -3938,8 +3887,8 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const res = await supabase
           .from('imeis')
-          .select('id, imei, cor, status, created_at, filial_id, produto_id, produtos(nome)')
-          .eq('empresa_id', empresaId)
+          .select('id, imei, produto_id, filial_id, status, created_at')
+          .eq('status', 'DISPONIVEL')
           .order('created_at', { ascending: false })
           .limit(10);
         imeisRes = res || { data: [], error: null };
@@ -3951,8 +3900,7 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const res = await supabase
           .from('imeis')
-          .select('id, produto_id, filial_id, status, imei')
-          .eq('empresa_id', empresaId)
+          .select('id, imei, produto_id, filial_id, status, created_at')
           .eq('status', 'DISPONIVEL')
           .order('created_at', { ascending: false })
           .limit(1000);
@@ -4502,22 +4450,13 @@ export default function Dashboard({ session, profileDataProps }) {
       // Fallback incondicional para garantir busca completa de todas as vendas do vendedor no Supabase
       if (!salesData || salesData.length === 0) {
         try {
-          const { data: dbSales } = await supabase
+          const { data: dbSales, error: dbSalesErr } = await supabase
             .from('vendas')
-            .select(`
-              *,
-              produtos(*),
-              clientes (
-                id,
-                nome,
-                cpf_cnpj
-              ),
-              vendas_pagamentos (*)
-            `)
+            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
             .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
             .order('created_at', { ascending: false })
             .limit(100);
-          if (dbSales) salesData = dbSales;
+          if (!dbSalesErr && dbSales) salesData = dbSales;
         } catch (dbErr) {
           console.warn('Aviso: Erro ao buscar vendas do vendedor via Supabase:', dbErr);
         }
@@ -4534,13 +4473,15 @@ export default function Dashboard({ session, profileDataProps }) {
       let branchImeis = [];
       let imeisDataGlobal = [];
       try {
-        const imeisRes = await supabase
+        let qImeis = supabase
           .from('imeis')
-          .select('id, produto_id, filial_id, empresa_id, status, imei, cor, created_at, produtos(nome)')
-          .eq('empresa_id', empId)
-          .eq('filial_id', filialId) // 1. O MURO: Isola estritamente a loja ativa do vendedor
-          .in('status', ['disponivel', 'DISPONIVEL', 'disponível', 'DISPONÍVEL']) // 2. O FILTRO: Garante apenas IMEIs ativos/disponíveis
+          .select('id, imei, produto_id, filial_id, status, created_at')
+          .eq('status', 'DISPONIVEL')
           .order('created_at', { ascending: false });
+        if (filialId) {
+          qImeis = qImeis.eq('filial_id', filialId);
+        }
+        const imeisRes = await qImeis;
         if (imeisRes.data) {
           imeisDataGlobal = imeisRes.data;
           branchImeis = imeisRes.data.filter(im => String(im.filial_id) === String(filialId));
@@ -6548,14 +6489,14 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let { data: newFechamentos, error: fetchErr } = await supabase
           .from('fechamentos')
-          .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
           .eq('empresa_id', targetEmpresaId)
           .order('created_at', { ascending: false })
           .limit(30);
 
         if (fetchErr || !newFechamentos) {
           const fbRes = await supabase.from('fechamentos')
-            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .select('id, empresa_id, filial_id, created_at, status')
             .order('created_at', { ascending: false })
             .limit(30);
           newFechamentos = fbRes.data || [];
@@ -6727,8 +6668,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const { data: imeisRes, error: imeisErr } = await supabase
         .from('imeis')
-        .select('id, imei, cor, status, filial_id, produto_id, produto_catalogo_id, created_at, produtos!produto_id(nome), filiais:filial_id(id, nome)')
-        .eq('empresa_id', empresaId)
+        .select('id, imei, produto_id, filial_id, status, created_at')
         .eq('status', 'DISPONIVEL');
 
       if (imeisErr) {
@@ -8005,8 +7945,7 @@ export default function Dashboard({ session, profileDataProps }) {
           .eq('empresa_id', targetEmpresaId),
         supabase
           .from('imeis')
-          .select('id, imei, produto_id, produto_catalogo_id, filial_id, empresa_id, status, cor')
-          .eq('empresa_id', targetEmpresaId)
+          .select('id, imei, produto_id, filial_id, status, created_at')
           .eq('status', 'DISPONIVEL')
       ]);
 
@@ -8063,8 +8002,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Encontrar IMEI disponível na filial de origem
         const { data: imeisDisp, error: findImeiErr } = await supabase
           .from('imeis')
-          .select('id, imei, produto_id, produto_catalogo_id, filial_id, empresa_id, status, cor, produtos(nome)')
-          .eq('empresa_id', targetEmpresaId)
+          .select('id, imei, produto_id, filial_id, status, created_at')
           .eq('filial_id', origenFilialId)
           .eq('status', 'DISPONIVEL');
 
@@ -9369,8 +9307,7 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const { data: existente, error: checkErr } = await supabase
         .from('imeis')
-        .select('imei')
-        .eq('empresa_id', company.id)
+        .select('id, imei, produto_id, filial_id, status, created_at')
         .eq('imei', imei)
         .maybeSingle();
 
@@ -9457,8 +9394,7 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const { data: existente, error: checkErr } = await supabase
         .from('imeis')
-        .select('imei')
-        .eq('empresa_id', company.id)
+        .select('id, imei, produto_id, filial_id, status, created_at')
         .eq('imei', imei)
         .maybeSingle();
 
@@ -10682,9 +10618,8 @@ export default function Dashboard({ session, profileDataProps }) {
           // Localizar o IMEI de forma segura sem .single() / .maybeSingle()
           const { data: imeiRecords, error: imeiRecordErr } = await supabase
             .from('imeis')
-            .select('*')
+            .select('id, imei, produto_id, filial_id, status, created_at')
             .eq('imei', targetImei)
-            .eq('empresa_id', targetEmpresaId)
             .eq('filial_id', ajusteFilialId)
             .eq('vendido', false);
 
@@ -10848,8 +10783,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Verificar duplicados no banco
         const { data: existingImeis, error: checkErr } = await supabase
           .from('imeis')
-          .select('imei')
-          .eq('empresa_id', company.id)
+          .select('id, imei, produto_id, filial_id, status, created_at')
           .in('imei', imeisList);
 
         if (checkErr) throw checkErr;
@@ -11343,7 +11277,7 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let query = supabase
           .from('imeis')
-          .select('id, imei, cor, status, filial_id, empresa_id, produto_id, produtos(nome)')
+          .select('id, imei, produto_id, filial_id, status, created_at')
           .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
 
         if (prodIds.length > 0) {
@@ -11352,9 +11286,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
         const targetFid = activeFilialId || profile?.filial_id;
         if (targetFid && targetFid !== 'todas' && targetFid !== 'ALL') {
-          query = query.or(`filial_id.eq.${targetFid},empresa_id.eq.${targetEmpresaId}`);
-        } else if (targetEmpresaId) {
-          query = query.eq('empresa_id', targetEmpresaId);
+          query = query.eq('filial_id', targetFid);
         }
 
         const { data: dbImeis, error: dbImeisErr } = await query;
@@ -11965,8 +11897,7 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const { data: existente, error: checkErr } = await supabase
         .from('imeis')
-        .select('imei')
-        .eq('empresa_id', profile.empresa_id)
+        .select('id, imei, produto_id, filial_id, status, created_at')
         .eq('imei', imei)
         .maybeSingle();
 
@@ -13010,13 +12941,30 @@ export default function Dashboard({ session, profileDataProps }) {
 
     try {
       // 1. Tentar buscar em IMEIs (por IMEI ou Número de Série)
-      const { data: imeiData } = await supabase
-        .from('imeis')
-        .select('*, produtos(*)')
-        .eq('imei', term)
-        .eq('empresa_id', profile.empresa_id)
-        .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel'])
-        .maybeSingle();
+      let imeiData = null;
+      try {
+        const { data: iData } = await supabase
+          .from('imeis')
+          .select('id, imei, produto_id, filial_id, status, created_at')
+          .eq('imei', term)
+          .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel'])
+          .maybeSingle();
+
+        if (iData) {
+          let prodInfo = null;
+          if (iData.produto_id) {
+            const { data: p } = await supabase
+              .from('produtos')
+              .select('id, nome, tipo, categoria')
+              .eq('id', iData.produto_id)
+              .maybeSingle();
+            prodInfo = p;
+          }
+          imeiData = { ...iData, produtos: prodInfo };
+        }
+      } catch (errImei) {
+        console.warn('Erro ao buscar imei para transferencia:', errImei);
+      }
 
       if (imeiData) {
         if (imeiData.filial_id !== origemId) {

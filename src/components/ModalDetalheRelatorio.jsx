@@ -103,17 +103,20 @@ export default function ModalDetalheRelatorio({
     const carregarDadosFinanceiros = async () => {
       setLoading(true);
       try {
+        const dataInicioISO = dataInicio ? new Date(`${String(dataInicio).split('T')[0]}T00:00:00.000Z`).toISOString() : null;
+        const dataFimISO = dataFim ? new Date(`${String(dataFim).split('T')[0]}T23:59:59.999Z`).toISOString() : null;
+
         // 1. Buscar vendas com filtros no range de datas
         let queryVendas = supabase
           .from('vendas')
-          .select('*')
+          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
           .order('created_at', { ascending: false });
 
-        if (dataInicio) {
-          queryVendas = queryVendas.gte('created_at', `${dataInicio}T00:00:00`);
+        if (dataInicioISO) {
+          queryVendas = queryVendas.gte('created_at', dataInicioISO);
         }
-        if (dataFim) {
-          queryVendas = queryVendas.lte('created_at', `${dataFim}T23:59:59`);
+        if (dataFimISO) {
+          queryVendas = queryVendas.lte('created_at', dataFimISO);
         }
 
         if (filialSelecionada && filialSelecionada !== 'todas') {
@@ -126,11 +129,11 @@ export default function ModalDetalheRelatorio({
           .select('id, filial_id, empresa_id, operador_id, status, created_at')
           .order('created_at', { ascending: false });
 
-        if (dataInicio) {
-          queryCaixas = queryCaixas.gte('created_at', `${dataInicio}T00:00:00`);
+        if (dataInicioISO) {
+          queryCaixas = queryCaixas.gte('created_at', dataInicioISO);
         }
-        if (dataFim) {
-          queryCaixas = queryCaixas.lte('created_at', `${dataFim}T23:59:59`);
+        if (dataFimISO) {
+          queryCaixas = queryCaixas.lte('created_at', dataFimISO);
         }
 
         if (filialSelecionada && filialSelecionada !== 'todas') {
