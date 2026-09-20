@@ -5,6 +5,7 @@ import Dashboard from './components/Dashboard';
 import CeoDashboard from './components/CeoDashboard';
 import ResetPassword from './components/ResetPassword';
 import GabaritoImpressao from './components/GabaritoImpressao';
+import { getCache, setCache } from './services/cacheService';
 
 function App() {
   if (isMissingCredentials) {
@@ -58,13 +59,24 @@ function App() {
       if (event === 'SIGNED_OUT') {
         localStorage.setItem('zenite_logged_out', 'true');
         sessionStorage.removeItem('zenite_super_admin_redirected');
+        setSession(null);
+        setLoading(false);
       } else if (event === 'SIGNED_IN') {
         localStorage.removeItem('zenite_logged_out');
+        setSession(session);
+        setLoading(false);
       } else if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
+        setSession(session);
+        setLoading(false);
+      } else if (event === 'TOKEN_REFRESHED') {
+        // TOKEN_REFRESHED dispara automaticamente em background pelo Supabase ao alternar ou desfocar abas.
+        // Preserva a referência de sessão se o usuário for o mesmo para evitar re-render global e recarregamentos.
+        setSession(prev => (prev?.user?.id === session?.user?.id ? prev : session));
+      } else {
+        setSession(session);
+        setLoading(false);
       }
-      setSession(session);
-      setLoading(false);
     });
 
     return () => {
@@ -144,11 +156,21 @@ const SuperAdminRouteWrapper = ({ session }) => {
 };
 
 const RoleProtectedRoute = ({ session, isCeoRoute }) => {
-  const [profile, setProfile] = useState(null);
-  const [loadingProfile, setLoadingProfile] = useState(true);
+  const userId = session?.user?.id;
+  const cachedProfile = userId ? getCache(`profile_${userId}`) : null;
+  const [profile, setProfile] = useState(cachedProfile);
+  const [loadingProfile, setLoadingProfile] = useState(!cachedProfile);
 
   useEffect(() => {
-    supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({ data, error }) => {
+    if (!userId) return;
+    const currentCached = getCache(`profile_${userId}`);
+    if (currentCached) {
+      setProfile(currentCached);
+      setLoadingProfile(false);
+      return;
+    }
+
+    supabase.from('profiles').select('*').eq('id', userId).single().then(({ data, error }) => {
       let userRole = data?.role || 'ADMIN';
       if (session.user.email === 'valentimodz@gmail.com') userRole = 'SUPER_ADMIN';
       else if (session.user.email === 'valentimodz2@gmail.com') userRole = 'ADMIN';
@@ -163,10 +185,11 @@ const RoleProtectedRoute = ({ session, isCeoRoute }) => {
         role: userRole,
         empresa_id: session.user.user_metadata?.empresa_id || null
       };
+      setCache(`profile_${userId}`, userProfile, 5); // 5 min (300.000ms)
       setProfile(userProfile);
       setLoadingProfile(false);
     });
-  }, [session.user.id, session.user.email]);
+  }, [userId, session?.user?.email]);
 
   if (loadingProfile) {
     return (

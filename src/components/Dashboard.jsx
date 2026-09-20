@@ -1139,6 +1139,9 @@ export default function Dashboard({ session, profileDataProps }) {
     const handleRevalidate = () => {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       if (targetEmpresaId) {
+        invalidateCache('catalogo_produtos_');
+        invalidateCache('pdv_produtos_');
+        invalidateCache('estoque_consolidado_');
         fetchCatalogoProdutos(targetEmpresaId);
       }
     };
@@ -1572,13 +1575,13 @@ export default function Dashboard({ session, profileDataProps }) {
       // Buscar mapa do catalogo para relacionar código de barras e SKU
       let { data: catData } = targetEmpresaId ? await supabase
         .from('produtos_catalogo')
-        .select('*')
+        .select('id, empresa_id, nome, tipo, categoria, preco, preco_custo, codigo_barras, sku, cor')
         .eq('empresa_id', targetEmpresaId) : { data: null };
 
       if (!catData || catData.length === 0) {
         const { data: fallbackCat } = await supabase
           .from('produtos_catalogo')
-          .select('*');
+          .select('id, empresa_id, nome, tipo, categoria, preco, preco_custo, codigo_barras, sku, cor');
         catData = fallbackCat || [];
       }
 
@@ -1849,7 +1852,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   useEffect(() => {
     fetchProfileAndCompany();
-  }, [session]);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     const fetchNotices = async () => {
@@ -1865,10 +1868,10 @@ export default function Dashboard({ session, profileDataProps }) {
         console.error('Erro ao buscar avisos globais:', err);
       }
     };
-    if (session) {
+    if (session?.user?.id) {
       fetchNotices();
     }
-  }, [session, profile]);
+  }, [session?.user?.id, profile?.role]);
 
   useEffect(() => {
     if (profile) {
@@ -1904,7 +1907,7 @@ export default function Dashboard({ session, profileDataProps }) {
         if (activeFilialId) fetchTransferencias(activeFilialId, tenantId);
       }
     }
-  }, [profile, activeFilialId, company?.id, activeEmpresaId]);
+  }, [profile?.id, profile?.empresa_id, profile?.role, activeFilialId, company?.id, activeEmpresaId]);
 
   // Efeito blindado para garantir que IMEIs de celulares NUNCA fiquem vazios por dessincronização
   useEffect(() => {
@@ -2342,15 +2345,32 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  const fetchProfileAndCompany = async () => {
-    setLoading(true);
+  const fetchProfileAndCompany = async (isManualRefresh = false) => {
+    const userId = session?.user?.id;
+    if (!userId) return;
+
+    const cacheKey = `profile_${userId}`;
+    const cachedProfile = getCache(cacheKey);
+
+    // Se já tiver perfil em memória ou em cache e não for refresh manual, não exibe tela de carregamento nem refaz query
+    if (!isManualRefresh && (cachedProfile || profile || profileDataProps)) {
+      if (cachedProfile && !profile) {
+        setProfile(cachedProfile);
+      }
+      setLoading(false);
+      return;
+    }
+
+    if (!profile && !profileDataProps) {
+      setLoading(true);
+    }
     setError('');
     try {
       // 1. Buscar perfil do usuário logado (usando maybeSingle para evitar erro PGRST116 se a tabela foi limpa)
       let { data: profileData, error: profileErr } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', session.user.id)
+        .eq('id', userId)
         .maybeSingle();
 
       // Auto-recomposição do perfil caso registros de teste tenham sido apagados
@@ -2364,7 +2384,7 @@ export default function Dashboard({ session, profileDataProps }) {
         else if (userEmail.includes('estoque')) fallbackRole = 'ESTOQUISTA';
 
         profileData = {
-          id: session.user.id,
+          id: userId,
           email: session.user.email,
           nome: session.user.user_metadata?.nome || userEmail.split('@')[0] || 'Usuário',
           role: fallbackRole,
@@ -2394,7 +2414,7 @@ export default function Dashboard({ session, profileDataProps }) {
         if (!profileData.empresa_id || profileData.empresa_id !== targetEmpId) {
           profileData.empresa_id = targetEmpId;
           await supabase.from('profiles').upsert({
-            id: session.user.id,
+            id: userId,
             email: session.user.email,
             nome: profileData.nome || session.user.email.split('@')[0],
             role: userRole,
@@ -2403,6 +2423,7 @@ export default function Dashboard({ session, profileDataProps }) {
         }
       }
 
+      setCache(cacheKey, profileData, 5); // Cache mínimo de 5 minutos (300.000ms)
       setProfile(profileData);
 
       // 2. Se for SUPER_ADMIN, ele não precisa estar vinculado a uma empresa para gerenciar o sistema
@@ -3017,6 +3038,13 @@ export default function Dashboard({ session, profileDataProps }) {
 
   const fetchTeamMembers = async (empresaId) => {
     const targetEmpresaId = empresaId || profile?.empresa_id || company?.id;
+    const cacheKey = `team_members_${targetEmpresaId || 'global'}`;
+    const cached = getCache(cacheKey);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      setTeamMembers(cached);
+      setIsLoadingTeamMembers(false);
+      return cached;
+    }
 
     console.log("-> [DEBUG RBAC] Empresa ID do Contexto:", targetEmpresaId);
     console.log("-> [DEBUG RBAC] Usuario Logado:", profile || session?.user);
@@ -3144,6 +3172,9 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       console.log("-> [DEBUG RBAC] Colaboradores finais processados:", filteredMembers);
+      if (filteredMembers && filteredMembers.length > 0) {
+        setCache(cacheKey, filteredMembers, 5); // 5 min (300.000ms)
+      }
       setTeamMembers(filteredMembers);
     } catch (err) {
       console.error('Erro ao carregar colaboradores da empresa:', err);
@@ -3981,6 +4012,15 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar Sessões de Caixa (Aberturas e Fechamentos) para o Relatório Gerencial
   const fetchSessoesCaixas = async (empresaId, filialId, mesStr) => {
+    const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
+    const cacheKey = `sessoes_caixas_${targetEmpresaId || 'all'}_${filialId || 'all'}_${mesStr || 'current'}`;
+    const cached = getCache(cacheKey);
+    if (cached && Array.isArray(cached)) {
+      setSessoesCaixas(cached);
+      setLoadingSessoesCaixas(false);
+      return cached;
+    }
+
     setLoadingSessoesCaixas(true);
     setErrorSessoesCaixas(null);
 
@@ -4048,6 +4088,7 @@ export default function Dashboard({ session, profileDataProps }) {
           };
         });
 
+        setCache(cacheKey, sessoesMapeadas, 5); // 5 min (300.000ms)
         setSessoesCaixas(sessoesMapeadas);
         setErrorSessoesCaixas(null);
       } else {
@@ -4073,6 +4114,16 @@ export default function Dashboard({ session, profileDataProps }) {
       return null;
     }
 
+    const cacheKey = `status_caixa_${targetEmpresaId}_${targetFilialId}`;
+    const cached = getCache(cacheKey);
+    if (cached !== null && cached !== undefined) {
+      setCaixaAtual(cached.caixaAtual);
+      setIsCaixaAberto(cached.isAberto);
+      if (cached.isAberto) setIsModalAbrirCaixaOpen(false);
+      setIsLoadingCaixa(false);
+      return cached.caixaAtual;
+    }
+
     setIsLoadingCaixa(true);
     try {
       // 2. Isolamento de Sessão de Caixa: exige empresa_id e filial_id simultaneamente
@@ -4088,12 +4139,14 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (!error && Array.isArray(data) && data.length > 0) {
         const caixaAberto = data[0];
+        setCache(cacheKey, { caixaAtual: caixaAberto, isAberto: true }, 5); // 5 min (300.000ms)
         setCaixaAtual(caixaAberto);
         setIsCaixaAberto(true);
         setIsModalAbrirCaixaOpen(false);
         return caixaAberto;
       }
 
+      setCache(cacheKey, { caixaAtual: null, isAberto: false }, 5); // 5 min (300.000ms)
       setCaixaAtual(null);
       setIsCaixaAberto(false);
       return null;
@@ -4168,6 +4221,8 @@ export default function Dashboard({ session, profileDataProps }) {
       setFundoTrocoInput('');
       setDepositoInicialInput('');
       setObsAberturaInput('');
+      invalidateCache('status_caixa_');
+      invalidateCache('sessoes_caixas_');
       const msgSucesso = depositoInicialNum > 0
         ? `Caixa aberto com sucesso! Fundo: R$ ${saldoInicialNum.toFixed(2)} | Depósito: R$ ${depositoInicialNum.toFixed(2)}`
         : `Caixa aberto com sucesso! Fundo inicial: R$ ${saldoInicialNum.toFixed(2)}`;
@@ -4194,6 +4249,13 @@ export default function Dashboard({ session, profileDataProps }) {
       console.warn('[PDV Fetch] Requisição abortada: Empresa ou Filial não definidas.');
       setProdutosDisponiveisPDV([]);
       return;
+    }
+
+    const cacheKey = `pdv_produtos_${targetEmpresaId}_${targetFilialId}`;
+    const cached = getCache(cacheKey);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      setProdutosDisponiveisPDV(cached);
+      return cached;
     }
 
     try {
@@ -4264,6 +4326,9 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       });
 
+      if (produtosMapeados && produtosMapeados.length > 0) {
+        setCache(cacheKey, produtosMapeados, 5); // 5 min (300.000ms)
+      }
       setProdutosDisponiveisPDV(produtosMapeados);
 
     } catch (err) {
@@ -4274,6 +4339,18 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar produtos do Estoque Consolidado com consulta otimizada (sem N+1, limit 100, timeout 6s)
   const fetchEstoqueConsolidado = async (filialSelecionadaId, termoBusca = '', categoriaFiltro = '') => {
+    const filialFiltro = (filialSelecionadaId && filialSelecionadaId !== 'TODAS' && filialSelecionadaId !== 'todas' && filialSelecionadaId !== 'all' && filialSelecionadaId !== '')
+      ? filialSelecionadaId
+      : (activeFilialId || profile?.filial_id || '');
+
+    const cacheKey = `estoque_consolidado_${filialFiltro || 'all'}_${(termoBusca || '').trim().toLowerCase()}_${(categoriaFiltro || '').trim().toLowerCase()}`;
+    const cached = getCache(cacheKey);
+    if (cached && Array.isArray(cached)) {
+      setEstoqueConsolidadoLista(cached);
+      setLoadingProdutos(false);
+      return;
+    }
+
     setLoadingProdutos(true);
     let timeoutId = null;
 
@@ -4345,6 +4422,7 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       });
 
+      setCache(cacheKey, prodsFormatados, 5); // 5 min (300.000ms)
       setEstoqueConsolidadoLista(prodsFormatados);
     } catch (err) {
       if (err?.message === 'TIMEOUT_6S') {
@@ -6418,6 +6496,8 @@ export default function Dashboard({ session, profileDataProps }) {
       setModalDetalheCaixa(null);
 
       // 4. Recarregar dados em segundo plano
+      invalidateCache('status_caixa_');
+      invalidateCache('sessoes_caixas_');
       fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
       fetchStatusCaixa(modalDetalheCaixa.filial_id);
 
@@ -6470,6 +6550,20 @@ export default function Dashboard({ session, profileDataProps }) {
       setLoadingCatalogo(false);
       return;
     }
+
+    const isDefaultQuery = !searchParam && (categoryParam === 'TODAS' || !categoryParam) && page === 0 && !isEanImeiSearch;
+    const cacheKey = `catalogo_produtos_${empresaId}`;
+
+    if (isDefaultQuery) {
+      const cached = getCache(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        setCatalogoProdutos(cached);
+        setCatalogoTotalCount(cached.length);
+        setLoadingCatalogo(false);
+        return cached;
+      }
+    }
+
     setLoadingCatalogo(true);
     try {
       // 1. Busca pura da tabela mestre de catálogo (produtos_catalogo)
@@ -6622,6 +6716,9 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       }).sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || '')));
 
+      if (isDefaultQuery && enrichedData && enrichedData.length > 0) {
+        setCache(cacheKey, enrichedData, 5); // 5 min (300.000ms)
+      }
       setCatalogoProdutos(enrichedData);
       if (enrichedData.length > 0) {
         setCatalogoTotalCount(enrichedData.length);
@@ -12790,6 +12887,11 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // Limpar estados do PDV
       handleClearCart(false);
+      invalidateCache('pdv_produtos_');
+      invalidateCache('catalogo_produtos_');
+      invalidateCache('estoque_consolidado_');
+      invalidateCache('status_caixa_');
+      invalidateCache('sessoes_caixas_');
 
       // Recarregar dados
       fetchVendedorData(activeFilialId, session.user.id);
@@ -13452,6 +13554,8 @@ export default function Dashboard({ session, profileDataProps }) {
       showToast('Caixa fechado com sucesso!', 'success');
       alert('Fechamento de caixa enviado com sucesso para a gerência!');
 
+      invalidateCache('status_caixa_');
+      invalidateCache('sessoes_caixas_');
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       fetchVendedorData(activeFilialId, session.user.id);
       fetchStatusCaixa(activeFilialId);
