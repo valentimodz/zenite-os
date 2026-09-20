@@ -73,12 +73,20 @@ export default function SaasDashboard({
     try {
       setAiAnalysisLoading(true);
 
-      // 1. Buscar produtos do estoque
-      const { data: prodsData } = await supabase.from('produtos').select('*');
+      // 1. Buscar produtos do estoque (apenas colunas necessárias para cálculo de giro e estoque)
+      const { data: prodsData } = await supabase
+        .from('produtos')
+        .select('id, nome, preco, preco_custo, quantidade, filial_id, empresa_id');
       const produtosList = prodsData || [];
 
-      // 2. Buscar histórico de vendas
-      const { data: vendsData } = await supabase.from('vendas').select('*');
+      // 2. Buscar histórico recente de vendas (últimos 60 dias ou limite seguro para evitar consumo excessivo de egress)
+      const dataCorte = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: vendsData } = await supabase
+        .from('vendas')
+        .select('id, produto_id, produto_nome, quantidade, preco, valor_total, created_at')
+        .gte('created_at', dataCorte)
+        .order('created_at', { ascending: false })
+        .limit(1000);
       const meVendasList = vendsData || [];
 
       // 3. Executar o Cérebro Matemático Determinístico (0 alucinações)

@@ -21,6 +21,7 @@ import CameraScanner from './CameraScanner';
 import ImportadorVendasCSV from './ImportadorVendasCSV';
 import ModalAuditoriaCega from './ModalAuditoriaCega';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
+import { getCache, setCache, invalidateCache } from '../services/cacheService';
 import RankingVendedores from './RankingVendedores';
 import ColorBadge from './ColorBadge';
 import ModalEditarImei from './ModalEditarImei';
@@ -3815,7 +3816,7 @@ export default function Dashboard({ session, profileDataProps }) {
           if (!dbSales || dbSales.length === 0 || dbErr) {
             let simpleQ = supabase
               .from('vendas')
-              .select('*')
+              .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
               .gte('created_at', dtInicio)
               .lte('created_at', dtFim)
               .order('created_at', { ascending: false });
@@ -3831,7 +3832,7 @@ export default function Dashboard({ session, profileDataProps }) {
           if (!dbSales || dbSales.length === 0) {
             const { data: recentSales } = await supabase
               .from('vendas')
-              .select('*')
+              .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
               .order('created_at', { ascending: false })
               .limit(500);
 
@@ -3844,7 +3845,11 @@ export default function Dashboard({ session, profileDataProps }) {
           return dbSales || [];
         } catch (err) {
           console.error("[Dashboard] Erro ao buscar vendas no Supabase:", err);
-          const { data: allSales } = await supabase.from('vendas').select('*').order('created_at', { ascending: false }).limit(500);
+          const { data: allSales } = await supabase
+            .from('vendas')
+            .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
+            .order('created_at', { ascending: false })
+            .limit(500);
           console.log('DEBUG VENDAS RETORNADAS:', allSales || []);
           return allSales || [];
         }
@@ -3855,7 +3860,7 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const res = await supabase
           .from('produtos')
-          .select('*')
+          .select('id, empresa_id, filial_id, nome, tipo, categoria, preco, preco_custo, quantidade, codigo_barras, cor, sku, created_at')
           .eq('empresa_id', empresaId)
           .order('created_at', { ascending: false });
         prodsRes = res || { data: [], error: null };
@@ -3982,11 +3987,12 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // 1. Busca limpa dos caixas sem joins relacionais (elimina PGRST200)
+      // 1. Busca limpa dos caixas com campos estritamente necessários e limite de 50 registros para evitar sobrecarga de Egress
       let query = supabase
         .from('caixas')
-        .select('*')
-        .order('data_abertura', { ascending: false });
+        .select('id, filial_id, empresa_id, operador_id, operador_nome, filial_nome, saldo_inicial, deposito_inicial, data_abertura, aberto_em, data_fechamento, fechado_em, status, total_vendas, total_dinheiro, total_cartao, total_pix, total_boleto, comprovante_url, comprovantes, observacoes, created_at')
+        .order('data_abertura', { ascending: false })
+        .limit(50);
 
       // Filtro de filial apenas se uma filial específica estiver selecionada
       if (filialId && filialId !== 'todas' && filialId !== 'ALL' && filialId !== '') {
@@ -5138,11 +5144,25 @@ export default function Dashboard({ session, profileDataProps }) {
 
   const fetchFiliais = async (empresaId) => {
     try {
+      const cacheKey = `filiais_${empresaId || 'global'}`;
+      const cached = getCache(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        setFiliais(cached);
+        if (cached.length > 0) {
+          setFilialVendedor(cached[0].id);
+          setFilialProduto(cached[0].id);
+          setFiltroFilialEstoque(cached[0].id);
+          const estoques = cached.filter(f => f.tipo === 'ESTOQUE');
+          setEntradaFilial(estoques.length > 0 ? estoques[0].id : '');
+        }
+        return cached;
+      }
+
       let data = null;
       if (empresaId) {
         const { data: empData } = await supabase
           .from('filiais')
-          .select('*')
+          .select('id, empresa_id, nome, tipo, created_at')
           .eq('empresa_id', empresaId)
           .order('created_at', { ascending: true });
         data = empData;
@@ -5152,9 +5172,13 @@ export default function Dashboard({ session, profileDataProps }) {
       if (!data || data.length === 0) {
         const { data: allData } = await supabase
           .from('filiais')
-          .select('*')
+          .select('id, empresa_id, nome, tipo, created_at')
           .order('created_at', { ascending: true });
         data = allData || [];
+      }
+
+      if (data && data.length > 0) {
+        setCache(cacheKey, data, 10); // Cache válido por 10 minutos
       }
 
       setFiliais(data || []);
@@ -5174,19 +5198,30 @@ export default function Dashboard({ session, profileDataProps }) {
 
   const fetchVendedores = async (empresaId) => {
     try {
-      let query = supabase
-        .from('profiles')
-        .select('*');
+      const cacheKey = `vendedores_${empresaId || 'global'}`;
+      const cached = getCache(cacheKey);
+      let data = cached;
 
-      if (empresaId) {
-        query = query.eq('empresa_id', empresaId);
-      }
+      if (!data || data.length === 0) {
+        let query = supabase
+          .from('profiles')
+          .select('id, nome, email, role, cargo, filial_id, empresa_id, is_treinner, meta_individual');
 
-      let { data, error } = await query;
+        if (empresaId) {
+          query = query.eq('empresa_id', empresaId);
+        }
 
-      if (error || !data || data.length === 0) {
-        const retryRes = await supabase.from('profiles').select('*');
-        data = retryRes.data || [];
+        let { data: fetchedData, error } = await query;
+
+        if (error || !fetchedData || fetchedData.length === 0) {
+          const retryRes = await supabase.from('profiles').select('id, nome, email, role, cargo, filial_id, empresa_id, is_treinner, meta_individual');
+          fetchedData = retryRes.data || [];
+        }
+
+        data = fetchedData || [];
+        if (data.length > 0) {
+          setCache(cacheKey, data, 5); // Cache de 5 minutos
+        }
       }
 
       // Filtrar para trazer todos os perfis operacionais de linha de frente (Vendedor, Trainee, Treener)
@@ -5203,7 +5238,7 @@ export default function Dashboard({ session, profileDataProps }) {
       const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
       const { data: metasData, error: metasError } = await supabase
         .from('metas')
-        .select('*')
+        .select('id, tenant_id, vendedor_id, valor_meta, tipo_meta, mes_referencia')
         .eq('tenant_id', empresaId)
         .eq('mes_referencia', mesRef);
 
@@ -6537,7 +6572,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const { data: imeisRes, error: imeisErr } = await supabase
         .from('imeis')
-        .select('*, produtos!produto_id(*), filiais:filial_id(id, nome)')
+        .select('id, imei, cor, status, filial_id, produto_id, produto_catalogo_id, vendido, created_at, produtos!produto_id(nome), filiais:filial_id(id, nome)')
         .eq('empresa_id', empresaId)
         .eq('vendido', false);
 
@@ -7555,11 +7590,18 @@ export default function Dashboard({ session, profileDataProps }) {
   // Buscar categorias da empresa e preencher com o padrão se vazio
   const fetchCategorias = async (empresaId) => {
     if (!empresaId) return;
+    const cacheKey = `categorias_${empresaId}`;
+    const cached = getCache(cacheKey);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      setCategorias(cached);
+      return;
+    }
+
     setLoadingCategorias(true);
     try {
       const { data, error } = await supabase
         .from('categorias')
-        .select('*')
+        .select('id, empresa_id, nome, created_at')
         .eq('empresa_id', empresaId)
         .order('nome', { ascending: true });
 
@@ -7580,11 +7622,14 @@ export default function Dashboard({ session, profileDataProps }) {
         const { data: insertedData, error: insertError } = await supabase
           .from('categorias')
           .insert(insertPayload)
-          .select();
+          .select('id, empresa_id, nome, created_at');
 
         if (insertError) throw insertError;
-        setCategorias(insertedData || []);
+        const finalCats = insertedData || [];
+        setCache(cacheKey, finalCats, 15);
+        setCategorias(finalCats);
       } else {
+        setCache(cacheKey, data || [], 15); // 15 minutos de cache
         setCategorias(data || []);
       }
     } catch (err) {
@@ -7615,11 +7660,12 @@ export default function Dashboard({ session, profileDataProps }) {
           empresa_id: company.id,
           nome: nome
         })
-        .select()
+        .select('id, empresa_id, nome, created_at')
         .single();
 
       if (error) throw error;
 
+      invalidateCache(`categorias_${company.id}`);
       alert('Categoria adicionada com sucesso!');
       setCategorias(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome)));
       setNovaCategoriaNome('');
@@ -7641,6 +7687,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (error) throw error;
 
+      if (company?.id) {
+        invalidateCache(`categorias_${company.id}`);
+      }
       alert('Categoria excluída com sucesso!');
       setCategorias(prev => prev.filter(c => c.id !== id));
     } catch (err) {
@@ -7794,11 +7843,11 @@ export default function Dashboard({ session, profileDataProps }) {
       const [resProdutos, resImeis] = await Promise.all([
         supabase
           .from('produtos')
-          .select('*')
+          .select('id, empresa_id, filial_id, catalogo_id, nome, tipo, categoria, preco, quantidade, codigo_barras, cor, sku')
           .eq('empresa_id', targetEmpresaId),
         supabase
           .from('imeis')
-          .select('*')
+          .select('id, imei, produto_id, produto_catalogo_id, filial_id, empresa_id, status, vendido, cor')
           .eq('empresa_id', targetEmpresaId)
           .eq('vendido', false)
       ]);
@@ -7856,7 +7905,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Encontrar IMEI disponível na filial de origem
         const { data: imeisDisp, error: findImeiErr } = await supabase
           .from('imeis')
-          .select('*')
+          .select('id, imei, produto_id, produto_catalogo_id, filial_id, empresa_id, status, vendido, cor, produtos(nome)')
           .eq('empresa_id', targetEmpresaId)
           .eq('filial_id', origenFilialId)
           .neq('status', 'VENDIDO')
@@ -7924,7 +7973,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Assegurar existência da linha do produto na filial ativa
         let { data: prodsLocais } = await supabase
           .from('produtos')
-          .select('*')
+          .select('id, empresa_id, filial_id, nome, tipo, categoria, preco, quantidade, codigo_barras, cor, sku')
           .eq('empresa_id', targetEmpresaId)
           .eq('filial_id', activeFilialId)
           .ilike('nome', produto.nome)
@@ -7954,7 +8003,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Acessórios: Decrementar 1 na filial de origem (fica INDISPONÍVEL na origem) e adicionar 1 na filial de operação (fica DISPONÍVEL para venda)
         const { data: prodsOrigem, error: findProdErr } = await supabase
           .from('produtos')
-          .select('*')
+          .select('id, empresa_id, filial_id, nome, tipo, categoria, preco, quantidade, codigo_barras, cor, sku')
           .eq('empresa_id', targetEmpresaId)
           .eq('filial_id', origenFilialId)
           .ilike('nome', produto.nome)
@@ -8010,7 +8059,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // 2. Incrementar ou Criar 1 unidade na filial de destino (disponivel na filial ativa)
         let { data: prodsDestino } = await supabase
           .from('produtos')
-          .select('*')
+          .select('id, empresa_id, filial_id, nome, tipo, categoria, preco, quantidade, codigo_barras, cor, sku')
           .eq('empresa_id', targetEmpresaId)
           .eq('filial_id', activeFilialId)
           .ilike('nome', produto.nome)
