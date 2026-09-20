@@ -2003,24 +2003,24 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let { data, error } = await supabase
           .from('usuarios')
-          .select('id, nome, role, is_treinner')
+          .select('id, nome, email, role')
           .or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`)
           .eq('status', 'ATIVO');
 
         if (error || !data || data.length === 0) {
           const { data: profs } = await supabase
             .from('profiles')
-            .select('id, nome, role, is_treinner')
+            .select('id, nome, email, role')
             .or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`);
           if (profs && profs.length > 0) {
             data = profs;
           }
         }
 
-        // Filtrar estritamente apenas os colaboradores com perfil TRAINEE, TREENER ou is_treinner === true
+        // Filtrar estritamente apenas os colaboradores com perfil TRAINEE ou TREENER
         const filteredTreeners = (data || []).filter(u => {
           const roleUpper = (u.role || u.cargo || u.perfil || '').toUpperCase();
-          return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER') || u.is_treinner === true;
+          return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER');
         });
 
         console.log("🔥 [FETCH TREENERS] Treeners/Trainees elegíveis encontrados:", filteredTreeners.length);
@@ -2637,14 +2637,16 @@ export default function Dashboard({ session, profileDataProps }) {
 
     fetchCategorias(targetEmpresaId).catch(e => console.warn('Aviso ao carregar categorias:', e));
 
-    const isAbaGestao = ['gestao', 'relatorios', 'auditoria', 'ranking', 'fechamentos'].includes(activeTab) ||
-                        ['gestao', 'relatorios', 'auditoria', 'ranking', 'fechamentos'].includes(currentView);
+    const isAbaGestao = ['gestao', 'relatorios', 'ranking', 'fechamentos'].includes(activeTab) ||
+                        ['gestao', 'relatorios', 'ranking', 'fechamentos'].includes(currentView);
 
     if ((podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) && isAbaGestao) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
-      fetchAuditoriaDescontos(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
       fetchGerenteData(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
-      fetchTorreControlo(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar torre de controle:', e));
+    }
+
+    if (activeTab === 'auditoria' || currentView === 'auditoria') {
+      fetchAuditoriaDescontos(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
     }
   }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria, filtroMes]);
 
@@ -2727,9 +2729,9 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [activeTab, currentView, activeFilialId, profile?.empresa_id, company?.id, activeEmpresaId]);
 
-  // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios ou alterar filtros, com Supabase Realtime
+  // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios/fechamentos ou alterar filtros, com Supabase Realtime
   useEffect(() => {
-    if (activeTab === 'fechamentos' || activeTab === 'gestao') {
+    if (activeTab === 'fechamentos' || activeTab === 'relatorios') {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
       fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
 
@@ -2947,7 +2949,7 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let qVendas = supabase
           .from('vendas')
-          .select('id, empresa_id, filial_id, vendedor_id, usuario_id, produto_id, produto_nome, produtos_descricao, quantidade, preco, valor_total, valor_vendido, total, desconto, valor_desconto, total_desconto, valor_tabela, preco_base, percentual_desconto, desconto_autorizado_por, cliente_nome, created_at')
+          .select('id, empresa_id, filial_id, vendedor_id, produto_id, produto_nome, quantidade, preco, valor_total, desconto, valor_desconto, percentual_desconto, cliente_nome, created_at')
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
           .order('created_at', { ascending: false })
@@ -2955,21 +2957,7 @@ export default function Dashboard({ session, profileDataProps }) {
         if (targetEmpresaId) {
           qVendas = qVendas.eq('empresa_id', targetEmpresaId);
         }
-        let { data: vendasData, error: vendasErr } = await qVendas;
-
-        // Se filtro com empresa retornar vazio ou der erro, buscar sem empresa como fallback
-        if ((!vendasData || vendasData.length === 0) && targetEmpresaId) {
-          const { data: fallbackVendas } = await supabase
-            .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, usuario_id, produto_id, produto_nome, produtos_descricao, quantidade, preco, valor_total, valor_vendido, total, desconto, valor_desconto, total_desconto, valor_tabela, preco_base, percentual_desconto, desconto_autorizado_por, cliente_nome, created_at')
-            .gte('created_at', dtInicio)
-            .lte('created_at', dtFim)
-            .order('created_at', { ascending: false })
-            .limit(200);
-          if (fallbackVendas && fallbackVendas.length > 0) {
-            vendasData = fallbackVendas;
-          }
-        }
+        let { data: vendasData } = await qVendas;
 
         console.log('Vendas encontradas:', vendasData || []);
 
@@ -3078,14 +3066,14 @@ export default function Dashboard({ session, profileDataProps }) {
       // 1. Consulta segura com select('*') para evitar erros de colunas inexistentes (como created_at, telefone, cpf)
       let { data, error } = await supabase
         .from('profiles')
-        .select('*');
+        .select('id, nome, email, role');
 
-      console.log("-> [DEBUG RBAC] Resposta inicial do Supabase (select *):", { data, error });
+      console.log("-> [DEBUG RBAC] Resposta inicial do Supabase:", { data, error });
 
       // Se der erro ou se data for nulo, tentar via consulta limpa sem filtro
       if (error || !data) {
         console.warn("-> [DEBUG RBAC] Erro ao buscar profiles:", error);
-        const retryRes = await supabase.from('profiles').select('*');
+        const retryRes = await supabase.from('profiles').select('id, nome, email, role');
         data = retryRes.data || [];
       }
 
@@ -3817,109 +3805,31 @@ export default function Dashboard({ session, profileDataProps }) {
           const isDono = ['DONO', 'OWNER'].includes(profile?.role);
           let q = supabase
             .from('vendas')
-            .select(`
-              *,
-              vendedor:profiles!vendedor_id(id, nome),
-              filial:filiais!filial_id(id, nome),
-              clientes:cliente_id (
-                id,
-                nome,
-                cpf_cnpj,
-                telefone,
-                email,
-                status_credito
-              ),
-              cliente:cliente_id (
-                id,
-                nome,
-                cpf_cnpj,
-                telefone,
-                email,
-                status_credito
-              ),
-              produtos:produto_id (
-                id,
-                nome,
-                tipo,
-                categoria,
-                preco_custo
-              )
-            `)
+            .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
             .gte('created_at', dtInicio)
             .lte('created_at', dtFim)
             .order('created_at', { ascending: false });
 
-          // Se for Dono, nunca filtra por filial e só filtra por empresa_id se for estritamente válido e não 'MASTER'
           if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
             q = q.eq('empresa_id', empresaId);
           }
 
           let { data: dbSales, error: dbErr } = await q;
 
-          // Se não encontrou vendas com empresa_id ou se houve erro de relação, fazer fallback amplo do mês
-          if ((!dbSales || dbSales.length === 0 || dbErr) && empresaId) {
-            const { data: globalMonthSales, error: gErr } = await supabase
-              .from('vendas')
-              .select(`
-                *,
-                vendedor:profiles!vendedor_id(id, nome),
-                filial:filiais!filial_id(id, nome),
-                clientes (
-                  id,
-                  nome,
-                  cpf_cnpj
-                )
-              `)
-              .gte('created_at', dtInicio)
-              .lte('created_at', dtFim)
-              .order('created_at', { ascending: false });
-
-            if (!gErr && Array.isArray(globalMonthSales) && globalMonthSales.length > 0) {
-              dbSales = globalMonthSales;
-              dbErr = null;
-            }
-          }
-
-          // Se ainda assim vier vazio ou der erro na query relacional, buscar na tabela 'vendas' pura
-          if (!dbSales || dbSales.length === 0 || dbErr) {
-            let simpleQ = supabase
-              .from('vendas')
-              .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
-              .gte('created_at', dtInicio)
-              .lte('created_at', dtFim)
-              .order('created_at', { ascending: false });
-
-            const { data: simpleSales, error: simpleErr } = await simpleQ;
-            if (!simpleErr && Array.isArray(simpleSales) && simpleSales.length > 0) {
-              dbSales = simpleSales;
-              dbErr = null;
-            }
-          }
-
-          // Fallback de contingência caso os timestamps created_at estejam fora do range exato
-          if (!dbSales || dbSales.length === 0) {
-            const { data: recentSales } = await supabase
+          if (dbErr || !dbSales || dbSales.length === 0) {
+            const { data: fallbackSales } = await supabase
               .from('vendas')
               .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
               .order('created_at', { ascending: false })
-              .limit(500);
-
-            if (Array.isArray(recentSales) && recentSales.length > 0) {
-              dbSales = recentSales;
-            }
+              .limit(100);
+            dbSales = fallbackSales || [];
           }
 
           console.log('DEBUG VENDAS RETORNADAS:', dbSales || []);
           return dbSales || [];
         } catch (err) {
           console.error("[Dashboard] Erro ao buscar vendas no Supabase:", err);
-          const { data: allSales } = await supabase
-            .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, cliente_id, produto_id, produto_nome, quantidade, preco, preco_custo, valor_total, metodo_pagamento, forma_pagamento, comissao, created_at')
-            .order('created_at', { ascending: false })
-            .limit(500);
-          console.log('DEBUG VENDAS RETORNADAS:', allSales || []);
-          return allSales || [];
+          return [];
         }
       };
 
@@ -3947,27 +3857,24 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let { data: fData, error: fErr } = await supabase
           .from('fechamentos')
-          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, observacoes, comprovante_url, created_at')
+          .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
           .eq('empresa_id', empresaId)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(30);
 
         if (fErr || !fData) {
           const fallbackF = await supabase
             .from('fechamentos')
-            .select('*')
-            .eq('empresa_id', empresaId)
+            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
             .order('created_at', { ascending: false })
-            .limit(50);
+            .limit(30);
           fData = fallbackF.data || [];
         }
 
         const enrichedFech = (fData || []).map(f => {
-          const vObj = (vendedores || []).find(v => String(v.id) === String(f.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(f.vendedor_id));
           const flObj = (filiais || []).find(fl => String(fl.id) === String(f.filial_id));
           return {
             ...f,
-            profiles: f.profiles || (vObj ? { id: vObj.id, nome: vObj.nome } : null),
             filiais: f.filiais || (flObj ? { id: flObj.id, nome: flObj.nome } : null)
           };
         });
@@ -4094,11 +4001,11 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // 1. Busca limpa dos caixas com campos existentes e join com profiles(nome)
+      // 1. Busca estrita dos caixas apenas com campos existentes
       let query = supabase
         .from('caixas')
-        .select('id, filial_id, empresa_id, operador_id, profiles(nome), saldo_inicial, data_abertura, data_fechamento, status, total_vendas, total_dinheiro, total_cartao, total_pix, total_boleto, comprovante_url, observacoes, created_at')
-        .order('data_abertura', { ascending: false })
+        .select('id, filial_id, empresa_id, operador_id, status, created_at')
+        .order('created_at', { ascending: false })
         .limit(50);
 
       // Filtro de filial apenas se uma filial específica estiver selecionada
@@ -4120,15 +4027,15 @@ export default function Dashboard({ session, profileDataProps }) {
       ] = await Promise.all([
         query,
         supabase.from('filiais').select('id, nome'),
-        supabase.from('profiles').select('id, nome')
+        supabase.from('profiles').select('id, nome, email, role')
       ]);
 
       if (errorCaixas) {
-        console.warn('[Caixas] Tentando select simplificado de caixas sem join:', errorCaixas.message || errorCaixas);
+        console.warn('[Caixas] Tentando select simplificado de caixas:', errorCaixas.message || errorCaixas);
         const fbRes = await supabase
           .from('caixas')
-          .select('id, filial_id, empresa_id, operador_id, saldo_inicial, data_abertura, data_fechamento, status, total_vendas, total_dinheiro, total_cartao, total_pix, total_boleto, comprovante_url, observacoes, created_at')
-          .order('data_abertura', { ascending: false })
+          .select('id, filial_id, empresa_id, operador_id, status, created_at')
+          .order('created_at', { ascending: false })
           .limit(50);
         if (!fbRes.error && fbRes.data) {
           listaCaixas = fbRes.data;
@@ -4209,12 +4116,11 @@ export default function Dashboard({ session, profileDataProps }) {
       // 2. Isolamento de Sessão de Caixa: exige empresa_id e filial_id simultaneamente
       const { data, error } = await supabase
         .from('caixas')
-        .select('*')
+        .select('id, filial_id, empresa_id, operador_id, saldo_inicial, status, created_at')
         .eq('empresa_id', targetEmpresaId)
         .eq('filial_id', targetFilialId)
-        .is('data_fechamento', null)
         .or('status.eq.ABERTO,status.eq.aberto')
-        .order('data_abertura', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1);
 
       if (!error && Array.isArray(data) && data.length > 0) {
@@ -5363,7 +5269,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (!data || data.length === 0) {
         let query = supabase
           .from('profiles')
-          .select('id, nome, email, role, cargo, filial_id, empresa_id, is_treinner, meta_individual');
+          .select('id, nome, email, role');
 
         if (empresaId) {
           query = query.eq('empresa_id', empresaId);
@@ -5372,7 +5278,7 @@ export default function Dashboard({ session, profileDataProps }) {
         let { data: fetchedData, error } = await query;
 
         if (error || !fetchedData || fetchedData.length === 0) {
-          const retryRes = await supabase.from('profiles').select('id, nome, email, role, cargo, filial_id, empresa_id, is_treinner, meta_individual');
+          const retryRes = await supabase.from('profiles').select('id, nome, email, role');
           fetchedData = retryRes.data || [];
         }
 
@@ -6371,17 +6277,20 @@ export default function Dashboard({ session, profileDataProps }) {
       showToast('Fechamento de caixa corrigido com sucesso!', 'success');
       setModalAjusteCaixaOpen(false);
 
-      // Recarregar os fechamentos para atualizar a UI (select limpo e seguro)
+      // Recarregar os fechamentos para atualizar a UI (select estrito sem vazamento de memória)
       try {
         let { data: newFechamentos, error: fetchErr } = await supabase
           .from('fechamentos')
-          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, comprovante_url, created_at')
+          .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
           .eq('empresa_id', profile.empresa_id)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(30);
 
         if (fetchErr || !newFechamentos) {
-          const fbRes = await supabase.from('fechamentos').select('*').eq('empresa_id', profile.empresa_id).order('created_at', { ascending: false }).limit(50);
+          const fbRes = await supabase.from('fechamentos')
+            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .order('created_at', { ascending: false })
+            .limit(30);
           newFechamentos = fbRes.data || [];
         }
 
@@ -6602,13 +6511,16 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         let { data: newFechamentos, error: fetchErr } = await supabase
           .from('fechamentos')
-          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, comprovante_url, created_at')
+          .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
           .eq('empresa_id', targetEmpresaId)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(30);
 
         if (fetchErr || !newFechamentos) {
-          const fbRes = await supabase.from('fechamentos').select('*').eq('empresa_id', targetEmpresaId).order('created_at', { ascending: false }).limit(50);
+          const fbRes = await supabase.from('fechamentos')
+            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .order('created_at', { ascending: false })
+            .limit(30);
           newFechamentos = fbRes.data || [];
         }
 

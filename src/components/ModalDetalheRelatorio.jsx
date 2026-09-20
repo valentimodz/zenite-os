@@ -123,8 +123,8 @@ export default function ModalDetalheRelatorio({
         // 2. Buscar caixas com filtros no range de datas
         let queryCaixas = supabase
           .from('caixas')
-          .select('*')
-          .order('data_abertura', { ascending: false });
+          .select('id, filial_id, empresa_id, operador_id, status, created_at')
+          .order('created_at', { ascending: false });
 
         if (dataInicio) {
           queryCaixas = queryCaixas.gte('created_at', `${dataInicio}T00:00:00`);
