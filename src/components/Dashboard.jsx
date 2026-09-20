@@ -1556,9 +1556,18 @@ export default function Dashboard({ session, profileDataProps }) {
   }, [torreSearch, torreData]);
 
   const fetchTorreControlo = async (empIdParam = null) => {
+    const targetEmpresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
+    const cacheKey = `torre_controle_${targetEmpresaId || 'global'}`;
+    const cached = getCache(cacheKey);
+    if (cached) {
+      setTorreFiliais(cached.uniqueFiliais || []);
+      setTorreData(cached.tableData || []);
+      setTorreLoading(false);
+      return cached;
+    }
+
     setTorreLoading(true);
     try {
-      const targetEmpresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
 
       const extractEan = (obj) => {
         if (!obj) return null;
@@ -1782,6 +1791,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
       setTorreFiliais(uniqueFiliais);
       setTorreData(tableData);
+      setCache(cacheKey, { uniqueFiliais, tableData }, 5); // 5 min (300.000ms)
     } catch (error) {
       console.error(error);
       alert('Erro ao carregar Torre de Controlo');
@@ -1877,37 +1887,10 @@ export default function Dashboard({ session, profileDataProps }) {
     if (profile) {
       const tenantId = profile.empresa_id || company?.id || activeEmpresaId;
       fetchFiliais(tenantId);
-      fetchTeamMembers(tenantId);
+      fetchCategorias(tenantId);
       fetchVendedores(tenantId);
-
-      if (profile.role === 'GERENTE' || profile.role === 'ESTOQUISTA') {
-        fetchGerenteData(tenantId);
-        fetchCatalogoProdutos(tenantId);
-        fetchTorreControlo(tenantId);
-        if (profile.role === 'GERENTE') fetchTaxasCartao(tenantId);
-        fetchCategorias(tenantId);
-        if (activeFilialId) fetchTransferencias(activeFilialId, tenantId);
-      } else if (profile.role === 'VENDEDOR') {
-        // Se já tiver activeFilialId no localStorage, usar ele e buscar os dados
-        if (activeFilialId) {
-          fetchVendedorData(activeFilialId, session?.user?.id);
-          fetchTransferencias(activeFilialId, tenantId);
-        }
-        fetchCatalogoProdutos(tenantId);
-        fetchTorreControlo(tenantId);
-        fetchTaxasCartao(tenantId);
-        fetchCategorias(tenantId);
-      } else {
-        // Perfis de Gestão (ADMIN, SUPER_ADMIN, OWNER, DONO, RH)
-        fetchGerenteData(tenantId);
-        fetchCatalogoProdutos(tenantId);
-        fetchTorreControlo(tenantId);
-        fetchTaxasCartao(tenantId);
-        fetchCategorias(tenantId);
-        if (activeFilialId) fetchTransferencias(activeFilialId, tenantId);
-      }
     }
-  }, [profile?.id, profile?.empresa_id, profile?.role, activeFilialId, company?.id, activeEmpresaId]);
+  }, [profile?.id, profile?.empresa_id, profile?.role, company?.id, activeEmpresaId]);
 
   // Efeito blindado para garantir que IMEIs de celulares NUNCA fiquem vazios por dessincronização
   useEffect(() => {
@@ -2661,6 +2644,7 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
       fetchAuditoriaDescontos(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
       fetchGerenteData(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
+      fetchTorreControlo(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar torre de controle:', e));
     }
   }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria, filtroMes]);
 
@@ -2688,8 +2672,11 @@ export default function Dashboard({ session, profileDataProps }) {
     return () => clearTimeout(timer);
   }, [categorias, activeTab, currentView]);
 
-  // Atualizar produtos do PDV e verificar status do Caixa Aberto (Bloqueio automático restrito a VENDEDOR)
+  // Atualizar produtos do PDV, taxas de cartão e status do Caixa Aberto APENAS na aba do PDV
   useEffect(() => {
+    const isPdvActive = activeTab === 'pdv' || currentView === 'pdv';
+    if (!isPdvActive) return;
+
     const targetFilialId = activeFilialId || profile?.filial_id || profile?.empresa_id || company?.id;
     const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
     const isVendedor = userRoleUpper === 'VENDEDOR' || userRoleUpper.startsWith('VENDEDOR_') || !['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE', 'RH', 'RH_ADMIN', 'ESTOQUISTA', 'DIRETOR'].includes(userRoleUpper);
@@ -2699,21 +2686,46 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchStatusCaixa(targetFilialId).then((cx) => {
         // O modal de abertura obrigatória de caixa SÓ abre automaticamente para usuários com cargo de Vendedor
         const isAberto = !!cx && String(cx.status || '').toLowerCase() === 'aberto' && !cx.data_fechamento;
-        if (isVendedor && !isAberto && (activeTab === 'pdv' || currentView === 'pdv')) {
+        if (isVendedor && !isAberto) {
           setIsModalAbrirCaixaOpen(true);
         }
       });
+      fetchTaxasCartao(profile?.empresa_id || company?.id || activeEmpresaId);
+      if (isVendedor) {
+        fetchVendedorData(targetFilialId, session?.user?.id);
+      }
     }
   }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id, profile?.role, profile?.cargo, activeTab, currentView]);
 
-  // Carregar Estoque Consolidado dinamicamente com debounce ao alterar busca, filtros ou filial
+  // Carregar Estoque Consolidado dinamicamente com debounce APENAS na aba de estoque
   useEffect(() => {
+    const isEstoque = activeTab === 'estoque' || currentView === 'estoque';
+    if (!isEstoque) return;
+
     const handler = setTimeout(() => {
       fetchEstoqueConsolidado(filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque);
     }, 300);
 
     return () => clearTimeout(handler);
-  }, [filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque, activeFilialId]);
+  }, [filtroFilialEstoque, buscaEstoque, filtroCategoriaEstoque, activeFilialId, activeTab, currentView]);
+
+  // Carregar Clientes apenas quando a aba 'clientes' estiver ativa
+  useEffect(() => {
+    if (activeTab === 'clientes' || currentView === 'clientes') {
+      const targetEmp = profile?.empresa_id || company?.id || activeEmpresaId;
+      fetchClientes(targetEmp);
+    }
+  }, [activeTab, currentView, profile?.empresa_id, company?.id, activeEmpresaId]);
+
+  // Carregar Transferências apenas quando a aba 'transferencias' estiver ativa
+  useEffect(() => {
+    if (activeTab === 'transferencias' || currentView === 'transferencias') {
+      const targetEmp = profile?.empresa_id || company?.id || activeEmpresaId;
+      if (activeFilialId) {
+        fetchTransferencias(activeFilialId, targetEmp);
+      }
+    }
+  }, [activeTab, currentView, activeFilialId, profile?.empresa_id, company?.id, activeEmpresaId]);
 
   // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios ou alterar filtros, com Supabase Realtime
   useEffect(() => {
@@ -2825,11 +2837,11 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       const allDiscountLogs = [];
 
-      // 1. Buscar da tabela 'itens_venda' usando select('*') puro (sem joins frágeis)
+      // 1. Buscar da tabela 'itens_venda' usando select('*') puro (evitando HTTP 400 por colunas ausentes)
       try {
         let qItens = supabase
           .from('itens_venda')
-          .select('id, venda_id, vendedor_id, filial_id, quantidade, preco_base, preco_unitario, preco_unitario_vendido, valor_desconto, desconto, valor_total, percentual_desconto, produto_nome, cliente_nome, created_at')
+          .select('*')
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
           .order('created_at', { ascending: false })
@@ -2837,12 +2849,24 @@ export default function Dashboard({ session, profileDataProps }) {
         if (targetEmpresaId) {
           qItens = qItens.eq('empresa_id', targetEmpresaId);
         }
-        const { data: itensData, error: itensErr } = await qItens;
+        let { data: itensData, error: itensErr } = await qItens;
+        if (itensErr && (itensErr.message?.includes('empresa_id') || itensErr.code === '42703')) {
+          // Fallback se itens_venda não tiver coluna empresa_id direta
+          const retryItens = await supabase
+            .from('itens_venda')
+            .select('*')
+            .gte('created_at', dtInicio)
+            .lte('created_at', dtFim)
+            .order('created_at', { ascending: false })
+            .limit(200);
+          itensData = retryItens.data || [];
+          itensErr = null;
+        }
         if (!itensErr && Array.isArray(itensData) && itensData.length > 0) {
           itensData.forEach(i => {
             const qtd = Number(i.quantidade || 1);
-            const pBase = Number(i.preco_base || 0);
-            const pCobrado = Number(i.preco_unitario || i.preco_unitario_vendido || 0);
+            const pBase = Number(i.preco_base || i.preco_tabela || 0);
+            const pCobrado = Number(i.preco_unitario || i.preco_unitario_vendido || i.preco || 0);
             let valDesc = Number(i.valor_desconto || i.desconto || 0);
             if (valDesc <= 0 && pBase > pCobrado && pBase > 0 && pCobrado > 0) {
               valDesc = (pBase - pCobrado) * qtd;
@@ -2864,7 +2888,7 @@ export default function Dashboard({ session, profileDataProps }) {
                 filial_id: i.filial_id,
                 filial_nome: fObj?.nome || i.filial_nome || 'Filial',
                 cliente_nome: i.cliente_nome || 'Cliente Consumidor',
-                itens_resumo: `${i.produto_nome || 'Produto'} (Qtd: ${qtd})`,
+                itens_resumo: `${i.produto_nome || i.nome || 'Produto'} (Qtd: ${qtd})`,
                 valor_tabela: valTabela,
                 valor_final: valFinal,
                 valor_desconto: valDesc,
@@ -3746,15 +3770,28 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar dados consolidados do Gerente (Estoque, Vendas Globais, Fechamentos)
+  // Buscar dados consolidados do Gerente (Estoque, Vendas Globais, Fechamentos) com cache de 5 minutos
   const fetchGerenteData = async (empresaId, mesAnoFiltro) => {
+    const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
+    const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
+    const cacheKey = `gerente_data_${targetEmpresaId || 'global'}_${selectedMonth}`;
+    const cached = getCache(cacheKey);
+    if (cached) {
+      setProdutos(cached.prodsMapeados || []);
+      setVendas(cached.salesData || []);
+      setFechamentos(cached.fechamentos || []);
+      setUltimosRecebidos(cached.ultimosRecebidos || []);
+      setDisponiveisImeis(cached.baseImeis || []);
+      setLoadingDados(false);
+      return cached;
+    }
+
     setLoadingDados(true);
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const token = currentSession?.access_token;
 
       // Range dinâmico baseado no seletor de mês
-      const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
       const [anoStr, mesStr] = selectedMonth.split('-');
       const anoNum = parseInt(anoStr, 10);
       const mesNum = parseInt(mesStr, 10);
@@ -3908,13 +3945,34 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let fechRes = { data: [], error: null };
       try {
-        const res = await supabase
+        let { data: fData, error: fErr } = await supabase
           .from('fechamentos')
-          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, created_at, profiles!vendedor_id(id, nome), filiais(id, nome)')
+          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, observacoes, comprovante_url, created_at')
           .eq('empresa_id', empresaId)
           .order('created_at', { ascending: false })
           .limit(50);
-        fechRes = res || { data: [], error: null };
+
+        if (fErr || !fData) {
+          const fallbackF = await supabase
+            .from('fechamentos')
+            .select('*')
+            .eq('empresa_id', empresaId)
+            .order('created_at', { ascending: false })
+            .limit(50);
+          fData = fallbackF.data || [];
+        }
+
+        const enrichedFech = (fData || []).map(f => {
+          const vObj = (vendedores || []).find(v => String(v.id) === String(f.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(f.vendedor_id));
+          const flObj = (filiais || []).find(fl => String(fl.id) === String(f.filial_id));
+          return {
+            ...f,
+            profiles: f.profiles || (vObj ? { id: vObj.id, nome: vObj.nome } : null),
+            filiais: f.filiais || (flObj ? { id: flObj.id, nome: flObj.nome } : null)
+          };
+        });
+
+        fechRes = { data: enrichedFech, error: null };
       } catch (err) {
         console.warn('[Dashboard] Falha na query de fechamentos:', err);
       }
@@ -3965,6 +4023,15 @@ export default function Dashboard({ session, profileDataProps }) {
       setFechamentos((fechRes && !fechRes.error && Array.isArray(fechRes.data)) ? fechRes.data : []);
       setUltimosRecebidos((imeisRes && !imeisRes.error && Array.isArray(imeisRes.data)) ? imeisRes.data : []);
       setDisponiveisImeis(baseImeis);
+
+      setCache(cacheKey, {
+        prodsMapeados,
+        salesData: Array.isArray(salesData) ? salesData : [],
+        fechamentos: (fechRes && !fechRes.error && Array.isArray(fechRes.data)) ? fechRes.data : [],
+        ultimosRecebidos: (imeisRes && !imeisRes.error && Array.isArray(imeisRes.data)) ? imeisRes.data : [],
+        baseImeis
+      }, 5); // 5 min (300.000ms)
+
       fetchSessoesCaixas(empresaId, filtroFilialCaixa, selectedMonth).catch(e => console.warn('Aviso caixas:', e));
     } catch (err) {
       console.error('[Dashboard] Erro detalhado ao buscar dados do gerente/dashboard:', err?.message || err, err);
@@ -4027,10 +4094,10 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // 1. Busca limpa dos caixas com campos estritamente necessários e limite de 50 registros para evitar sobrecarga de Egress
+      // 1. Busca limpa dos caixas com campos existentes e join com profiles(nome)
       let query = supabase
         .from('caixas')
-        .select('id, filial_id, empresa_id, operador_id, operador_nome, filial_nome, saldo_inicial, deposito_inicial, data_abertura, aberto_em, data_fechamento, fechado_em, status, total_vendas, total_dinheiro, total_cartao, total_pix, total_boleto, comprovante_url, comprovantes, observacoes, created_at')
+        .select('id, filial_id, empresa_id, operador_id, profiles(nome), saldo_inicial, data_abertura, data_fechamento, status, total_vendas, total_dinheiro, total_cartao, total_pix, total_boleto, comprovante_url, observacoes, created_at')
         .order('data_abertura', { ascending: false })
         .limit(50);
 
@@ -4046,7 +4113,7 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // Execução paralela: caixas, filiais e profiles cadastrados
-      const [
+      let [
         { data: listaCaixas, error: errorCaixas },
         { data: filiaisData },
         { data: profilesData }
@@ -4055,6 +4122,19 @@ export default function Dashboard({ session, profileDataProps }) {
         supabase.from('filiais').select('id, nome'),
         supabase.from('profiles').select('id, nome')
       ]);
+
+      if (errorCaixas) {
+        console.warn('[Caixas] Tentando select simplificado de caixas sem join:', errorCaixas.message || errorCaixas);
+        const fbRes = await supabase
+          .from('caixas')
+          .select('id, filial_id, empresa_id, operador_id, saldo_inicial, data_abertura, data_fechamento, status, total_vendas, total_dinheiro, total_cartao, total_pix, total_boleto, comprovante_url, observacoes, created_at')
+          .order('data_abertura', { ascending: false })
+          .limit(50);
+        if (!fbRes.error && fbRes.data) {
+          listaCaixas = fbRes.data;
+          errorCaixas = null;
+        }
+      }
 
       if (errorCaixas) {
         console.error('[Caixas] ⚠️ Erro na consulta de caixas do Supabase:', errorCaixas);
@@ -4077,14 +4157,14 @@ export default function Dashboard({ session, profileDataProps }) {
           const profileEncontrado = todosProfiles.find(p => String(p.id) === String(cx.operador_id));
 
           const filialNome = cx.filial_nome || filialEncontrada?.nome || 'Sem Filial';
-          const operadorNome = cx.operador_nome || profileEncontrado?.nome || 'Operador PDV';
+          const operadorNome = cx.profiles?.nome || cx.operador_nome || profileEncontrado?.nome || 'Operador PDV';
 
           return {
             ...cx,
             filial_nome: filialNome,
             filiais: filialEncontrada ? { id: filialEncontrada.id, nome: filialEncontrada.nome } : { nome: filialNome },
             operador_nome: operadorNome,
-            profiles: profileEncontrado ? { id: profileEncontrado.id, nome: profileEncontrado.nome } : { nome: operadorNome }
+            profiles: cx.profiles || (profileEncontrado ? { id: profileEncontrado.id, nome: profileEncontrado.nome } : { nome: operadorNome })
           };
         });
 
@@ -6291,16 +6371,34 @@ export default function Dashboard({ session, profileDataProps }) {
       showToast('Fechamento de caixa corrigido com sucesso!', 'success');
       setModalAjusteCaixaOpen(false);
 
-      // Recarregar os fechamentos para atualizar a UI
-      const { data: newFechamentos, error: fetchErr } = await supabase
-        .from('fechamentos')
-        .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, created_at, profiles!vendedor_id(id, nome), filiais(id, nome)')
-        .eq('empresa_id', profile.empresa_id)
-        .order('created_at', { ascending: false })
-        .limit(50);
+      // Recarregar os fechamentos para atualizar a UI (select limpo e seguro)
+      try {
+        let { data: newFechamentos, error: fetchErr } = await supabase
+          .from('fechamentos')
+          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, comprovante_url, created_at')
+          .eq('empresa_id', profile.empresa_id)
+          .order('created_at', { ascending: false })
+          .limit(50);
 
-      if (!fetchErr && newFechamentos) {
-        setFechamentos(newFechamentos);
+        if (fetchErr || !newFechamentos) {
+          const fbRes = await supabase.from('fechamentos').select('*').eq('empresa_id', profile.empresa_id).order('created_at', { ascending: false }).limit(50);
+          newFechamentos = fbRes.data || [];
+        }
+
+        if (newFechamentos) {
+          const enriched = newFechamentos.map(f => {
+            const vObj = (vendedores || []).find(v => String(v.id) === String(f.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(f.vendedor_id));
+            const flObj = (filiais || []).find(fl => String(fl.id) === String(f.filial_id));
+            return {
+              ...f,
+              profiles: f.profiles || (vObj ? { id: vObj.id, nome: vObj.nome } : null),
+              filiais: f.filiais || (flObj ? { id: flObj.id, nome: flObj.nome } : null)
+            };
+          });
+          setFechamentos(enriched);
+        }
+      } catch (errFech) {
+        console.warn('Erro ao atualizar lista de fechamentos após ajuste:', errFech);
       }
     } catch (err) {
       console.error('Erro ao corrigir fechamento:', err);
@@ -6502,15 +6600,29 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchStatusCaixa(modalDetalheCaixa.filial_id);
 
       try {
-        const { data: newFechamentos } = await supabase
+        let { data: newFechamentos, error: fetchErr } = await supabase
           .from('fechamentos')
-          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, created_at, profiles!vendedor_id(id, nome), filiais(id, nome)')
+          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, valor_dinheiro, valor_cartao, valor_pix, valor_boleto, valor_troca, qtd_transferencias_saida, qtd_transferencias_entrada, observacoes, comprovante_url, created_at')
           .eq('empresa_id', targetEmpresaId)
           .order('created_at', { ascending: false })
           .limit(50);
 
+        if (fetchErr || !newFechamentos) {
+          const fbRes = await supabase.from('fechamentos').select('*').eq('empresa_id', targetEmpresaId).order('created_at', { ascending: false }).limit(50);
+          newFechamentos = fbRes.data || [];
+        }
+
         if (newFechamentos) {
-          setFechamentos(newFechamentos);
+          const enriched = newFechamentos.map(f => {
+            const vObj = (vendedores || []).find(v => String(v.id) === String(f.vendedor_id)) || (teamMembers || []).find(m => String(m.id) === String(f.vendedor_id));
+            const flObj = (filiais || []).find(fl => String(fl.id) === String(f.filial_id));
+            return {
+              ...f,
+              profiles: f.profiles || (vObj ? { id: vObj.id, nome: vObj.nome } : null),
+              filiais: f.filiais || (flObj ? { id: flObj.id, nome: flObj.nome } : null)
+            };
+          });
+          setFechamentos(enriched);
         }
       } catch (e) {
         console.warn('Erro ao atualizar lista de fechamentos:', e);
@@ -8296,32 +8408,22 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Buscar clientes do banco (Com JOIN relacional e filtro abrangente por empresa_id/vendedor_id)
-  const fetchClientes = async (empIdParam = null) => {
+  // Buscar clientes do banco com cache de 5 minutos (staleTime 300.000ms)
+  const fetchClientes = async (empIdParam = null, force = false) => {
+    const targetEmpresa = empIdParam || activeEmpresaId || company?.id || profile?.empresa_id;
+    const currentUserId = profile?.id || session?.user?.id;
+    const cacheKey = `clientes_${targetEmpresa || 'all'}_${currentUserId || 'all'}`;
+
+    if (!force) {
+      const cached = getCache(cacheKey);
+      if (cached && Array.isArray(cached)) {
+        setClientes(cached);
+        return;
+      }
+    }
+
     setLoadingClientes(true);
     try {
-      const targetEmpresa = empIdParam || activeEmpresaId || company?.id || profile?.empresa_id;
-      const currentUserId = profile?.id || session?.user?.id;
-
-      console.log("🕵️‍♂️ [AUDITORIA] ID do Vendedor Logado (Filtro):", currentUserId);
-      console.log("🕵️‍♂️ [AUDITORIA] Tipo do ID:", typeof currentUserId);
-      console.log("🕵️‍♂️ [AUDITORIA] Profile ID:", profile?.id, "Session User ID:", session?.user?.id);
-      console.log("🕵️‍♂️ [AUDITORIA] Target Empresa ID:", targetEmpresa);
-
-      // BUSCA PARALELA DE AUDITORIA SEM FILTROS (Verificar acesso total da tabela e RLS)
-      try {
-        const { data: rawAll, error: rawErr } = await supabase
-          .from('clientes')
-          .select('id, nome, empresa_id, filial_id, vendedor_id, usuario_id, criado_por');
-
-        console.log("🕵️‍♂️ [AUDITORIA PARALELA] Leitura total da tabela clientes (Sem Filtro):", rawAll ? rawAll.length : "ERRO OU BLOQUEIO RLS", rawErr || "Sem Erro");
-        if (rawAll && rawAll.length > 0) {
-          console.log("🕵️‍♂️ [AUDITORIA PARALELA] Amostra dos 3 primeiros clientes no banco:", rawAll.slice(0, 3));
-        }
-      } catch (diagErr) {
-        console.error("🕵️‍♂️ [AUDITORIA PARALELA] Exceção ao testar leitura da tabela clientes:", diagErr);
-      }
-
       let query = supabase
         .from('clientes')
         .select(`
@@ -8360,7 +8462,6 @@ export default function Dashboard({ session, profileDataProps }) {
 
       // Fallback secundário se nada retornou mas o vendedor possui clientes vinculados
       if ((!data || data.length === 0) && currentUserId) {
-        console.log("🕵️‍♂️ [AUDITORIA] 0 clientes retornados com os filtros atuais. Executando fallback incondicional pelo vendedor...");
         const { data: userClients } = await supabase
           .from('clientes')
           .select('*')
@@ -8368,12 +8469,11 @@ export default function Dashboard({ session, profileDataProps }) {
           .order('created_at', { ascending: false });
 
         if (userClients && userClients.length > 0) {
-          console.log("🕵️‍♂️ [AUDITORIA] Fallback encontrou clientes do vendedor:", userClients.length);
           data = userClients;
         }
       }
 
-      // Mapeamento auxiliar corrigido de nomes de filiais/empresas (Sem ReferenceError)
+      // Mapeamento auxiliar de nomes de filiais/empresas
       const filiaisMap = new Map();
       (filiais || []).forEach(f => filiaisMap.set(String(f.id), f.nome));
       if (company && company.id) {
@@ -8388,8 +8488,8 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       });
 
-      console.log("🔥 [FETCH CLIENTES] Clientes finais carregados:", enrichedData?.length || 0);
       setClientes(enrichedData);
+      setCache(cacheKey, enrichedData, 5); // 5 min TTL
     } catch (err) {
       console.error('Erro ao buscar clientes:', err);
     } finally {
@@ -8673,7 +8773,8 @@ export default function Dashboard({ session, profileDataProps }) {
       setClienteComplemento('');
       setEditingCliente(null);
       setIsClienteModalOpen(false);
-      fetchClientes(company?.id || profile?.empresa_id);
+      invalidateCache('clientes_');
+      fetchClientes(company?.id || profile?.empresa_id, true);
     } catch (err) {
       console.error(err);
       alert('Erro ao salvar cliente: ' + err.message);
@@ -8832,7 +8933,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (error) throw error;
       alert('Cliente excluído com sucesso!');
-      fetchClientes(company?.id || profile?.empresa_id);
+      invalidateCache('clientes_');
+      fetchClientes(company?.id || profile?.empresa_id, true);
     } catch (err) {
       console.error(err);
       alert('Erro ao excluir cliente: ' + err.message);
@@ -11069,19 +11171,36 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
 
-  // Buscar taxas de cartão do banco
-  const fetchTaxasCartao = async (tenantId) => {
+  // Buscar taxas de cartão do banco com cache de 5 minutos (staleTime 300.000ms)
+  const fetchTaxasCartao = async (tenantId, force = false) => {
     const targetEmpresaId = profile?.empresa_id || tenantId || company?.id || activeEmpresaId;
     if (!targetEmpresaId) return;
+
+    const cacheKey = `taxas_cartao_${targetEmpresaId}`;
+    if (!force) {
+      const cached = getCache(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        setTaxasCartao(cached);
+        const ratesMap = {};
+        const debitoRow = cached.find(r => r.parcela === 0 || r.parcelas === 0);
+        ratesMap[0] = debitoRow ? debitoRow.taxa : 1.0;
+        for (let i = 1; i <= 18; i++) {
+          const row = cached.find(r => r.parcela === i || r.parcelas === i);
+          ratesMap[i] = row ? row.taxa : (1.5 + (i - 1));
+        }
+        setTempTaxasMap(ratesMap);
+        return;
+      }
+    }
+
     setIsLoadingTaxas(true);
     try {
-      // Busca pelo campo padrão empresa_id (com fallback para tenant_id caso necessário)
-      let query = supabase
+      // Busca limpa pelo campo existente empresa_id (sem referenciar tenant_id inexistente que causa erro 400)
+      const { data, error } = await supabase
         .from('taxas_cartao')
         .select('*')
+        .eq('empresa_id', targetEmpresaId)
         .order('parcela', { ascending: true });
-
-      const { data, error } = await query.or(`empresa_id.eq.${targetEmpresaId},tenant_id.eq.${targetEmpresaId}`);
 
       if (error) {
         if (error.code === '42P01') {
@@ -11124,6 +11243,7 @@ export default function Dashboard({ session, profileDataProps }) {
           ratesMap[i] = 1.5 + (i - 1);
         }
         setTempTaxasMap(ratesMap);
+        setCache(cacheKey, defaultRates, 5);
       } else {
         // Normaliza registros suportando parcela ou parcelas
         const normalizedData = data.map(r => ({
@@ -11140,6 +11260,7 @@ export default function Dashboard({ session, profileDataProps }) {
           ratesMap[i] = row ? row.taxa : (1.5 + (i - 1));
         }
         setTempTaxasMap(ratesMap);
+        setCache(cacheKey, normalizedData, 5);
       }
     } catch (err) {
       console.error('Erro ao buscar taxas de cartão:', err);
@@ -11196,7 +11317,8 @@ export default function Dashboard({ session, profileDataProps }) {
 
       if (error) throw error;
 
-      await fetchTaxasCartao(targetEmpresaId);
+      invalidateCache('taxas_cartao_');
+      await fetchTaxasCartao(targetEmpresaId, true);
       alert('Taxas de parcelamento salvas com sucesso!');
     } catch (err) {
       console.error('Erro ao salvar taxas de cartão:', err);
