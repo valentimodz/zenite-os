@@ -1214,6 +1214,8 @@ export default function Dashboard({ session, profileDataProps }) {
     const mes = String(dataAtual.getMonth() + 1).padStart(2, '0');
     return `${ano}-${mes}`;
   }); // YYYY-MM
+  const [metaVendedorLogado, setMetaVendedorLogado] = useState(null);
+  const [loadingMetaVendedor, setLoadingMetaVendedor] = useState(false);
 
   // Estados para Correção de Fechamento de Caixa Diário
   const [modalAjusteCaixaOpen, setModalAjusteCaixaOpen] = useState(false);
@@ -2658,6 +2660,21 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
   }, [activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id, profile?.role, profile?.cargo, activeTab, currentView]);
+
+  // Sincronizar Meta do Vendedor Logado e Vendas quando mudar a aba de Metas ou o Filtro de Mês
+  useEffect(() => {
+    const currentUserId = session?.user?.id || profile?.id;
+    const currentFilialId = activeFilialId || profile?.filial_id;
+    const isMetasTab = activeSellerTab === 'metas' || activeTab === 'metas' || currentView === 'metas';
+    const isVendedor = profile?.role === 'VENDEDOR' || !['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role);
+
+    if (currentUserId && (isMetasTab || isVendedor)) {
+      carregarMetaVendedor(currentUserId, currentFilialId, filtroMes);
+      if (currentFilialId) {
+        fetchVendedorData(currentFilialId, currentUserId, null, filtroMes);
+      }
+    }
+  }, [activeSellerTab, activeTab, currentView, filtroMes, activeFilialId, profile?.filial_id, session?.user?.id, profile?.id, profile?.role]);
 
   // Carregar Estoque Consolidado dinamicamente com debounce APENAS na aba de estoque
   useEffect(() => {
@@ -4408,8 +4425,121 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
+  // Buscar meta do vendedor logado dinamicamente para o mês (com fallback inteligente)
+  const carregarMetaVendedor = async (userId, filialId, targetMes = null) => {
+    if (!userId) return;
+    setLoadingMetaVendedor(true);
+    const mesAlvo = targetMes || filtroMes || new Date().toISOString().slice(0, 7);
+
+    try {
+      let metaEncontrada = null;
+
+      // 1. Buscar a meta do vendedor logado com base no mes_ano atual
+      try {
+        const { data: metaData, error: metaErr } = await supabase
+          .from('metas')
+          .select('*')
+          .eq('vendedor_id', userId)
+          .eq('mes_ano', mesAlvo)
+          .maybeSingle();
+
+        if (!metaErr && metaData) {
+          metaEncontrada = metaData;
+        } else {
+          // Fallback por mes_referencia
+          const { data: metaRefData, error: metaRefErr } = await supabase
+            .from('metas')
+            .select('*')
+            .eq('vendedor_id', userId)
+            .eq('mes_referencia', mesAlvo)
+            .maybeSingle();
+
+          if (!metaRefErr && metaRefData) {
+            metaEncontrada = metaRefData;
+          }
+        }
+      } catch (errM) {
+        console.warn('[Dashboard] Aviso ao buscar meta do vendedor:', errM);
+      }
+
+      // 2. Fallback inteligente: se não houver registro específico na tabela metas,
+      // buscar a configuração padrão da filial na tabela configuracoes_metas_filial para o mês atual
+      if (!metaEncontrada && filialId) {
+        try {
+          const { data: cfgData, error: cfgErr } = await supabase
+            .from('configuracoes_metas_filial')
+            .select('*')
+            .eq('filial_id', filialId)
+            .eq('mes_ano', mesAlvo)
+            .maybeSingle();
+
+          if (!cfgErr && cfgData) {
+            const isTrainee = Boolean(profile?.is_treinner) || (profile?.role || '').toUpperCase().includes('TRAINEE');
+            const valorCalculado = isTrainee
+              ? (Number(cfgData.meta_trainee_boletos) || 30000)
+              : (Number(cfgData.meta_vendedor_boleto) || 45000);
+
+            metaEncontrada = {
+              vendedor_id: userId,
+              filial_id: filialId,
+              mes_ano: mesAlvo,
+              mes_referencia: mesAlvo,
+              valor_meta: valorCalculado,
+              tipo_meta: 'boleto',
+              meta_vendedor_boleto: cfgData.meta_vendedor_boleto,
+              meta_vendedor_acessorios: cfgData.meta_vendedor_acessorios,
+              super_meta_boleto: cfgData.super_meta_boleto,
+              super_meta_acessorios: cfgData.super_meta_acessorios,
+              meta_trainee_boletos: cfgData.meta_trainee_boletos,
+              origem: 'configuracoes_metas_filial'
+            };
+          }
+        } catch (errCfg) {
+          console.warn('[Dashboard] Aviso fallback configuracoes_metas_filial:', errCfg);
+        }
+
+        // Se ainda não encontrou, verificar regras_comissoes da filial
+        if (!metaEncontrada) {
+          try {
+            const { data: regData } = await supabase
+              .from('regras_comissoes')
+              .select('*')
+              .eq('filial_id', filialId)
+              .eq('mes_referencia', mesAlvo)
+              .maybeSingle();
+
+            if (regData) {
+              const isTrainee = Boolean(profile?.is_treinner) || (profile?.role || '').toUpperCase().includes('TRAINEE');
+              const valorCalculado = isTrainee
+                ? (Number(regData.meta_trainee_boleto) || 30000)
+                : 45000;
+
+              metaEncontrada = {
+                vendedor_id: userId,
+                filial_id: filialId,
+                mes_ano: mesAlvo,
+                mes_referencia: mesAlvo,
+                valor_meta: valorCalculado,
+                tipo_meta: 'faturamento',
+                origem: 'regras_comissoes'
+              };
+            }
+          } catch (errReg) {
+            console.warn('[Dashboard] Aviso fallback regras_comissoes:', errReg);
+          }
+        }
+      }
+
+      setMetaVendedorLogado(metaEncontrada);
+    } catch (err) {
+      console.error('[Dashboard] Erro ao carregar meta:', err);
+    } finally {
+      setLoadingMetaVendedor(false);
+    }
+  };
+
   // Buscar dados específicos do Vendedor (Estoque na Filial e Vendas próprias)
-  const fetchVendedorData = async (filialId, sellerId, forceEmpresaId = null) => {
+  const fetchVendedorData = async (filialId, sellerId, forceEmpresaId = null, targetMes = null) => {
     if (!filialId || !sellerId) {
       setProdutosFilial([]);
       setVendasVendedor([]);
@@ -4436,12 +4566,42 @@ export default function Dashboard({ session, profileDataProps }) {
       // Fallback incondicional para garantir busca completa de todas as vendas do vendedor no Supabase
       if (!salesData || salesData.length === 0) {
         try {
-          const { data: dbSales, error: dbSalesErr } = await supabase
+          const mesAlvo = targetMes || filtroMes;
+          let querySales = supabase
             .from('vendas')
-            .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
+            .select(`
+              id,
+              empresa_id,
+              filial_id,
+              vendedor_id,
+              vendedor_nome,
+              valor_total,
+              desconto,
+              forma_pagamento,
+              metodo_pagamento,
+              parcelas,
+              comissao,
+              comissao_trainee,
+              created_at,
+              produtos_descricao,
+              itens_resumo,
+              vendas_pagamentos (*),
+              itens_venda (id, produto_nome, quantidade, preco_unitario)
+            `)
             .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
-            .order('created_at', { ascending: false })
-            .limit(100);
+            .order('created_at', { ascending: false });
+
+          if (mesAlvo) {
+            const [ano, mes] = mesAlvo.split('-');
+            const dtInicio = `${mesAlvo}-01T00:00:00.000Z`;
+            const lastDay = new Date(parseInt(ano, 10), parseInt(mes, 10), 0).getDate();
+            const dtFim = `${mesAlvo}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
+            querySales = querySales.gte('created_at', dtInicio).lte('created_at', dtFim);
+          } else {
+            querySales = querySales.limit(150);
+          }
+
+          const { data: dbSales, error: dbSalesErr } = await querySales;
           if (!dbSalesErr && dbSales) salesData = dbSales;
         } catch (dbErr) {
           console.warn('Aviso: Erro ao buscar vendas do vendedor via Supabase:', dbErr);
@@ -13811,20 +13971,27 @@ export default function Dashboard({ session, profileDataProps }) {
     }).sort((a, b) => b.totalSalesVolume - a.totalSalesVolume);
   };
 
-  // Cálculo das Metas Pessoais do Vendedor com Motor de Progresso Condicional
+  // Cálculo das Metas Pessoais do Vendedor com Motor de Progresso Condicional e Histórico Mensal
   const getMetasVendedor = () => {
-    const today = new Date();
     const currentUserId = session?.user?.id || profile?.id;
-    const mesRef = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-    const m = metas.find(x => (x.vendedor_id === currentUserId || x.usuario_id === currentUserId) && x.mes_referencia === mesRef);
+    const mesAlvo = filtroMes || new Date().toISOString().slice(0, 7);
+    const [anoAlvoStr, mesAlvoStr] = mesAlvo.split('-');
+    const anoAlvo = parseInt(anoAlvoStr, 10);
+    const mesAlvoIdx = parseInt(mesAlvoStr, 10) - 1; // 0-indexed
+
+    // Priorizar meta encontrada dinamicamente para o mês ou buscar no array metas
+    const m = metaVendedorLogado || metas.find(x => 
+      (x.vendedor_id === currentUserId || x.usuario_id === currentUserId) && 
+      (x.mes_ano === mesAlvo || x.mes_referencia === mesAlvo)
+    );
     const tipoMeta = m?.tipo_meta || 'faturamento';
     const normType = getNormalizedMetaTipo(tipoMeta);
 
     console.log("🕵️‍♂️ [METAS AUDIT] ID Vendedor Logado:", currentUserId);
     console.log("🕵️‍♂️ [METAS AUDIT] Total Vendas do Vendedor no Estado (vendasVendedor):", (vendasVendedor || []).length);
-    console.log("🕵️‍♂️ [METAS AUDIT] Mês de Referência:", mesRef);
+    console.log("🕵️‍♂️ [METAS AUDIT] Mês de Referência:", mesAlvo);
 
-    // Todas as vendas do mês corrente deste vendedor (resiliente a fuso horário e nulos)
+    // Todas as vendas do mês corrente/filtrado deste vendedor (resiliente a fuso horário e nulos)
     const currentMonthSales = (vendasVendedor || []).filter(sale => {
       const saleUserId = sale.vendedor_id || sale.usuario_id || sale.criado_por;
       if (saleUserId && currentUserId && String(saleUserId) !== String(currentUserId)) return false;
@@ -13835,21 +14002,21 @@ export default function Dashboard({ session, profileDataProps }) {
       const saleDate = new Date(rawDateStr);
       if (isNaN(saleDate.getTime())) return true;
 
-      // Comparação tolerante considerando tanto fuso UTC quanto fuso local
-      const isUtcCurrentMonth = saleDate.getUTCFullYear() === today.getFullYear() && saleDate.getUTCMonth() === today.getMonth();
-      const isLocalCurrentMonth = saleDate.getFullYear() === today.getFullYear() && saleDate.getMonth() === today.getMonth();
+      // Comparação tolerante considerando tanto fuso UTC quanto fuso local para o mês selecionado
+      const isUtcMatch = saleDate.getUTCFullYear() === anoAlvo && saleDate.getUTCMonth() === mesAlvoIdx;
+      const isLocalMatch = saleDate.getFullYear() === anoAlvo && saleDate.getMonth() === mesAlvoIdx;
 
-      return isUtcCurrentMonth || isLocalCurrentMonth;
+      return isUtcMatch || isLocalMatch;
     });
 
-    console.log("🕵️‍♂️ [METAS AUDIT] Vendas Filtradas para o Mês Atual:", currentMonthSales.length);
+    console.log("🕵️‍♂️ [METAS AUDIT] Vendas Filtradas para o Mês Selecionado:", currentMonthSales.length);
 
     // MOTOR DE PROGRESSO CONDICIONAL: filtragem por tipo_meta
     let vendasParaMeta = currentMonthSales;
     if (normType === 'boleto') {
       vendasParaMeta = currentMonthSales.filter(sale => {
-        const mp = (sale.metodo_pagamento || '').toLowerCase();
-        return mp === 'boleto';
+        const mp = (sale.metodo_pagamento || sale.forma_pagamento || '').toLowerCase();
+        return mp.includes('boleto');
       });
     } else if (normType === 'ativacao') {
       vendasParaMeta = currentMonthSales.filter(sale => {
@@ -13872,6 +14039,7 @@ export default function Dashboard({ session, profileDataProps }) {
     const progressoPercent = metaObjetivo > 0 ? Math.min(100, Math.round((totalVendas / metaObjetivo) * 100)) : 0;
 
     return {
+      mesReferencia: mesAlvo,
       totalVendas,          // valor filtrado pelo tipo_meta (para o progresso)
       totalVendasGeral,     // total real incondicional de tudo no mês
       totalComissoes,
@@ -13880,11 +14048,23 @@ export default function Dashboard({ session, profileDataProps }) {
       metaObjetivo,
       tipoMeta,
       progressoPercent,
+      metaRegistro: m,
       historico: currentMonthSales
     };
   };
 
-  const metasInfo = profile?.role === 'VENDEDOR' ? getMetasVendedor() : null;
+  const metasInfo = getMetasVendedor() || {
+    mesReferencia: filtroMes,
+    totalVendas: 0,
+    totalVendasGeral: 0,
+    totalComissoes: 0,
+    salesCount: 0,
+    ticketMedio: 0,
+    metaObjetivo: 0,
+    tipoMeta: 'faturamento',
+    progressoPercent: 0,
+    historico: []
+  };
 
   // Métricas Globais do Gerente
   const getGerenteMetrics = () => {
@@ -23951,7 +24131,53 @@ export default function Dashboard({ session, profileDataProps }) {
 
                     {/* VENDEDOR ABA 2: MINHAS METAS */}
                     {activeSellerTab === 'metas' && (
-                      <div className="space-y-8 animate-fadeIn">
+                      <div className="space-y-6 animate-fadeIn">
+
+                        {/* Barra Superior de Navegação de Histórico & Filtro Mensal */}
+                        <div className="bg-[#111111] border border-[#222222] p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg shadow-purple-950/10">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg bg-[#6A0DAD]/15 text-[#A78BFA] flex items-center justify-center border border-[#6A0DAD]/30 shrink-0">
+                              <Calendar size={20} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-sm font-extrabold text-white">
+                                  Minhas Metas & Comissões Mensais
+                                </h3>
+                                {loadingMetaVendedor && (
+                                  <RefreshCw size={13} className="animate-spin text-purple-400" />
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-400 flex items-center gap-1.5 flex-wrap">
+                                Mês selecionado: <span className="text-purple-300 font-bold font-mono">{filtroMes}</span>
+                                {metasInfo?.metaRegistro?.origem && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/50 text-purple-300 border border-purple-800/40 font-semibold">
+                                    Base: {metasInfo.metaRegistro.origem === 'configuracoes_metas_filial' ? 'Configuração Padrão da Filial' : 'Meta Individual'}
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2.5 bg-black border border-[#333333] focus-within:border-[#6A0DAD] px-3 py-1.5 rounded-lg transition-colors">
+                            <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Mês:</span>
+                            <input
+                              type="month"
+                              value={filtroMes}
+                              onChange={(e) => {
+                                const novoMes = e.target.value;
+                                setFiltroMes(novoMes);
+                                const currentUserId = session?.user?.id || profile?.id;
+                                const currentFilialId = activeFilialId || profile?.filial_id;
+                                carregarMetaVendedor(currentUserId, currentFilialId, novoMes);
+                                if (currentFilialId && currentUserId) {
+                                  fetchVendedorData(currentFilialId, currentUserId, null, novoMes);
+                                }
+                              }}
+                              className="bg-transparent text-xs font-bold text-white outline-none cursor-pointer font-mono"
+                            />
+                          </div>
+                        </div>
 
                         {/* Indicador de Perfil Trainee */}
                         {profile?.is_treinner && (
@@ -23966,7 +24192,7 @@ export default function Dashboard({ session, profileDataProps }) {
                         {/* KPIs Pessoais */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                           <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl">
-                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Minhas Vendas (Mês Atual)</span>
+                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Minhas Vendas ({metasInfo?.mesReferencia || filtroMes})</span>
                             <span className="text-2xl font-black text-white mt-2 block font-mono">
                               R$ {metasInfo.totalVendasGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
@@ -23978,7 +24204,7 @@ export default function Dashboard({ session, profileDataProps }) {
                             </span>
                           </div>
                           <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl border-l-4 border-l-[#6A0DAD]">
-                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Minhas Comissões (Mês Atual)</span>
+                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Minhas Comissões ({metasInfo?.mesReferencia || filtroMes})</span>
                             <span className="text-2xl font-black text-[#6A0DAD] mt-2 block font-mono">
                               R$ {metasInfo.totalComissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
@@ -24056,7 +24282,7 @@ export default function Dashboard({ session, profileDataProps }) {
                               <tbody className="divide-y divide-[#222222]/50">
                                 {metasInfo.historico.length === 0 ? (
                                   <tr>
-                                    <td colSpan="8" className="py-6 text-center italic text-gray-600">Você ainda não registrou nenhuma venda neste mês.</td>
+                                    <td colSpan="8" className="py-6 text-center italic text-gray-600">Você ainda não registrou nenhuma venda no mês {metasInfo?.mesReferencia || filtroMes}.</td>
                                   </tr>
                                 ) : (
                                   metasInfo.historico.map(sale => {

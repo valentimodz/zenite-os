@@ -21,10 +21,18 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
   const [mensagem, setMensagem] = useState(null);
 
   // Estados dos Campos das Metas da Loja (R$)
+  // Estados dos Campos das Metas da Loja (R$)
   const [metaLojaBoleto, setMetaLojaBoleto] = useState(123000);
   const [metaLojaAcessorios, setMetaLojaAcessorios] = useState(8000);
   const [superMeta, setSuperMeta] = useState(143000);
   const [metaTraineeBoleto, setMetaTraineeBoleto] = useState(30000);
+
+  // Estados dos Campos Solicitados para Metas Individuais do Vendedor e Trainee (R$)
+  const [metaVendedorBoleto, setMetaVendedorBoleto] = useState(45000);
+  const [metaVendedorAcessorios, setMetaVendedorAcessorios] = useState(3000);
+  const [superMetaBoleto, setSuperMetaBoleto] = useState(60000);
+  const [superMetaAcessorios, setSuperMetaAcessorios] = useState(4500);
+  const [metaTraineeBoletos, setMetaTraineeBoletos] = useState(30000);
 
   // Estados dos Campos das Regras de Comissionamento (% e R$)
   // Vendas Boleto
@@ -54,6 +62,33 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
     setLoading(true);
     setMensagem(null);
     try {
+      // 1. Tentar buscar da tabela configuracoes_metas_filial
+      try {
+        const { data: cfgData } = await supabase
+          .from('configuracoes_metas_filial')
+          .select('*')
+          .eq('filial_id', filialId)
+          .eq('mes_ano', mes)
+          .maybeSingle();
+
+        if (cfgData) {
+          if (cfgData.meta_vendedor_boleto !== undefined && cfgData.meta_vendedor_boleto !== null) setMetaVendedorBoleto(Number(cfgData.meta_vendedor_boleto));
+          if (cfgData.meta_vendedor_acessorios !== undefined && cfgData.meta_vendedor_acessorios !== null) setMetaVendedorAcessorios(Number(cfgData.meta_vendedor_acessorios));
+          if (cfgData.super_meta_boleto !== undefined && cfgData.super_meta_boleto !== null) setSuperMetaBoleto(Number(cfgData.super_meta_boleto));
+          if (cfgData.super_meta_acessorios !== undefined && cfgData.super_meta_acessorios !== null) setSuperMetaAcessorios(Number(cfgData.super_meta_acessorios));
+          if (cfgData.meta_trainee_boletos !== undefined && cfgData.meta_trainee_boletos !== null) {
+            setMetaTraineeBoletos(Number(cfgData.meta_trainee_boletos));
+            setMetaTraineeBoleto(Number(cfgData.meta_trainee_boletos));
+          }
+          if (cfgData.meta_loja_boleto !== undefined && cfgData.meta_loja_boleto !== null) setMetaLojaBoleto(Number(cfgData.meta_loja_boleto));
+          if (cfgData.meta_loja_acessorios !== undefined && cfgData.meta_loja_acessorios !== null) setMetaLojaAcessorios(Number(cfgData.meta_loja_acessorios));
+          if (cfgData.super_meta !== undefined && cfgData.super_meta !== null) setSuperMeta(Number(cfgData.super_meta));
+        }
+      } catch (eCfg) {
+        console.warn('[ModalMetasFilial] Aviso configuracoes_metas_filial:', eCfg);
+      }
+
+      // 2. Buscar da tabela regras_comissoes
       const { data, error } = await supabase
         .from('regras_comissoes')
         .select('*')
@@ -71,6 +106,7 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
         setMetaLojaAcessorios(Number(data.meta_loja_acessorios ?? 8000));
         setSuperMeta(Number(data.super_meta ?? 143000));
         setMetaTraineeBoleto(Number(data.meta_trainee_boleto ?? 30000));
+        setMetaTraineeBoletos(Number(data.meta_trainee_boleto ?? 30000));
 
         // Converter valores de fração decimal para percentual (0.01 -> 1%) se vier assim do banco
         const toPercent = (val, def) => {
@@ -95,28 +131,8 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
 
         setComissaoTraineeBoleto(toPercent(data.comissao_trainee_boleto, 1.0));
       } else {
-        // Valores Padrão recomendados
+        // Valores Padrão recomendados se não existir registro
         setRegistroId(null);
-        setMetaLojaBoleto(123000);
-        setMetaLojaAcessorios(8000);
-        setSuperMeta(143000);
-        setMetaTraineeBoleto(30000);
-
-        setComissaoBoletoAbaixo(1.0);
-        setComissaoBoletoBatida(3.0);
-        setComissaoBoletoSuper(3.2);
-
-        setComissaoAcessoriosAbaixo(1.0);
-        setComissaoAcessoriosBatida(2.5);
-        setComissaoAcessoriosSuper(3.0);
-
-        setComissaoCelularAbaixo(1.0);
-        setComissaoCelularBatida(2.0);
-
-        setPremiumUnitarioAbaixo(15.0);
-        setPremiumUnitarioBatida(30.0);
-
-        setComissaoTraineeBoleto(1.0);
       }
     } catch (err) {
       console.error('[ModalMetasFilial] Erro ao carregar:', err);
@@ -149,13 +165,85 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
         return Number((n / 100).toFixed(4));
       };
 
+      // 1. Fazer upsert na tabela configuracoes_metas_filial com filial_id e o mes_ano selecionado
+      try {
+        const payloadConfigMetas = {
+          filial_id: filial.id,
+          mes_ano: mesReferencia,
+          meta_vendedor_boleto: parseFloat(metaVendedorBoleto) || 0,
+          meta_vendedor_acessorios: parseFloat(metaVendedorAcessorios) || 0,
+          super_meta_boleto: parseFloat(superMetaBoleto) || 0,
+          super_meta_acessorios: parseFloat(superMetaAcessorios) || 0,
+          meta_trainee_boletos: parseFloat(metaTraineeBoletos) || 0,
+          meta_loja_boleto: parseFloat(metaLojaBoleto) || 0,
+          meta_loja_acessorios: parseFloat(metaLojaAcessorios) || 0,
+          super_meta: parseFloat(superMeta) || 0,
+          updated_at: new Date().toISOString()
+        };
+        if (tenantId) payloadConfigMetas.tenant_id = tenantId;
+
+        const { error: cfgErr } = await supabase
+          .from('configuracoes_metas_filial')
+          .upsert(payloadConfigMetas, { onConflict: 'filial_id,mes_ano' });
+
+        if (cfgErr) {
+          console.warn('[ModalMetasFilial] Aviso upsert configuracoes_metas_filial:', cfgErr);
+        }
+      } catch (errCfg) {
+        console.warn('[ModalMetasFilial] Aviso na tabela configuracoes_metas_filial:', errCfg);
+      }
+
+      // 2. Propagar ou atualizar os registros na tabela metas para todos os vendedores ativos vinculados àquela filial no mesmo mes_ano (usando ON CONFLICT (vendedor_id, mes_ano) DO UPDATE)
+      try {
+        const { data: vendedores, error: errVend } = await supabase
+          .from('profiles')
+          .select('id, nome, role, is_treinner, filial_id, empresa_id')
+          .eq('filial_id', filial.id);
+
+        if (!errVend && vendedores && vendedores.length > 0) {
+          const rowsMetas = vendedores.map(v => {
+            const isTrainee = Boolean(v.is_treinner) || (v.role || '').toUpperCase().includes('TRAINEE');
+            const valorMetaFinal = isTrainee
+              ? (parseFloat(metaTraineeBoletos) || 30000)
+              : (parseFloat(metaVendedorBoleto) || 45000);
+
+            const row = {
+              vendedor_id: v.id,
+              filial_id: filial.id,
+              mes_ano: mesReferencia,
+              mes_referencia: mesReferencia,
+              valor_meta: valorMetaFinal,
+              tipo_meta: 'boleto',
+              updated_at: new Date().toISOString()
+            };
+            if (tenantId) row.tenant_id = tenantId;
+            return row;
+          });
+
+          // Tentar upsert com ON CONFLICT (vendedor_id, mes_ano)
+          let { error: errUpsertMetas } = await supabase
+            .from('metas')
+            .upsert(rowsMetas, { onConflict: 'vendedor_id,mes_ano' });
+
+          if (errUpsertMetas) {
+            console.warn('[ModalMetasFilial] Tentando fallback onConflict vendedor_id,mes_referencia:', errUpsertMetas.message);
+            await supabase
+              .from('metas')
+              .upsert(rowsMetas, { onConflict: 'vendedor_id,mes_referencia' });
+          }
+        }
+      } catch (errProp) {
+        console.warn('[ModalMetasFilial] Aviso ao propagar metas para vendedores:', errProp);
+      }
+
+      // 3. Persistir na tabela regras_comissoes para retrocompatibilidade
       const payload = {
         filial_id: filial.id,
         mes_referencia: mesReferencia,
         meta_loja_boleto: parseFloat(metaLojaBoleto) || 0,
         meta_loja_acessorios: parseFloat(metaLojaAcessorios) || 0,
         super_meta: parseFloat(superMeta) || 0,
-        meta_trainee_boleto: parseFloat(metaTraineeBoleto) || 0,
+        meta_trainee_boleto: parseFloat(metaTraineeBoletos || metaTraineeBoleto) || 0,
 
         comissao_boleto_abaixo: toDecimal(comissaoBoletoAbaixo),
         comissao_boleto_batida: toDecimal(comissaoBoletoBatida),
@@ -196,7 +284,10 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
         setRegistroId(data.id);
       }
 
-      setMensagem({ tipo: 'sucesso', texto: `Metas e comissões para ${mesReferencia} salvas com sucesso!` });
+      setMensagem({ 
+        tipo: 'sucesso', 
+        texto: `Metas e parâmetros para ${mesReferencia} salvos e propagados com sucesso para a equipe!` 
+      });
 
       if (onSuccess) {
         onSuccess(data);
@@ -388,11 +479,134 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
             </div>
           </div>
 
-          {/* SEÇÃO 2: REGRAS DE COMISSIONAMENTO (% / R$) */}
+          {/* SEÇÃO 2: METAS INDIVIDUAIS DE VENDEDOR & TRAINEE (R$) */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between border-t border-[#222222] pt-4">
+              <h4 className="text-xs font-extrabold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
+                <Target size={14} className="text-[#A78BFA]" /> 2. Metas Individuais por Vendedor (R$)
+              </h4>
+              <span className="text-[10px] text-gray-500">Propagadas automaticamente para a equipe no mês selecionado</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* Meta Vendedor / Boleto (R$) */}
+              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
+                <label className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  Meta Vendedor / Boleto (R$)
+                </label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={metaVendedorBoleto}
+                    onChange={(e) => setMetaVendedorBoleto(e.target.value)}
+                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    placeholder="45000.00"
+                    required
+                  />
+                </div>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 45.000,00</span>
+              </div>
+
+              {/* Meta Vendedor / Acessórios (R$) */}
+              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
+                <label className="block text-[10px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                  Meta Vendedor / Acessórios (R$)
+                </label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={metaVendedorAcessorios}
+                    onChange={(e) => setMetaVendedorAcessorios(e.target.value)}
+                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    placeholder="3000.00"
+                    required
+                  />
+                </div>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 3.000,00</span>
+              </div>
+
+              {/* Super Meta Boleto (R$) */}
+              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
+                <label className="block text-[10px] font-bold text-[#A78BFA] uppercase tracking-wider flex items-center gap-1">
+                  <Sparkles size={11} className="text-[#A78BFA]" /> Super Meta Boleto (R$)
+                </label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={superMetaBoleto}
+                    onChange={(e) => setSuperMetaBoleto(e.target.value)}
+                    className="w-full bg-transparent text-sm font-bold text-[#A78BFA] outline-none font-mono"
+                    placeholder="60000.00"
+                    required
+                  />
+                </div>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 60.000,00</span>
+              </div>
+
+              {/* Super Meta Acessórios (R$) */}
+              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
+                <label className="block text-[10px] font-bold text-pink-400 uppercase tracking-wider flex items-center gap-1">
+                  <Sparkles size={11} className="text-pink-400" /> Super Meta Acessórios (R$)
+                </label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={superMetaAcessorios}
+                    onChange={(e) => setSuperMetaAcessorios(e.target.value)}
+                    className="w-full bg-transparent text-sm font-bold text-pink-300 outline-none font-mono"
+                    placeholder="4500.00"
+                    required
+                  />
+                </div>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 4.500,00</span>
+              </div>
+
+              {/* Meta Trainee Boletos (R$) */}
+              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors sm:col-span-2 lg:col-span-2">
+                <label className="block text-[10px] font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
+                  Meta Trainee Boletos (R$)
+                </label>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={metaTraineeBoletos}
+                    onChange={(e) => {
+                      setMetaTraineeBoletos(e.target.value);
+                      setMetaTraineeBoleto(e.target.value);
+                    }}
+                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    placeholder="30000.00"
+                    required
+                  />
+                </div>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 30.000,00 (Meta reduzida para vendedores em período trainee)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* SEÇÃO 3: REGRAS DE COMISSIONAMENTO (% / R$) */}
           <div className="space-y-4 pt-2">
             <div className="flex items-center justify-between border-t border-[#222222] pt-4">
               <h4 className="text-xs font-extrabold uppercase tracking-wider text-purple-400 flex items-center gap-1.5">
-                <Award size={14} /> 2. Regras de Comissionamento (% / R$)
+                <Award size={14} /> 3. Regras de Comissionamento (% / R$)
               </h4>
               <span className="text-[10px] text-gray-500">Gatilhos aplicados sobre faturamento e unidades</span>
             </div>
