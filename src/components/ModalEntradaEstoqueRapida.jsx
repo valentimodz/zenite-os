@@ -265,7 +265,7 @@ export default function ModalEntradaEstoqueRapida({
     try {
       const { data: imeiExistente, error: errCheck } = await supabase
         .from('imeis')
-        .select('id, imei, status, vendido')
+        .select('id, imei, status')
         .eq('imei', imeiLimpo)
         .maybeSingle();
 
@@ -274,7 +274,8 @@ export default function ModalEntradaEstoqueRapida({
       }
 
       if (imeiExistente) {
-        const isAtivo = !imeiExistente.vendido && String(imeiExistente.status || '').toUpperCase() !== 'BAIXADO';
+        const st = String(imeiExistente.status || '').toUpperCase();
+        const isAtivo = st !== 'BAIXADO' && st !== 'VENDIDO';
         if (isAtivo) {
           setErroMsg(`O IMEI ${imeiLimpo} já está cadastrado no sistema (Status: ${imeiExistente.status || 'Ativo'}).`);
           setValidandoImei(false);
