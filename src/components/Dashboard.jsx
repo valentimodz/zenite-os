@@ -4555,9 +4555,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar dados específicos do Vendedor (Estoque na Filial e Vendas próprias)
   const fetchVendedorData = async (filialId, sellerId, forceEmpresaId = null, targetMes = null) => {
-    const currentUserId = sellerId || session?.user?.id || profile?.id;
+    const userAuthId = session?.user?.id;
+    const profileId = profile?.id;
+    const currentUserId = sellerId || userAuthId || profileId;
+    const profileNome = (profile?.nome || session?.user?.user_metadata?.nome || '').trim();
 
-    if (!currentUserId) {
+    if (!currentUserId && !profileNome) {
       setProdutosFilial([]);
       setVendasVendedor([]);
       setLoadingDados(false);
@@ -4581,13 +4584,14 @@ export default function Dashboard({ session, profileDataProps }) {
       const [anoStr, mesStr] = mesAlvo.split('-');
       const ano = parseInt(anoStr, 10);
       const mes = parseInt(mesStr, 10);
-      const dataInicio = `${mesAlvo}-01T00:00:00.000Z`;
       const lastDay = new Date(ano, mes, 0).getDate();
-      const dataFim = `${mesAlvo}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
+      const dataInicio = `${mesAlvo}-01T00:00:00`;
+      const dataFim = `${mesAlvo}-${String(lastDay).padStart(2, '0')}T23:59:59`;
 
       try {
-        // Consulta limpa e direta com vendedor_id
-        let querySales = supabase
+        const primeiroNome = (profileNome.split(' ')[0] || 'ISLAYNE').replace(/[^a-zA-Z0-9]/g, '').toUpperCase() || 'ISLAYNE';
+
+        const { data: vendasData, error: vendasError } = await supabase
           .from('vendas')
           .select(`
             id,
@@ -4620,24 +4624,15 @@ export default function Dashboard({ session, profileDataProps }) {
               preco_unitario
             )
           `)
+          .or(`vendedor_id.eq.${currentUserId},vendedor_nome.ilike.%${primeiroNome}%`)
           .gte('created_at', dataInicio)
           .lte('created_at', dataFim)
           .order('created_at', { ascending: false });
 
-        const rawNome = (profile?.nome || session?.user?.user_metadata?.nome || '').replace(/["'%]/g, '').trim();
-
-        if (rawNome) {
-          querySales = querySales.or(`vendedor_id.eq.${currentUserId},vendedor_nome.eq.${rawNome}`);
-        } else {
-          querySales = querySales.eq('vendedor_id', currentUserId);
-        }
-
-        const { data: dbSales, error: dbSalesErr } = await querySales;
-
-        if (dbSalesErr) {
-          console.error("Erro ao carregar vendas do vendedor:", dbSalesErr);
-          // Fallback estrito por vendedor_id direto
-          const { data: fallbackSales, error: fbErr } = await supabase
+        if (vendasError) {
+          console.error("Erro ao buscar vendas:", vendasError);
+          // Fallback defensivo direto com .eq('vendedor_id', currentUserId)
+          const { data: fbSales } = await supabase
             .from('vendas')
             .select(`
               id,
@@ -4675,11 +4670,55 @@ export default function Dashboard({ session, profileDataProps }) {
             .lte('created_at', dataFim)
             .order('created_at', { ascending: false });
 
-          if (!fbErr && fallbackSales) {
-            salesData = fallbackSales;
+          if (fbSales) {
+            salesData = fbSales;
           }
-        } else if (dbSales) {
-          salesData = dbSales;
+        } else if (vendasData) {
+          salesData = vendasData;
+        }
+
+        // Se ainda estiver vazio para o mês, buscar recentes sem trava de data estrita
+        if (salesData.length === 0 && currentUserId) {
+          const { data: recentSales } = await supabase
+            .from('vendas')
+            .select(`
+              id,
+              created_at,
+              valor_total,
+              desconto,
+              forma_pagamento,
+              metodo_pagamento,
+              categoria,
+              vendedor_id,
+              vendedor_nome,
+              status_repasse,
+              financeira,
+              financeira_parceira,
+              trainee_id,
+              treener_id,
+              parcelas,
+              comissao,
+              comissao_trainee,
+              produtos_descricao,
+              itens_resumo,
+              vendas_pagamentos (*),
+              itens_venda (
+                id,
+                produto_nome,
+                categoria,
+                subtotal,
+                valor_total,
+                quantidade,
+                preco_unitario
+              )
+            `)
+            .or(`vendedor_id.eq.${currentUserId},vendedor_nome.ilike.%${primeiroNome}%`)
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+          if (recentSales && recentSales.length > 0) {
+            salesData = recentSales;
+          }
         }
       } catch (dbErr) {
         console.error('Erro ao buscar vendas do vendedor via Supabase:', dbErr);
@@ -14124,13 +14163,15 @@ export default function Dashboard({ session, profileDataProps }) {
     });
 
     // 2. CÁLCULO E DISTRIBUIÇÃO DAS VENDAS NOS CARDS:
+    const listaVendas = (currentMonthSales && currentMonthSales.length > 0) ? currentMonthSales : (vendasVendedor || []);
+
     // Somar apenas vendas onde metodo_pagamento ou financeira pertence a financiamentos/boletos: ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO']
     const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO'];
 
     let totalBoletos = 0;
     let totalAcessorios = 0;
 
-    currentMonthSales.forEach(sale => {
+    listaVendas.forEach(sale => {
       const val = parseFloat(sale.valor_total || sale.valor || 0);
       const mpUpper = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
       const finUpper = String(sale.financeira || sale.financeira_parceira || '').toUpperCase();
@@ -14180,8 +14221,8 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     });
 
-    const totalVendasGeral = currentMonthSales.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
-    const salesCount = currentMonthSales.length;
+    const totalVendasGeral = listaVendas.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
+    const salesCount = listaVendas.length;
     const ticketMedio = salesCount > 0 ? totalVendasGeral / salesCount : 0;
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 
