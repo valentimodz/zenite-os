@@ -275,7 +275,7 @@ export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja',
     return gerarEstrategiaGiroFallback(produto, filialNome);
   }
 
-  const prompt = `Atue como um estrategista comercial de varejo de celulares.
+  const prompt = `Você é a Feijão IA, a inteligência artificial especialista em inteligência comercial e varejo de tecnologia da rede Zênite. Atue como uma estrategista comercial de varejo de celulares.
 O produto a seguir está parado no estoque da filial ${filialNome}:
 - Item: ${produto.nome}
 - Categoria: ${produto.categoria || 'Celulares / Geral'}

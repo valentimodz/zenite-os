@@ -51,8 +51,8 @@ export default function EstrategiaProdutoModal({
       });
       setEstrategiaTexto(texto || '');
     } catch (err) {
-      console.error('Erro ao gerar estratégia com Gemini:', err);
-      setErro(err.message || 'Falha ao conectar com o Gemini para gerar estratégia.');
+      console.error('Erro ao gerar estratégia com Feijão IA:', err);
+      setErro(err.message || 'Falha ao conectar com a Feijão IA para gerar estratégia.');
     } finally {
       setIsLoading(false);
     }
@@ -82,13 +82,13 @@ export default function EstrategiaProdutoModal({
   // Copiar para WhatsApp
   const handleCopiarWhatsApp = () => {
     const precoFormatado = formatBRL(produto?.preco || produto?.preco_custo || 0);
-    const msg = `⚡ *PLANO DE DESOVA & GIRO IMEDIATO - ZENITE OS (IA)* ⚡\n` +
+    const msg = `⚡ *PLANO DE DESOVA & GIRO IMEDIATO - FEIJÃO IA (ZÊNITE)* ⚡\n` +
       `📍 *Unidade:* ${filialNome}\n` +
       `📦 *Item em Estoque:* ${produto?.nome}\n` +
       `💰 *Preço Tabela:* ${precoFormatado}\n` +
       `⏳ *Dias Imobilizado:* ${produto?.dias_sem_giro || 30} dias\n\n` +
       `${estrategiaTexto}\n\n` +
-      `_Ação gerada pela Inteligência Artificial de Varejo do Zenite OS_`;
+      `_Ação gerada pela Feijão IA - Inteligência Comercial da Rede Zênite_`;
 
     navigator.clipboard.writeText(msg);
     setCopiado(true);
@@ -113,7 +113,7 @@ export default function EstrategiaProdutoModal({
                   Estratégia de Giro do Produto
                 </h2>
                 <span className="text-[10px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
-                  Gemini 2.5
+                  FEIJÃO IA
                 </span>
               </div>
               <p className="text-xs text-purple-200/70 font-mono mt-0.5">
@@ -169,10 +169,10 @@ export default function EstrategiaProdutoModal({
               </div>
               <div className="text-center space-y-1">
                 <p className="text-sm font-bold text-white tracking-tight">
-                  Consultando Inteligência Comercial (Gemini 2.5)...
+                  Consultando Feijão IA...
                 </p>
                 <p className="text-xs text-gray-400 font-mono">
-                  Calculando margem, combos de acessórios e metas de queima para {produto.nome}.
+                  Feijão IA calculando estratégias de margem e combos para {produto.nome}...
                 </p>
               </div>
             </div>
