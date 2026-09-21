@@ -89,11 +89,14 @@ export const isAcessorio = (venda) => {
 
 export default function ModalDashboardColaborador({
   colaborador,
-  filtroMes: mesInicial,
+  mesAno: propMesAno,
+  filtroMes,
   filiais = [],
+  vendasCache = [],
   onClose
 }) {
-  const [mesAtivo, setMesAtivo] = useState(() => mesInicial || new Date().toISOString().slice(0, 7));
+  const mesCompetencia = propMesAno || filtroMes || new Date().toISOString().slice(0, 7);
+  const [mesAtivo, setMesAtivo] = useState(() => mesCompetencia);
   const [vendasColaborador, setVendasColaborador] = useState([]);
   const [metaIndividual, setMetaIndividual] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -104,13 +107,18 @@ export default function ModalDashboardColaborador({
     setIsLoading(true);
 
     try {
-      const [anoStr, mesStr] = (mesAtivo || new Date().toISOString().slice(0, 7)).split('-');
-      const ano = parseInt(anoStr, 10);
-      const mes = parseInt(mesStr, 10) - 1;
-      const inicioMes = new Date(ano, mes, 1, 0, 0, 0, 0).toISOString();
-      const fimMes = new Date(ano, mes + 1, 0, 23, 59, 59, 999).toISOString();
+      const vendedorId = colaborador?.id;
+      const vendedorNome = colaborador?.nome;
 
-      // 1. Consulta de vendas com relação itens_venda e colunas explícitas
+      // Início e fim do mês selecionado
+      const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
+      const ano = parseInt(anoStr, 10);
+      const mes = parseInt(mesStr, 10);
+      const ultimoDia = new Date(ano, mes, 0).getDate();
+      const dataInicio = `${anoStr}-${mesStr}-01T00:00:00Z`;
+      const dataFim = `${anoStr}-${mesStr}-${String(ultimoDia).padStart(2, '0')}T23:59:59Z`;
+
+      // 1. Consulta de vendas no Supabase sem usar auth.user.id
       let query = supabase
         .from('vendas')
         .select(`
@@ -125,7 +133,6 @@ export default function ModalDashboardColaborador({
           vendedor_nome,
           produto_nome,
           imei,
-          filial_id,
           itens_venda (
             id,
             produto_nome,
@@ -133,50 +140,71 @@ export default function ModalDashboardColaborador({
             preco_unitario
           )
         `)
-        .gte('created_at', inicioMes)
-        .lte('created_at', fimMes)
+        .gte('created_at', dataInicio)
+        .lte('created_at', dataFim)
         .order('created_at', { ascending: false });
 
-      if (colaborador.filial_id) {
-        query = query.eq('filial_id', colaborador.filial_id);
+      // Filtrar pelo ID do colaborador selecionado ou pelo nome dele
+      const isUuid = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str));
+
+      if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
+        if (isUuid(vendedorId) && vendedorNome && vendedorNome.trim()) {
+          query = query.or(`vendedor_id.eq.${vendedorId},vendedor_nome.ilike.%${vendedorNome.trim()}%`);
+        } else if (isUuid(vendedorId)) {
+          query = query.eq('vendedor_id', vendedorId);
+        } else if (vendedorNome) {
+          query = query.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
+        }
+      } else if (vendedorNome) {
+        query = query.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
       }
 
-      // Filtrar especificamente pelo ID do colaborador ou por vendedor_nome
-      if (colaborador.id && colaborador.nome && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
-        query = query.or(`vendedor_id.eq.${colaborador.id},vendedor_nome.ilike.%${colaborador.nome}%`);
-      } else if (colaborador.id && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
-        query = query.eq('vendedor_id', colaborador.id);
-      } else if (colaborador.nome) {
-        query = query.ilike('vendedor_nome', `%${colaborador.nome}%`);
-      }
-
-      let { data, error } = await query;
+      let { data: vendasModal, error } = await query;
 
       if (error) {
-        console.warn('[ModalDashboardColaborador] Fallback na busca com itens_venda:', error);
+        console.warn('[ModalDashboardColaborador] Fallback na busca sem itens_venda:', error);
         let fbQuery = supabase
           .from('vendas')
-          .select('id, created_at, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei, filial_id')
-          .gte('created_at', inicioMes)
-          .lte('created_at', fimMes)
+          .select('id, created_at, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei')
+          .gte('created_at', dataInicio)
+          .lte('created_at', dataFim)
           .order('created_at', { ascending: false });
 
-        if (colaborador.filial_id) fbQuery = fbQuery.eq('filial_id', colaborador.filial_id);
-        if (colaborador.id && colaborador.nome && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
-          fbQuery = fbQuery.or(`vendedor_id.eq.${colaborador.id},vendedor_nome.ilike.%${colaborador.nome}%`);
-        } else if (colaborador.id && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
-          fbQuery = fbQuery.eq('vendedor_id', colaborador.id);
-        } else if (colaborador.nome) {
-          fbQuery = fbQuery.ilike('vendedor_nome', `%${colaborador.nome}%`);
+        if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
+          if (isUuid(vendedorId) && vendedorNome && vendedorNome.trim()) {
+            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},vendedor_nome.ilike.%${vendedorNome.trim()}%`);
+          } else if (isUuid(vendedorId)) {
+            fbQuery = fbQuery.eq('vendedor_id', vendedorId);
+          } else if (vendedorNome) {
+            fbQuery = fbQuery.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
+          }
+        } else if (vendedorNome) {
+          fbQuery = fbQuery.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
         }
 
         const fbRes = await fbQuery;
         if (!fbRes.error && fbRes.data) {
-          data = fbRes.data;
+          vendasModal = fbRes.data;
         }
       }
 
-      setVendasColaborador(data || []);
+      // Fallback em memória caso a query direta retorne vazio mas já tenhamos os dados carregados na tabela do ranking
+      if ((!vendasModal || vendasModal.length === 0) && Array.isArray(vendasCache) && vendasCache.length > 0) {
+        const cachedVendas = vendasCache.filter(v => {
+          const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
+          const matchNome = vendedorNome && (
+            (v.vendedor_nome || '').toLowerCase().includes(vendedorNome.toLowerCase()) ||
+            vendedorNome.toLowerCase().includes((v.vendedor_nome || '').toLowerCase())
+          );
+          const matchTrainee = (v.treener_id && String(v.treener_id) === String(vendedorId)) || (v.trainee_id && String(v.trainee_id) === String(vendedorId));
+          return matchId || matchNome || matchTrainee;
+        });
+        if (cachedVendas.length > 0) {
+          vendasModal = cachedVendas;
+        }
+      }
+
+      setVendasColaborador(vendasModal || []);
 
       // 2. Consulta de Metas configuradas para o vendedor no mês
       let metaEncontrada = null;

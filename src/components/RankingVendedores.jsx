@@ -381,8 +381,10 @@ export default function RankingVendedores({
       {vendedorSelecionadoModal && (
         <ModalDashboardColaborador
           colaborador={vendedorSelecionadoModal}
+          mesAno={filtroMes}
           filtroMes={filtroMes}
           filiais={filiais}
+          vendasCache={vendasPeriodo}
           onClose={() => setVendedorSelecionadoModal(null)}
         />
       )}
