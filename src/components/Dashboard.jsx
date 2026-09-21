@@ -1368,6 +1368,8 @@ export default function Dashboard({ session, profileDataProps }) {
   const [fechamentoComprovante, setFechamentoComprovante] = useState(''); // base64 string
   const [fechamentoObs, setFechamentoObs] = useState('');
   const [loadingFechamento, setLoadingFechamento] = useState(false);
+  const [vendasDiaAuditoria, setVendasDiaAuditoria] = useState([]);
+  const [carregandoAuditoriaDia, setCarregandoAuditoriaDia] = useState(false);
 
   // Estados para Transferência de Mercadorias
   const [transferencias, setTransferencias] = useState([]);
@@ -13650,6 +13652,124 @@ export default function Dashboard({ session, profileDataProps }) {
     };
   }, [vendasVendedor, vendas, activeFilialId]);
 
+  // 1. Consulta dos Valores do Sistema para o Dia Corrente (Auditoria de Caixa)
+  const carregarVendasDiaAuditoria = React.useCallback(async () => {
+    const filialAtivaId = activeFilialId || caixaAtual?.filial_id || profile?.filial_id;
+    if (!filialAtivaId) return;
+
+    setCarregandoAuditoriaDia(true);
+    try {
+      const inicioDia = new Date();
+      inicioDia.setHours(0, 0, 0, 0);
+
+      const { data: vendasDia, error } = await supabase
+        .from('vendas')
+        .select('valor_total, metodo_pagamento, financeira, created_at')
+        .eq('filial_id', filialAtivaId)
+        .gte('created_at', inicioDia.toISOString());
+
+      if (!error && Array.isArray(vendasDia)) {
+        setVendasDiaAuditoria(vendasDia);
+      }
+    } catch (err) {
+      console.error('Erro ao consultar vendas do dia para auditoria:', err);
+    } finally {
+      setCarregandoAuditoriaDia(false);
+    }
+  }, [activeFilialId, caixaAtual?.filial_id, profile?.filial_id]);
+
+  useEffect(() => {
+    if (activeSellerTab === 'fechamento') {
+      carregarVendasDiaAuditoria();
+    }
+  }, [activeSellerTab, carregarVendasDiaAuditoria]);
+
+  // Somatório dos valores por método de pagamento para o Painel Guia
+  const auditoriaSistema = React.useMemo(() => {
+    let pixSistema = 0;
+    let cartaoSistema = 0;
+    let dinheiroSistema = 0;
+    let financiadoraSistema = 0;
+    let totalEsperadoSistema = 0;
+
+    const listaParaCalcular = (vendasDiaAuditoria && vendasDiaAuditoria.length > 0)
+      ? vendasDiaAuditoria
+      : null;
+
+    if (listaParaCalcular) {
+      listaParaCalcular.forEach(v => {
+        const val = parseFloat(v.valor_total || 0);
+        totalEsperadoSistema += val;
+
+        const mp = String(v.metodo_pagamento || '').trim().toUpperCase();
+        const fin = String(v.financeira || '').trim().toUpperCase();
+
+        if (mp.includes('PIX')) {
+          pixSistema += val;
+        } else if (
+          mp.includes('CARTAO') ||
+          mp.includes('CARTÃO') ||
+          mp.includes('CREDITO') ||
+          mp.includes('CRÉDITO') ||
+          mp.includes('DEBITO') ||
+          mp.includes('DÉBITO')
+        ) {
+          cartaoSistema += val;
+        } else if (
+          mp.includes('DINHEIRO') ||
+          mp.includes('ESPECIE') ||
+          mp.includes('DINERO')
+        ) {
+          dinheiroSistema += val;
+        } else if (
+          mp.includes('PAYJOY') ||
+          mp.includes('AIVA') ||
+          mp.includes('BOLETO') ||
+          mp.includes('CREDIARIO') ||
+          mp.includes('CREDIÁRIO') ||
+          mp.includes('UME') ||
+          fin.includes('PAYJOY') ||
+          fin.includes('AIVA') ||
+          fin.includes('BOLETO') ||
+          fin.includes('CREDIARIO') ||
+          fin.includes('UME')
+        ) {
+          financiadoraSistema += val;
+        } else {
+          cartaoSistema += val;
+        }
+      });
+    } else {
+      pixSistema = vendasEsperadasHoje.pix;
+      cartaoSistema = vendasEsperadasHoje.cartao;
+      dinheiroSistema = vendasEsperadasHoje.especie;
+      financiadoraSistema = vendasEsperadasHoje.boleto;
+      totalEsperadoSistema = vendasEsperadasHoje.total;
+    }
+
+    return {
+      pixSistema: Number(pixSistema.toFixed(2)),
+      cartaoSistema: Number(cartaoSistema.toFixed(2)),
+      dinheiroSistema: Number(dinheiroSistema.toFixed(2)),
+      financiadoraSistema: Number(financiadoraSistema.toFixed(2)),
+      totalEsperadoSistema: Number(totalEsperadoSistema.toFixed(2))
+    };
+  }, [vendasDiaAuditoria, vendasEsperadasHoje]);
+
+  // Recálculo em tempo real do total digitado e da divergência
+  const totalDigitado = React.useMemo(() => {
+    const d = parseFloat(fechamentoDinheiro || 0);
+    const c = parseFloat(fechamentoCartao || 0);
+    const p = parseFloat(fechamentoPix || 0);
+    const b = parseFloat(fechamentoBoleto || 0);
+    const t = parseFloat(fechamentoTroca || 0);
+    return Number((d + c + p + b + t).toFixed(2));
+  }, [fechamentoDinheiro, fechamentoCartao, fechamentoPix, fechamentoBoleto, fechamentoTroca]);
+
+  const diferenca = React.useMemo(() => {
+    return Number((totalDigitado - auditoriaSistema.totalEsperadoSistema).toFixed(2));
+  }, [totalDigitado, auditoriaSistema.totalEsperadoSistema]);
+
   const handleSubmeterFechamento = async (e) => {
     e.preventDefault();
     if (!fechamentoDinheiro && !fechamentoCartao && !fechamentoPix && !fechamentoBoleto && !fechamentoTroca) {
@@ -24883,205 +25003,294 @@ export default function Dashboard({ session, profileDataProps }) {
                       </div>
                     )}
 
-                    {/* VENDEDOR ABA 3: FECHAMENTO DE CAIXA */}
+                    {/* VENDEDOR ABA 3: FECHAMENTO DE CAIXA (COM PAINEL GUIA DE AUDITORIA) */}
                     {activeSellerTab === 'fechamento' && (
-                      <div className="max-w-xl mx-auto animate-fadeIn">
-                        <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 space-y-6">
-                          <div className="space-y-1">
-                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                              <ClipboardList size={18} className="text-[#6A0DAD]" />
-                              Fechamento de Caixa Diário
-                            </h3>
-                            <p className="text-xs text-gray-500 leading-relaxed">
-                              Informe as vendas brutas processadas por meio de cada modalidade financeira hoje e anexe a foto do comprovante final emitido pela maquininha.
-                            </p>
-                          </div>
+                      <div className="max-w-7xl mx-auto animate-fadeIn">
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-                          <form onSubmit={handleSubmeterFechamento} className="space-y-4">
-                            {/* Card de Resumo do Total Geral Esperado no Fechamento Cego */}
-                            <div className="bg-[#111111] border border-[#6A0DAD]/40 p-4 rounded-xl flex justify-between items-center text-xs mb-2 shadow-lg">
-                              <div className="flex items-center gap-3">
-                                <span className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse shrink-0"></span>
-                                <div>
-                                  <h3 className="text-sm font-bold text-white">Total Apurado no Dia:</h3>
-                                  <p className="text-xs font-medium text-purple-200 mt-0.5">
-                                    Informe o valor físico exato de cada forma de pagamento para validação do sistema.
-                                  </p>
-                                </div>
-                              </div>
-                              <span className="font-mono font-extrabold text-[#9b5de5] text-sm bg-[#6A0DAD]/10 px-3 py-1.5 rounded-lg border border-[#6A0DAD]/30 whitespace-nowrap">
-                                R$ {vendasEsperadasHoje.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                              </span>
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-4">
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                  Total em Gaveta / Dinheiro Físico (R$)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={fechamentoDinheiro}
-                                  onChange={(e) => setFechamentoDinheiro(e.target.value)}
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
-                                  placeholder="0.00"
-                                />
-                                <span className="text-[9px] text-gray-500 mt-0.5 block">Apenas cédulas/moedas</span>
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                  Cartão (R$)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={fechamentoCartao}
-                                  onChange={(e) => setFechamentoCartao(e.target.value)}
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                  PIX (R$)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={fechamentoPix}
-                                  onChange={(e) => setFechamentoPix(e.target.value)}
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                  Boleto / Financiadoras (R$)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={fechamentoBoleto}
-                                  onChange={(e) => setFechamentoBoleto(e.target.value)}
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                  Troca (R$)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={fechamentoTroca}
-                                  onChange={(e) => setFechamentoTroca(e.target.value)}
-                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                            </div>
-
-                            {/* CARD INFORMATIVO DE CONTRATOS (FINANCIADORAS) */}
-                            <div className="bg-[#111115] border border-purple-900/40 rounded-xl p-4 space-y-2.5 shadow-sm">
-                              <div className="flex items-center justify-between border-b border-purple-900/30 pb-2">
-                                <div className="flex items-center gap-2">
-                                  <FileText size={15} className="text-purple-400" />
-                                  <h4 className="text-xs font-bold text-purple-200">
-                                    Contratos de Financiadoras (Previsão de Repasse Bancário)
-                                  </h4>
-                                </div>
-                                <span className="font-mono font-extrabold text-xs text-purple-300 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/40">
-                                  Total: R$ {(vendasEsperadasHoje.totalFinanciadoras || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </span>
-                              </div>
-
-                              {/* Somatório do turno agrupado por financeira */}
-                              {Object.keys(vendasEsperadasHoje.contratosFinanciadoras || {}).length > 0 ? (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
-                                  {Object.entries(vendasEsperadasHoje.contratosFinanciadoras).map(([finNome, finTotal]) => (
-                                    <div key={finNome} className="bg-black/50 border border-purple-900/30 px-2.5 py-1.5 rounded-lg flex items-center justify-between">
-                                      <span className="text-[11px] font-bold text-gray-300">{finNome}:</span>
-                                      <span className="text-[11px] font-mono font-black text-emerald-400">
-                                        R$ {Number(finTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-[11px] text-gray-500 italic py-1">
-                                  Nenhum contrato de financiadora registrado no turno de hoje.
-                                </p>
-                              )}
-
-                              {/* Texto explicativo sutil */}
-                              <p className="text-[10px] text-gray-400/90 leading-tight pt-1 border-t border-purple-900/20 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0"></span>
-                                <span>Valores repassados mensalmente via depósito em conta bancária PJ. (Não compõem dinheiro físico na gaveta)</span>
+                          {/* Coluna Principal (Formulário Atual - 7 colunas no Desktop) */}
+                          <div className="lg:col-span-7 bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 space-y-6">
+                            <div className="space-y-1">
+                              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                <ClipboardList size={18} className="text-[#6A0DAD]" />
+                                Fechamento de Caixa Diário
+                              </h3>
+                              <p className="text-xs text-gray-500 leading-relaxed">
+                                Informe as vendas brutas processadas por meio de cada modalidade financeira hoje e anexe a foto do comprovante final emitido pela maquininha.
                               </p>
                             </div>
 
-                            {/* Comprovante Upload */}
-                            <div className="space-y-2">
-                              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide">
-                                Foto do Comprovante da Maquininha (Obrigatório)
-                              </label>
-                              <div className="border border-dashed border-[#222222] hover:border-[#6A0DAD]/50 bg-black p-4 rounded text-center cursor-pointer relative transition-colors">
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={handleComprovanteChange}
-                                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                  required
-                                />
-                                <div className="flex flex-col items-center gap-2">
-                                  <Upload size={20} className="text-gray-550" />
-                                  <span className="text-xs text-gray-400">Arraste ou clique para selecionar imagem do recibo</span>
-                                  <span className="text-[9px] text-gray-600">Formatos: PNG, JPG, JPEG (Máx 2MB)</span>
+                            <form onSubmit={handleSubmeterFechamento} className="space-y-4">
+                              {/* Card de Resumo do Total Geral Esperado */}
+                              <div className="bg-[#111111] border border-[#6A0DAD]/40 p-4 rounded-xl flex justify-between items-center text-xs mb-2 shadow-lg">
+                                <div className="flex items-center gap-3">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse shrink-0"></span>
+                                  <div>
+                                    <h3 className="text-sm font-bold text-white">Total Apurado no Dia:</h3>
+                                    <p className="text-xs font-medium text-purple-200 mt-0.5">
+                                      Informe o valor físico exato de cada forma de pagamento para validação do sistema.
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="font-mono font-extrabold text-[#9b5de5] text-sm bg-[#6A0DAD]/10 px-3 py-1.5 rounded-lg border border-[#6A0DAD]/30 whitespace-nowrap">
+                                  R$ {auditoriaSistema.totalEsperadoSistema.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                    Total em Gaveta (R$)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={fechamentoDinheiro}
+                                    onChange={(e) => setFechamentoDinheiro(e.target.value)}
+                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
+                                    placeholder="0.00"
+                                  />
+                                  <span className="text-[9px] text-gray-500 mt-0.5 block">Apenas cédulas/moedas</span>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                    Cartão (R$)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={fechamentoCartao}
+                                    onChange={(e) => setFechamentoCartao(e.target.value)}
+                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                    PIX (R$)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={fechamentoPix}
+                                    onChange={(e) => setFechamentoPix(e.target.value)}
+                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                    Boleto / Financiadoras (R$)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={fechamentoBoleto}
+                                    onChange={(e) => setFechamentoBoleto(e.target.value)}
+                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                                    Troca (R$)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={fechamentoTroca}
+                                    onChange={(e) => setFechamentoTroca(e.target.value)}
+                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none font-mono font-bold"
+                                    placeholder="0.00"
+                                  />
                                 </div>
                               </div>
-                            </div>
 
-                            {/* Preview Imagem Comprovante */}
-                            {fechamentoComprovante && (
-                              <div className="bg-black border border-[#222222] p-3 rounded flex flex-col items-center gap-2">
-                                <span className="text-[10px] text-gray-500 uppercase block self-start">Pré-visualização do Anexo</span>
-                                <img
-                                  src={fechamentoComprovante}
-                                  alt="Recibo"
-                                  className="max-h-48 object-contain rounded border border-[#161616]"
-                                />
+                              {/* CARD INFORMATIVO DE CONTRATOS (FINANCIADORAS) */}
+                              <div className="bg-[#111115] border border-purple-900/40 rounded-xl p-4 space-y-2.5 shadow-sm">
+                                <div className="flex items-center justify-between border-b border-purple-900/30 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <FileText size={15} className="text-purple-400" />
+                                    <h4 className="text-xs font-bold text-purple-200">
+                                      Contratos de Financiadoras (Previsão de Repasse Bancário)
+                                    </h4>
+                                  </div>
+                                  <span className="font-mono font-extrabold text-xs text-purple-300 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/40">
+                                    Total: R$ {(vendasEsperadasHoje.totalFinanciadoras || auditoriaSistema.financiadoraSistema || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+
+                                {/* Somatório do turno agrupado por financeira */}
+                                {Object.keys(vendasEsperadasHoje.contratosFinanciadoras || {}).length > 0 ? (
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                                    {Object.entries(vendasEsperadasHoje.contratosFinanciadoras).map(([finNome, finTotal]) => (
+                                      <div key={finNome} className="bg-black/50 border border-purple-900/30 px-2.5 py-1.5 rounded-lg flex items-center justify-between">
+                                        <span className="text-[11px] font-bold text-gray-300">{finNome}:</span>
+                                        <span className="text-[11px] font-mono font-black text-emerald-400">
+                                          R$ {Number(finTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-[11px] text-gray-500 italic py-1">
+                                    Nenhum contrato de financiadora registrado no turno de hoje.
+                                  </p>
+                                )}
+
+                                {/* Texto explicativo sutil */}
+                                <p className="text-[10px] text-gray-400/90 leading-tight pt-1 border-t border-purple-900/20 flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0"></span>
+                                  <span>Valores repassados mensalmente via depósito em conta bancária PJ. (Não compõem dinheiro físico na gaveta)</span>
+                                </p>
                               </div>
-                            )}
 
-                            {/* Obs */}
-                            <div>
-                              <label className="block text-[10px] font-bold text-gray-450 uppercase tracking-wider mb-2">
-                                Observações / Diferenças de Caixa
-                              </label>
-                              <textarea
-                                rows="3"
-                                value={fechamentoObs}
-                                onChange={(e) => setFechamentoObs(e.target.value)}
-                                placeholder="Descreva se ocorreu alguma divergência de valores ou observação importante."
-                                className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded p-3 text-xs text-white outline-none resize-none"
-                              ></textarea>
+                              {/* Comprovante Upload */}
+                              <div className="space-y-2">
+                                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide">
+                                  Foto do Comprovante da Maquininha (Obrigatório)
+                                </label>
+                                <div className="border border-dashed border-[#222222] hover:border-[#6A0DAD]/50 bg-black p-4 rounded text-center cursor-pointer relative transition-colors">
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleComprovanteChange}
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                    required
+                                  />
+                                  <div className="flex flex-col items-center gap-2">
+                                    <Upload size={20} className="text-gray-550" />
+                                    <span className="text-xs text-gray-400">Arraste ou clique para selecionar imagem do recibo</span>
+                                    <span className="text-[9px] text-gray-600">Formatos: PNG, JPG, JPEG (Máx 2MB)</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Preview Imagem Comprovante */}
+                              {fechamentoComprovante && (
+                                <div className="bg-black border border-[#222222] p-3 rounded flex flex-col items-center gap-2">
+                                  <span className="text-[10px] text-gray-500 uppercase block self-start">Pré-visualização do Anexo</span>
+                                  <img
+                                    src={fechamentoComprovante}
+                                    alt="Recibo"
+                                    className="max-h-48 object-contain rounded border border-[#161616]"
+                                  />
+                                </div>
+                              )}
+
+                              {/* Obs */}
+                              <div>
+                                <label className="block text-[10px] font-bold text-gray-450 uppercase tracking-wider mb-2">
+                                  Observações / Diferenças de Caixa
+                                </label>
+                                <textarea
+                                  rows="3"
+                                  value={fechamentoObs}
+                                  onChange={(e) => setFechamentoObs(e.target.value)}
+                                  placeholder="Descreva se ocorreu alguma divergência de valores ou observação importante."
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded p-3 text-xs text-white outline-none resize-none"
+                                ></textarea>
+                              </div>
+
+                              <button
+                                type="submit"
+                                disabled={loadingFechamento}
+                                className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-xs font-bold py-3 rounded transition-all shadow-md"
+                              >
+                                {loadingFechamento ? 'Enviando fechamento...' : 'Enviar Fechamento de Caixa'}
+                              </button>
+                            </form>
+                          </div>
+
+                          {/* Coluna Lateral (Painel Guia / Sistema - 5 colunas no Desktop) */}
+                          <div className="lg:col-span-5 space-y-4">
+                            <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-5 flex flex-col gap-4 sticky top-6">
+                              <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+                                <h3 className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+                                  📊 Guia do Sistema (Registado Hoje)
+                                </h3>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={carregarVendasDiaAuditoria}
+                                    className="text-zinc-400 hover:text-white transition-colors p-1 rounded hover:bg-zinc-800"
+                                    title="Atualizar conferência agora"
+                                  >
+                                    <RefreshCw size={13} className={carregandoAuditoriaDia ? "animate-spin" : ""} />
+                                  </button>
+                                  <span className="text-xs text-purple-400 font-mono">Em Tempo Real</span>
+                                </div>
+                              </div>
+
+                              {/* Linhas Comparativas */}
+                              <div className="space-y-3 text-sm">
+                                <div className="flex justify-between items-center bg-zinc-950/40 p-3 rounded-lg border border-zinc-850">
+                                  <span className="text-zinc-400">PIX no Sistema:</span>
+                                  <span className="font-semibold text-emerald-400 font-mono">
+                                    {auditoriaSistema.pixSistema.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </span>
+                                </div>
+
+                                <div className="flex justify-between items-center bg-zinc-950/40 p-3 rounded-lg border border-zinc-850">
+                                  <span className="text-zinc-400">Cartão (Crédito/Débito):</span>
+                                  <span className="font-semibold text-blue-400 font-mono">
+                                    {auditoriaSistema.cartaoSistema.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </span>
+                                </div>
+
+                                <div className="flex justify-between items-center bg-zinc-950/40 p-3 rounded-lg border border-zinc-850">
+                                  <span className="text-zinc-400">Dinheiro Físico:</span>
+                                  <span className="font-semibold text-amber-400 font-mono">
+                                    {auditoriaSistema.dinheiroSistema.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </span>
+                                </div>
+
+                                <div className="flex justify-between items-center bg-zinc-950/40 p-3 rounded-lg border border-zinc-850">
+                                  <span className="text-zinc-400">Financiadoras / Boletos:</span>
+                                  <span className="font-semibold text-purple-400 font-mono">
+                                    {auditoriaSistema.financiadoraSistema.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Resumo e Divergência */}
+                              <div className="mt-2 pt-3 border-t border-zinc-800 flex flex-col gap-2">
+                                <div className="flex justify-between text-xs text-zinc-400">
+                                  <span>Total Esperado:</span>
+                                  <span className="font-bold text-white font-mono">
+                                    {auditoriaSistema.totalEsperadoSistema.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </span>
+                                </div>
+
+                                <div className="flex justify-between text-xs text-zinc-400">
+                                  <span>Total Digitado no Caixa:</span>
+                                  <span className="font-bold text-purple-300 font-mono">
+                                    {totalDigitado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </span>
+                                </div>
+                                
+                                {/* Alerta se houver discrepância entre o digitado e o sistema */}
+                                {diferenca !== 0 && totalDigitado > 0 && (
+                                  <div className={`p-2.5 rounded text-xs font-medium ${diferenca > 0 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                                    {diferenca > 0 ? `Sobra no caixa: +R$ ${diferenca.toFixed(2)}` : `Falta no caixa: -R$ ${Math.abs(diferenca).toFixed(2)}`}
+                                  </div>
+                                )}
+
+                                {diferenca === 0 && totalDigitado > 0 && (
+                                  <div className="p-2.5 rounded text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                                    <CheckCircle2 size={14} className="shrink-0" />
+                                    <span>Caixa 100% conferido e batido com o sistema!</span>
+                                  </div>
+                                )}
+                              </div>
                             </div>
+                          </div>
 
-                            <button
-                              type="submit"
-                              disabled={loadingFechamento}
-                              className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-xs font-bold py-3 rounded transition-all shadow-md"
-                            >
-                              {loadingFechamento ? 'Enviando fechamento...' : 'Enviar Fechamento de Caixa'}
-                            </button>
-                          </form>
                         </div>
                       </div>
                     )}
