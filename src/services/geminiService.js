@@ -254,3 +254,98 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
 
   throw new Error(`Falha ao processar a folha com a IA do Gemini: ${lastError?.message || 'Serviço temporariamente indisponível'}`);
 }
+
+/**
+ * Gera uma estratégia de giro acelerado para um produto parado no estoque via Gemini 2.5
+ */
+export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja', customApiKey = '' }) {
+  const effectiveApiKey =
+    customApiKey?.trim() ||
+    localStorage.getItem('@zenite_gemini_api_key') ||
+    import.meta.env.VITE_GEMINI_API_KEY ||
+    import.meta.env.VITE_GOOGLE_GENAI_API_KEY ||
+    '';
+
+  const precoVenda = Number(produto.preco || produto.preco_custo || 0);
+  const diasParado = Number(produto.dias_sem_giro || 30);
+
+  // Fallback rápido se não houver chave de API configurada
+  if (!effectiveApiKey) {
+    console.warn('[GeminiService] Chave Gemini não encontrada, usando gerador estratégico heurístico.');
+    return gerarEstrategiaGiroFallback(produto, filialNome);
+  }
+
+  const prompt = `Atue como um diretor comercial especialista em lojas de celulares e varejo de tecnologia.
+Analise o seguinte item que está imobilizado no estoque da filial ${filialNome}:
+- Produto: ${produto.nome}
+- Categoria: ${produto.categoria || 'Celulares / Tecnologia'}
+- Quantidade Parada: ${produto.quantidade || 1} un.
+- Valor Unitário: R$ ${precoVenda.toFixed(2)}
+- Dias sem Giro Estimados: ${diasParado} dias
+
+Gere uma estratégia curta, incisiva e prática dividida estritamente em:
+1. Oferta Comercial de Giro Rápido (Ideia de Combo, Condição no Boleto/PayJoy ou Entrada Facilitada)
+2. Argumento de Venda Direto para os Consultores usarem no balcão
+3. Ação de Desova Imediata (Meta relâmpago ou incentivo específico para a equipe no PDV)`;
+
+  const modelosTentativa = ['gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
+  let lastError = null;
+
+  for (const modelo of modelosTentativa) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveApiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1000
+          }
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const texto = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (texto && texto.trim().length > 20) {
+          return texto;
+        }
+      } else {
+        const errJson = await response.json().catch(() => ({}));
+        lastError = new Error(errJson.error?.message || `Erro HTTP ${response.status}`);
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  console.warn('[GeminiService] Falha na chamada da API do Gemini, aplicando gerador heurístico:', lastError);
+  return gerarEstrategiaGiroFallback(produto, filialNome);
+}
+
+/**
+ * Fallback heurístico inteligente caso a API esteja temporariamente indisponível
+ */
+export function gerarEstrategiaGiroFallback(produto, filialNome = 'Loja') {
+  const preco = Number(produto.preco || produto.preco_custo || 0);
+  const entradaBoleto = (preco * 0.15).toFixed(2);
+  const parcelaEstimada = ((preco * 1.15) / 12).toFixed(2);
+
+  return `### 1. Oferta Comercial de Giro Rápido (Combos & Condições)
+* **Combo Proteção Total**: Na compra do **${produto.nome}**, leve Capa Anti-Impacto + Película 3D com 50% de desconto ou grátis para fechamento via PIX.
+* **Facilitação no Boleto / PayJoy**: Divulgar como "Leve hoje com entrada a partir de apenas R$ ${entradaBoleto} e saldo em parcelas acessíveis de ~R$ ${parcelaEstimada}/mês".
+* **Up-sell Inteligente**: Oferecer como alternativa para clientes que vieram buscar modelos inferiores, mostrando que a diferença de parcela cabe no bolso.
+
+### 2. Argumento de Venda Direto para os Consultores no Balcão
+* *"Este modelo se destaca pela estabilidade no uso diário e autonomia de bateria. Conseguimos liberar uma condição especial com a gerência exclusiva para esta unidade em estoque da loja ${filialNome}."*
+* *"Se você fechar agora, eu garanto a aplicação imediata da película e já te entrego o aparelho 100% configurado com garantia local."*
+
+### 3. Ação de Desova Imediata (Meta Relâmpago PDV)
+* **Incentivo Direto (Comissão Turbo)**: Bônus de **R$ 20,00 a R$ 30,00 adicionais** pagos em PIX direto para o primeiro consultor que faturar este item nas próximas 48 horas.
+* **Foco de Vitrine**: Posicionar o item na prateleira central de entrada com tag chamativa *"Oportunidade da Semana - Pronta Entrega"*.`;
+}

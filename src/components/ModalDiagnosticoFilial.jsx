@@ -21,6 +21,8 @@ import {
   Tag,
   Users
 } from 'lucide-react';
+import ModalEstoqueParadoFilial from './ModalEstoqueParadoFilial';
+import EstrategiaProdutoModal from './EstrategiaProdutoModal';
 
 export default function ModalDiagnosticoFilial({
   filial,
@@ -36,6 +38,10 @@ export default function ModalDiagnosticoFilial({
   const [produtosFilial, setProdutosFilial] = useState([]);
   const [metasFilial, setMetasFilial] = useState(null);
   const [vendedoresFilial, setVendedoresFilial] = useState([]);
+
+  // Estados dos modais integrados com IA (Produtos Parados & Estratégia de Giro)
+  const [modalProdutosParadosAberto, setModalProdutosParadosAberto] = useState(false);
+  const [produtoParaEstrategia, setProdutoParaEstrategia] = useState(null);
 
   // Formatação de moeda BRL
   const formatBRL = (val) => {
@@ -681,20 +687,18 @@ export default function ModalDiagnosticoFilial({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {typeof onVerEstoqueParado === 'function' && (
-                <button
-                  onClick={onVerEstoqueParado}
-                  className="px-3.5 py-2 rounded-lg bg-black hover:bg-zinc-900 border border-[#333] hover:border-amber-500/50 text-xs font-bold text-amber-300 transition-all flex items-center gap-1.5"
-                >
-                  <Package size={14} />
-                  Ver Produtos Parados da Loja
-                </button>
-              )}
+              <button
+                onClick={() => setModalProdutosParadosAberto(true)}
+                className="px-3.5 py-2 rounded-lg bg-black hover:bg-zinc-900 border border-[#333] hover:border-amber-500/60 text-xs font-bold text-amber-300 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+              >
+                <Package size={14} />
+                Ver Produtos Parados da Loja
+              </button>
 
               {typeof onFiltrarVendedores === 'function' && (
                 <button
                   onClick={onFiltrarVendedores}
-                  className="px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white transition-all flex items-center gap-1.5 shadow-[0_0_15px_rgba(106,13,173,0.3)]"
+                  className="px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white transition-all flex items-center gap-1.5 shadow-[0_0_15px_rgba(106,13,173,0.3)] hover:scale-[1.02]"
                 >
                   <Users size={14} />
                   Filtrar Ranking de Vendedores Desta Filial
@@ -719,6 +723,29 @@ export default function ModalDiagnosticoFilial({
         </div>
 
       </div>
+
+      {/* MODAL 1: PRODUTOS PARADOS DA LOJA */}
+      {modalProdutosParadosAberto && (
+        <ModalEstoqueParadoFilial
+          isOpen={modalProdutosParadosAberto}
+          onClose={() => setModalProdutosParadosAberto(false)}
+          filial={filial}
+          empresaId={empresaId}
+          onSelecionarProduto={(prod) => {
+            setProdutoParaEstrategia(prod);
+          }}
+        />
+      )}
+
+      {/* MODAL / DRAWER 2: ESTRATÉGIA DE GIRO DO PRODUTO (GEMINI 2.5) */}
+      {produtoParaEstrategia && (
+        <EstrategiaProdutoModal
+          isOpen={Boolean(produtoParaEstrategia)}
+          onClose={() => setProdutoParaEstrategia(null)}
+          produto={produtoParaEstrategia}
+          filialNome={filial?.nome || 'Loja'}
+        />
+      )}
     </div>
   );
 }
