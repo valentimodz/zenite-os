@@ -5,7 +5,7 @@ import {
   Package,
   Search,
   AlertTriangle,
-  Sparkles,
+  Zap,
   Smartphone,
   Tag,
   DollarSign,
@@ -26,7 +26,6 @@ export default function ModalEstoqueParadoFilial({
   onSelecionarProduto
 }) {
   const [produtos, setProdutos] = useState([]);
-  const [imeisMap, setImeisMap] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('TODAS');
@@ -41,59 +40,39 @@ export default function ModalEstoqueParadoFilial({
     });
   };
 
-  // Buscar produtos em estoque da filial
+  // 1. Consulta ao Supabase
   const carregarProdutosParados = async () => {
     if (!filial?.id) return;
     setIsLoading(true);
     try {
-      // 1. Buscar produtos com saldo > 0 da filial
-      let q = supabase
+      const filialId = filial.id;
+      const { data, error } = await supabase
         .from('produtos')
-        .select('id, nome, categoria, tipo, preco, preco_custo, quantidade, created_at, updated_at')
-        .eq('filial_id', filial.id)
+        .select('id, nome, categoria, quantidade, preco_venda, preco, preco_custo, created_at, filial_id')
+        .eq('filial_id', filialId)
         .gt('quantidade', 0)
-        .order('updated_at', { ascending: true });
+        .order('created_at', { ascending: true });
 
-      if (empresaId && empresaId !== 'MASTER') {
-        q = q.eq('empresa_id', empresaId);
-      }
+      if (error) throw error;
 
-      const { data: prodsData, error: prodsErr } = await q;
-      if (prodsErr) throw prodsErr;
+      // 2. Tratamento por linha
+      const formatados = (data || []).map(item => {
+        const dataCriacao = item.created_at ? new Date(item.created_at).getTime() : Date.now();
+        const diasSemGiro = Math.max(0, Math.floor((Date.now() - dataCriacao) / (1000 * 60 * 60 * 24)));
+        const valorUnitario = Number(item.preco_venda || item.preco || item.preco_custo || 0);
+        const valorTotalLinha = valorUnitario * Number(item.quantidade || 1);
 
-      // 2. Buscar IMEIs disponíveis associados aos produtos
-      let qImeis = supabase
-        .from('imeis')
-        .select('id, produto_id, imei, status, created_at')
-        .eq('filial_id', filial.id)
-        .or('status.ilike.%DISPON%,vendido.eq.false');
-
-      const { data: imeisData } = await qImeis;
-
-      const map = {};
-      (imeisData || []).forEach(im => {
-        if (im.produto_id) {
-          if (!map[im.produto_id]) map[im.produto_id] = [];
-          map[im.produto_id].push(im.imei);
-        }
-      });
-      setImeisMap(map);
-
-      // 3. Calcular dias sem giro estimado
-      const agora = new Date().getTime();
-      const formatados = (prodsData || []).map(p => {
-        const dt = new Date(p.updated_at || p.created_at || new Date().toISOString()).getTime();
-        const dias = Math.max(1, Math.floor((agora - dt) / (1000 * 60 * 60 * 24)));
         return {
-          ...p,
-          dias_sem_giro: dias,
-          primeiro_imei: map[p.id]?.[0] || null
+          ...item,
+          diasSemGiro,
+          valorUnitario,
+          valorTotalLinha
         };
-      }).sort((a, b) => b.dias_sem_giro - a.dias_sem_giro);
+      });
 
       setProdutos(formatados);
     } catch (err) {
-      console.error('Erro ao buscar estoque parado da filial:', err);
+      console.error('Erro ao consultar produtos parados da filial:', err);
     } finally {
       setIsLoading(false);
     }
@@ -116,42 +95,35 @@ export default function ModalEstoqueParadoFilial({
     }
   }, [isOpen, onClose]);
 
-  // Métricas do estoque parado
-  const { totalItens, totalCapital, itensCriticos30Dias } = useMemo(() => {
-    let qtd = 0;
-    let cap = 0;
-    let crit = 0;
+  // 2. Métricas Superiores
+  const { totalItens, capitalImobilizadoTotal, itensCriticos30Dias } = useMemo(() => {
+    const qtdTotal = produtos.reduce((acc, cur) => acc + Number(cur.quantidade || 0), 0);
+    const capTotal = produtos.reduce((acc, cur) => acc + Number(cur.valorTotalLinha || 0), 0);
+    const critTotal = produtos.filter(p => p.diasSemGiro >= 30).reduce((acc, cur) => acc + Number(cur.quantidade || 0), 0);
 
-    produtos.forEach(p => {
-      const q = parseInt(p.quantidade || 0, 10);
-      const val = parseFloat(p.preco || p.preco_custo || 0);
-      qtd += q;
-      cap += q * val;
-      if (p.dias_sem_giro >= 30) {
-        crit += q;
-      }
-    });
-
-    return { totalItens: qtd, totalCapital: cap, itensCriticos30Dias: crit };
+    return {
+      totalItens: qtdTotal,
+      capitalImobilizadoTotal: capTotal,
+      itensCriticos30Dias: critTotal
+    };
   }, [produtos]);
 
-  // Filtragem de produtos
+  // Filtragem de produtos (Busca e Categoria)
   const produtosFiltrados = useMemo(() => {
     return produtos.filter(p => {
       const matchBusca = !busca.trim() ||
         (p.nome && p.nome.toLowerCase().includes(busca.toLowerCase())) ||
-        (p.categoria && p.categoria.toLowerCase().includes(busca.toLowerCase())) ||
-        (p.primeiro_imei && p.primeiro_imei.includes(busca.trim()));
+        (p.categoria && p.categoria.toLowerCase().includes(busca.toLowerCase()));
 
       if (!matchBusca) return false;
 
       if (filtroCategoria === 'CELULARES') {
-        const cat = (p.categoria || p.tipo || '').toUpperCase();
+        const cat = (p.categoria || '').toUpperCase();
         return cat.includes('CEL') || cat.includes('SMART') || cat.includes('APARELHO') || cat.includes('IPHONE') || cat.includes('ANDROID');
       }
 
       if (filtroCategoria === 'ACESSORIOS') {
-        const cat = (p.categoria || p.tipo || '').toUpperCase();
+        const cat = (p.categoria || '').toUpperCase();
         return cat.includes('ACESS');
       }
 
@@ -162,13 +134,13 @@ export default function ModalEstoqueParadoFilial({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="bg-[#0D0D0D] border border-[#222222] w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="bg-[#0D0D0D] border border-[#222222] w-full max-w-5xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[92vh]">
 
         {/* CABEÇALHO */}
         <div className="px-6 py-5 border-b border-[#222222] bg-[#0F0F0F] flex flex-wrap items-center justify-between gap-4 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-amber-950/40 border border-amber-800/40 flex items-center justify-center text-amber-400 shrink-0">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-amber-950/40 border border-amber-800/40 flex items-center justify-center text-amber-400 shrink-0 shadow-[0_0_15px_rgba(245,158,11,0.15)]">
               <Package size={22} />
             </div>
             <div>
@@ -176,12 +148,12 @@ export default function ModalEstoqueParadoFilial({
                 <h2 className="text-lg font-extrabold text-white tracking-tight">
                   Produtos Parados em Estoque
                 </h2>
-                <span className="text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/50 px-2 py-0.5 rounded-full font-bold uppercase">
+                <span className="text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/50 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
                   {filial?.nome || 'Filial'}
                 </span>
               </div>
               <p className="text-xs text-gray-400 font-mono mt-0.5">
-                Auditoria de Mercadoria Imobilizada · Ação de Giro Acelerado
+                Leitura direta da tabela 'produtos' · Análise de Giro com Gemini 2.5
               </p>
             </div>
           </div>
@@ -190,7 +162,7 @@ export default function ModalEstoqueParadoFilial({
             <button
               onClick={carregarProdutosParados}
               className="p-2 rounded-xl bg-[#181818] hover:bg-[#252525] border border-[#333] text-gray-400 hover:text-white transition-colors"
-              title="Recarregar Estoque"
+              title="Recarregar Produtos"
             >
               <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} />
             </button>
@@ -204,42 +176,57 @@ export default function ModalEstoqueParadoFilial({
           </div>
         </div>
 
-        {/* METRICAS RÁPIDAS NO TOPO */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-black/40 border-b border-[#1A1A1A] shrink-0">
-          <div className="bg-[#121212] border border-[#222] p-3 rounded-xl flex items-center justify-between">
+        {/* CARDS DE MÉTRICAS SUPERIORES */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 p-4 bg-black/40 border-b border-[#1A1A1A] shrink-0">
+          {/* ITENS PARADOS */}
+          <div className="bg-[#121212] border border-[#222] p-3.5 rounded-xl flex items-center justify-between">
             <div>
-              <span className="text-[10px] text-gray-500 font-bold uppercase block">Itens Parados</span>
-              <span className="text-base font-extrabold text-white font-mono">{totalItens} unidades</span>
+              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Itens Parados</span>
+              <span className="text-lg font-extrabold text-white font-mono mt-0.5 block">
+                {totalItens} unidades
+              </span>
             </div>
-            <Package size={20} className="text-purple-400 opacity-60" />
+            <div className="w-9 h-9 rounded-lg bg-purple-950/30 border border-purple-800/30 flex items-center justify-center text-purple-400">
+              <Package size={18} />
+            </div>
           </div>
 
-          <div className="bg-[#121212] border border-[#222] p-3 rounded-xl flex items-center justify-between">
+          {/* CAPITAL IMOBILIZADO */}
+          <div className="bg-[#121212] border border-[#222] p-3.5 rounded-xl flex items-center justify-between">
             <div>
-              <span className="text-[10px] text-gray-500 font-bold uppercase block">Capital Imobilizado</span>
-              <span className="text-base font-extrabold text-emerald-400 font-mono">{formatBRL(totalCapital)}</span>
+              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Capital Imobilizado</span>
+              <span className="text-lg font-extrabold text-emerald-400 font-mono mt-0.5 block">
+                {formatBRL(capitalImobilizadoTotal)}
+              </span>
             </div>
-            <DollarSign size={20} className="text-emerald-400 opacity-60" />
+            <div className="w-9 h-9 rounded-lg bg-emerald-950/30 border border-emerald-800/30 flex items-center justify-center text-emerald-400">
+              <DollarSign size={18} />
+            </div>
           </div>
 
-          <div className="bg-[#121212] border border-[#222] p-3 rounded-xl flex items-center justify-between">
+          {/* CRÍTICO (+30 DIAS) */}
+          <div className="bg-[#121212] border border-[#222] p-3.5 rounded-xl flex items-center justify-between">
             <div>
-              <span className="text-[10px] text-gray-500 font-bold uppercase block">Crítico (+30 Dias)</span>
-              <span className="text-base font-extrabold text-amber-400 font-mono">{itensCriticos30Dias} unidades</span>
+              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Crítico (+30 Dias)</span>
+              <span className="text-lg font-extrabold text-amber-400 font-mono mt-0.5 block">
+                {itensCriticos30Dias} unidades
+              </span>
             </div>
-            <AlertTriangle size={20} className="text-amber-400 opacity-60" />
+            <div className="w-9 h-9 rounded-lg bg-amber-950/30 border border-amber-800/30 flex items-center justify-center text-amber-400">
+              <AlertTriangle size={18} />
+            </div>
           </div>
         </div>
 
-        {/* FILTROS E BUSCA */}
-        <div className="p-4 border-b border-[#222] flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="relative flex-1 min-w-[200px]">
+        {/* BARRA DE FILTROS E BUSCA */}
+        <div className="p-4 border-b border-[#222] flex flex-wrap items-center justify-between gap-3 shrink-0 bg-[#0A0A0A]">
+          <div className="relative flex-1 min-w-[220px]">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
             <input
               type="text"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar por nome do produto, IMEI ou categoria..."
+              placeholder="Buscar por nome do produto ou categoria..."
               className="w-full bg-[#141414] border border-[#2A2A2A] focus:border-purple-500 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-gray-500 outline-none transition-colors"
             />
           </div>
@@ -261,104 +248,127 @@ export default function ModalEstoqueParadoFilial({
           </div>
         </div>
 
-        {/* LISTA / TABELA DE PRODUTOS PARADOS */}
-        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-2">
+        {/* 3. LISTAGEM INTERATIVA (TABELA) */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
           {isLoading ? (
-            <div className="py-16 flex flex-col items-center justify-center space-y-3 text-gray-500">
-              <Loader2 size={24} className="animate-spin text-purple-400" />
-              <span className="text-xs font-mono">Buscando itens parados da filial...</span>
+            <div className="py-20 flex flex-col items-center justify-center space-y-3 text-gray-500">
+              <Loader2 size={26} className="animate-spin text-purple-400" />
+              <span className="text-xs font-mono">Carregando produtos parados em estoque...</span>
             </div>
           ) : produtosFiltrados.length === 0 ? (
-            <div className="py-16 text-center space-y-2">
-              <Package size={32} className="mx-auto text-gray-600" />
-              <p className="text-sm font-bold text-gray-400">Nenhum produto parado encontrado.</p>
-              <p className="text-xs text-gray-600">O estoque desta loja está fluindo ou não corresponde aos filtros.</p>
+            <div className="py-20 text-center space-y-2">
+              <Package size={36} className="mx-auto text-gray-600" />
+              <p className="text-sm font-bold text-gray-300">Nenhum produto em estoque parado encontrado.</p>
+              <p className="text-xs text-gray-600">Não há produtos com saldo &gt; 0 que atendam aos critérios de busca.</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {produtosFiltrados.map((item) => {
-                const dias = item.dias_sem_giro || 1;
-                const isCritico = dias >= 30;
-                const isAtencao = dias >= 15 && dias < 30;
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-[#222222] bg-[#0E0E0E] text-gray-400 font-bold uppercase tracking-wider text-[10px]">
+                    <th className="py-3 px-4">PRODUTO</th>
+                    <th className="py-3 px-3">CATEGORIA</th>
+                    <th className="py-3 px-3 text-center">QUANTIDADE</th>
+                    <th className="py-3 px-3 text-right">PREÇO UNITÁRIO</th>
+                    <th className="py-3 px-3 text-right">CAPITAL TOTAL</th>
+                    <th className="py-3 px-3 text-center">DIAS PARADO</th>
+                    <th className="py-3 px-4 text-center">AÇÃO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#1A1A1A]">
+                  {produtosFiltrados.map((item) => {
+                    const dias = item.diasSemGiro || 0;
+                    const isCritico = dias >= 30;
+                    const isAtencao = dias >= 15 && dias < 30;
 
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => onSelecionarProduto(item)}
-                    className="bg-black/50 border border-[#222] hover:border-purple-500/70 hover:bg-purple-950/[0.08] p-3.5 rounded-xl transition-all cursor-pointer flex flex-wrap items-center justify-between gap-3 group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="w-10 h-10 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-purple-400 shrink-0 group-hover:scale-105 transition-transform">
-                        {item.categoria?.toUpperCase().includes('ACESS') ? (
-                          <Tag size={18} className="text-emerald-400" />
-                        ) : (
-                          <Smartphone size={18} className="text-purple-400" />
-                        )}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-white truncate group-hover:text-purple-300 transition-colors">
-                            {item.nome}
-                          </span>
-                          {item.categoria && (
-                            <span className="text-[9px] bg-zinc-800 text-gray-400 px-1.5 py-0.5 rounded">
-                              {item.categoria}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-3 text-[11px] text-gray-400 font-mono mt-0.5">
-                          {item.primeiro_imei && (
-                            <span className="text-zinc-500">
-                              IMEI: ...{item.primeiro_imei.slice(-6)}
-                            </span>
-                          )}
-                          <span>Saldo: <strong className="text-white">{item.quantidade} un.</strong></span>
-                          <span>Preço: <strong className="text-emerald-400">{formatBRL(item.preco || item.preco_custo || 0)}</strong></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 shrink-0">
-                      {/* Badge de Dias Parado */}
-                      <span className={`text-[10px] font-bold font-mono px-2.5 py-1 rounded-full border flex items-center gap-1 ${
-                        isCritico
-                          ? 'bg-rose-950/60 border-rose-700/60 text-rose-300'
-                          : isAtencao
-                            ? 'bg-amber-950/60 border-amber-700/60 text-amber-300'
-                            : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300'
-                      }`}>
-                        <Clock size={11} />
-                        {dias} dias sem giro
-                      </span>
-
-                      {/* Botão de Ação IA */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelecionarProduto(item);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-purple-950/50 hover:bg-purple-600 border border-purple-700/50 text-xs font-bold text-purple-200 hover:text-white transition-all flex items-center gap-1.5 shadow-[0_0_12px_rgba(168,85,247,0.25)] group-hover:bg-purple-600 group-hover:text-white"
+                    return (
+                      <tr
+                        key={item.id}
+                        onClick={() => onSelecionarProduto(item)}
+                        className="hover:bg-purple-950/[0.12] transition-colors cursor-pointer group"
                       >
-                        <Sparkles size={13} className="text-yellow-300" />
-                        <span>Gerar Estratégia (IA)</span>
-                        <ArrowRight size={13} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                        {/* PRODUTO */}
+                        <td className="py-3.5 px-4 font-medium text-white">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-purple-400 shrink-0 group-hover:scale-105 transition-transform">
+                              {item.categoria?.toUpperCase().includes('ACESS') ? (
+                                <Tag size={13} className="text-emerald-400" />
+                              ) : (
+                                <Smartphone size={13} className="text-purple-400" />
+                              )}
+                            </div>
+                            <span className="font-bold text-white group-hover:text-purple-300 transition-colors">
+                              {item.nome}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* CATEGORIA */}
+                        <td className="py-3.5 px-3">
+                          <span className="text-[10px] font-medium bg-zinc-900 border border-zinc-800 text-gray-300 px-2 py-0.5 rounded">
+                            {item.categoria || 'Geral'}
+                          </span>
+                        </td>
+
+                        {/* QUANTIDADE */}
+                        <td className="py-3.5 px-3 text-center font-mono font-bold text-white">
+                          {item.quantidade} un.
+                        </td>
+
+                        {/* PREÇO UNITÁRIO */}
+                        <td className="py-3.5 px-3 text-right font-mono font-semibold text-gray-300">
+                          {formatBRL(item.valorUnitario)}
+                        </td>
+
+                        {/* CAPITAL TOTAL */}
+                        <td className="py-3.5 px-3 text-right font-mono font-bold text-emerald-400">
+                          {formatBRL(item.valorTotalLinha)}
+                        </td>
+
+                        {/* DIAS PARADO */}
+                        <td className="py-3.5 px-3 text-center">
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold font-mono px-2 py-0.5 rounded-full border ${
+                            isCritico
+                              ? 'bg-rose-950/60 border-rose-700/60 text-rose-300'
+                              : isAtencao
+                                ? 'bg-amber-950/60 border-amber-700/60 text-amber-300'
+                                : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300'
+                          }`}>
+                            <Clock size={10} />
+                            {dias} dias
+                          </span>
+                        </td>
+
+                        {/* AÇÃO */}
+                        <td className="py-3.5 px-4 text-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelecionarProduto(item);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-purple-950/60 hover:bg-purple-600 border border-purple-700/60 text-xs font-bold text-purple-200 hover:text-white transition-all inline-flex items-center gap-1.5 shadow-[0_0_10px_rgba(168,85,247,0.25)] group-hover:bg-purple-600 group-hover:text-white"
+                          >
+                            <Zap size={12} className="text-yellow-300" />
+                            <span>⚡ Gerar Estratégia (IA)</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
 
         {/* RODAPÉ */}
-        <div className="px-6 py-3.5 border-t border-[#222222] bg-[#0A0A0A] flex items-center justify-between text-xs text-gray-500 shrink-0">
-          <span>{produtosFiltrados.length} produto(s) listado(s)</span>
+        <div className="px-6 py-4 border-t border-[#222222] bg-[#0A0A0A] flex items-center justify-between text-xs text-gray-500 shrink-0">
+          <span>
+            Exibindo <strong className="text-white">{produtosFiltrados.length}</strong> de <strong className="text-white">{produtos.length}</strong> produtos
+          </span>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white font-bold text-xs transition-colors"
+            className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-white font-bold text-xs transition-colors"
           >
             Fechar
           </button>

@@ -266,8 +266,8 @@ export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja',
     import.meta.env.VITE_GOOGLE_GENAI_API_KEY ||
     '';
 
-  const precoVenda = Number(produto.preco || produto.preco_custo || 0);
-  const diasParado = Number(produto.dias_sem_giro || 30);
+  const valorUnitario = Number(produto.preco_venda || produto.preco || produto.preco_custo || 0);
+  const diasSemGiro = Number(produto.dias_sem_giro || 30);
 
   // Fallback rápido se não houver chave de API configurada
   if (!effectiveApiKey) {
@@ -275,18 +275,18 @@ export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja',
     return gerarEstrategiaGiroFallback(produto, filialNome);
   }
 
-  const prompt = `Atue como um diretor comercial especialista em lojas de celulares e varejo de tecnologia.
-Analise o seguinte item que está imobilizado no estoque da filial ${filialNome}:
-- Produto: ${produto.nome}
-- Categoria: ${produto.categoria || 'Celulares / Tecnologia'}
-- Quantidade Parada: ${produto.quantidade || 1} un.
-- Valor Unitário: R$ ${precoVenda.toFixed(2)}
-- Dias sem Giro Estimados: ${diasParado} dias
+  const prompt = `Atue como um estrategista comercial de varejo de celulares.
+O produto a seguir está parado no estoque da filial ${filialNome}:
+- Item: ${produto.nome}
+- Categoria: ${produto.categoria || 'Celulares / Geral'}
+- Quantidade Imobilizada: ${produto.quantidade || 1} un.
+- Preço Unitário: R$ ${valorUnitario.toFixed(2)}
+- Dias em Estoque: ${diasSemGiro} dias
 
-Gere uma estratégia curta, incisiva e prática dividida estritamente em:
-1. Oferta Comercial de Giro Rápido (Ideia de Combo, Condição no Boleto/PayJoy ou Entrada Facilitada)
-2. Argumento de Venda Direto para os Consultores usarem no balcão
-3. Ação de Desova Imediata (Meta relâmpago ou incentivo específico para a equipe no PDV)`;
+Forneça um plano tático imediato com:
+1. Oferta de Combinação/Cross-selling (ex.: condição com película, capinha ou financiamento PayJoy/Aiva)
+2. Argumento de Venda Rápido para a equipe no balcão
+3. Ação Comercial Imediata para desovar o lote esta semana`;
 
   const modelosTentativa = ['gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
   let lastError = null;
@@ -332,20 +332,19 @@ Gere uma estratégia curta, incisiva e prática dividida estritamente em:
  * Fallback heurístico inteligente caso a API esteja temporariamente indisponível
  */
 export function gerarEstrategiaGiroFallback(produto, filialNome = 'Loja') {
-  const preco = Number(produto.preco || produto.preco_custo || 0);
+  const preco = Number(produto.preco_venda || produto.preco || produto.preco_custo || 0);
   const entradaBoleto = (preco * 0.15).toFixed(2);
   const parcelaEstimada = ((preco * 1.15) / 12).toFixed(2);
 
-  return `### 1. Oferta Comercial de Giro Rápido (Combos & Condições)
-* **Combo Proteção Total**: Na compra do **${produto.nome}**, leve Capa Anti-Impacto + Película 3D com 50% de desconto ou grátis para fechamento via PIX.
-* **Facilitação no Boleto / PayJoy**: Divulgar como "Leve hoje com entrada a partir de apenas R$ ${entradaBoleto} e saldo em parcelas acessíveis de ~R$ ${parcelaEstimada}/mês".
-* **Up-sell Inteligente**: Oferecer como alternativa para clientes que vieram buscar modelos inferiores, mostrando que a diferença de parcela cabe no bolso.
+  return `### 1. Oferta de Combinação / Cross-selling (Acessórios & PayJoy/Aiva)
+* **Combo Proteção Total**: Na compra do **${produto.nome}**, leve Capa Anti-Impacto + Película 3D com 50% de desconto ou grátis na entrada via PIX.
+* **Condição PayJoy / Aiva**: Entrada facilitada de apenas **R$ ${entradaBoleto}** e saldo em parcelas acessíveis de ~R$ ${parcelaEstimada}/mês.
 
-### 2. Argumento de Venda Direto para os Consultores no Balcão
-* *"Este modelo se destaca pela estabilidade no uso diário e autonomia de bateria. Conseguimos liberar uma condição especial com a gerência exclusiva para esta unidade em estoque da loja ${filialNome}."*
-* *"Se você fechar agora, eu garanto a aplicação imediata da película e já te entrego o aparelho 100% configurado com garantia local."*
+### 2. Argumento de Venda Rápido para a Equipe no Balcão
+* *"Este modelo oferece excelente autonomia de bateria, tela de alta nitidez e suporte oficial. Conseguimos liberar uma condição autorizada pela diretoria exclusiva para esta unidade em estoque aqui na loja ${filialNome}."*
+* *"Fechando hoje, já te entrego o aparelho com a película aplicada e todos os seus dados transferidos sem nenhum custo adicional."*
 
-### 3. Ação de Desova Imediata (Meta Relâmpago PDV)
-* **Incentivo Direto (Comissão Turbo)**: Bônus de **R$ 20,00 a R$ 30,00 adicionais** pagos em PIX direto para o primeiro consultor que faturar este item nas próximas 48 horas.
-* **Foco de Vitrine**: Posicionar o item na prateleira central de entrada com tag chamativa *"Oportunidade da Semana - Pronta Entrega"*.`;
+### 3. Ação Comercial Imediata para Desovar o Lote Esta Semana
+* **Incentivo Direto aos Consultores**: Bônus de **R$ 25,00 a R$ 35,00 adicionais** pagos na hora para o consultor que faturar este item nas próximas 48 horas.
+* **Vitrine & Ponto Focal**: Posicionar na prateleira central da loja ${filialNome} com tag *"Destaque da Semana - Condição Exclusiva"*.`;
 }
