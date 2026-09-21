@@ -22,9 +22,9 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
 
   // Estados dos Campos das Metas da Loja (R$)
   // Estados dos Campos das Metas da Loja (R$)
-  const [metaLojaBoleto, setMetaLojaBoleto] = useState(123000);
-  const [metaLojaAcessorios, setMetaLojaAcessorios] = useState(8000);
-  const [superMeta, setSuperMeta] = useState(143000);
+  const [metaLojaBoleto, setMetaLojaBoleto] = useState(270000);
+  const [metaLojaAcessorios, setMetaLojaAcessorios] = useState(40000);
+  const [superMeta, setSuperMeta] = useState(310000);
   const [metaTraineeBoleto, setMetaTraineeBoleto] = useState(30000);
 
   // Estados dos Campos Solicitados para Metas Individuais do Vendedor e Trainee (R$)
@@ -102,9 +102,9 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
 
       if (data) {
         setRegistroId(data.id);
-        setMetaLojaBoleto(Number(data.meta_loja_boleto ?? 123000));
-        setMetaLojaAcessorios(Number(data.meta_loja_acessorios ?? 8000));
-        setSuperMeta(Number(data.super_meta ?? 143000));
+        setMetaLojaBoleto(Number(data.meta_loja_boleto ?? 270000));
+        setMetaLojaAcessorios(Number(data.meta_loja_acessorios ?? 40000));
+        setSuperMeta(Number(data.super_meta ?? 310000));
         setMetaTraineeBoleto(Number(data.meta_trainee_boleto ?? 30000));
         setMetaTraineeBoletos(Number(data.meta_trainee_boleto ?? 30000));
 
@@ -420,11 +420,11 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
                     value={metaLojaBoleto}
                     onChange={(e) => setMetaLojaBoleto(e.target.value)}
                     className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
-                    placeholder="123000.00"
+                    placeholder="270000.00"
                     required
                   />
                 </div>
-                <span className="text-[9px] text-gray-500 block">Ex: R$ 123.000,00</span>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 270.000,00</span>
               </div>
 
               {/* Meta Acessórios */}
@@ -447,11 +447,11 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
                     value={metaLojaAcessorios}
                     onChange={(e) => setMetaLojaAcessorios(e.target.value)}
                     className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
-                    placeholder="8000.00"
+                    placeholder="40000.00"
                     required
                   />
                 </div>
-                <span className="text-[9px] text-gray-500 block">Ex: R$ 8.000,00</span>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 40.000,00</span>
               </div>
 
               {/* Super Meta */}
@@ -473,11 +473,11 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
                     value={superMeta}
                     onChange={(e) => setSuperMeta(e.target.value)}
                     className="w-full bg-transparent text-lg font-bold text-[#A78BFA] outline-none font-mono tracking-tight cursor-text"
-                    placeholder="143000.00"
+                    placeholder="310000.00"
                     required
                   />
                 </div>
-                <span className="text-[9px] text-gray-500 block">Ex: R$ 143.000,00</span>
+                <span className="text-[9px] text-gray-500 block">Ex: R$ 310.000,00</span>
               </div>
 
               {/* Meta Trainee Boletos */}

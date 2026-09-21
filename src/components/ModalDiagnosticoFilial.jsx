@@ -79,7 +79,7 @@ export default function ModalDiagnosticoFilial({
         // 1. Vendas da filial no mês
         let qVendas = supabase
           .from('vendas')
-          .select('id, valor_total, categoria, metodo_pagamento, produto_nome, vendedor_id, vendedor_nome, created_at')
+          .select('id, valor_total, categoria, metodo_pagamento, produto_nome, vendedor_id, vendedor_nome, created_at, financeira, financeira_parceira')
           .eq('filial_id', filial.id)
           .gte('created_at', dataInicio)
           .lte('created_at', dataFim);
@@ -88,7 +88,22 @@ export default function ModalDiagnosticoFilial({
           qVendas = qVendas.eq('empresa_id', empresaId);
         }
 
-        const { data: vData } = await qVendas;
+        let { data: vData, error: vErr } = await qVendas;
+        if (vErr) {
+          // Fallback caso colunas adicionais causem inconsistência
+          let qFallback = supabase
+            .from('vendas')
+            .select('id, valor_total, categoria, metodo_pagamento, produto_nome, vendedor_id, vendedor_nome, created_at')
+            .eq('filial_id', filial.id)
+            .gte('created_at', dataInicio)
+            .lte('created_at', dataFim);
+
+          if (empresaId && empresaId !== 'MASTER') {
+            qFallback = qFallback.eq('empresa_id', empresaId);
+          }
+          const { data: vFallback } = await qFallback;
+          vData = vFallback;
+        }
         setVendasFilial(vData || []);
 
         // 2. Produtos em estoque da filial
@@ -187,19 +202,40 @@ export default function ModalDiagnosticoFilial({
     return faturamentoFilial / estoqueTotalValor;
   }, [faturamentoFilial, estoqueTotalValor]);
 
-  // Meta da filial (padrão ou cadastrada)
-  const metaFilialTotal = useMemo(() => {
-    if (metasFilial) {
-      const mBoleto = parseFloat(metasFilial.meta_loja_boleto) || 270000;
-      const mAcess = parseFloat(metasFilial.meta_loja_acessorios) || 40000;
-      return mBoleto + mAcess;
-    }
-    return 310000; // Padrão da rede: R$ 270k boleto + R$ 40k acessórios
-  }, [metasFilial]);
+  // Metas Oficiais da Filial (Monkey Shop: R$ 270k boleto + R$ 40k acessórios = R$ 310k total)
+  const metaBoletosAlvo = 270000;
+  const metaAcessoriosAlvo = 40000;
+  const metaFilialTotal = metaBoletosAlvo + metaAcessoriosAlvo; // R$ 310.000,00 oficial da loja
 
   const percentualMetaAtingido = useMemo(() => {
     return metaFilialTotal > 0 ? (faturamentoFilial / metaFilialTotal) * 100 : 0;
   }, [faturamentoFilial, metaFilialTotal]);
+
+  // Realizados Oficiais da Filial (Boletos & Acessórios)
+  const realizadoBoletosLoja = useMemo(() => {
+    return (vendasFilial || [])
+      .filter(v => ['BOLETO', 'PAYJOY', 'AIVA', 'UME', 'WATU', 'CREDIARIO']
+        .some(m => (v.metodo_pagamento || '').toUpperCase().includes(m) || 
+                   (v.financeira || '').toUpperCase().includes(m) ||
+                   (v.financeira_parceira || '').toUpperCase().includes(m)))
+      .reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
+  }, [vendasFilial]);
+
+  const realizadoAcessoriosLoja = useMemo(() => {
+    return (vendasFilial || [])
+      .filter(v => (v.categoria || '').toUpperCase().includes('ACESS') || 
+                   (v.categoria || '').toUpperCase().includes('PELICULA') || 
+                   (v.categoria || '').toUpperCase().includes('CAPA') ||
+                   (v.produto_nome || '').toUpperCase().includes('ACESS') ||
+                   (v.produto_nome || '').toUpperCase().includes('PELICULA') ||
+                   (v.produto_nome || '').toUpperCase().includes('CAPA') ||
+                   (v.produto_nome || '').toUpperCase().includes('CARREGADOR') ||
+                   (v.produto_nome || '').toUpperCase().includes('FONE'))
+      .reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
+  }, [vendasFilial]);
+
+  const pctBoletos = Math.min(100, (realizadoBoletosLoja / metaBoletosAlvo) * 100);
+  const pctAcessorios = Math.min(100, (realizadoAcessoriosLoja / metaAcessoriosAlvo) * 100);
 
   // Composição por Categoria (Celulares vs Acessórios vs Outros)
   const categoriasBreakdown = useMemo(() => {
@@ -385,6 +421,24 @@ export default function ModalDiagnosticoFilial({
       listPros.push(`Venda agregada de acessórios em bom nível (${categoriasBreakdown.acessorio.pct.toFixed(1)}% do faturamento).`);
     }
 
+    // Metas da Filial (Boletos & Acessórios) - Redlines e Destaques
+    const diaCorte = pacingInfo?.diaCorte ?? new Date().getDate();
+    if (diaCorte >= 15) {
+      if (pctBoletos < 50) {
+        listContras.push('Ritmo de Boletos abaixo da meta linear da loja (R$ 270k).');
+      } else if (pctBoletos >= 100) {
+        listPros.push(`Meta de Boletos / Financiadoras superada com sucesso (${pctBoletos.toFixed(1)}% de R$ 270k)!`);
+      } else {
+        listPros.push(`Ritmo saudável de Boletos / Financiadoras: ${formatBRL(realizadoBoletosLoja)} (${pctBoletos.toFixed(1)}% da meta).`);
+      }
+
+      if (pctAcessorios < 50) {
+        listContras.push(`Gargalo no giro de acessórios: faturado ${formatBRL(realizadoAcessoriosLoja)} de R$ 40k necessários.`);
+      } else if (pctAcessorios >= 100) {
+        listPros.push(`Meta de Acessórios da loja atingida (${pctAcessorios.toFixed(1)}% de R$ 40k)!`);
+      }
+    }
+
     return { pros: listPros, contras: listContras };
   }, [
     faturamentoFilial,
@@ -395,7 +449,12 @@ export default function ModalDiagnosticoFilial({
     estoqueTotalValor,
     capitalParado30Dias,
     consultoresBreakdown,
-    categoriasBreakdown
+    categoriasBreakdown,
+    pacingInfo,
+    pctBoletos,
+    pctAcessorios,
+    realizadoBoletosLoja,
+    realizadoAcessoriosLoja
   ]);
 
   return (
@@ -512,28 +571,46 @@ export default function ModalDiagnosticoFilial({
               </div>
             </div>
 
-            {/* Card 4: Meta da Filial */}
-            <div className="bg-black/50 border border-[#222] p-4 rounded-xl flex flex-col justify-between space-y-3">
+            {/* Card 4: Metas da Filial (Boletos & Acessórios) */}
+            <div className="bg-black/50 border border-[#222] p-4 rounded-xl flex flex-col justify-between space-y-2">
               <div className="flex justify-between items-start">
-                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Meta da Loja</span>
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                  METAS DA FILIAL (BOLETOS &amp; ACESSÓRIOS)
+                </span>
                 <span className="text-[10px] font-bold text-white bg-white/10 px-2 py-0.5 rounded-full font-mono">
-                  {percentualMetaAtingido.toFixed(0)}%
+                  Oficial
                 </span>
               </div>
-              <div>
-                <div className="text-2xl font-extrabold font-mono text-emerald-400">
-                  {formatBRL(faturamentoFilial)}
+              <div className="flex-1 flex flex-col justify-center">
+                {/* Bloco 1: Boletos */}
+                <div className="space-y-1.5 mb-3">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-amber-400 flex items-center gap-1">
+                      🟡 Boletos / Financ.:
+                    </span>
+                    <span className="font-bold text-zinc-200">
+                      {pctBoletos.toFixed(1)}% ({realizadoBoletosLoja.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / R$ 270.000,00)
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 transition-all duration-500" style={{ width: `${pctBoletos}%` }} />
+                  </div>
                 </div>
-                <div className="w-full bg-[#151515] h-2 rounded-full overflow-hidden mt-2">
-                  <div
-                    className="bg-gradient-to-r from-emerald-500 to-purple-500 h-full rounded-full transition-all"
-                    style={{ width: `${Math.min(percentualMetaAtingido, 100)}%` }}
-                  />
+
+                {/* Bloco 2: Acessórios */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-pink-400 flex items-center gap-1">
+                      🌸 Acessórios:
+                    </span>
+                    <span className="font-bold text-zinc-200">
+                      {pctAcessorios.toFixed(1)}% ({realizadoAcessoriosLoja.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / R$ 40.000,00)
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-pink-500 to-rose-400 transition-all duration-500" style={{ width: `${pctAcessorios}%` }} />
+                  </div>
                 </div>
-                <p className="text-[9px] text-gray-500 mt-1 flex justify-between font-mono">
-                  <span>Alvo: {formatBRL(metaFilialTotal)}</span>
-                  <span>{percentualMetaAtingido >= 100 ? 'Superada!' : 'Em progresso'}</span>
-                </p>
               </div>
             </div>
 
