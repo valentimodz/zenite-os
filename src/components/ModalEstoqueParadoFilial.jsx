@@ -153,7 +153,7 @@ export default function ModalEstoqueParadoFilial({
                 </span>
               </div>
               <p className="text-xs text-gray-400 font-mono mt-0.5">
-                Leitura direta da tabela 'produtos' · Análise de Giro com Gemini 2.5
+                Leitura direta da tabela 'produtos' · Análise de Giro com Feijão IA
               </p>
             </div>
           </div>
@@ -349,7 +349,7 @@ export default function ModalEstoqueParadoFilial({
                             className="px-3 py-1.5 rounded-lg bg-purple-950/60 hover:bg-purple-600 border border-purple-700/60 text-xs font-bold text-purple-200 hover:text-white transition-all inline-flex items-center gap-1.5 shadow-[0_0_10px_rgba(168,85,247,0.25)] group-hover:bg-purple-600 group-hover:text-white"
                           >
                             <Zap size={12} className="text-yellow-300" />
-                            <span>⚡ Gerar Estratégia (IA)</span>
+                            <span>⚡ Estratégia Feijão IA</span>
                           </button>
                         </td>
                       </tr>

@@ -901,7 +901,7 @@ export default function ModalDiagnosticoFilial({
         />
       )}
 
-      {/* MODAL / DRAWER 2: ESTRATÉGIA DE GIRO DO PRODUTO (GEMINI 2.5) */}
+      {/* MODAL / DRAWER 2: ESTRATÉGIA DE GIRO DO PRODUTO (FEIJÃO IA) */}
       {produtoParaEstrategia && (
         <EstrategiaProdutoModal
           isOpen={Boolean(produtoParaEstrategia)}
