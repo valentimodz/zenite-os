@@ -355,7 +355,7 @@ function ProductTableRow({
       addImei(p.imei);
     }
 
-    // 3. Fallback de disponiveisImeis global (busca por produto_id ou nome equivalente)
+    // 3. Fallback de disponiveisImeis global (busca por WHERE imeis.produto_id = produto.id AND imeis.status = 'DISPONIVEL')
     if (Array.isArray(disponiveisImeis)) {
       disponiveisImeis.forEach(im => {
         const matchesId = (p.id && im.produto_id && String(p.id) === String(im.produto_id));
@@ -363,10 +363,10 @@ function ProductTableRow({
           im.produtos?.nome && p.nome &&
           im.produtos.nome.trim().toLowerCase() === String(p.nome).trim().toLowerCase()
         );
-        const matchesFilial = !p.filial_id || !im.filial_id || String(p.filial_id) === String(im.filial_id);
-        const isNotSold = !im.vendido && String(im.status || '').toUpperCase() !== 'VENDIDO';
+        const statusNorm = String(im.status || '').toUpperCase();
+        const isDisponivel = statusNorm.includes('DISPONIV') || (!im.vendido && statusNorm !== 'VENDIDO');
 
-        if ((matchesId || matchesNome) && matchesFilial && isNotSold) {
+        if ((matchesId || matchesNome) && isDisponivel) {
           if (im.imei) addImei(im.imei, im);
         }
       });
@@ -415,41 +415,46 @@ function ProductTableRow({
                     </button>
                   </span>
                 ) : listaImeisExtraidos.length > 1 ? (
-                  /* Múltiplos IMEIs: exibe as badges com botão de cópia individual e botão de expansão */
-                  <div className="flex flex-wrap items-center gap-1 max-w-[280px]">
-                    {listaImeisExtraidos.slice(0, 3).map((imObj) => (
-                      <span
-                        key={imObj.imei}
-                        className="inline-flex items-center gap-1 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-1.5 py-0.5 rounded"
-                      >
-                        <span className="truncate max-w-[110px]" title={imObj.imei}>{imObj.imei}</span>
+                  /* Múltiplos IMEIs: exibe a quantidade e botões de cópia */
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="inline-flex items-center gap-1 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-2 py-0.5 rounded font-bold">
+                      {listaImeisExtraidos.length} unid. (Serial)
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1 max-w-[240px]">
+                      {listaImeisExtraidos.slice(0, 2).map((imObj) => (
+                        <span
+                          key={imObj.imei}
+                          className="inline-flex items-center gap-1 bg-zinc-900 border border-zinc-800 text-zinc-300 font-mono text-[10px] px-1.5 py-0.5 rounded"
+                        >
+                          <span className="truncate max-w-[90px]" title={imObj.imei}>{imObj.imei}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => copiarImeiParaClipboard(e, imObj.imei)}
+                            className="hover:text-white transition-colors cursor-pointer text-zinc-400"
+                            title={`Copiar IMEI ${imObj.imei}`}
+                          >
+                            {copiedImeiMap[imObj.imei] ? (
+                              <Check size={10} className="text-emerald-400" />
+                            ) : (
+                              <Copy size={10} />
+                            )}
+                          </button>
+                        </span>
+                      ))}
+                      {listaImeisExtraidos.length > 2 && (
                         <button
                           type="button"
-                          onClick={(e) => copiarImeiParaClipboard(e, imObj.imei)}
-                          className="hover:text-white transition-colors cursor-pointer text-purple-300"
-                          title={`Copiar IMEI ${imObj.imei}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id);
+                          }}
+                          className="text-[9px] bg-purple-900/50 hover:bg-purple-800/70 text-purple-200 px-1.5 py-0.5 rounded font-mono font-bold cursor-pointer transition-colors"
+                          title="Ver todos os seriais"
                         >
-                          {copiedImeiMap[imObj.imei] ? (
-                            <Check size={10} className="text-emerald-400" />
-                          ) : (
-                            <Copy size={10} />
-                          )}
+                          +{listaImeisExtraidos.length - 2} mais
                         </button>
-                      </span>
-                    ))}
-                    {listaImeisExtraidos.length > 3 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id);
-                        }}
-                        className="text-[9px] bg-purple-900/50 hover:bg-purple-800/70 text-purple-200 px-1.5 py-0.5 rounded font-mono font-bold cursor-pointer transition-colors"
-                        title="Ver todos os seriais"
-                      >
-                        +{listaImeisExtraidos.length - 3} mais
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
                 ) : (
                   /* Sem IMEI vinculado apenas se a lista/campo realmente retornar vazia */
@@ -1191,6 +1196,7 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Novos estados para a Entrada de Estoque (Item Físico / IMEI) de alta produtividade
   const [selectedProdutoMestre, setSelectedProdutoMestre] = useState(null);
+  const [produtosMestres, setProdutosMestres] = useState([]);
   const [entradaFiltroCategoria, setEntradaFiltroCategoria] = useState('todas');
   const [entradaBuscaMestre, setEntradaBuscaMestre] = useState('');
   const [entradaImei, setEntradaImei] = useState('');
@@ -3981,13 +3987,40 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let imeisRes = { data: [], error: null };
       try {
-        const res = await supabase
+        const { data: ultimosAparelhos, error: errUltimos } = await supabase
           .from('imeis')
-          .select('id, imei, produto_id, filial_id, status, created_at')
-          .eq('status', 'DISPONIVEL')
+          .select(`
+            id,
+            imei,
+            cor,
+            status,
+            filial_id,
+            created_at,
+            produto_id,
+            produtos (
+              id,
+              nome,
+              categoria
+            ),
+            filiais (
+              id,
+              nome
+            )
+          `)
           .order('created_at', { ascending: false })
           .limit(10);
-        imeisRes = res || { data: [], error: null };
+
+        if (!errUltimos && ultimosAparelhos) {
+          imeisRes = { data: ultimosAparelhos, error: null };
+        } else {
+          // Fallback seguro caso haja restrição no join
+          const fallbackRes = await supabase
+            .from('imeis')
+            .select('id, imei, cor, status, filial_id, created_at, produto_id')
+            .order('created_at', { ascending: false })
+            .limit(10);
+          imeisRes = fallbackRes || { data: [], error: null };
+        }
       } catch (err) {
         console.warn('[Dashboard] Falha na query de ultimos imeis:', err);
       }
@@ -3996,10 +4029,23 @@ export default function Dashboard({ session, profileDataProps }) {
       try {
         const res = await supabase
           .from('imeis')
-          .select('id, imei, produto_id, filial_id, status, created_at')
-          .eq('status', 'DISPONIVEL')
+          .select(`
+            id,
+            imei,
+            cor,
+            status,
+            filial_id,
+            created_at,
+            produto_id,
+            produtos (
+              id,
+              nome,
+              categoria
+            )
+          `)
+          .or('status.eq.DISPONIVEL,status.eq.DISPONÍVEL,status.eq.Disponível,status.eq.disponivel')
           .order('created_at', { ascending: false })
-          .limit(1000);
+          .limit(2000);
         allImeisRes = res || { data: [], error: null };
       } catch (err) {
         console.warn('[Dashboard] Falha na query de imeis disponiveis:', err);
@@ -4010,13 +4056,15 @@ export default function Dashboard({ session, profileDataProps }) {
 
       let imeisMapGlobal = {};
       baseImeis.forEach(im => {
-        if (!imeisMapGlobal[im.produto_id]) imeisMapGlobal[im.produto_id] = [];
-        imeisMapGlobal[im.produto_id].push(im);
+        if (!im.produto_id) return;
+        const pKey = String(im.produto_id);
+        if (!imeisMapGlobal[pKey]) imeisMapGlobal[pKey] = [];
+        imeisMapGlobal[pKey].push(im);
       });
 
       const prodsMapeados = baseProdutos.map(p => ({
         ...p,
-        imeis_db: imeisMapGlobal[p.id] || []
+        imeis_db: imeisMapGlobal[String(p.id)] || []
       }));
 
       setProdutos(prodsMapeados);
@@ -9728,6 +9776,42 @@ export default function Dashboard({ session, profileDataProps }) {
       alert('Erro ao verificar IMEI no banco de dados.');
     }
   };
+
+  // 1. Fetch de Produtos Mestres da categoria 'Celulares':
+  useEffect(() => {
+    let isMounted = true;
+    const fetchProdutosMestres = async () => {
+      try {
+        const { data: prodsMestres, error } = await supabase
+          .from('produtos')
+          .select('id, nome, categoria')
+          .ilike('categoria', '%celula%')
+          .order('nome', { ascending: true });
+
+        if (!error && prodsMestres && isMounted) {
+          setProdutosMestres(prodsMestres);
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar produtos mestres da categoria celulares:', err);
+      }
+    };
+
+    fetchProdutosMestres();
+    return () => { isMounted = false; };
+  }, [profile?.empresa_id]);
+
+  // 2. Tratamento Adicional com Normalização (Garantia Dupla):
+  // Caso existam variações na escrita da categoria no banco ('Celulares', 'CELULARES', 'Celular', 'Smartphones'):
+  const listaCelulares = React.useMemo(() => {
+    let base = (produtosMestres && produtosMestres.length > 0)
+      ? produtosMestres
+      : ((catalogoProdutos && catalogoProdutos.length > 0) ? catalogoProdutos : (produtos || []));
+
+    return (base || []).filter(item => {
+      const cat = (item.categoria || item.tipo || '').trim().toLowerCase();
+      return cat.includes('celul') || cat.includes('smart');
+    });
+  }, [produtosMestres, catalogoProdutos, produtos]);
 
   // Filtro derivado de modelos para o dropdown de Entrada de Estoque (Pipeline: Dados Brutos -> Filtro por Categoria -> Select)
   const produtosMestreOptions = React.useMemo(() => {
@@ -18720,7 +18804,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       value={selectedProdutoMestre ? String(selectedProdutoMestre.id) : ''}
                       onChange={(e) => {
                         const prodId = String(e.target.value || '');
-                        const prod = (produtosMestreOptions || []).find(p => String(p.id) === prodId) || (catalogoProdutos || []).find(p => String(p.id) === prodId);
+                        const prod = (listaCelulares || []).find(p => String(p.id) === prodId) || (catalogoProdutos || []).find(p => String(p.id) === prodId);
                         setSelectedProdutoMestre(prod || null);
                         if (prod) {
                           setEntradaCodigoBarras(prod.codigo_barras || prod.barcode || prod.ean || '');
@@ -18729,16 +18813,11 @@ export default function Dashboard({ session, profileDataProps }) {
                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
                     >
                       <option value="">Selecione o Produto Mestre...</option>
-                      {(produtosMestreOptions || []).map(p => {
-                        const nomeExibido = p.nome || p.name || 'Produto sem Nome';
-                        const eanExibido = p.codigo_barras || p.barcode || p.ean;
-                        const catExibida = p.categoria || p.tipo || p.category || 'Geral';
-                        return (
-                          <option key={p.id || p.nome} value={p.id}>
-                            {nomeExibido} {eanExibido ? `[EAN: ${eanExibido}]` : ''} ({catExibida})
-                          </option>
-                        );
-                      })}
+                      {listaCelulares.map(produto => (
+                        <option key={produto.id} value={produto.id}>
+                          {produto.nome} ({produto.categoria})
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -18969,33 +19048,55 @@ export default function Dashboard({ session, profileDataProps }) {
                     </div>
                   ) : (
                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                      {ultimosRecebidos.slice(0, 10).map((item, idx) => (
-                        <div
-                          key={item.id || idx}
-                          className="flex items-center justify-between rounded-lg px-3 py-2 border bg-black/40 border-[#222222] hover:border-[#6A0DAD]/30 transition-all"
-                        >
-                          <div className="flex items-center gap-3">
-                            <Smartphone size={15} className="text-purple-400 flex-shrink-0" />
-                            <div>
-                              <p className="text-xs font-bold text-white tracking-wider">
-                                {item.produtos?.nome || 'Modelo não identificado'}
-                              </p>
-                              <div className="flex items-center gap-2 text-[10px] font-mono mt-0.5 flex-wrap">
-                                <span className="text-gray-500">IMEI: <span className="text-gray-300 font-semibold">{item.imei}</span></span>
-                                <ColorBadge cor={item.cor} />
+                      {ultimosRecebidos.slice(0, 10).map((item, idx) => {
+                        const nomeModelo = 
+                          item.produtos?.nome || 
+                          item.produto_nome || 
+                          item.modelo || 
+                          'Modelo não identificado';
+
+                        const corAparelho = 
+                          item.cor || 
+                          item.cor_nome || 
+                          'Sem cor';
+
+                        return (
+                          <div
+                            key={item.id || idx}
+                            className="flex items-center justify-between rounded-lg px-3 py-2.5 border bg-black/40 border-[#222222] hover:border-[#6A0DAD]/30 transition-all"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Smartphone size={16} className="text-[#6A0DAD] flex-shrink-0" />
+                              <div className="space-y-1">
+                                <div>
+                                  <span className="font-bold text-sm text-white">
+                                    {nomeModelo}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-zinc-400">
+                                  <span className="font-mono">IMEI: {item.imei}</span>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
+                                    <span className="w-2 h-2 rounded-full bg-zinc-400"></span>
+                                    {corAparelho}
+                                  </span>
+                                  {item.filiais?.nome && (
+                                    <span className="text-zinc-500 font-medium">({item.filiais.nome})</span>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div>
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${item.status === 'VENDIDO' || item.status === 'Vendido'
-                              ? 'bg-red-950/20 text-red-400 border border-red-800/30'
-                              : 'bg-green-950/20 text-green-400 border border-green-800/30'
+                            <div>
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${
+                                String(item.status || '').toUpperCase() === 'VENDIDO'
+                                  ? 'bg-red-950/20 text-red-400 border border-red-800/30'
+                                  : 'bg-green-950/20 text-green-400 border border-green-800/30'
                               }`}>
-                              {item.status}
-                            </span>
+                                {item.status || 'DISPONIVEL'}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
