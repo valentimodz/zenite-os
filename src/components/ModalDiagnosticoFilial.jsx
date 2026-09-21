@@ -227,39 +227,82 @@ export default function ModalDiagnosticoFilial({
     };
   }, [vendasFilial]);
 
-  // Vendas acumuladas dia a dia para o gráfico de curva
-  const curvaDias = useMemo(() => {
-    const [anoStr, mesStr] = (mesAno || new Date().toISOString().slice(0, 7)).split('-');
-    const diasNoMes = new Date(parseInt(anoStr, 10), parseInt(mesStr, 10), 0).getDate();
+  // Vendas acumuladas dia a dia para o gráfico de curva e status do Pacing
+  const { curvaDias, pacingInfo } = useMemo(() => {
+    const hoje = new Date();
+    const [anoStr, mesStr] = (mesAno || hoje.toISOString().slice(0, 7)).split('-');
+    const ano = parseInt(anoStr, 10);
+    const mes = parseInt(mesStr, 10);
+    const diasNoMes = new Date(ano, mes, 0).getDate();
+
+    const isMesAtual = hoje.getFullYear() === ano && (hoje.getMonth() + 1) === mes;
+    const isMesPassado = (ano < hoje.getFullYear()) || (ano === hoje.getFullYear() && mes < (hoje.getMonth() + 1));
 
     const diasMap = {};
     for (let d = 1; d <= diasNoMes; d++) {
       diasMap[d] = 0;
     }
 
+    let maxDiaComVenda = 0;
     vendasFilial.forEach(v => {
       if (!v.created_at) return;
       const diaNum = new Date(v.created_at).getDate();
       if (diasMap[diaNum] !== undefined) {
         diasMap[diaNum] += (parseFloat(v.valor_total) || 0);
+        if (diaNum > maxDiaComVenda) maxDiaComVenda = diaNum;
       }
     });
+
+    // Dia de corte: se mês atual, dia corrente (ou último dia com venda, o que for maior).
+    // Se mês passado, todos os dias (diasNoMes). Se mês futuro, 0.
+    const diaCorte = isMesAtual
+      ? Math.max(hoje.getDate(), maxDiaComVenda)
+      : (isMesPassado ? diasNoMes : maxDiaComVenda);
 
     let acumulado = 0;
     const metaDiariaLinear = metaFilialTotal / diasNoMes;
 
-    return Object.keys(diasMap).map(dStr => {
+    const listaDias = Object.keys(diasMap).map(dStr => {
       const dia = parseInt(dStr, 10);
-      acumulado += diasMap[dia];
+      const isFuturo = dia > diaCorte;
+
+      if (!isFuturo) {
+        acumulado += diasMap[dia];
+      }
+
       const metaEsperadaDia = metaDiariaLinear * dia;
+
       return {
         dia,
-        faturadoDia: diasMap[dia],
-        faturadoAcumulado: acumulado,
+        isFuturo,
+        faturadoDia: isFuturo ? 0 : diasMap[dia],
+        faturadoAcumulado: isFuturo ? null : acumulado,
         metaAcumulada: metaEsperadaDia
       };
     });
-  }, [vendasFilial, mesAno, metaFilialTotal]);
+
+    // Cálculo do Status do Pacing
+    const diaPacing = Math.min(Math.max(diaCorte, 1), diasNoMes);
+    const metaEsperadaAteCorte = metaDiariaLinear * diaPacing;
+    const diferencaRitmo = faturamentoFilial - metaEsperadaAteCorte;
+    const noRitmo = diferencaRitmo >= 0;
+    const pctPacing = metaEsperadaAteCorte > 0 ? (faturamentoFilial / metaEsperadaAteCorte) * 100 : 100;
+
+    const textoDiferencaRitmo = noRitmo
+      ? `No Ritmo (+${formatBRL(diferencaRitmo)} / ${pctPacing.toFixed(0)}% do pacing)`
+      : `Abaixo do Ritmo (-${formatBRL(Math.abs(diferencaRitmo))} / ${pctPacing.toFixed(0)}% do pacing)`;
+
+    return {
+      curvaDias: listaDias,
+      pacingInfo: {
+        noRitmo,
+        textoDiferencaRitmo,
+        diaCorte,
+        metaEsperadaAteCorte,
+        diferencaRitmo
+      }
+    };
+  }, [vendasFilial, mesAno, metaFilialTotal, faturamentoFilial]);
 
   // Concentração de vendas por consultor
   const consultoresBreakdown = useMemo(() => {
@@ -550,11 +593,21 @@ export default function ModalDiagnosticoFilial({
 
             {/* Gráfico 1: Curva de Faturamento vs Meta Diária (2 Colunas) */}
             <div className="lg:col-span-2 bg-black border border-[#222] rounded-xl p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1A1A1A] pb-3">
-                <div className="flex items-center gap-2">
-                  <BarChart3 size={16} className="text-purple-400" />
-                  <h3 className="text-sm font-bold text-white">Curva de Faturamento vs Meta Linear</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1A1A1A] pb-3">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 size={16} className="text-purple-400" />
+                    <h3 className="text-sm font-bold text-white">Curva de Faturamento vs Meta Linear</h3>
+                  </div>
+                  {/* Badge de Status do Pacing com alto contraste */}
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-zinc-800/80 border border-zinc-700 text-xs font-medium text-zinc-200">
+                    <span>Status do Pacing:</span>
+                    <span className={pacingInfo?.noRitmo ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                      {pacingInfo?.textoDiferencaRitmo}
+                    </span>
+                  </div>
                 </div>
+
                 <div className="flex items-center gap-3 text-[11px] font-mono">
                   <span className="flex items-center gap-1.5 text-purple-400">
                     <span className="w-2.5 h-2.5 rounded bg-purple-500" /> Realizado Acumulado
@@ -567,10 +620,11 @@ export default function ModalDiagnosticoFilial({
 
               {/* Visualização da Curva Diária */}
               <div className="space-y-2">
-                <div className="h-44 flex items-end gap-1 pt-4 pb-2 px-2 border-b border-[#222] overflow-x-auto">
+                <div className="h-48 flex items-end gap-1 pt-6 pb-2 px-2 border-b border-[#222] overflow-x-auto relative">
                   {curvaDias.map((item) => {
-                    const maxEscala = Math.max(metaFilialTotal, faturamentoFilial, 1);
-                    const alturaReal = (item.faturadoAcumulado / maxEscala) * 100;
+                    // Escala com margem superior (+15%) para as barras não tocarem o topo
+                    const maxEscala = Math.max(metaFilialTotal, faturamentoFilial, 1) * 1.15;
+                    const alturaReal = item.faturadoAcumulado !== null ? (item.faturadoAcumulado / maxEscala) * 100 : 0;
                     const alturaMeta = (item.metaAcumulada / maxEscala) * 100;
 
                     return (
@@ -578,25 +632,43 @@ export default function ModalDiagnosticoFilial({
                         key={item.dia}
                         className="flex-1 min-w-[10px] max-w-[28px] h-full flex flex-col justify-end items-center relative group"
                       >
-                        {/* Tooltip Hover */}
-                        <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-700 text-[10px] text-white p-2 rounded shadow-xl pointer-events-none z-20 whitespace-nowrap">
-                          <span className="font-bold text-purple-300">Dia {item.dia}</span>
-                          <span>Faturado no dia: {formatBRL(item.faturadoDia)}</span>
-                          <span>Acumulado: {formatBRL(item.faturadoAcumulado)}</span>
-                          <span className="text-rose-400">Meta Linear: {formatBRL(item.metaAcumulada)}</span>
+                        {/* Tooltip Hover com formatação monetária em R$ */}
+                        <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-700 text-[10px] text-white p-2.5 rounded-lg shadow-2xl pointer-events-none z-30 whitespace-nowrap">
+                          <span className="font-bold text-purple-300 pb-1 border-b border-zinc-800 mb-1">
+                            Dia {item.dia} {item.isFuturo ? '(Futuro)' : ''}
+                          </span>
+                          {!item.isFuturo ? (
+                            <>
+                              <span className="text-zinc-300">
+                                Faturado no dia: <strong className="text-white">{formatBRL(item.faturadoDia)}</strong>
+                              </span>
+                              <span className="text-purple-300">
+                                Acumulado: <strong className="text-purple-200">{formatBRL(item.faturadoAcumulado)}</strong>
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-zinc-400 italic">Dia futuro (sem vendas registradas)</span>
+                          )}
+                          <span className="text-rose-400">
+                            Meta Linear: <strong className="text-rose-300">{formatBRL(item.metaAcumulada)}</strong>
+                          </span>
                         </div>
 
-                        {/* Linha da Meta Linear Ideal */}
+                        {/* Linha da Meta Linear Ideal contínua de 1 a 30 */}
                         <div
-                          className="absolute w-full h-0.5 bg-rose-500/70 z-10"
+                          className="absolute w-full h-0.5 bg-rose-500/70 z-10 pointer-events-none"
                           style={{ bottom: `${Math.min(alturaMeta, 100)}%` }}
                         />
 
-                        {/* Barra do Faturamento Realizado */}
-                        <div
-                          className="w-full bg-gradient-to-t from-purple-700 to-purple-400 rounded-t-sm transition-all group-hover:brightness-125"
-                          style={{ height: `${Math.max(alturaReal, item.faturadoDia > 0 ? 4 : 0)}%` }}
-                        />
+                        {/* Barra do Faturamento Realizado (oculta nos dias futuros) */}
+                        {!item.isFuturo && item.faturadoAcumulado !== null ? (
+                          <div
+                            className="w-full bg-gradient-to-t from-purple-700 to-purple-400 rounded-t-sm transition-all group-hover:brightness-125"
+                            style={{ height: `${Math.max(alturaReal, item.faturadoDia > 0 ? 4 : 2)}%` }}
+                          />
+                        ) : (
+                          <div className="w-full h-0.5 bg-zinc-800/30 rounded-full" />
+                        )}
                       </div>
                     );
                   })}
