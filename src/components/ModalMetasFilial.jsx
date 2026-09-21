@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, Target, Award, DollarSign, Percent, Save, RefreshCw, 
-  Calendar, Store, AlertCircle, CheckCircle2, TrendingUp, ShieldAlert, Sparkles 
+  Calendar, Store, AlertCircle, CheckCircle2, TrendingUp, ShieldAlert, Sparkles, Pencil, Edit2 
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
@@ -203,9 +203,11 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
         if (!errVend && vendedores && vendedores.length > 0) {
           const rowsMetas = vendedores.map(v => {
             const isTrainee = Boolean(v.is_treinner) || (v.role || '').toUpperCase().includes('TRAINEE');
-            const valorMetaFinal = isTrainee
+            const valorBoleto = isTrainee
               ? (parseFloat(metaTraineeBoletos) || 30000)
               : (parseFloat(metaVendedorBoleto) || 45000);
+            const valorAcessorios = parseFloat(metaVendedorAcessorios) || 3000;
+            const valorMetaFinal = valorBoleto + valorAcessorios;
 
             const row = {
               vendedor_id: v.id,
@@ -213,7 +215,12 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               mes_ano: mesReferencia,
               mes_referencia: mesReferencia,
               valor_meta: valorMetaFinal,
-              tipo_meta: 'boleto',
+              meta_boleto: parseFloat(metaVendedorBoleto) || 45000,
+              super_meta_boleto: parseFloat(superMetaBoleto) || 60000,
+              meta_acessorios: parseFloat(metaVendedorAcessorios) || 3000,
+              super_meta_acessorios: parseFloat(superMetaAcessorios) || 4500,
+              meta_trainee_boleto: parseFloat(metaTraineeBoletos) || 30000,
+              tipo_meta: 'VALOR',
               updated_at: new Date().toISOString()
             };
             if (tenantId) row.tenant_id = tenantId;
@@ -286,7 +293,7 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
 
       setMensagem({ 
         tipo: 'sucesso', 
-        texto: `Metas e parâmetros para ${mesReferencia} salvos e propagados com sucesso para a equipe!` 
+        texto: 'Metas atualizadas com sucesso!' 
       });
 
       if (onSuccess) {
@@ -394,19 +401,25 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {/* Meta Boleto */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                  Meta Boleto (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-[#6A0DAD]/60 focus-within:border-[#A78BFA] focus-within:ring-1 focus-within:ring-[#A78BFA]/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-purple-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                    Meta Boleto (R$)
+                  </label>
+                  <div className="text-gray-500 group-hover:text-[#A78BFA] p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-[#A78BFA]/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-gray-400 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={metaLojaBoleto}
                     onChange={(e) => setMetaLojaBoleto(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
                     placeholder="123000.00"
                     required
                   />
@@ -415,19 +428,25 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               </div>
 
               {/* Meta Acessórios */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                  Meta Acessórios (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-[#6A0DAD]/60 focus-within:border-[#A78BFA] focus-within:ring-1 focus-within:ring-[#A78BFA]/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-purple-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                    Meta Acessórios (R$)
+                  </label>
+                  <div className="text-gray-500 group-hover:text-[#A78BFA] p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-[#A78BFA]/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-gray-400 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={metaLojaAcessorios}
                     onChange={(e) => setMetaLojaAcessorios(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
                     placeholder="8000.00"
                     required
                   />
@@ -436,19 +455,24 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               </div>
 
               {/* Super Meta */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-[#A78BFA] uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles size={11} /> Super Meta (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-[#6A0DAD]/60 focus-within:border-[#A78BFA] focus-within:ring-1 focus-within:ring-[#A78BFA]/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-purple-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-[#A78BFA] uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <Sparkles size={11} className="text-[#A78BFA]" /> Super Meta (R$)
+                  </label>
+                  <div className="text-[#A78BFA]/60 group-hover:text-[#A78BFA] p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-[#A78BFA]/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-[#A78BFA]/70 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={superMeta}
                     onChange={(e) => setSuperMeta(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-[#A78BFA] outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-[#A78BFA] outline-none font-mono tracking-tight cursor-text"
                     placeholder="143000.00"
                     required
                   />
@@ -457,19 +481,28 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               </div>
 
               {/* Meta Trainee Boletos */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                  Meta Trainee Boletos (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-[#6A0DAD]/60 focus-within:border-[#A78BFA] focus-within:ring-1 focus-within:ring-[#A78BFA]/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-purple-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
+                    Meta Trainee Boletos (R$)
+                  </label>
+                  <div className="text-gray-500 group-hover:text-yellow-400 p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-[#A78BFA]/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-gray-400 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={metaTraineeBoleto}
-                    onChange={(e) => setMetaTraineeBoleto(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    onChange={(e) => {
+                      setMetaTraineeBoleto(e.target.value);
+                      setMetaTraineeBoletos(e.target.value);
+                    }}
+                    className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
                     placeholder="30000.00"
                     required
                   />
@@ -490,20 +523,25 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {/* Meta Vendedor / Boleto (R$) */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                  Meta Vendedor / Boleto (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-amber-500/60 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-amber-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    Meta Vendedor / Boleto (R$)
+                  </label>
+                  <div className="text-gray-500 group-hover:text-amber-400 p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-amber-400/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-gray-400 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={metaVendedorBoleto}
                     onChange={(e) => setMetaVendedorBoleto(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
                     placeholder="45000.00"
                     required
                   />
@@ -512,20 +550,25 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               </div>
 
               {/* Meta Vendedor / Acessórios (R$) */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
-                  Meta Vendedor / Acessórios (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-purple-500/60 focus-within:border-[#A78BFA] focus-within:ring-1 focus-within:ring-[#A78BFA]/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-purple-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                    Meta Vendedor / Acessórios (R$)
+                  </label>
+                  <div className="text-gray-500 group-hover:text-[#A78BFA] p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-[#A78BFA]/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-gray-400 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={metaVendedorAcessorios}
                     onChange={(e) => setMetaVendedorAcessorios(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
                     placeholder="3000.00"
                     required
                   />
@@ -534,19 +577,24 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               </div>
 
               {/* Super Meta Boleto (R$) */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-[#A78BFA] uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles size={11} className="text-[#A78BFA]" /> Super Meta Boleto (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-purple-500/60 focus-within:border-[#A78BFA] focus-within:ring-1 focus-within:ring-[#A78BFA]/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-purple-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-[#A78BFA] uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <Sparkles size={11} className="text-[#A78BFA]" /> Super Meta Boleto (R$)
+                  </label>
+                  <div className="text-[#A78BFA]/60 group-hover:text-[#A78BFA] p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-[#A78BFA]/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-[#A78BFA]/70 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={superMetaBoleto}
                     onChange={(e) => setSuperMetaBoleto(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-[#A78BFA] outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-[#A78BFA] outline-none font-mono tracking-tight cursor-text"
                     placeholder="60000.00"
                     required
                   />
@@ -555,19 +603,24 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               </div>
 
               {/* Super Meta Acessórios (R$) */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors">
-                <label className="block text-[10px] font-bold text-pink-400 uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles size={11} className="text-pink-400" /> Super Meta Acessórios (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-pink-500/60 focus-within:border-pink-400 focus-within:ring-1 focus-within:ring-pink-400/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-pink-950/20 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-pink-400 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <Sparkles size={11} className="text-pink-400" /> Super Meta Acessórios (R$)
+                  </label>
+                  <div className="text-pink-400/60 group-hover:text-pink-400 p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-pink-400/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-pink-400/70 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
                     value={superMetaAcessorios}
                     onChange={(e) => setSuperMetaAcessorios(e.target.value)}
-                    className="w-full bg-transparent text-sm font-bold text-pink-300 outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-pink-300 outline-none font-mono tracking-tight cursor-text"
                     placeholder="4500.00"
                     required
                   />
@@ -576,13 +629,18 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
               </div>
 
               {/* Meta Trainee Boletos (R$) */}
-              <div className="bg-[#111111] border border-[#222222] focus-within:border-[#6A0DAD] p-3.5 rounded-xl space-y-1 transition-colors sm:col-span-2 lg:col-span-2">
-                <label className="block text-[10px] font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
-                  Meta Trainee Boletos (R$)
-                </label>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-bold text-gray-500 font-mono">R$</span>
+              <div className="group relative bg-[#0D0D0D] hover:bg-[#131313] border border-[#222222] hover:border-yellow-500/60 focus-within:border-yellow-400 focus-within:ring-1 focus-within:ring-yellow-400/30 p-3.5 rounded-xl space-y-2 transition-all shadow-md hover:shadow-yellow-950/20 cursor-pointer sm:col-span-2 lg:col-span-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider flex items-center gap-1.5 cursor-pointer">
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
+                    Meta Trainee Boletos (R$)
+                  </label>
+                  <div className="text-gray-500 group-hover:text-yellow-400 p-1 rounded hover:bg-white/5 transition-colors" title="Campo editável">
+                    <Pencil size={12} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 group-hover:border-white/15 focus-within:border-yellow-400/60 rounded-lg px-3 py-2 transition-all">
+                  <span className="text-sm font-black text-gray-400 font-mono select-none">R$</span>
                   <input
                     type="number"
                     step="0.01"
@@ -592,7 +650,7 @@ export default function ModalMetasFilial({ filial, isOpen, onClose, onSuccess })
                       setMetaTraineeBoletos(e.target.value);
                       setMetaTraineeBoleto(e.target.value);
                     }}
-                    className="w-full bg-transparent text-sm font-bold text-white outline-none font-mono"
+                    className="w-full bg-transparent text-lg font-bold text-white outline-none font-mono tracking-tight cursor-text"
                     placeholder="30000.00"
                     required
                   />

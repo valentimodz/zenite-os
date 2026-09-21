@@ -4579,6 +4579,7 @@ export default function Dashboard({ session, profileDataProps }) {
               filial_id,
               vendedor_id,
               vendedor_nome,
+              categoria,
               valor_total,
               desconto,
               forma_pagamento,
@@ -4590,10 +4591,16 @@ export default function Dashboard({ session, profileDataProps }) {
               produtos_descricao,
               itens_resumo,
               vendas_pagamentos (*),
-              itens_venda (id, produto_nome, quantidade, preco_unitario)
+              itens_venda (id, produto_nome, categoria, subtotal, valor_total, quantidade, preco_unitario)
             `)
-            .or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`)
             .order('created_at', { ascending: false });
+
+          const userName = profile?.nome?.trim();
+          if (sellerId && userName) {
+            querySales = querySales.or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId},vendedor_nome.ilike.%${userName}%`);
+          } else if (sellerId) {
+            querySales = querySales.or(`vendedor_id.eq.${sellerId},usuario_id.eq.${sellerId},criado_por.eq.${sellerId}`);
+          }
 
           if (mesAlvo) {
             const [ano, mes] = mesAlvo.split('-');
@@ -12579,7 +12586,7 @@ export default function Dashboard({ session, profileDataProps }) {
         const { data: rpcRes, error: rpcErr } = await supabase.rpc('registrar_venda_hibrida', {
           p_empresa_id: empresaId,
           p_filial_id: activeFilialId,
-          p_vendedor_id: session.user.id,
+          p_vendedor_id: vendedor_id || session.user.id,
           p_produto_novo_id: realProdutoId || item.produto.id,
           p_quantidade_novo: item.quantidade,
           p_imei_novo: (item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei) ? item.imei : null,
@@ -14015,7 +14022,14 @@ export default function Dashboard({ session, profileDataProps }) {
     // Todas as vendas do mês corrente/filtrado deste vendedor (resiliente a fuso horário e nulos)
     const currentMonthSales = (vendasVendedor || []).filter(sale => {
       const saleUserId = sale.vendedor_id || sale.usuario_id || sale.criado_por;
-      if (saleUserId && currentUserId && String(saleUserId) !== String(currentUserId)) return false;
+      const saleNome = (sale.vendedor_nome || '').toLowerCase().trim();
+      const userNome = (profile?.nome || '').toLowerCase().trim();
+
+      const matchesId = saleUserId && currentUserId && String(saleUserId) === String(currentUserId);
+      const matchesNome = userNome && saleNome && (saleNome.includes(userNome) || userNome.includes(saleNome));
+
+      if (saleUserId && currentUserId && !matchesId && !matchesNome) return false;
+      if (!saleUserId && currentUserId && userNome && !matchesNome) return false;
 
       const rawDateStr = sale.created_at || sale.data;
       if (!rawDateStr) return true; // Se não houver data, mantém na exibição por segurança

@@ -252,10 +252,32 @@ export default function ImportarCaixaRetroativoModal({
 
         // 3. Inserir a venda na tabela 'vendas' com created_at retroativo
         const precoUnitario = item.quantidade > 0 ? (item.valor_total / item.quantidade) : item.valor_total;
+        
+        let resolvedVendedorId = perfilUsuario?.id || null;
+        const targetVendNome = (item.vendedor_nome || '').trim();
+        if (targetVendNome) {
+          try {
+            const { data: profMatch } = await supabase
+              .from('profiles')
+              .select('id, nome')
+              .ilike('nome', `%${targetVendNome}%`)
+              .limit(1)
+              .maybeSingle();
+            if (profMatch?.id) {
+              resolvedVendedorId = profMatch.id;
+            }
+          } catch (eMatch) {
+            console.warn('Aviso ao associar vendedor_id:', eMatch);
+          }
+        }
+
         const payloadVenda = {
           empresa_id: empresaIdFinal,
           filial_id: filialIdFinal,
-          vendedor_nome: item.vendedor_nome,
+          vendedor_id: resolvedVendedorId,
+          usuario_id: resolvedVendedorId,
+          criado_por: resolvedVendedorId,
+          vendedor_nome: item.vendedor_nome || perfilUsuario?.nome || 'Vendedor',
           produto_nome: item.produto_nome,
           categoria: item.categoria,
           produto_id: produtoId,

@@ -376,12 +376,16 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           faturamentoFigurativo
         } = calcularComissoesLinha(row.qtd_premium, row.qtd_androids, row.qtd_acessorios, row.forma_pagamento, hasTrainee);
 
+        const resolvedVendedorNome = row.vendedor_nome || sellerObj?.nome || 'Vendedor';
+
         // O OBJETO PERFEITO (Com treener_id corrigido e sem o status intruso)
         const payloadVenda = {
           empresa_id: vendedorEmpresaId || activeEmpresaId,
           filial_id: vendedorFilialId || null,
           usuario_id: row.vendedor_id,
           vendedor_id: row.vendedor_id,
+          criado_por: row.vendedor_id,
+          vendedor_nome: resolvedVendedorNome,
           produto_id: '0054cfa7-fd7c-4b7b-8942-b6dfa4749b67',
           valor_total: faturamentoFigurativo,
           valor_pago: faturamentoFigurativo,
