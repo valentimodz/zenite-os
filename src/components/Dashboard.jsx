@@ -4562,24 +4562,59 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Função de busca defensiva solicitada para garantir que os dados apareçam imediatamente
+  // Função de busca defensiva solicitada com relação itens_venda
   const carregarVendas = async () => {
     try {
-      // Buscar apenas as colunas essenciais que existem comprovadamente na tabela vendas
-      const { data, error } = await supabase
+      // 1. Consulta com os itens da venda
+      let { data, error } = await supabase
         .from('vendas')
-        .select('id, created_at, valor_total, metodo_pagamento, vendedor_id, vendedor_nome')
+        .select(`
+          id,
+          created_at,
+          valor_total,
+          metodo_pagamento,
+          categoria,
+          comissao,
+          vendedor_id,
+          vendedor_nome,
+          itens_venda (
+            id,
+            produto_nome,
+            quantidade,
+            preco_unitario
+          )
+        `)
         .eq('filial_id', '2c3f0242-1b0a-455b-bf48-168ea5bfc46a');
 
       if (error) {
         console.error("ERRO SUPABASE AO BUSCAR VENDAS:", error);
-        return;
+        // Fallback defensivo caso a relação com itens_venda encontre divergência de coluna
+        const fbRes = await supabase
+          .from('vendas')
+          .select('id, created_at, valor_total, metodo_pagamento, categoria, comissao, vendedor_id, vendedor_nome')
+          .eq('filial_id', '2c3f0242-1b0a-455b-bf48-168ea5bfc46a');
+        if (!fbRes.error && fbRes.data) {
+          data = fbRes.data;
+        }
       }
 
       console.log("Vendas brutas recebidas:", data);
 
+      // Normalizar itens_venda garantindo valor_unitario e categoria em cada item
+      const dataNormalizada = (data || []).map(v => {
+        const itensNorm = (v.itens_venda || []).map(it => ({
+          ...it,
+          valor_unitario: it.valor_unitario || it.preco_unitario || 0,
+          categoria: it.categoria || v.categoria || 'Geral'
+        }));
+        return {
+          ...v,
+          itens_venda: itensNorm
+        };
+      });
+
       // Filtrar as vendas de Setembro de 2026 e associadas à Islayne (por ID ou Nome)
-      const vendasFiltradas = (data || []).filter((v) => {
+      const vendasFiltradas = dataNormalizada.filter((v) => {
         const dataVenda = new Date(v.created_at);
         const mesCorreto = dataVenda.getFullYear() === 2026 && dataVenda.getMonth() === 8; // 8 = Setembro (0-indexed)
         
@@ -24567,8 +24602,32 @@ export default function Dashboard({ session, profileDataProps }) {
                                   </tr>
                                 ) : (
                                   metasInfo.historico.map(sale => {
-                                    const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
-                                    const produtoNome = sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || prodObj?.nome || 'Produto Geral';
+                                    const itens = Array.isArray(sale.itens_venda) ? sale.itens_venda : [];
+
+                                    // 2. Nome do Produto conforme especificado
+                                    let produtoNome = 'Produto Geral';
+                                    if (itens.length === 1) {
+                                      produtoNome = itens[0]?.produto_nome || 'Produto Geral';
+                                    } else if (itens.length > 1) {
+                                      const sobram = itens.length - 1;
+                                      produtoNome = `${itens[0]?.produto_nome || 'Produto'} (+${sobram} ${sobram === 1 ? 'item' : 'itens'})`;
+                                    } else {
+                                      produtoNome = sale.produto_nome || sale.descricao || sale.produtos_descricao || sale.itens_resumo || 'Produto Geral';
+                                    }
+
+                                    // Quantidade: Somar a quantidade dos itens
+                                    const quantidadeItens = itens.length > 0
+                                      ? itens.reduce((acc, cur) => acc + (Number(cur.quantidade) || 1), 0)
+                                      : (Number(sale.quantidade) || 1);
+
+                                    // Categoria: Extrair a categoria real do item ou usar a categoria definida na venda
+                                    const categoriaExibida = (itens.length > 0 && itens[0]?.categoria)
+                                      ? itens[0].categoria
+                                      : (sale.categoria || sale.produtos?.categoria || 'Geral');
+
+                                    // 3. Formatação da Comissão: 2 casas decimais com máscara monetária (ex.: R$ 104,42 em vez de R$ 104,415)
+                                    const valorComissaoBruto = Number(calcularComissaoItem(sale) ?? sale.comissao ?? 0);
+                                    const comissaoFormatada = valorComissaoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
                                     // Renderizador de Badge de Pagamento
                                     const renderPagamentoBadge = () => {
@@ -24661,14 +24720,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                         <td className="py-3 font-semibold text-white">{produtoNome}</td>
                                         <td className="py-3">
                                           <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-[#6A0DAD]/10 text-purple-300">
-                                            {sale.produtos?.categoria || 'Geral'}
+                                            {categoriaExibida}
                                           </span>
                                         </td>
-                                        <td className="py-3 text-center font-bold text-gray-300">{sale.quantidade}</td>
-                                        <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                        <td className="py-3 text-center font-bold text-gray-300">{quantidadeItens}</td>
+                                        <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                         <td className="py-3 text-center">{renderPagamentoBadge()}</td>
                                         <td className="py-3 text-right font-mono font-bold text-emerald-400">
-                                          R$ {calcularComissaoItem(sale).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          R$ {comissaoFormatada}
                                         </td>
                                         <td className="py-3 text-right">
                                           <button
