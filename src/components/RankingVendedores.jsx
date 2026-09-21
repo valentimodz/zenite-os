@@ -89,7 +89,43 @@ export default function RankingVendedores({
   const [vendasPeriodo, setVendasPeriodo] = useState(() => initialVendas || []);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 2. Consulta de Vendas Padronizada com Janela Temporal
+  // 1. Consulta dos Colaboradores com relação 'filiais' (Item 1 do requisito)
+  const [colaboradoresDb, setColaboradoresDb] = useState([]);
+
+  const fetchColaboradores = useCallback(async () => {
+    try {
+      let q = supabase
+        .from('profiles')
+        .select(`
+          id,
+          nome,
+          role,
+          is_treinner,
+          filial_id,
+          filiais (
+            id,
+            nome
+          )
+        `);
+
+      if (empresaId && empresaId !== 'MASTER') {
+        q = q.eq('empresa_id', empresaId);
+      }
+
+      const { data: listaColaboradores, error } = await q;
+      if (!error && listaColaboradores && listaColaboradores.length > 0) {
+        setColaboradoresDb(listaColaboradores);
+      }
+    } catch (err) {
+      console.warn('[RankingVendedores] Erro ao carregar colaboradores com filiais:', err);
+    }
+  }, [empresaId]);
+
+  useEffect(() => {
+    fetchColaboradores();
+  }, [fetchColaboradores]);
+
+  // 2. Consulta de Vendas Padronizada com Janela Temporal e Relação de Filiais
   const fetchVendasRanking = useCallback(async (customInicio = null, customFim = null) => {
     setIsLoading(true);
     try {
@@ -100,7 +136,28 @@ export default function RankingVendedores({
 
       let query = supabase
         .from('vendas')
-        .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, categoria, comissao, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id, created_at')
+        .select(`
+          id,
+          empresa_id,
+          filial_id,
+          vendedor_id,
+          vendedor_nome,
+          valor_total,
+          metodo_pagamento,
+          categoria,
+          comissao,
+          produto_nome,
+          imei,
+          teve_participacao_trainee,
+          comissao_trainee,
+          treener_id,
+          trainee_id,
+          created_at,
+          filiais (
+            id,
+            nome
+          )
+        `)
         .gte('created_at', dataInicio)
         .lte('created_at', dataFim)
         .order('created_at', { ascending: false });
@@ -109,20 +166,31 @@ export default function RankingVendedores({
         query = query.eq('empresa_id', empresaId);
       }
 
-      const { data, error } = await query;
+      let { data, error } = await query;
 
       if (error) {
-        console.error('[RankingVendedores] Erro ao buscar vendas do período:', error);
-        // Fallback para filtrar initialVendas em memória com timezone safety
-        const fallback = (initialVendas || []).filter(v => {
-          const d = v.created_at || v.data || v.date;
-          if (!d) return false;
-          return String(d).startsWith(filtroMes);
-        });
-        setVendasPeriodo(fallback);
-      } else {
-        setVendasPeriodo(data || []);
+        console.warn('[RankingVendedores] Tentando fallback de vendas sem join de filiais:', error);
+        // Fallback para query padrão sem o join explícito caso o banco precise
+        const fallbackQ = await supabase
+          .from('vendas')
+          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, categoria, comissao, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id, created_at')
+          .gte('created_at', dataInicio)
+          .lte('created_at', dataFim)
+          .order('created_at', { ascending: false });
+
+        if (!fallbackQ.error) {
+          data = fallbackQ.data || [];
+        } else {
+          // Fallback para filtrar initialVendas em memória com timezone safety
+          data = (initialVendas || []).filter(v => {
+            const d = v.created_at || v.data || v.date;
+            if (!d) return false;
+            return String(d).startsWith(filtroMes);
+          });
+        }
       }
+
+      setVendasPeriodo(data || []);
     } catch (err) {
       console.error('[RankingVendedores] Exceção ao consultar vendas:', err);
     } finally {
@@ -151,6 +219,7 @@ export default function RankingVendedores({
         (payload) => {
           console.log('⚡ [Ranking Realtime] Nova venda detectada no ranking:', payload?.new);
           fetchVendasRanking();
+          fetchColaboradores();
           if (typeof fetchGerenteData === 'function' && empresaId) {
             fetchGerenteData(empresaId);
           }
@@ -161,11 +230,14 @@ export default function RankingVendedores({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [empresaId, fetchVendasRanking, fetchGerenteData]);
+  }, [empresaId, fetchVendasRanking, fetchColaboradores, fetchGerenteData]);
 
   // Atualização manual via botão Recarregar
   const handleRecarregar = async () => {
-    await fetchVendasRanking();
+    await Promise.all([
+      fetchVendasRanking(),
+      fetchColaboradores()
+    ]);
     if (typeof fetchGerenteData === 'function' && empresaId) {
       fetchGerenteData(empresaId);
     }
@@ -176,7 +248,8 @@ export default function RankingVendedores({
   // - Some 'valor_total' para Volume, conte as vendas para 'Transações', calcule a média para 'Ticket Médio' e some a comissão acumulada.
   // 3. Agrupamento e Ordenação:
   const rankingData = useMemo(() => {
-    if (!vendedores || vendedores.length === 0) return [];
+    const listaColaboradores = (colaboradoresDb && colaboradoresDb.length > 0) ? colaboradoresDb : (vendedores || []);
+    if (!listaColaboradores || listaColaboradores.length === 0) return [];
 
     // Helper de limpeza e normalização para busca tolerante de nomes
     const cleanStr = (s) => (s || '')
@@ -187,20 +260,64 @@ export default function RankingVendedores({
       .replace(/\s+/g, ' ')
       .trim();
 
+    // 2. Mapeamento de Filial Predominante por Vendas (Fallback Seguro):
+    // Ao processar o ranking a partir da tabela 'vendas', mapear a filial onde o vendedor mais realizou vendas no período:
+    const mapaFilialVendedor = {};
+    const contagemFiliaisPorVendedor = {};
+
+    (vendasPeriodo || []).forEach(v => {
+      const nomeVend = (v.vendedor_nome || '').trim().toUpperCase();
+      const nomeFilial = v.filiais?.nome || filiais?.find(f => String(f.id) === String(v.filial_id))?.nome;
+      if (nomeVend && nomeFilial) {
+        if (!contagemFiliaisPorVendedor[nomeVend]) contagemFiliaisPorVendedor[nomeVend] = {};
+        contagemFiliaisPorVendedor[nomeVend][nomeFilial] = (contagemFiliaisPorVendedor[nomeVend][nomeFilial] || 0) + 1;
+        if (!mapaFilialVendedor[nomeVend]) {
+          mapaFilialVendedor[nomeVend] = nomeFilial;
+        }
+      }
+    });
+
+    // Mapear a filial predominante (onde mais realizou vendas no período)
+    Object.keys(contagemFiliaisPorVendedor).forEach(nomeVend => {
+      const counts = contagemFiliaisPorVendedor[nomeVend];
+      let maxCount = -1;
+      let melhorFilial = '';
+      for (const [fNome, count] of Object.entries(counts)) {
+        if (count > maxCount) {
+          maxCount = count;
+          melhorFilial = fNome;
+        }
+      }
+      if (melhorFilial) {
+        mapaFilialVendedor[nomeVend] = melhorFilial;
+      }
+    });
+
+    // 3. Resolução Segura do Nome da Filial (sem fallback fixo)
+    const resolverNomeFilial = (colab) => {
+      if (!colab) return 'Sem Filial';
+      const nomeLimpo = (colab.nome || '').trim().toUpperCase();
+      const filialRelacao = colab.filiais?.nome;
+      const filialPorId = filiais?.find(f => String(f.id) === String(colab.filial_id))?.nome;
+      const filialPorVenda = mapaFilialVendedor[nomeLimpo];
+
+      return filialRelacao || filialPorId || filialPorVenda || 'Sem Filial';
+    };
+
     // 1. Inicializar o mapa exclusivamente com os colaboradores cadastrados (profiles)
     const rankingMap = {};
-    (vendedores || []).forEach(colab => {
+    listaColaboradores.forEach(colab => {
       if (filtroFilial && filtroFilial !== 'TODAS' && String(colab.filial_id) !== String(filtroFilial)) {
         return;
       }
       const colabKey = String(colab.id);
-      const filialObj = filiais?.find(f => String(f.id) === String(colab.filial_id));
       rankingMap[colabKey] = {
         id: colabKey,
         nome: colab.nome,
         cargo: colab.role === 'TRAINEE' || colab.is_treinner ? 'Trainee' : (colab.cargo || 'Profissional'),
         filial_id: colab.filial_id,
-        filialNome: filialObj?.nome || 'Rede Cred',
+        filiais: colab.filiais,
+        filialNome: resolverNomeFilial(colab),
         transacoes: 0,
         volume: 0,
         ticketMedio: 0,
@@ -232,15 +349,15 @@ export default function RankingVendedores({
       // 1. Identificar Perfil do Vendedor Titular (antes da barra)
       let titularProfile = null;
       if (v.vendedor_id) {
-        titularProfile = (vendedores || []).find(p => String(p.id) === String(v.vendedor_id));
+        titularProfile = listaColaboradores.find(p => String(p.id) === String(v.vendedor_id));
       }
       if (!titularProfile && nomeTitular) {
         const normTitular = cleanStr(nomeTitular);
-        titularProfile = (vendedores || []).find(p => {
+        titularProfile = listaColaboradores.find(p => {
           const normP = cleanStr(p.nome);
           const palavras = normP.split(' ');
           return normP === normTitular || palavras.includes(normTitular) || normP.startsWith(normTitular) || normP.endsWith(normTitular);
-        }) || (vendedores || []).find(p => {
+        }) || listaColaboradores.find(p => {
           const normP = cleanStr(p.nome);
           return normP.includes(normTitular) || normTitular.includes(normP);
         });
@@ -250,22 +367,22 @@ export default function RankingVendedores({
       let traineeProfile = null;
       const tId = v.treener_id || v.trainee_id;
       if (tId) {
-        traineeProfile = (vendedores || []).find(p => String(p.id) === String(tId));
+        traineeProfile = listaColaboradores.find(p => String(p.id) === String(tId));
       }
       if (!traineeProfile && nomeTrainee) {
         const normTrainee = cleanStr(nomeTrainee);
-        traineeProfile = (vendedores || []).find(p => {
+        traineeProfile = listaColaboradores.find(p => {
           const normP = cleanStr(p.nome);
           const palavras = normP.split(' ');
           return normP === normTrainee || palavras.includes(normTrainee) || normP.startsWith(normTrainee);
-        }) || (vendedores || []).find(p => {
+        }) || listaColaboradores.find(p => {
           const normP = cleanStr(p.nome);
           return normP.includes(normTrainee) || normTrainee.includes(normP);
         });
       }
       if (!traineeProfile && isTraineeVenda) {
         // Localizar a trainee cadastrada no sistema (Paula Thaynara)
-        traineeProfile = (vendedores || []).find(p => {
+        traineeProfile = listaColaboradores.find(p => {
           const normP = cleanStr(p.nome);
           return normP.includes('PAULA') || p.role === 'TRAINEE' || p.is_treinner;
         });
@@ -278,18 +395,19 @@ export default function RankingVendedores({
       // Cálculo de comissão dinâmico
       const comissaoTitular = calcularComissaoVendedorItem(v, isTraineeVenda);
       const comissaoTrainee = isTraineeVenda ? calcularComissaoTraineeItem(v) : 0;
+      const comissaoTotalVenda = (Number(v.comissao) || 0) > 0 ? Number(v.comissao) : (comissaoTitular + comissaoTrainee);
 
       // Atribuição ao Titular
       if (titularProfile) {
         const key = String(titularProfile.id);
         if (!rankingMap[key]) {
-          const filialObj = filiais?.find(f => String(f.id) === String(titularProfile.filial_id));
           rankingMap[key] = {
             id: key,
             nome: titularProfile.nome,
             cargo: titularProfile.role === 'TRAINEE' || titularProfile.is_treinner ? 'Trainee' : 'Profissional',
             filial_id: titularProfile.filial_id,
-            filialNome: filialObj?.nome || 'Rede Cred',
+            filiais: titularProfile.filiais,
+            filialNome: resolverNomeFilial(titularProfile),
             transacoes: 0,
             volume: 0,
             ticketMedio: 0,
@@ -304,12 +422,13 @@ export default function RankingVendedores({
         // Venda Balcão sem nenhum vendedor identificado
         const key = 'sem_vendedor';
         if (!rankingMap[key]) {
+          const filialVenda = v.filiais?.nome || filiais?.find(f => String(f.id) === String(v.filial_id))?.nome;
           rankingMap[key] = {
             id: key,
             nome: 'Vendas de Balcão / Sem Vendedor',
             cargo: 'Balcão / Geral',
             filial_id: v.filial_id || null,
-            filialNome: 'Balcão',
+            filialNome: filialVenda || 'Balcão',
             transacoes: 0,
             volume: 0,
             ticketMedio: 0,
@@ -326,13 +445,13 @@ export default function RankingVendedores({
       if (isTraineeVenda && traineeProfile) {
         const tKey = String(traineeProfile.id);
         if (!rankingMap[tKey]) {
-          const filialObj = filiais?.find(f => String(f.id) === String(traineeProfile.filial_id));
           rankingMap[tKey] = {
             id: tKey,
             nome: traineeProfile.nome,
             cargo: 'Trainee',
             filial_id: traineeProfile.filial_id,
-            filialNome: filialObj?.nome || 'Rede Cred',
+            filiais: traineeProfile.filiais,
+            filialNome: resolverNomeFilial(traineeProfile),
             transacoes: 0,
             volume: 0,
             ticketMedio: 0,
@@ -353,7 +472,7 @@ export default function RankingVendedores({
 
     // Ordenação estrita por Volume decrescente (b.volume - a.volume)
     return data.sort((a, b) => b.volume - a.volume);
-  }, [vendedores, vendasPeriodo, filiais, filtroFilial]);
+  }, [colaboradoresDb, vendedores, vendasPeriodo, filiais, filtroFilial]);
 
   return (
     <div className="bg-black border border-[#222] rounded-xl overflow-hidden shadow-2xl animate-fadeIn mt-4 space-y-0">
@@ -432,7 +551,9 @@ export default function RankingVendedores({
             </tr>
           </thead>
           <tbody className="divide-y divide-[#1A1A1A]">
-            {rankingData.map((colab, idx) => (
+            {rankingData.map((colab, idx) => {
+              const nomeFilialExibicao = colab.filialNome || colab.filiais?.nome || 'Sem Filial';
+              return (
               <tr 
                 key={colab.id} 
                 onClick={() => !colab.isSemVendedor && setVendedorSelecionadoModal(colab)}
@@ -448,7 +569,11 @@ export default function RankingVendedores({
                 <td className="py-3 px-4 font-bold text-white uppercase group-hover:text-purple-300 transition-colors">
                   {colab.nome}
                 </td>
-                <td className="py-3 px-4 text-gray-400 text-[11px]">{colab.filialNome}</td>
+                <td className="py-3 px-4">
+                  <span className="text-zinc-200 font-semibold text-xs uppercase tracking-wide">
+                    {nomeFilialExibicao}
+                  </span>
+                </td>
                 <td className="py-3 px-4">
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                     colab.isSemVendedor
@@ -487,7 +612,8 @@ export default function RankingVendedores({
                   )}
                 </td>
               </tr>
-            ))}
+            );
+          })}
 
             {rankingData.length === 0 && (
               <tr>

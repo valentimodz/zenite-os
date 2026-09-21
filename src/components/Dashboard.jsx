@@ -3099,7 +3099,18 @@ export default function Dashboard({ session, profileDataProps }) {
     try {
       let query = supabase
         .from('profiles')
-        .select('id, nome, email, role');
+        .select(`
+          id,
+          nome,
+          email,
+          role,
+          is_treinner,
+          filial_id,
+          filiais (
+            id,
+            nome
+          )
+        `);
 
       if (targetEmpresaId && targetEmpresaId !== 'MASTER' && targetEmpresaId !== 'all') {
         query = query.or(`filial_id.is.null,empresa_id.eq.${targetEmpresaId}`);
@@ -3112,7 +3123,18 @@ export default function Dashboard({ session, profileDataProps }) {
       // Se der erro ou se data for nulo, tentar via consulta limpa sem filtro
       if (error || !data) {
         console.warn("-> [DEBUG RBAC] Erro ao buscar profiles:", error);
-        const retryRes = await supabase.from('profiles').select('id, nome, email, role');
+        const retryRes = await supabase.from('profiles').select(`
+          id,
+          nome,
+          email,
+          role,
+          is_treinner,
+          filial_id,
+          filiais (
+            id,
+            nome
+          )
+        `);
         data = retryRes.data || [];
       }
 
@@ -3153,7 +3175,10 @@ export default function Dashboard({ session, profileDataProps }) {
           id: m.id,
           nome: m.nome || m.full_name || m.nome_completo || (resolvedEmail ? resolvedEmail.split('@')[0] : 'Colaborador'),
           email: resolvedEmail || 'N/A',
-          role: memberRole
+          role: memberRole,
+          filial_id: m.filial_id,
+          filiais: m.filiais,
+          is_treinner: m.is_treinner
         });
       }
 
