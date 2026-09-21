@@ -132,33 +132,14 @@ html.light textarea:focus {
   outline: none;
 }
 
-/* Regras de Impressão de Alta Fidelidade para Logos e Comprovantes / Térmica 80mm Elgin i9 */
+/* Regras de Impressão de Alta Fidelidade: Térmica 80mm vs Relatório A4 */
 @media print {
-  @page {
-    size: 80mm auto !important; /* Força o navegador a selecionar o rolo contínuo de 80mm em vez de A4 */
-    margin: 0 !important;
-  }
-
-  html, body {
-    width: 80mm !important;
-    max-width: 80mm !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #fff !important;
-    color: #000 !important;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 11px;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-    color-adjust: exact !important;
-  }
-
   /* Esconde todo o layout do sistema (telas, modais, menus, botões) */
   body * {
     visibility: hidden;
   }
 
-  /* Exibe estritamente o contêiner do cupom */
+  /* Exibe estritamente o contêiner do cupom/comprovante */
   #area-cupom-impressao, #area-cupom-impressao * {
     visibility: visible;
   }
@@ -167,23 +148,77 @@ html.light textarea:focus {
     position: absolute;
     left: 0;
     top: 0;
-    width: 72mm !important; /* 72mm é a largura útil de impressão da Elgin i9 */
-    margin: 0 auto !important;
-    padding: 2mm !important;
     page-break-inside: avoid;
     box-shadow: none !important;
     border: none !important;
     background: #ffffff !important;
     color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* -------------------------------------------
+     MODO TÉRMICA (80mm)
+     ------------------------------------------- */
+  body.print-modo-termica,
+  body:not(.print-modo-a4) {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-size: 11px !important;
+  }
+
+  #area-cupom-impressao.modo-termica,
+  body.print-modo-termica #area-cupom-impressao,
+  body:not(.print-modo-a4) #area-cupom-impressao:not(.modo-a4) {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 4mm !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-size: 10.5px !important;
+    line-height: 1.25 !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    box-sizing: border-box !important;
+  }
+
+  /* -------------------------------------------
+     MODO RELATÓRIO / TERMO (A4)
+     ------------------------------------------- */
+  body.print-modo-a4 {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 12px !important;
+  }
+
+  #area-cupom-impressao.modo-a4,
+  body.print-modo-a4 #area-cupom-impressao {
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+    color: #000000 !important;
   }
 
   .recibo-logo-container {
     display: flex !important;
-    justify-content: center !important;
     align-items: center !important;
     width: 100% !important;
-    margin-top: 4px !important;
-    margin-bottom: 8px !important;
   }
 
   .recibo-logo-img {

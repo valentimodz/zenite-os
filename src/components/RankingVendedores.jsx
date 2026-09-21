@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Award, RefreshCw, Calendar, Store, Filter, Eye } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import ModalDashboardColaborador from './ModalDashboardColaborador';
+import PeriodoSelector from './common/PeriodoSelector';
 
 // Helper de cálculo dinâmico de comissão do vendedor titular
 export function calcularComissaoVendedorItem(v, teveTrainee = false) {
@@ -71,6 +72,16 @@ export default function RankingVendedores({
   const filtroMes = propFiltroMes || localFiltroMes;
   const setFiltroMes = propSetFiltroMes || setLocalFiltroMes;
 
+  // Estado do Período (com janela temporal início e fim)
+  const [periodoData, setPeriodoData] = useState(() => {
+    const [a, m] = (filtroMes || currentMonthStr).split('-');
+    const ultimoDia = new Date(parseInt(a, 10), parseInt(m, 10), 0).getDate();
+    return {
+      inicio: `${a}-${m}-01`,
+      fim: `${a}-${m}-${String(ultimoDia).padStart(2, '0')}`
+    };
+  });
+
   // Filtro de Filial (Todas as Filiais / Por Filial)
   const [filtroFilial, setFiltroFilial] = useState('TODAS');
 
@@ -78,17 +89,14 @@ export default function RankingVendedores({
   const [vendasPeriodo, setVendasPeriodo] = useState(() => initialVendas || []);
   const [isLoading, setIsLoading] = useState(false);
 
-  // 2. Ajuste na Query de Vendas:
-  // Remova qualquer data fixa. Calcule o range com base no mês selecionado:
-  const fetchVendasRanking = useCallback(async () => {
+  // 2. Consulta de Vendas Padronizada com Janela Temporal
+  const fetchVendasRanking = useCallback(async (customInicio = null, customFim = null) => {
     setIsLoading(true);
     try {
-      const [anoStr, mesStr] = (filtroMes || currentMonthStr).split('-');
-      const ano = parseInt(anoStr, 10);
-      const mes = parseInt(mesStr, 10) - 1; // 0-indexed para o construtor Date
-
-      const dataInicio = new Date(ano, mes, 1).toISOString();
-      const dataFim = new Date(ano, mes + 1, 0, 23, 59, 59, 999).toISOString();
+      const pInicio = customInicio || periodoData.inicio;
+      const pFim = customFim || periodoData.fim;
+      const dataInicio = `${pInicio}T00:00:00.000Z`;
+      const dataFim = `${pFim}T23:59:59.999Z`;
 
       let query = supabase
         .from('vendas')
@@ -363,17 +371,18 @@ export default function RankingVendedores({
 
         {/* Controles de Filtros */}
         <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-          {/* Seletor de Mês/Ano Dinâmico */}
-          <div className="flex items-center gap-2 bg-black border border-[#222] hover:border-[#6A0DAD]/50 px-3 py-1.5 rounded-lg transition-colors">
-            <Calendar size={14} className="text-[#6A0DAD]" />
-            <span className="text-[11px] font-bold text-gray-400 uppercase">Mês:</span>
-            <input
-              type="month"
-              value={filtroMes}
-              onChange={(e) => setFiltroMes(e.target.value)}
-              className="bg-transparent text-white text-xs font-bold font-mono outline-none cursor-pointer"
-            />
-          </div>
+          {/* Seletor de Período Dinâmico com Calendário Interativo */}
+          <PeriodoSelector
+            tipo="range"
+            mesAno={filtroMes}
+            dataInicio={periodoData.inicio}
+            dataFim={periodoData.fim}
+            onChange={({ inicio, fim, mesAno: novoMesAno }) => {
+              setPeriodoData({ inicio, fim });
+              setFiltroMes(novoMesAno);
+              fetchVendasRanking(inicio, fim);
+            }}
+          />
 
           {/* Filtro de Filial */}
           <div className="flex items-center gap-2 bg-black border border-[#222] hover:border-[#6A0DAD]/50 px-3 py-1.5 rounded-lg transition-colors">
@@ -497,6 +506,8 @@ export default function RankingVendedores({
           colaborador={vendedorSelecionadoModal}
           mesAno={filtroMes}
           filtroMes={filtroMes}
+          dataInicio={periodoData.inicio}
+          dataFim={periodoData.fim}
           filiais={filiais}
           vendasCache={vendasPeriodo}
           onClose={() => setVendedorSelecionadoModal(null)}

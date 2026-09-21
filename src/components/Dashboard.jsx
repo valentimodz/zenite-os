@@ -1354,6 +1354,7 @@ export default function Dashboard({ session, profileDataProps }) {
   const [pdvReciboAtivo, setPdvReciboAtivo] = useState(false);
   const [pdvReciboDados, setPdvReciboDados] = useState(null);
   const [tipoReciboAtual, setTipoReciboAtual] = useState('DETALHADO'); // 'AVISTA' | 'DETALHADO'
+  const [formatoImpressao, setFormatoImpressao] = useState('termica'); // 'termica' | 'a4'
   const [modalSucessoVenda, setModalSucessoVenda] = useState(null); // { venda, dadosRecibo }
   const [modalEscolhaRecibo, setModalEscolhaRecibo] = useState(null); // venda a reimprimir
   const [isImageLoaded, setIsImageLoaded] = useState(false);
@@ -2253,21 +2254,32 @@ export default function Dashboard({ session, profileDataProps }) {
     setIsPdvClienteDropdownOpen(false);
   };
 
+  const dispararImpressao = (formato) => {
+    const modo = formato || formatoImpressao;
+    setFormatoImpressao(modo);
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('print-modo-termica', 'print-modo-a4');
+      document.body.classList.add(modo === 'a4' ? 'print-modo-a4' : 'print-modo-termica');
+    }
+    setTimeout(() => {
+      window.print();
+    }, 120);
+  };
+
   useEffect(() => {
-    if (pdvReciboAtivo) {
-      const hasLogo = pdvReciboDados?.filial_logo && pdvReciboDados.filial_logo.trim() !== '';
-      if (!hasLogo && !hasPrinted) {
-        setHasPrinted(true);
-        window.print();
-      } else if (hasLogo && isImageLoaded && !hasPrinted) {
-        setHasPrinted(true);
-        window.print();
-      }
-    } else {
+    if (!pdvReciboAtivo) {
       setIsImageLoaded(false);
       setHasPrinted(false);
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('print-modo-termica', 'print-modo-a4');
+      }
+    } else {
+      if (typeof document !== 'undefined') {
+        document.body.classList.remove('print-modo-termica', 'print-modo-a4');
+        document.body.classList.add(formatoImpressao === 'a4' ? 'print-modo-a4' : 'print-modo-termica');
+      }
     }
-  }, [pdvReciboAtivo, isImageLoaded, pdvReciboDados, hasPrinted]);
+  }, [pdvReciboAtivo, formatoImpressao]);
 
   const restoreDraft = () => {
     if (draftDataToRestore) {
@@ -26626,336 +26638,563 @@ export default function Dashboard({ session, profileDataProps }) {
         )}
 
 
-        {/* MODAL DE RECIBO DE VENDA CONSOLIDADO */}
+        {/* MODAL DE RECIBO DE VENDA CONSOLIDADO (TÉRMICA 80MM VS RELATÓRIO A4) */}
         {pdvReciboAtivo && pdvReciboDados && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:bg-white">
-            <div id="area-cupom-impressao" className="bg-card text-card-foreground border border-border rounded-2xl max-w-xl w-full p-6 space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:p-0 print:m-0 print:bg-white print:block print:static">
+            {/* Injeção Dinâmica de @page para Precisão Milimétrica do Navegador */}
+            <style dangerouslySetInnerHTML={{
+              __html: formatoImpressao === 'a4'
+                ? `@media print { @page { size: A4 portrait !important; margin: 15mm !important; } }`
+                : `@media print { @page { size: 80mm auto !important; margin: 0 !important; } }`
+            }} />
 
-              {/* Botão de Fechar no topo */}
-              <button
-                onClick={() => setPdvReciboAtivo(false)}
-                className="absolute right-4 top-4 p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors print:hidden cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-
-              {/* Cabeçalho */}
-              <div className="text-center space-y-1">
-                <span className={`text-[10px] border px-2.5 py-0.5 rounded-full font-bold uppercase print:hidden ${
-                  pdvReciboDados.tipo_recibo === 'AVISTA'
-                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                    : 'bg-primary/15 text-primary border-primary/30'
-                }`}>
-                  {pdvReciboDados.tipo_recibo === 'AVISTA'
-                    ? 'Recibo de Venda À Vista (Simplificado)'
-                    : 'Recibo de Venda Detalhado'}
-                </span>
-                {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
-                  <div className="recibo-logo-container w-full flex justify-center items-center my-2">
-                    <img
-                      src={pdvReciboDados.filial_logo}
-                      alt="Logo da Filial"
-                      onLoad={() => setIsImageLoaded(true)}
-                      className="recibo-logo-img max-w-[160px] max-h-[90px] w-auto h-auto object-contain block mx-auto"
-                      style={{
-                        objectFit: 'contain',
-                        maxWidth: '160px',
-                        maxHeight: '90px',
-                        width: 'auto',
-                        height: 'auto',
-                        filter: 'none',
-                        WebkitFilter: 'none'
-                      }}
-                    />
+            <div
+              id="area-cupom-impressao"
+              className={`bg-card text-card-foreground border border-border rounded-2xl w-full p-6 space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:shadow-none transition-all ${
+                formatoImpressao === 'a4' ? 'max-w-4xl modo-a4' : 'max-w-md modo-termica'
+              }`}
+            >
+              {/* Barra Superior de Seleção de Formato e Fechar (Apenas na Tela) */}
+              <div className="flex items-center justify-between pb-3 border-b border-border/60 print:hidden gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted-foreground font-semibold">Modelo de Impressão:</span>
+                  <div className="inline-flex p-1 bg-surface-elevated border border-border rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setFormatoImpressao('termica')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        formatoImpressao === 'termica'
+                          ? 'bg-zinc-800 text-white shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <Printer size={13} />
+                      Térmica (80mm)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormatoImpressao('a4')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        formatoImpressao === 'a4'
+                          ? 'bg-[#6A0DAD] text-white shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <FileText size={13} />
+                      Relatório / Termo (A4)
+                    </button>
                   </div>
-                ) : (
-                  <h2 className="text-xl font-bold text-white print:text-black tracking-tight flex justify-center items-center gap-2 mb-2">
-                    {pdvReciboDados.filial_nome}
-                  </h2>
-                )}
-
-                <div className="text-[10px] text-gray-500 font-mono leading-tight mb-2">
-                  <p className="font-bold">{pdvReciboDados.filial_nome}</p>
-                  <p>{pdvReciboDados.filial_endereco}</p>
-                  <p>CNPJ: {pdvReciboDados.filial_cnpj} | Tel: {pdvReciboDados.filial_telefone}</p>
                 </div>
 
-                {pdvReciboDados.is_trainee && (
-                  <div className="border border-dashed border-gray-400 p-2 text-center text-[10px] font-bold uppercase mb-2">
-                    Teve participação de Trainee
-                  </div>
-                )}
-
-                <p className="text-[10px] text-gray-500 font-mono mt-2">ID da Venda: {pdvReciboDados.venda_id}</p>
-                <p className="text-[10px] text-gray-550">
-                  {new Date(pdvReciboDados.data).toLocaleString('pt-BR')}
-                </p>
+                <button
+                  type="button"
+                  onClick={() => setPdvReciboAtivo(false)}
+                  className="p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                  title="Fechar"
+                >
+                  <X size={16} />
+                </button>
               </div>
 
+              {/* Cálculos e Normalização de Dados */}
+              {(() => {
+                const isAvista = pdvReciboDados.tipo_recibo === 'AVISTA';
+                const itens = pdvReciboDados.itens && pdvReciboDados.itens.length > 0
+                  ? pdvReciboDados.itens
+                  : pdvReciboDados.produto_novo
+                    ? [pdvReciboDados.produto_novo]
+                    : [];
 
+                const fin = pdvReciboDados.financeiro || {};
+                const subtotalExibido = isAvista
+                  ? Number(fin.total_novo_original ?? fin.total_novo ?? 0)
+                  : Number(fin.total_novo ?? fin.total_novo_original ?? 0);
+                const totalGeral = isAvista
+                  ? Number(fin.saldo_pagar_original ?? fin.saldo_pagar ?? 0)
+                  : Number(fin.saldo_pagar ?? fin.saldo_pagar_original ?? 0);
 
-              <hr className="border-[#222222] print:border-gray-300" />
+                const mNorm = String(fin.metodo || '').toLowerCase();
+                const isDebito = mNorm === 'cartao_debito';
+                const isCredito = mNorm === 'cartao_credito' || mNorm === 'cartao';
+                const parcelasNum = fin.parcelas || 1;
+                const valorParcela = parcelasNum > 0 ? (totalGeral / parcelasNum) : totalGeral;
 
-              {/* Informações Básicas */}
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Vendedor</span>
-                  <span className="text-white print:text-black font-semibold">{pdvReciboDados.vendedor_nome}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500 block uppercase font-bold text-[9px]">Filial</span>
-                  <span className="text-white print:text-black font-semibold">{pdvReciboDados.filial_nome}</span>
-                </div>
+                let descricaoPagamento = '';
+                let parcelamentoTexto = '';
 
-                {/* Cliente Vinculado */}
-                {(pdvReciboDados.cliente_nome || pdvReciboDados.cliente_cpf_cnpj) && (
-                  <div className="col-span-2 border-t border-[#222222]/60 pt-2">
-                    <span className="text-gray-500 block uppercase font-bold text-[9px]">Cliente Vinculado</span>
-                    <p className="text-white print:text-black font-semibold">
-                      {pdvReciboDados.cliente_nome || 'Consumidor Final'}
-                      {pdvReciboDados.cliente_cpf_cnpj && ` (CPF/CNPJ: ${pdvReciboDados.cliente_cpf_cnpj})`}
-                    </p>
-                    {(pdvReciboDados.cliente_telefone || pdvReciboDados.cliente_email) && (
-                      <p className="text-[10px] text-gray-500 font-medium">
-                        {pdvReciboDados.cliente_telefone && `Tel: ${pdvReciboDados.cliente_telefone}`}
-                        {pdvReciboDados.cliente_telefone && pdvReciboDados.cliente_email && ' · '}
-                        {pdvReciboDados.cliente_email && `Email: ${pdvReciboDados.cliente_email}`}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
+                if (isAvista) {
+                  descricaoPagamento = 'À VISTA (VALOR NOMINAL)';
+                } else if (isDebito) {
+                  descricaoPagamento = 'CARTÃO DE DÉBITO';
+                } else if (isCredito) {
+                  descricaoPagamento = 'CARTÃO DE CRÉDITO';
+                  parcelamentoTexto = `${parcelasNum}x de R$ ${valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                } else if (fin.pagamentos && fin.pagamentos.length > 1) {
+                  descricaoPagamento = fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
+                  if (parcelasNum > 1) {
+                    parcelamentoTexto = `${parcelasNum}x de R$ ${(totalGeral / parcelasNum).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                  }
+                } else if (fin.metodo === 'troca') {
+                  if (fin.saldo_pagar > 0) {
+                    const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
+                      ? `Cartão de Crédito (${fin.parcelas || 1}x)`
+                      : fin.metodo_saldo === 'cartao_debito'
+                        ? 'Cartão de Débito'
+                        : fin.metodo_saldo === 'pix'
+                          ? 'Pix'
+                          : fin.metodo_saldo === 'boleto'
+                            ? 'Boleto'
+                            : 'Dinheiro';
+                    descricaoPagamento = `Troca + ${saldoMetodo}`;
+                  } else {
+                    descricaoPagamento = 'Troca (Totalmente Abatido)';
+                  }
+                } else if (mNorm === 'pix') {
+                  descricaoPagamento = 'PIX';
+                } else if (mNorm === 'dinheiro') {
+                  descricaoPagamento = 'DINHEIRO';
+                } else if (mNorm === 'boleto') {
+                  descricaoPagamento = 'BOLETO PARCELADO';
+                  if (parcelasNum > 1) {
+                    parcelamentoTexto = `${parcelasNum}x de R$ ${(totalGeral / parcelasNum).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                  }
+                } else {
+                  descricaoPagamento = String(fin.metodo || 'DINHEIRO').toUpperCase();
+                  if (parcelasNum > 1) {
+                    parcelamentoTexto = `${parcelasNum}x de R$ ${(totalGeral / parcelasNum).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                  }
+                }
 
-              {/* Itens de Saída (Carrinho) */}
-              <div className="bg-surface border border-border p-4 rounded-xl space-y-2.5 print:bg-white print:border-gray-300">
-                <span className="text-[9px] text-primary font-bold uppercase tracking-wider block print:text-purple-650">
-                  Itens de Venda (Saída)
-                </span>
-                <div className="space-y-3 divide-y divide-[#222222]/50 print:divide-gray-200">
-                  {pdvReciboDados.itens && pdvReciboDados.itens.length > 0 ? (
-                    pdvReciboDados.itens.map((item, idx) => {
-                      const isAvista = pdvReciboDados.tipo_recibo === 'AVISTA';
-                      const itemPrecoUnitario = Number((isAvista ? (item.preco_original ?? item.valor_unitario) : (item.valor_unitario ?? item.preco_original)) ?? 0);
-                      const itemSubtotal = Number((isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1))) : (item.valor_total ?? (itemPrecoUnitario * Number(item.quantidade || 1)))) ?? 0);
-                      return (
-                        <div key={idx} className={`flex justify-between items-start ${idx > 0 ? 'pt-2' : ''}`}>
-                          <div>
-                            <h4 className="font-extrabold text-sm text-white print:text-black">{item.nome}</h4>
-                            {item.imei && (
-                              <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {item.imei}</p>
-                            )}
-                            <p className="text-[10px] text-gray-450">
-                              Qtd: {item.quantidade} un.{itemPrecoUnitario > 0 ? ` · R$ ${itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} un.` : ''}
-                            </p>
+                const textoGarantia = (pdvReciboDados.obs_garantia && pdvReciboDados.obs_garantia.trim())
+                  ? pdvReciboDados.obs_garantia.trim()
+                  : 'Garantia legal conforme CDC de 90 dias contra defeitos de fabricação.';
+
+                return (
+                  <>
+                    {/* ========================================================
+                        LAYOUT 1: TÉRMICA (80MM)
+                        ======================================================== */}
+                    {formatoImpressao === 'termica' ? (
+                      <div className="space-y-4 text-xs font-mono">
+                        {/* Cabeçalho Térmica */}
+                        <div className="text-center space-y-1">
+                          <span className={`text-[10px] border px-2.5 py-0.5 rounded-full font-bold uppercase print:hidden ${
+                            isAvista
+                              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                              : 'bg-primary/15 text-primary border-primary/30'
+                          }`}>
+                            {isAvista ? 'Recibo à Vista (80mm)' : 'Recibo Detalhado (80mm)'}
+                          </span>
+
+                          {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
+                            <div className="recibo-logo-container w-full flex justify-center items-center my-2">
+                              <img
+                                src={pdvReciboDados.filial_logo}
+                                alt="Logo da Filial"
+                                onLoad={() => setIsImageLoaded(true)}
+                                className="recibo-logo-img max-w-[140px] max-h-[75px] w-auto h-auto object-contain block mx-auto"
+                              />
+                            </div>
+                          ) : (
+                            <h2 className="text-base font-bold text-white print:text-black tracking-tight mb-1 uppercase">
+                              {pdvReciboDados.filial_nome}
+                            </h2>
+                          )}
+
+                          <div className="text-[10px] text-zinc-400 print:text-black leading-tight space-y-0.5">
+                            <p className="font-bold text-zinc-200 print:text-black">{pdvReciboDados.filial_nome}</p>
+                            <p>{pdvReciboDados.filial_endereco}</p>
+                            <p>CNPJ: {pdvReciboDados.filial_cnpj || '---'} {pdvReciboDados.filial_telefone ? `| Tel: ${pdvReciboDados.filial_telefone}` : ''}</p>
                           </div>
-                          <div className="text-right">
-                            <span className="font-mono text-xs font-bold text-white print:text-black">
-                              R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </span>
+
+                          {pdvReciboDados.is_trainee && (
+                            <div className="border border-dashed border-zinc-500 print:border-black p-1 text-center text-[9px] font-bold uppercase my-1">
+                              Participação de Trainee
+                            </div>
+                          )}
+
+                          <div className="text-[10px] text-zinc-500 print:text-black pt-1 border-t border-dashed border-zinc-800 print:border-black flex justify-between">
+                            <span>Venda #{pdvReciboDados.venda_id}</span>
+                            <span>{new Date(pdvReciboDados.data).toLocaleString('pt-BR')}</span>
                           </div>
                         </div>
-                      );
-                    })
-                  ) : (
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="font-extrabold text-sm text-white print:text-black">{pdvReciboDados.produto_novo.nome}</h4>
-                        {pdvReciboDados.produto_novo.imei && (
-                          <p className="text-[10px] text-gray-550 font-mono mt-0.5">IMEI: {pdvReciboDados.produto_novo.imei}</p>
-                        )}
-                        <p className="text-[10px] text-gray-450">Qtd: {pdvReciboDados.produto_novo.quantidade} unidade(s)</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-mono text-xs font-bold text-white print:text-black">
-                          R$ {Number(pdvReciboDados.produto_novo.valor_total_original ?? pdvReciboDados.produto_novo.preco_original ?? pdvReciboDados.produto_novo.preco).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
 
-              {/* BLOCO DESTACADO: TERMO DE GARANTIA / CONDIÇÕES */}
-              <div className="bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/30 dark:border-amber-500/40 p-3.5 rounded-xl text-xs print:bg-white print:border print:border-gray-400 print:p-2.5 shadow-sm space-y-1">
-                <div className="flex items-center gap-1.5 text-amber-500 dark:text-amber-400 print:text-black font-extrabold uppercase tracking-wide text-[10px]">
-                  <span>🛡️</span>
-                  <span>TERMO DE GARANTIA</span>
-                </div>
-                <p className="text-foreground dark:text-zinc-200 print:text-black text-[11px] leading-relaxed whitespace-pre-wrap font-medium">
-                  {(pdvReciboDados.obs_garantia && pdvReciboDados.obs_garantia.trim()) 
-                    ? pdvReciboDados.obs_garantia.trim() 
-                    : 'Garantia legal conforme CDC de 90 dias contra defeitos de fabricação.'}
-                </p>
-              </div>
+                        <div className="border-t border-dashed border-zinc-700 print:border-black"></div>
 
-              {/* Aparelhos de Entrada (Troca) */}
-              {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                <div className="space-y-3">
-                  <span className="text-[9px] text-primary font-bold uppercase tracking-wider block">
-                    Aparelho(s) Recebido(s) na Troca
-                  </span>
-                  {pdvReciboDados.trocas.map((troca, idx) => (
-                    <div key={idx} className="bg-primary/5 border border-primary/20 p-4 rounded-xl flex justify-between items-start print:bg-white print:border-gray-300">
-                      <div className="space-y-1">
-                        <h4 className="font-extrabold text-sm text-foreground print:text-black">{troca.nome}</h4>
-                        <p className="text-[10px] text-muted-foreground font-mono">IMEI: {troca.imei}</p>
-                        <p className="text-[10px] text-muted-foreground font-semibold">
-                          Cor: {troca.cor} · Bateria: {troca.bateria}%
-                        </p>
-                        {troca.obs && (
-                          <p className="text-[9px] text-muted-foreground italic">Checklist: {troca.obs}</p>
-                        )}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span className="font-mono text-xs font-bold text-primary print:text-black">
-                          - R$ {troca.valor_avaliacao.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <hr className="border-border print:border-gray-300" />
-
-              {/* Resumo Financeiro */}
-              <div className="space-y-2 text-xs">
-                {(() => {
-                  const isAvista = pdvReciboDados.tipo_recibo === 'AVISTA';
-                  const fin = pdvReciboDados.financeiro || {};
-                  const subtotalExibido = isAvista
-                    ? Number(fin.total_novo_original ?? fin.total_novo ?? 0)
-                    : Number(fin.total_novo ?? fin.total_novo_original ?? 0);
-                  const totalGeral = isAvista
-                    ? Number(fin.saldo_pagar_original ?? fin.saldo_pagar ?? 0)
-                    : Number(fin.saldo_pagar ?? fin.saldo_pagar_original ?? 0);
-
-                  return (
-                    <>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Subtotal (Itens):</span>
-                        <span className="font-mono text-foreground font-bold">
-                          R$ {subtotalExibido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                      {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                        <div className="flex justify-between text-primary print:text-black font-bold">
-                          <span>Abatimento por Troca:</span>
-                          <span className="font-mono">- R$ {Number(fin.desconto_troca || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      )}
-
-                      {/* MODO RECIBO À VISTA (SIMPLIFICADO) */}
-                      {isAvista ? (
-                        <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                        {/* Informações Básicas */}
+                        <div className="space-y-1 text-[11px] leading-tight">
                           <div className="flex justify-between">
-                            <span className="text-gray-400 font-bold uppercase">CONDIÇÃO:</span>
-                            <span className="font-extrabold text-emerald-400 print:text-black uppercase">À VISTA (VALOR NOMINAL)</span>
+                            <span className="text-zinc-500 print:text-black uppercase text-[9px] font-bold">Vendedor:</span>
+                            <span className="text-zinc-200 print:text-black font-semibold">{pdvReciboDados.vendedor_nome}</span>
                           </div>
-                          <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
-                            <span>TOTAL PAGO:</span>
-                            <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        /* MODO RECIBO DETALHADO (COM TAXAS, CARTÕES E PARCELAS) */
-                        (() => {
-                          const mNorm = String(fin.metodo || '').toLowerCase();
-                          const isDebito = mNorm === 'cartao_debito';
-                          const isCredito = mNorm === 'cartao_credito' || mNorm === 'cartao';
-                          const parcelasNum = fin.parcelas || 1;
-                          const valorParcela = parcelasNum > 0 ? (totalGeral / parcelasNum) : totalGeral;
-
-                          if (isDebito) {
-                            return (
-                              <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
-                                  <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE DÉBITO</span>
-                                </div>
-                                <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
-                                  <span>TOTAL PAGO:</span>
-                                  <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          if (isCredito) {
-                            return (
-                              <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
-                                  <span className="font-extrabold text-white print:text-black uppercase">CARTÃO DE CRÉDITO</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-400 font-bold uppercase">PARCELAMENTO:</span>
-                                  <span className="font-extrabold text-white print:text-black">
-                                    {parcelasNum}x de R$ {valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
-                                  <span>TOTAL PAGO:</span>
-                                  <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div className="space-y-1 text-xs border-t border-[#222222]/50 pt-2 font-mono">
+                          {(pdvReciboDados.cliente_nome || pdvReciboDados.cliente_cpf_cnpj) && (
+                            <div className="pt-1 border-t border-dashed border-zinc-800 print:border-black">
                               <div className="flex justify-between">
-                                <span className="text-gray-400 font-bold uppercase">FORMA DE PAGAMENTO:</span>
-                                <span className="font-extrabold text-white print:text-black uppercase">
-                                  {(() => {
-                                    if (fin.pagamentos && fin.pagamentos.length > 1) {
-                                      return fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
-                                    }
-                                    if (fin.metodo === 'troca') {
-                                      if (fin.saldo_pagar > 0) {
-                                        const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
-                                          ? `Cartão de Crédito (${fin.parcelas || 1}x)`
-                                          : fin.metodo_saldo === 'cartao_debito'
-                                            ? 'Cartão de Débito'
-                                            : fin.metodo_saldo === 'pix'
-                                              ? 'Pix'
-                                              : fin.metodo_saldo === 'boleto'
-                                                ? 'Boleto'
-                                                : 'Dinheiro';
-                                        return `Troca + ${saldoMetodo}`;
-                                      }
-                                      return 'Troca (Totalmente Abatido)';
-                                    }
-                                    if (mNorm === 'pix') return 'PIX';
-                                    if (mNorm === 'dinheiro') return 'DINHEIRO';
-                                    if (mNorm === 'boleto') return 'BOLETO PARCELADO';
-                                    return String(fin.metodo || 'DINHEIRO').toUpperCase();
-                                  })()}
+                                <span className="text-zinc-500 print:text-black uppercase text-[9px] font-bold">Cliente:</span>
+                                <span className="text-zinc-200 print:text-black font-semibold text-right max-w-[180px] truncate">
+                                  {pdvReciboDados.cliente_nome || 'Consumidor Final'}
                                 </span>
                               </div>
-                              {fin.parcelas > 1 && (
-                                <div className="flex justify-between">
-                                  <span className="text-gray-400 font-bold uppercase">PARCELAS:</span>
-                                  <span className="font-extrabold text-white print:text-black">
-                                    {fin.parcelas}x de R$ {(totalGeral / fin.parcelas).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </span>
+                              {pdvReciboDados.cliente_cpf_cnpj && (
+                                <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
+                                  <span>CPF/CNPJ:</span>
+                                  <span>{pdvReciboDados.cliente_cpf_cnpj}</span>
                                 </div>
                               )}
-                              <div className="flex justify-between text-sm font-extrabold text-foreground print:text-black border-t border-border/40 pt-1">
-                                <span>TOTAL PAGO:</span>
-                                <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                              </div>
+                              {pdvReciboDados.cliente_telefone && (
+                                <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
+                                  <span>Tel:</span>
+                                  <span>{pdvReciboDados.cliente_telefone}</span>
+                                </div>
+                              )}
                             </div>
-                          );
-                        })()
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
+                          )}
+                        </div>
 
-              {/* Ações */}
-              <div className="flex flex-col gap-2 pt-2 print:hidden">
+                        <div className="border-t border-dashed border-zinc-700 print:border-black"></div>
+
+                        {/* Itens de Saída */}
+                        <div className="space-y-2">
+                          <span className="text-[9px] text-zinc-400 print:text-black font-bold uppercase tracking-wider block">
+                            Itens de Venda (Saída)
+                          </span>
+                          <div className="space-y-2 divide-y divide-dashed divide-zinc-800 print:divide-black">
+                            {itens.map((item, idx) => {
+                              const itemPrecoUnitario = Number((isAvista ? (item.preco_original ?? item.valor_unitario) : (item.valor_unitario ?? item.preco_original)) ?? 0);
+                              const itemSubtotal = Number((isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1))) : (item.valor_total ?? (itemPrecoUnitario * Number(item.quantidade || 1)))) ?? 0);
+                              return (
+                                <div key={idx} className={`pt-1.5 ${idx === 0 ? 'pt-0' : ''}`}>
+                                  <div className="flex justify-between items-start gap-2">
+                                    <span className="font-bold text-zinc-100 print:text-black break-words flex-1">
+                                      {item.nome}
+                                    </span>
+                                    <span className="font-bold text-zinc-100 print:text-black shrink-0">
+                                      R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                  {item.imei && (
+                                    <p className="text-[10px] text-zinc-400 print:text-black font-mono break-all">
+                                      IMEI: {item.imei}
+                                    </p>
+                                  )}
+                                  <p className="text-[10px] text-zinc-400 print:text-black">
+                                    {item.quantidade || 1}x R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Aparelhos de Troca se houver */}
+                        {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
+                          <div className="space-y-1.5 pt-1 border-t border-dashed border-zinc-700 print:border-black">
+                            <span className="text-[9px] text-zinc-400 print:text-black font-bold uppercase tracking-wider block">
+                              Aparelho(s) Recebido(s) na Troca
+                            </span>
+                            {pdvReciboDados.trocas.map((troca, idx) => (
+                              <div key={idx} className="flex justify-between items-start text-[10px]">
+                                <div>
+                                  <p className="font-bold text-zinc-200 print:text-black">{troca.nome}</p>
+                                  <p className="text-zinc-400 print:text-black font-mono">IMEI: {troca.imei}</p>
+                                  <p className="text-zinc-400 print:text-black">Cor: {troca.cor} · Bateria: {troca.bateria}%</p>
+                                </div>
+                                <span className="font-bold text-red-400 print:text-black shrink-0">
+                                  - R$ {Number(troca.valor_avaliacao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="border-t border-dashed border-zinc-700 print:border-black"></div>
+
+                        {/* Resumo Financeiro */}
+                        <div className="space-y-1 text-xs">
+                          <div className="flex justify-between text-zinc-400 print:text-black">
+                            <span>Subtotal:</span>
+                            <span className="font-semibold">R$ {subtotalExibido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
+                            <div className="flex justify-between text-red-400 print:text-black font-semibold">
+                              <span>Abatimento Troca:</span>
+                              <span>- R$ {Number(fin.desconto_troca || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-zinc-400 print:text-black">
+                            <span>Pagamento:</span>
+                            <span className="font-bold uppercase text-right">{descricaoPagamento}</span>
+                          </div>
+                          {parcelamentoTexto && (
+                            <div className="flex justify-between text-zinc-400 print:text-black">
+                              <span>Parcelamento:</span>
+                              <span className="font-bold">{parcelamentoTexto}</span>
+                            </div>
+                          )}
+                          <div className="border-t border-zinc-700 print:border-black pt-1 flex justify-between text-sm font-black text-zinc-100 print:text-black">
+                            <span>TOTAL PAGO:</span>
+                            <span>R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+
+                        {/* BLOCO DESTACADO: TERMO DE GARANTIA (Alto Contraste P&B) */}
+                        <div className="border border-zinc-300 dark:border-zinc-700 rounded p-2 bg-zinc-50 dark:bg-zinc-900/50 my-2 print:border-black print:bg-transparent">
+                          <div className="text-[11px] font-bold text-zinc-950 dark:text-zinc-100 print:text-black flex items-center gap-1 mb-0.5 uppercase">
+                            <span>🛡️ TERMO DE GARANTIA</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-800 dark:text-zinc-200 print:text-black font-semibold leading-tight whitespace-pre-wrap">
+                            {textoGarantia}
+                          </p>
+                        </div>
+
+                        <p className="text-[9px] text-center text-zinc-500 print:text-black pt-1">
+                          Obrigado pela preferência!
+                        </p>
+                      </div>
+                    ) : (
+                      /* ========================================================
+                         LAYOUT 2: RELATÓRIO / TERMO EXTENDIDO (A4)
+                         ======================================================== */
+                      <div className="space-y-6 text-xs font-sans text-zinc-900 dark:text-zinc-100 print:text-black">
+                        {/* 1. Cabeçalho Corporativo */}
+                        <div className="flex justify-between items-start border-b-2 border-zinc-900 dark:border-zinc-700 print:border-black pb-4">
+                          <div className="space-y-1.5 max-w-[50%]">
+                            {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
+                              <div className="recibo-logo-container">
+                                <img
+                                  src={pdvReciboDados.filial_logo}
+                                  alt="Logo da Filial"
+                                  onLoad={() => setIsImageLoaded(true)}
+                                  className="recibo-logo-img max-h-16 w-auto object-contain block"
+                                />
+                              </div>
+                            ) : (
+                              <h1 className="text-2xl font-black text-zinc-900 dark:text-white print:text-black tracking-tight uppercase">
+                                {pdvReciboDados.filial_nome}
+                              </h1>
+                            )}
+                            <div className="inline-block px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary dark:text-[#A78BFA] print:text-black print:border-black text-[11px] font-bold uppercase tracking-wider">
+                              Comprovante de Venda & Termo de Garantia
+                            </div>
+                          </div>
+
+                          <div className="text-right space-y-0.5 text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
+                            <p className="font-bold text-sm text-zinc-900 dark:text-white print:text-black">{pdvReciboDados.filial_nome}</p>
+                            <p>CNPJ: {pdvReciboDados.filial_cnpj || '---'}</p>
+                            <p>{pdvReciboDados.filial_endereco}</p>
+                            {pdvReciboDados.filial_telefone && <p>Telefone: {pdvReciboDados.filial_telefone}</p>}
+                            <div className="pt-1.5">
+                              <p className="font-mono font-extrabold text-xs text-zinc-950 dark:text-white print:text-black">
+                                Venda Nº: #{pdvReciboDados.venda_id}
+                              </p>
+                              <p className="text-[11px] text-zinc-500 print:text-black">
+                                Emissão: {new Date(pdvReciboDados.data).toLocaleString('pt-BR')}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Identificação das Partes (Cliente & Operação) */}
+                        <div className="grid grid-cols-2 gap-4">
+                          {/* Dados do Cliente */}
+                          <div className="border border-zinc-300 dark:border-zinc-800 print:border-zinc-400 rounded-lg p-3 bg-zinc-50/60 dark:bg-zinc-900/40 print:bg-transparent space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block border-b border-zinc-200 dark:border-zinc-800 print:border-zinc-400 pb-1">
+                              Identificação do Cliente / Destinatário
+                            </span>
+                            <p className="font-bold text-sm text-zinc-900 dark:text-white print:text-black">
+                              {pdvReciboDados.cliente_nome || 'Consumidor Final'}
+                            </p>
+                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
+                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">CPF/CNPJ:</strong> {pdvReciboDados.cliente_cpf_cnpj || 'Não informado'}
+                            </p>
+                            {pdvReciboDados.cliente_telefone && (
+                              <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
+                                <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Telefone:</strong> {pdvReciboDados.cliente_telefone}
+                              </p>
+                            )}
+                            {pdvReciboDados.cliente_email && (
+                              <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
+                                <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">E-mail:</strong> {pdvReciboDados.cliente_email}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Dados da Operação */}
+                          <div className="border border-zinc-300 dark:border-zinc-800 print:border-zinc-400 rounded-lg p-3 bg-zinc-50/60 dark:bg-zinc-900/40 print:bg-transparent space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block border-b border-zinc-200 dark:border-zinc-800 print:border-zinc-400 pb-1">
+                              Dados da Operação Comercial
+                            </span>
+                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
+                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Vendedor(a):</strong> {pdvReciboDados.vendedor_nome}
+                            </p>
+                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
+                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Filial Emissora:</strong> {pdvReciboDados.filial_nome}
+                            </p>
+                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
+                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Tipo de Documento:</strong> {isAvista ? 'Venda À Vista (Simplificado)' : 'Venda Detalhada'}
+                            </p>
+                            {pdvReciboDados.is_trainee && (
+                              <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 print:text-black">
+                                Atendimento com participação de Trainee
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 3. Tabela Estilizada de Produtos (100% de largura) */}
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block">
+                            Produtos / Itens Adquiridos
+                          </span>
+                          <table className="w-full border-collapse text-left text-xs">
+                            <thead>
+                              <tr className="bg-zinc-100 dark:bg-zinc-800 print:bg-zinc-100 border-y border-zinc-300 dark:border-zinc-700 print:border-black text-[10px] font-bold uppercase text-zinc-700 dark:text-zinc-300 print:text-black">
+                                <th className="py-2.5 px-3 w-12 text-center">ITEM</th>
+                                <th className="py-2.5 px-3">PRODUTO / IMEI</th>
+                                <th className="py-2.5 px-3 w-16 text-center">QTD</th>
+                                <th className="py-2.5 px-3 w-32 text-right">VALOR UNIT.</th>
+                                <th className="py-2.5 px-3 w-32 text-right">TOTAL</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 print:divide-zinc-300">
+                              {itens.map((item, idx) => {
+                                const itemPrecoUnitario = Number((isAvista ? (item.preco_original ?? item.valor_unitario) : (item.valor_unitario ?? item.preco_original)) ?? 0);
+                                const itemSubtotal = Number((isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1))) : (item.valor_total ?? (itemPrecoUnitario * Number(item.quantidade || 1)))) ?? 0);
+                                return (
+                                  <tr key={idx} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 print:hover:bg-transparent">
+                                    <td className="py-2.5 px-3 text-center font-bold text-zinc-500 print:text-black">
+                                      {idx + 1}
+                                    </td>
+                                    <td className="py-2.5 px-3">
+                                      <span className="font-bold text-zinc-900 dark:text-zinc-100 print:text-black block">
+                                        {item.nome}
+                                      </span>
+                                      {item.imei && (
+                                        <span className="inline-block mt-0.5 text-[10px] font-mono text-zinc-600 dark:text-zinc-400 print:text-black bg-zinc-100 dark:bg-zinc-800 print:bg-transparent px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 print:border-none">
+                                          IMEI: {item.imei}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-center font-medium text-zinc-700 dark:text-zinc-300 print:text-black">
+                                      {item.quantidade || 1} un.
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono text-zinc-700 dark:text-zinc-300 print:text-black">
+                                      R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono font-bold text-zinc-900 dark:text-zinc-100 print:text-black">
+                                      R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* 4. Aparelhos Recebidos na Troca se houver */}
+                        {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block">
+                              Aparelho(s) Recebido(s) na Troca (Trade-in)
+                            </span>
+                            <table className="w-full border-collapse text-left text-xs border border-zinc-200 dark:border-zinc-800 print:border-zinc-400 rounded-lg overflow-hidden">
+                              <thead>
+                                <tr className="bg-zinc-100 dark:bg-zinc-800 print:bg-zinc-100 border-b border-zinc-300 dark:border-zinc-700 print:border-black text-[10px] font-bold uppercase text-zinc-700 dark:text-zinc-300 print:text-black">
+                                  <th className="py-2 px-3">APARELHO</th>
+                                  <th className="py-2 px-3">IMEI</th>
+                                  <th className="py-2 px-3">ESTADO / BATERIA</th>
+                                  <th className="py-2 px-3 text-right">VALOR DEDUZIDO</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 print:divide-zinc-300">
+                                {pdvReciboDados.trocas.map((troca, idx) => (
+                                  <tr key={idx}>
+                                    <td className="py-2 px-3 font-bold text-zinc-900 dark:text-zinc-100 print:text-black">{troca.nome}</td>
+                                    <td className="py-2 px-3 font-mono text-zinc-600 dark:text-zinc-400 print:text-black">{troca.imei}</td>
+                                    <td className="py-2 px-3 text-zinc-600 dark:text-zinc-300 print:text-black">
+                                      Cor: {troca.cor} · Bateria: {troca.bateria}% {troca.obs ? `(${troca.obs})` : ''}
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono font-bold text-red-600 print:text-black">
+                                      - R$ {Number(troca.valor_avaliacao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {/* 5. Totais e Pagamentos alinhados à direita */}
+                        <div className="flex justify-end pt-2">
+                          <div className="w-80 space-y-1.5 text-xs">
+                            <div className="flex justify-between text-zinc-600 dark:text-zinc-400 print:text-black">
+                              <span>Subtotal dos Produtos:</span>
+                              <span className="font-mono font-semibold">R$ {subtotalExibido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                            {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
+                              <div className="flex justify-between text-red-600 print:text-black font-semibold">
+                                <span>Abatimento por Troca:</span>
+                                <span className="font-mono">- R$ {Number(fin.desconto_troca || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between text-zinc-600 dark:text-zinc-400 print:text-black">
+                              <span>Forma de Pagamento:</span>
+                              <span className="font-mono font-bold uppercase">{descricaoPagamento}</span>
+                            </div>
+                            {parcelamentoTexto && (
+                              <div className="flex justify-between text-zinc-600 dark:text-zinc-400 print:text-black">
+                                <span>Parcelamento:</span>
+                                <span className="font-mono font-semibold">{parcelamentoTexto}</span>
+                              </div>
+                            )}
+                            <div className="border-t-2 border-zinc-900 dark:border-zinc-700 print:border-black pt-2 mt-2 flex justify-between text-sm font-extrabold text-zinc-950 dark:text-white print:text-black">
+                              <span>TOTAL PAGO:</span>
+                              <span className="font-mono text-base">R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 6. Bloco do Termo de Garantia (Alto Contraste P&B) */}
+                        <div className="border border-zinc-300 dark:border-zinc-700 rounded-lg p-3 bg-zinc-50 dark:bg-zinc-900/50 my-4 print:border-black print:bg-transparent">
+                          <div className="text-[11px] font-bold text-zinc-950 dark:text-zinc-100 print:text-black flex items-center gap-1.5 mb-1 uppercase tracking-wide">
+                            <span>🛡️</span>
+                            <span>TERMO DE GARANTIA E CONDIÇÕES DE COMPRA</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-800 dark:text-zinc-200 print:text-black font-semibold leading-relaxed whitespace-pre-wrap">
+                            {textoGarantia}
+                          </p>
+                        </div>
+
+                        {/* 7. Campo para Assinatura do Cliente */}
+                        <div className="mt-10 pt-4 border-t border-zinc-200 dark:border-zinc-800 print:border-zinc-400">
+                          <div className="grid grid-cols-2 gap-12 text-center text-xs">
+                            <div>
+                              <div className="border-b border-zinc-400 dark:border-zinc-600 print:border-black pb-10 mb-2"></div>
+                              <p className="font-bold text-zinc-900 dark:text-zinc-100 print:text-black">{pdvReciboDados.filial_nome}</p>
+                              <p className="text-[10px] text-zinc-500 print:text-black">Vendedor(a): {pdvReciboDados.vendedor_nome}</p>
+                            </div>
+                            <div>
+                              <div className="border-b border-zinc-400 dark:border-zinc-600 print:border-black pb-10 mb-2"></div>
+                              <p className="font-bold text-zinc-900 dark:text-zinc-100 print:text-black">
+                                {pdvReciboDados.cliente_nome || 'Assinatura do Cliente / Recebido'}
+                              </p>
+                              <p className="text-[10px] text-zinc-500 print:text-black">
+                                {pdvReciboDados.cliente_cpf_cnpj ? `CPF/CNPJ: ${pdvReciboDados.cliente_cpf_cnpj}` : 'Recebido em perfeitas condições'}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="text-[9px] text-center text-zinc-400 print:text-black mt-4">
+                            Documento emitido para conferência e garantia de compra · Zênite OS
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* Botões de Ação na Tela (conforme Item 4 do user request) */}
+              <div className="flex flex-col gap-2 pt-2 print:hidden border-t border-border/60">
                 {pdvReciboDados.nfe_status === 'EMITIDA' ? (
                   <div className="flex gap-2 w-full">
                     <div className="flex-1 bg-green-950/20 border border-green-800/40 text-green-400 font-bold py-3 rounded text-xs flex items-center justify-center gap-1.5">
@@ -26973,7 +27212,7 @@ export default function Dashboard({ session, profileDataProps }) {
                     )}
                   </div>
                 ) : ['VENDEDOR', 'GERENTE'].includes(profile?.role) ? (
-                  <div className="w-full bg-[#111111] border border-red-950/30 text-red-400 text-center py-3 px-4 rounded text-[11px] font-semibold">
+                  <div className="w-full bg-[#111111] border border-red-950/30 text-red-400 text-center py-2.5 px-4 rounded text-[11px] font-semibold">
                     Apenas administradores ou RH possuem permissão para emitir documentos fiscais
                   </div>
                 ) : ['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? (
@@ -26981,7 +27220,7 @@ export default function Dashboard({ session, profileDataProps }) {
                     type="button"
                     onClick={() => handleEmitirNfePdv(pdvReciboDados)}
                     disabled={isFiscalLoading}
-                    className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-650 text-white font-bold py-3 rounded text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-[#6A0DAD]/20"
+                    className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-650 text-white font-bold py-2.5 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-[#6A0DAD]/20 cursor-pointer"
                   >
                     {isFiscalLoading ? (
                       <>
@@ -26995,18 +27234,37 @@ export default function Dashboard({ session, profileDataProps }) {
                   </button>
                 ) : null}
 
-                <div className="flex gap-2 w-full">
+                <div className="flex flex-wrap gap-2 w-full pt-1">
                   <button
                     type="button"
-                    onClick={() => window.print()}
-                    className="flex-1 bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 rounded transition-all flex items-center justify-center gap-1.5"
+                    onClick={() => dispararImpressao('termica')}
+                    className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${
+                      formatoImpressao === 'termica'
+                        ? 'bg-zinc-900 hover:bg-zinc-800 text-white border-zinc-600 shadow-md ring-1 ring-zinc-500'
+                        : 'bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 border-zinc-800'
+                    }`}
                   >
-                    Imprimir Recibo
+                    <Printer size={15} />
+                    🖨️ Imprimir Térmica (80mm)
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => dispararImpressao('a4')}
+                    className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${
+                      formatoImpressao === 'a4'
+                        ? 'bg-[#6A0DAD] hover:bg-[#500885] text-white border-[#8B2BE2]/50 shadow-md shadow-[#6A0DAD]/20 ring-1 ring-[#8B2BE2]'
+                        : 'bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#A78BFA] border-[#6A0DAD]/40'
+                    }`}
+                  >
+                    <FileText size={15} />
+                    📄 Imprimir Relatório / Termo (A4)
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setPdvReciboAtivo(false)}
-                    className="flex-1 bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 rounded transition-all"
+                    className="w-full sm:w-auto px-5 py-3 bg-surface hover:bg-surface-elevated border border-border text-muted-foreground hover:text-foreground text-xs font-bold rounded-xl transition-all cursor-pointer"
                   >
                     Fechar e Novo Pedido
                   </button>
