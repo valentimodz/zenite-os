@@ -4555,11 +4555,9 @@ export default function Dashboard({ session, profileDataProps }) {
 
   // Buscar dados específicos do Vendedor (Estoque na Filial e Vendas próprias)
   const fetchVendedorData = async (filialId, sellerId, forceEmpresaId = null, targetMes = null) => {
-    const userAuthId = session?.user?.id || sellerId;
-    const profileId = profile?.id || sellerId;
-    const profileNome = (profile?.nome || session?.user?.user_metadata?.nome || '').trim();
+    const currentUserId = sellerId || session?.user?.id || profile?.id;
 
-    if (!userAuthId && !profileId && !profileNome) {
+    if (!currentUserId) {
       setProdutosFilial([]);
       setVendasVendedor([]);
       setLoadingDados(false);
@@ -4588,6 +4586,7 @@ export default function Dashboard({ session, profileDataProps }) {
       const dataFim = `${mesAlvo}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
 
       try {
+        // Consulta limpa e direta com vendedor_id
         let querySales = supabase
           .from('vendas')
           .select(`
@@ -4625,39 +4624,20 @@ export default function Dashboard({ session, profileDataProps }) {
           .lte('created_at', dataFim)
           .order('created_at', { ascending: false });
 
-        if (profileNome && userAuthId) {
-          const orFilters = [
-            `vendedor_id.eq.${userAuthId}`,
-            `usuario_id.eq.${userAuthId}`,
-            `criado_por.eq.${userAuthId}`
-          ];
-          if (profileId && profileId !== userAuthId) {
-            orFilters.push(`vendedor_id.eq.${profileId}`);
-            orFilters.push(`usuario_id.eq.${profileId}`);
-            orFilters.push(`criado_por.eq.${profileId}`);
-          }
-          orFilters.push(`vendedor_nome.ilike.%${profileNome}%`);
-          querySales = querySales.or(orFilters.join(','));
-        } else if (userAuthId) {
-          const orFilters = [
-            `vendedor_id.eq.${userAuthId}`,
-            `usuario_id.eq.${userAuthId}`,
-            `criado_por.eq.${userAuthId}`
-          ];
-          if (profileId && profileId !== userAuthId) {
-            orFilters.push(`vendedor_id.eq.${profileId}`);
-          }
-          querySales = querySales.or(orFilters.join(','));
-        } else if (profileNome) {
-          querySales = querySales.ilike('vendedor_nome', `%${profileNome}%`);
+        const rawNome = (profile?.nome || session?.user?.user_metadata?.nome || '').replace(/["'%]/g, '').trim();
+
+        if (rawNome) {
+          querySales = querySales.or(`vendedor_id.eq.${currentUserId},vendedor_nome.eq.${rawNome}`);
+        } else {
+          querySales = querySales.eq('vendedor_id', currentUserId);
         }
 
         const { data: dbSales, error: dbSalesErr } = await querySales;
-        if (!dbSalesErr && dbSales && dbSales.length > 0) {
-          salesData = dbSales;
-        } else {
-          // Fallback resiliente: buscar vendas recentes do colaborador sem trava estrita de data ISO
-          let fbQuery = supabase
+
+        if (dbSalesErr) {
+          console.error("Erro ao carregar vendas do vendedor:", dbSalesErr);
+          // Fallback estrito por vendedor_id direto
+          const { data: fallbackSales, error: fbErr } = await supabase
             .from('vendas')
             .select(`
               id,
@@ -4690,24 +4670,19 @@ export default function Dashboard({ session, profileDataProps }) {
                 preco_unitario
               )
             `)
-            .order('created_at', { ascending: false })
-            .limit(200);
+            .eq('vendedor_id', currentUserId)
+            .gte('created_at', dataInicio)
+            .lte('created_at', dataFim)
+            .order('created_at', { ascending: false });
 
-          if (profileNome && userAuthId) {
-            fbQuery = fbQuery.or(`vendedor_id.eq.${userAuthId},vendedor_id.eq.${profileId || userAuthId},vendedor_nome.ilike.%${profileNome}%`);
-          } else if (userAuthId) {
-            fbQuery = fbQuery.or(`vendedor_id.eq.${userAuthId},vendedor_id.eq.${profileId || userAuthId}`);
-          } else if (profileNome) {
-            fbQuery = fbQuery.ilike('vendedor_nome', `%${profileNome}%`);
+          if (!fbErr && fallbackSales) {
+            salesData = fallbackSales;
           }
-
-          const { data: fbData } = await fbQuery;
-          if (fbData && fbData.length > 0) {
-            salesData = fbData;
-          }
+        } else if (dbSales) {
+          salesData = dbSales;
         }
       } catch (dbErr) {
-        console.warn('Aviso: Erro ao buscar vendas do vendedor via Supabase:', dbErr);
+        console.error('Erro ao buscar vendas do vendedor via Supabase:', dbErr);
       }
 
       setVendasVendedor(salesData);
@@ -14125,9 +14100,10 @@ export default function Dashboard({ session, profileDataProps }) {
 
       const matchesAuthId = userAuthId && saleUserId && String(saleUserId) === String(userAuthId);
       const matchesProfileId = profileId && saleUserId && String(saleUserId) === String(profileId);
+      const matchesCurrentId = currentUserId && saleUserId && String(saleUserId) === String(currentUserId);
       const matchesNome = userNome && saleNome && (saleNome.includes(userNome) || userNome.includes(saleNome));
 
-      if ((userAuthId || profileId) && saleUserId && !matchesAuthId && !matchesProfileId && !matchesNome) {
+      if (currentUserId && saleUserId && !matchesAuthId && !matchesProfileId && !matchesCurrentId && !matchesNome) {
         return false;
       }
       if (!saleUserId && userNome && !matchesNome) {
