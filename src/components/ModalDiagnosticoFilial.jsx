@@ -223,14 +223,21 @@ export default function ModalDiagnosticoFilial({
 
   const realizadoAcessoriosLoja = useMemo(() => {
     return (vendasFilial || [])
-      .filter(v => (v.categoria || '').toUpperCase().includes('ACESS') || 
-                   (v.categoria || '').toUpperCase().includes('PELICULA') || 
-                   (v.categoria || '').toUpperCase().includes('CAPA') ||
-                   (v.produto_nome || '').toUpperCase().includes('ACESS') ||
-                   (v.produto_nome || '').toUpperCase().includes('PELICULA') ||
-                   (v.produto_nome || '').toUpperCase().includes('CAPA') ||
-                   (v.produto_nome || '').toUpperCase().includes('CARREGADOR') ||
-                   (v.produto_nome || '').toUpperCase().includes('FONE'))
+      .filter(v => {
+        const cat = (v.categoria || '').toUpperCase();
+        const prod = (v.produto_nome || '').toUpperCase();
+        return cat.includes('ACESS') || 
+               cat.includes('PELICULA') || 
+               cat.includes('PELÍCULA') || 
+               cat.includes('CAPA') ||
+               prod.includes('ACESS') ||
+               prod.includes('PELICULA') || 
+               prod.includes('PELÍCULA') || 
+               prod.includes('CAPA') ||
+               prod.includes('CARREGADOR') ||
+               prod.includes('FONE') ||
+               prod.includes('CABO');
+      })
       .reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
   }, [vendasFilial]);
 
@@ -571,44 +578,52 @@ export default function ModalDiagnosticoFilial({
               </div>
             </div>
 
-            {/* Card 4: Metas da Filial (Boletos & Acessórios) */}
-            <div className="bg-black/50 border border-[#222] p-4 rounded-xl flex flex-col justify-between space-y-2">
+            {/* Card 4: Meta da Loja (Boletos & Acessórios) */}
+            <div className="bg-black/50 border border-[#222] p-4 rounded-xl flex flex-col justify-between space-y-3">
               <div className="flex justify-between items-start">
                 <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                  METAS DA FILIAL (BOLETOS &amp; ACESSÓRIOS)
+                  META DA LOJA
                 </span>
-                <span className="text-[10px] font-bold text-white bg-white/10 px-2 py-0.5 rounded-full font-mono">
-                  Oficial
+                <span className="text-[10px] font-bold text-amber-400 bg-amber-950/40 border border-amber-800/30 px-2 py-0.5 rounded-full">
+                  Boletos &amp; Acessórios
                 </span>
               </div>
-              <div className="flex-1 flex flex-col justify-center">
-                {/* Bloco 1: Boletos */}
-                <div className="space-y-1.5 mb-3">
+              <div className="flex-1 flex flex-col justify-center space-y-3">
+                {/* Barra 1: Boletos / Financ. */}
+                <div className="space-y-1.5">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-amber-400 flex items-center gap-1">
+                    <span className="font-semibold text-amber-400 flex items-center gap-1.5">
                       🟡 Boletos / Financ.:
                     </span>
-                    <span className="font-bold text-zinc-200">
-                      {pctBoletos.toFixed(1)}% ({realizadoBoletosLoja.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / R$ 270.000,00)
+                    <span className="font-bold text-zinc-200 font-mono text-[11px]">
+                      {realizadoBoletosLoja.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / R$ 270.000,00
+                      <span className="text-amber-400 ml-1.5 font-bold">({pctBoletos.toFixed(1)}%)</span>
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 transition-all duration-500" style={{ width: `${pctBoletos}%` }} />
+                  <div className="w-full h-2.5 bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-zinc-800/80">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]"
+                      style={{ width: `${pctBoletos}%` }}
+                    />
                   </div>
                 </div>
 
-                {/* Bloco 2: Acessórios */}
+                {/* Barra 2: Acessórios */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center text-xs">
-                    <span className="font-semibold text-pink-400 flex items-center gap-1">
+                    <span className="font-semibold text-pink-400 flex items-center gap-1.5">
                       🌸 Acessórios:
                     </span>
-                    <span className="font-bold text-zinc-200">
-                      {pctAcessorios.toFixed(1)}% ({realizadoAcessoriosLoja.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / R$ 40.000,00)
+                    <span className="font-bold text-zinc-200 font-mono text-[11px]">
+                      {realizadoAcessoriosLoja.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / R$ 40.000,00
+                      <span className="text-pink-400 ml-1.5 font-bold">({pctAcessorios.toFixed(1)}%)</span>
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-pink-500 to-rose-400 transition-all duration-500" style={{ width: `${pctAcessorios}%` }} />
+                  <div className="w-full h-2.5 bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-zinc-800/80">
+                    <div
+                      className="h-full bg-gradient-to-r from-pink-500 to-rose-400 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]"
+                      style={{ width: `${pctAcessorios}%` }}
+                    />
                   </div>
                 </div>
               </div>
