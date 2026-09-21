@@ -31,6 +31,8 @@ import ModalEntradaAparelhosLote from './ModalEntradaAparelhosLote';
 import ModalDetalheRelatorio from './ModalDetalheRelatorio';
 import ModalEntradaEstoqueRapida from './ModalEntradaEstoqueRapida';
 import ModalMetasFilial from './ModalMetasFilial';
+import ModalMetasVendedor from './ModalMetasVendedor';
+import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1216,6 +1218,8 @@ export default function Dashboard({ session, profileDataProps }) {
   }); // YYYY-MM
   const [metaVendedorLogado, setMetaVendedorLogado] = useState(null);
   const [loadingMetaVendedor, setLoadingMetaVendedor] = useState(false);
+  const [modalMetasVendedorOpen, setModalMetasVendedorOpen] = useState(false);
+  const [vendedorMetasSelecionado, setVendedorMetasSelecionado] = useState(null);
 
   // Estados para Correção de Fechamento de Caixa Diário
   const [modalAjusteCaixaOpen, setModalAjusteCaixaOpen] = useState(false);
@@ -13984,12 +13988,29 @@ export default function Dashboard({ session, profileDataProps }) {
       (x.vendedor_id === currentUserId || x.usuario_id === currentUserId) && 
       (x.mes_ano === mesAlvo || x.mes_referencia === mesAlvo)
     );
-    const tipoMeta = m?.tipo_meta || 'faturamento';
-    const normType = getNormalizedMetaTipo(tipoMeta);
 
-    console.log("🕵️‍♂️ [METAS AUDIT] ID Vendedor Logado:", currentUserId);
-    console.log("🕵️‍♂️ [METAS AUDIT] Total Vendas do Vendedor no Estado (vendasVendedor):", (vendasVendedor || []).length);
-    console.log("🕵️‍♂️ [METAS AUDIT] Mês de Referência:", mesAlvo);
+    const isTrainee = Boolean(profile?.is_treinner) || (profile?.role || '').toUpperCase().includes('TRAINEE');
+
+    // Metas configuradas com fallbacks exatos conforme solicitado
+    const metaBoleto = Number(m?.meta_boleto) > 0 
+      ? Number(m.meta_boleto) 
+      : (isTrainee ? (Number(m?.meta_trainee_boleto) || 40000) : 67500);
+
+    const superMetaBoleto = Number(m?.super_meta_boleto) > 0 
+      ? Number(m.super_meta_boleto) 
+      : (isTrainee ? 50000 : 87000);
+
+    const metaAcessorios = Number(m?.meta_acessorios) > 0 
+      ? Number(m.meta_acessorios) 
+      : 10000;
+
+    const superMetaAcessorios = Number(m?.super_meta_acessorios) > 0 
+      ? Number(m.super_meta_acessorios) 
+      : 15000;
+
+    const metaTotal = Number(m?.valor_meta) > 0 
+      ? Number(m.valor_meta) 
+      : (metaBoleto + metaAcessorios);
 
     // Todas as vendas do mês corrente/filtrado deste vendedor (resiliente a fuso horário e nulos)
     const currentMonthSales = (vendasVendedor || []).filter(sale => {
@@ -14009,61 +14030,181 @@ export default function Dashboard({ session, profileDataProps }) {
       return isUtcMatch || isLocalMatch;
     });
 
-    console.log("🕵️‍♂️ [METAS AUDIT] Vendas Filtradas para o Mês Selecionado:", currentMonthSales.length);
+    // Classificação e soma das categorias
+    let totalBoletos = 0;
+    let totalAcessorios = 0;
 
-    // MOTOR DE PROGRESSO CONDICIONAL: filtragem por tipo_meta
-    let vendasParaMeta = currentMonthSales;
-    if (normType === 'boleto') {
-      vendasParaMeta = currentMonthSales.filter(sale => {
-        const mp = (sale.metodo_pagamento || sale.forma_pagamento || '').toLowerCase();
-        return mp.includes('boleto');
-      });
-    } else if (normType === 'ativacao') {
-      vendasParaMeta = currentMonthSales.filter(sale => {
-        return sale.produtos?.categoria === 'SERVICO' || sale.categoria === 'SERVICO';
-      });
-    }
+    currentMonthSales.forEach(sale => {
+      const val = parseFloat(sale.valor_total || sale.valor || 0);
+      const mp = String(sale.metodo_pagamento || sale.forma_pagamento || '').toLowerCase();
+      const pags = Array.isArray(sale.vendas_pagamentos) ? sale.vendas_pagamentos : [];
+      const hasBoleto = mp.includes('boleto') || mp.includes('crediario') || pags.some(p => String(p.metodo_pagamento || '').toLowerCase().includes('boleto'));
 
-    const totalVendas = isUnitMetric(normType)
-      ? vendasParaMeta.length
-      : vendasParaMeta.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
+      if (hasBoleto) {
+        totalBoletos += val;
+      }
+
+      // Identificação detalhada de acessórios
+      let acVal = 0;
+      if (Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0) {
+        sale.itens_venda.forEach(item => {
+          const iname = String(item.produto_nome || '').toUpperCase();
+          if (iname.includes('CAPA') || iname.includes('PELICULA') || iname.includes('FONE') || 
+              iname.includes('CABO') || iname.includes('CARREGADOR') || iname.includes('ACESSORIO') ||
+              iname.includes('SUPORTE') || iname.includes('POWERBANK') || iname.includes('ADAPTADOR')) {
+            acVal += (Number(item.preco_unitario || 0) * Number(item.quantidade || 1));
+          }
+        });
+      }
+      if (acVal > 0) {
+        totalAcessorios += acVal;
+      } else {
+        const cat = String(sale.produtos?.categoria || sale.categoria || '').toUpperCase();
+        const tipo = String(sale.produtos?.tipo || sale.tipo || '').toUpperCase();
+        const pnome = String(sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || '').toUpperCase();
+        const isAc = tipo === 'ACESSORIO' || cat.includes('ACESSORIO') || cat.includes('CAPA') || 
+                     cat.includes('PELICULA') || cat.includes('FONE') || pnome.includes('CAPA') || 
+                     pnome.includes('PELICULA') || pnome.includes('FONE') || pnome.includes('CABO') || 
+                     pnome.includes('CARREGADOR');
+        const isCel = tipo === 'CELULAR' || cat === 'ANDROID' || cat === 'IOS' || cat.includes('CELULAR') || 
+                      cat === 'APPLE_JBL_CONSOLE' || !!sale.imei || pnome.includes('IPHONE') || pnome.includes('GALAXY');
+        if (isAc && !isCel) {
+          totalAcessorios += val;
+        }
+      }
+    });
 
     const totalVendasGeral = currentMonthSales.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
+    const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
     const totalComissoes = currentMonthSales.reduce((acc, s) => acc + calcularComissaoItem(s), 0);
     const salesCount = currentMonthSales.length;
     const ticketMedio = salesCount > 0 ? totalVendasGeral / salesCount : 0;
 
-    const metaObjetivo = m ? Number(m.valor_meta) : (Number(profile?.meta_mensal) || 0);
+    // Progresso Boletos
+    const progressoBoleto = metaBoleto > 0 ? Math.min(100, Math.round((totalBoletos / metaBoleto) * 100)) : 0;
+    // Progresso Acessórios
+    const progressoAcessorios = metaAcessorios > 0 ? Math.min(100, Math.round((totalAcessorios / metaAcessorios) * 100)) : 0;
+    // Progresso Total
+    const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((totalVendasGeral / metaTotal) * 100)) : 0;
 
-    // FIX DO MEDIDOR DE META: se metaObjetivo <= 0, o progresso é 0% (evita bug visual 0 de 0 = 100%)
-    const progressoPercent = metaObjetivo > 0 ? Math.min(100, Math.round((totalVendas / metaObjetivo) * 100)) : 0;
+    // Badges de Comissão para Boletos
+    let badgeBoleto = {
+      taxa: '1,0%',
+      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+      status: 'abaixo',
+      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
+    };
+    if (totalBoletos >= superMetaBoleto) {
+      badgeBoleto = {
+        taxa: '3,2%',
+        texto: 'Faixa Atual: 3,2% (Super Meta! 🔥)',
+        status: 'super',
+        classe: 'bg-purple-950/60 text-purple-300 border border-purple-700/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+      };
+    } else if (totalBoletos >= metaBoleto) {
+      badgeBoleto = {
+        taxa: '3,0%',
+        texto: 'Faixa Atual: 3,0% (Meta Batida! 🚀)',
+        status: 'batida',
+        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
+      };
+    }
+
+    // Badges de Comissão para Acessórios
+    let badgeAcessorios = {
+      taxa: '1,0%',
+      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+      status: 'abaixo',
+      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
+    };
+    if (totalAcessorios >= superMetaAcessorios) {
+      badgeAcessorios = {
+        taxa: '3,0%',
+        texto: 'Faixa Atual: 3,0% (Super Meta! 🔥)',
+        status: 'super',
+        classe: 'bg-pink-950/60 text-pink-300 border border-pink-700/60 shadow-[0_0_12px_rgba(244,114,182,0.3)]'
+      };
+    } else if (totalAcessorios >= metaAcessorios) {
+      badgeAcessorios = {
+        taxa: '2,5%',
+        texto: 'Faixa Atual: 2,5% (Meta Batida! 🚀)',
+        status: 'batida',
+        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
+      };
+    }
+
+    // Evolução diária (dias 1 a 28/30/31)
+    const diasNoMes = new Date(anoAlvo, mesAlvoIdx + 1, 0).getDate();
+    const evolucaoDiaria = [];
+    for (let d = 1; d <= diasNoMes; d++) {
+      evolucaoDiaria.push({ dia: d, total: 0 });
+    }
+    currentMonthSales.forEach(s => {
+      const dStr = s.created_at || s.data;
+      if (dStr) {
+        const dt = new Date(dStr);
+        const diaNum = dt.getDate();
+        if (diaNum >= 1 && diaNum <= diasNoMes) {
+          evolucaoDiaria[diaNum - 1].total += parseFloat(s.valor_total || s.valor || 0);
+        }
+      }
+    });
 
     return {
       mesReferencia: mesAlvo,
-      totalVendas,          // valor filtrado pelo tipo_meta (para o progresso)
-      totalVendasGeral,     // total real incondicional de tudo no mês
-      totalComissoes,
-      salesCount,
+      isTrainee,
+      totalVendasGeral,
       ticketMedio,
-      metaObjetivo,
-      tipoMeta,
-      progressoPercent,
-      metaRegistro: m,
-      historico: currentMonthSales
+      totalComissoes,
+      metaTotal,
+      salesCount,
+      // Boletos
+      totalBoletos,
+      metaBoleto,
+      superMetaBoleto,
+      progressoBoleto,
+      badgeBoleto,
+      // Acessórios
+      totalAcessorios,
+      metaAcessorios,
+      superMetaAcessorios,
+      progressoAcessorios,
+      badgeAcessorios,
+      // À Vista
+      totalAVista,
+      // Geral
+      progressoTotal,
+      // Gráficos
+      evolucaoDiaria,
+      // Histórico
+      historico: currentMonthSales,
+      metaRegistro: m
     };
   };
 
   const metasInfo = getMetasVendedor() || {
     mesReferencia: filtroMes,
-    totalVendas: 0,
+    isTrainee: false,
     totalVendasGeral: 0,
-    totalComissoes: 0,
-    salesCount: 0,
     ticketMedio: 0,
-    metaObjetivo: 0,
-    tipoMeta: 'faturamento',
-    progressoPercent: 0,
-    historico: []
+    totalComissoes: 0,
+    metaTotal: 77500,
+    salesCount: 0,
+    totalBoletos: 0,
+    metaBoleto: 67500,
+    superMetaBoleto: 87000,
+    progressoBoleto: 0,
+    badgeBoleto: { taxa: '1,0%', texto: 'Faixa Atual: 1,0% (Abaixo da Meta)', classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40' },
+    totalAcessorios: 0,
+    metaAcessorios: 10000,
+    superMetaAcessorios: 15000,
+    progressoAcessorios: 0,
+    badgeAcessorios: { taxa: '1,0%', texto: 'Faixa Atual: 1,0% (Abaixo da Meta)', classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40' },
+    totalAVista: 0,
+    progressoTotal: 0,
+    evolucaoDiaria: [],
+    historico: [],
+    metaRegistro: null
   };
 
   // Métricas Globais do Gerente
@@ -20876,74 +21017,19 @@ export default function Dashboard({ session, profileDataProps }) {
 
                                     {/* Lado Direito (Ações / Leitura) */}
                                     <div className="flex flex-wrap items-center gap-3 w-full md:w-auto md:justify-end">
-                                      {/* Grupo de Meta: Valor R$ + Tipo */}
-                                      <div className="flex items-stretch gap-0 rounded-md border border-[#333] overflow-hidden h-10 w-full max-w-[260px] flex-shrink-0 bg-[#111]">
-                                        {/* Prefixo R$ ou Qtd */}
-                                        <span className="px-2 text-[10px] text-gray-400 font-bold flex items-center whitespace-nowrap bg-[#0A0A0A] border-r border-[#333]">
-                                          {(() => {
-                                            const dataAtual = new Date();
-                                            const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                            const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
-                                            return isUnitMetric(tipoAtual) ? 'Meta Qtd' : 'Meta R$';
-                                          })()}
-                                        </span>
-                                        {/* Valor */}
-                                        <input
-                                          type="number"
-                                          className="w-[70px] bg-transparent text-white text-xs outline-none py-1 px-2 border-r border-[#333]"
-                                          placeholder={(() => {
-                                            const dataAtual = new Date();
-                                            const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                            const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
-                                            return isUnitMetric(tipoAtual) ? '90' : '15000';
-                                          })()}
-                                          defaultValue={(() => {
-                                            const dataAtual = new Date();
-                                            const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                            const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            return m ? m.valor_meta : (v.meta_mensal || 0);
-                                          })()}
-                                          onBlur={(e) => {
-                                            const newVal = Number(e.target.value);
-                                            const dataAtual = new Date();
-                                            const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                            const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            const currentVal = m ? Number(m.valor_meta) : Number(v.meta_mensal || 0);
-                                            const tipoAtual = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
-                                            if (newVal !== currentVal) {
-                                              handleUpdateMeta(v.id, newVal, tipoAtual);
-                                            }
-                                          }}
-                                        />
-                                        {/* Dropdown Tipo da Meta */}
-                                        <select
-                                          className="bg-transparent text-purple-300 text-[10px] font-semibold outline-none px-1 cursor-pointer flex-1 min-w-0"
-                                          title="Tipo da Meta"
-                                          value={(() => {
-                                            const dataAtual = new Date();
-                                            const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                            const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            const val = metaTipoMap[v.id] || m?.tipo_meta || 'FATURAMENTO_GERAL';
-                                            if (val === 'faturamento' || val === 'FATURAMENTO_GERAL' || val === 'FATURAMENTO') return 'FATURAMENTO_GERAL';
-                                            if (val === 'boleto' || val === 'BOLETO' || val === 'quantidade') return 'BOLETO';
-                                            return val;
-                                          })()}
-                                          onChange={(e) => {
-                                            const novoTipo = e.target.value;
-                                            const dataAtual = new Date();
-                                            const mesRef = `${dataAtual.getFullYear()}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
-                                            const m = metas.find(x => x.vendedor_id === v.id && x.mes_referencia === mesRef);
-                                            const valorAtual = m ? Number(m.valor_meta) : Number(v.meta_mensal || 0);
-                                            setMetaTipoMap(prev => ({ ...prev, [v.id]: novoTipo }));
-                                            handleUpdateMeta(v.id, valorAtual, novoTipo);
-                                          }}
-                                        >
-                                          <option value="FATURAMENTO_GERAL">Faturamento</option>
-                                          <option value="BOLETO">Boleto Vendido</option>
-                                        </select>
-                                      </div>
+                                      {/* Botão Elegante: Configurar Metas do Mês */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setVendedorMetasSelecionado(v);
+                                          setModalMetasVendedorOpen(true);
+                                        }}
+                                        className="flex items-center gap-2 px-3.5 h-10 bg-gradient-to-r from-purple-950/70 to-[#6A0DAD]/40 hover:from-[#6A0DAD]/70 hover:to-purple-700/60 text-purple-200 hover:text-white border border-[#6A0DAD]/50 hover:border-[#A78BFA] rounded-md text-xs font-bold transition-all shadow-md shadow-purple-950/30 hover:scale-[1.02] cursor-pointer whitespace-nowrap"
+                                        title="Configurar Metas Individuais do Mês"
+                                      >
+                                        <Target size={15} className="text-[#A78BFA]" />
+                                        🎯 Configurar Metas do Mês
+                                      </button>
 
                                       {/* Botão de Ação: Tornar Trainee / Promover */}
                                       <button
@@ -24189,77 +24275,220 @@ export default function Dashboard({ session, profileDataProps }) {
                           </div>
                         )}
 
-                        {/* KPIs Pessoais */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                          <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl">
-                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Minhas Vendas ({metasInfo?.mesReferencia || filtroMes})</span>
-                            <span className="text-2xl font-black text-white mt-2 block font-mono">
-                              R$ {metasInfo.totalVendasGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {/* PARTE 2: 1. CARDS DE RESUMO NO TOPO */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                          {/* Card 1: VENDAS TOTAIS (MÊS) */}
+                          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-[#6A0DAD]/40 p-5 rounded-xl transition-all shadow-lg shadow-purple-950/5">
+                            <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider block">
+                              Vendas Totais ({metasInfo?.mesReferencia || filtroMes})
+                            </span>
+                            <span className="text-2xl font-black text-white mt-1.5 block font-mono">
+                              R$ {metasInfo.totalVendasGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-[10px] text-gray-400 mt-1 block">
+                              {metasInfo.salesCount} {metasInfo.salesCount === 1 ? 'venda realizada' : 'vendas realizadas'}
                             </span>
                           </div>
-                          <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl">
-                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Ticket Médio</span>
-                            <span className="text-2xl font-black text-blue-400 mt-2 block font-mono">
-                              R$ {metasInfo.ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+
+                          {/* Card 2: TICKET MÉDIO */}
+                          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-blue-500/40 p-5 rounded-xl transition-all shadow-lg shadow-blue-950/5">
+                            <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider block">
+                              Ticket Médio
+                            </span>
+                            <span className="text-2xl font-black text-blue-400 mt-1.5 block font-mono">
+                              R$ {metasInfo.ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-[10px] text-gray-400 mt-1 block">
+                              Média financeira por venda
                             </span>
                           </div>
-                          <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl border-l-4 border-l-[#6A0DAD]">
-                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Minhas Comissões ({metasInfo?.mesReferencia || filtroMes})</span>
-                            <span className="text-2xl font-black text-[#6A0DAD] mt-2 block font-mono">
-                              R$ {metasInfo.totalComissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+
+                          {/* Card 3: COMISSÕES ACUMULADAS */}
+                          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-[#6A0DAD] p-5 rounded-xl transition-all border-l-4 border-l-[#6A0DAD] shadow-lg shadow-purple-950/10">
+                            <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider block">
+                              Comissões Acumuladas
+                            </span>
+                            <span className="text-2xl font-black text-[#A78BFA] mt-1.5 block font-mono">
+                              R$ {metasInfo.totalComissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-[10px] text-emerald-400 mt-1 block font-semibold flex items-center gap-1">
+                              <Sparkles size={11} /> Ganhos gerados no mês
                             </span>
                           </div>
-                          <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl">
-                            <span className="text-xs text-gray-500 uppercase font-bold tracking-wider block">Objetivo Mensal</span>
-                            <span className="text-2xl font-black text-gray-400 mt-2 block font-mono">
-                              {getNormalizedMetaTipo(metasInfo.tipoMeta) === 'boleto'
-                                ? `${Math.round(metasInfo.totalVendas)} de ${Math.round(metasInfo.metaObjetivo)} boletos`
-                                : formatMetaValue(metasInfo.metaObjetivo, metasInfo.tipoMeta)}
+
+                          {/* Card 4: META TOTAL */}
+                          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-purple-500/40 p-5 rounded-xl transition-all shadow-lg shadow-purple-950/5">
+                            <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider block">
+                              Meta Total Combinada
                             </span>
-                            {/* Badge de tipo */}
-                            <span className={`mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${isUnitMetric(metasInfo.tipoMeta)
-                              ? 'bg-blue-950/40 text-blue-400 border border-blue-800/40'
-                              : 'bg-purple-950/40 text-purple-400 border border-purple-800/40'
-                              }`}>
-                              {isUnitMetric(metasInfo.tipoMeta) ? `🧾 Meta de ${getMetricName(metasInfo.tipoMeta)}` : '📊 Faturamento Geral'}
+                            <span className="text-2xl font-black text-white mt-1.5 block font-mono">
+                              R$ {metasInfo.metaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-[9px] text-purple-400/90 mt-1 block font-semibold">
+                              Boletos (R$ {metasInfo.metaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}) + Acessórios (R$ {metasInfo.metaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 0 })})
                             </span>
                           </div>
                         </div>
 
-                        {/* Medidor da Meta */}
-                        <div className="bg-[#0A0A0A] border border-[#222222] p-6 rounded-xl space-y-4">
-                          <div className="flex justify-between items-center">
-                            <span className="text-xs font-bold text-white uppercase tracking-wide flex items-center gap-1.5">
-                              <TrendingUp size={14} className="text-[#6A0DAD]" />
-                              Medidor de Meta
-                              <span className={`ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold ${isUnitMetric(metasInfo.tipoMeta)
-                                ? 'bg-blue-950/60 text-blue-300'
-                                : 'bg-purple-950/60 text-purple-300'
-                                }`}>
-                                {isUnitMetric(metasInfo.tipoMeta) ? `🧾 ${getMetricName(metasInfo.tipoMeta)}` : '📊 Geral'}
-                              </span>
-                            </span>
-                            <span className="text-sm font-black text-[#A78BFA]">{metasInfo.progressoPercent}% atingido</span>
+                        {/* PARTE 2: 3. DIVISÃO EM DOIS MEDIDORES PRINCIPAIS COM INDICADOR DE COMISSÃO */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          
+                          {/* BLOCO A: META DE BOLETOS / FINANCIADORAS */}
+                          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-amber-500/40 p-6 rounded-xl space-y-4 shadow-xl shadow-amber-950/5 transition-all">
+                            {/* Topo do Medidor A */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1A1A1A] pb-3">
+                              <div>
+                                <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_8px_#f59e0b]"></span>
+                                  Meta de Boletos / Financiadoras
+                                </span>
+                                <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                  Crediário & Boletos faturados pelo colaborador
+                                </span>
+                              </div>
+
+                              {/* Badge de Faixa de Comissão */}
+                              <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${metasInfo.badgeBoleto.classe} whitespace-nowrap self-start sm:self-auto`}>
+                                {metasInfo.badgeBoleto.texto}
+                              </div>
+                            </div>
+
+                            {/* Valores Realizado vs Objetivo vs Super Meta */}
+                            <div className="grid grid-cols-3 gap-2 bg-[#111111] p-3 rounded-lg border border-[#222222] text-center font-mono">
+                              <div>
+                                <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
+                                <span className="text-sm sm:text-base font-black text-amber-400 mt-0.5 block">
+                                  R$ {metasInfo.totalBoletos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div className="border-x border-[#222222]">
+                                <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
+                                <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
+                                  R$ {metasInfo.metaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-purple-300 uppercase font-bold block flex items-center justify-center gap-0.5">
+                                  <Sparkles size={10} /> Super Meta
+                                </span>
+                                <span className="text-sm sm:text-base font-black text-purple-300 mt-0.5 block">
+                                  R$ {metasInfo.superMetaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Barra de Progresso Boletos */}
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between text-xs font-bold">
+                                <span className="text-gray-400">Progresso do Objetivo</span>
+                                <span className="text-amber-400 font-mono">{metasInfo.progressoBoleto}% atingido</span>
+                              </div>
+                              <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
+                                <div
+                                  className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-amber-600 via-amber-400 to-yellow-300 shadow-[0_0_10px_#f59e0b]"
+                                  style={{ width: `${metasInfo.progressoBoleto}%` }}
+                                ></div>
+                              </div>
+                            </div>
+
+                            {/* Mensagem de Feedback Boletos */}
+                            <p className="text-xs text-gray-400 leading-relaxed font-sans">
+                              {metasInfo.totalBoletos >= metasInfo.superMetaBoleto ? (
+                                <span className="text-purple-300 font-bold flex items-center gap-1">
+                                  🔥 Parabéns! Super Meta de boletos superada com comissão máxima de 3,2%!
+                                </span>
+                              ) : metasInfo.totalBoletos >= metasInfo.metaBoleto ? (
+                                <span className="text-emerald-400 font-bold">
+                                  🚀 Meta batida! Falta R$ {(metasInfo.superMetaBoleto - metasInfo.totalBoletos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para a Super Meta (3,2%).
+                                </span>
+                              ) : (
+                                <span>
+                                  Falta <strong className="text-white font-mono">R$ {(metasInfo.metaBoleto - metasInfo.totalBoletos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> em boletos para atingir a meta e desbloquear comissão de 3,0%.
+                                </span>
+                              )}
+                            </p>
                           </div>
 
-                          <div className="w-full bg-[#161616] rounded-full h-3.5 overflow-hidden border border-[#222222]">
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 ${isUnitMetric(metasInfo.tipoMeta)
-                                ? 'bg-gradient-to-r from-blue-700 to-blue-400 shadow-[0_0_8px_#3b82f6]'
-                                : 'bg-gradient-to-r from-[#6A0DAD] to-pink-500 shadow-[0_0_8px_#6A0DAD]'
-                                }`}
-                              style={{ width: `${metasInfo.progressoPercent}%` }}
-                            ></div>
+                          {/* BLOCO B: META DE ACESSÓRIOS */}
+                          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-pink-500/40 p-6 rounded-xl space-y-4 shadow-xl shadow-pink-950/5 transition-all">
+                            {/* Topo do Medidor B */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1A1A1A] pb-3">
+                              <div>
+                                <span className="text-xs font-bold text-pink-400 uppercase tracking-wider flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-pink-400 shadow-[0_0_8px_#ec4899]"></span>
+                                  Meta de Acessórios
+                                </span>
+                                <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                  Capas, Películas, Fones, Carregadores e Cabos
+                                </span>
+                              </div>
+
+                              {/* Badge de Faixa de Comissão */}
+                              <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${metasInfo.badgeAcessorios.classe} whitespace-nowrap self-start sm:self-auto`}>
+                                {metasInfo.badgeAcessorios.texto}
+                              </div>
+                            </div>
+
+                            {/* Valores Realizado vs Objetivo vs Super Meta */}
+                            <div className="grid grid-cols-3 gap-2 bg-[#111111] p-3 rounded-lg border border-[#222222] text-center font-mono">
+                              <div>
+                                <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
+                                <span className="text-sm sm:text-base font-black text-pink-400 mt-0.5 block">
+                                  R$ {metasInfo.totalAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div className="border-x border-[#222222]">
+                                <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
+                                <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
+                                  R$ {metasInfo.metaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-pink-300 uppercase font-bold block flex items-center justify-center gap-0.5">
+                                  <Sparkles size={10} /> Super Meta
+                                </span>
+                                <span className="text-sm sm:text-base font-black text-pink-300 mt-0.5 block">
+                                  R$ {metasInfo.superMetaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Barra de Progresso Acessórios */}
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between text-xs font-bold">
+                                <span className="text-gray-400">Progresso do Objetivo</span>
+                                <span className="text-pink-400 font-mono">{metasInfo.progressoAcessorios}% atingido</span>
+                              </div>
+                              <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
+                                <div
+                                  className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-pink-600 via-pink-500 to-rose-400 shadow-[0_0_10px_#ec4899]"
+                                  style={{ width: `${metasInfo.progressoAcessorios}%` }}
+                                ></div>
+                              </div>
+                            </div>
+
+                            {/* Mensagem de Feedback Acessórios */}
+                            <p className="text-xs text-gray-400 leading-relaxed font-sans">
+                              {metasInfo.totalAcessorios >= metasInfo.superMetaAcessorios ? (
+                                <span className="text-pink-300 font-bold flex items-center gap-1">
+                                  🔥 Incrível! Super Meta de acessórios superada com comissão máxima de 3,0%!
+                                </span>
+                              ) : metasInfo.totalAcessorios >= metasInfo.metaAcessorios ? (
+                                <span className="text-emerald-400 font-bold">
+                                  🚀 Meta batida! Falta R$ {(metasInfo.superMetaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para a Super Meta (3,0%).
+                                </span>
+                              ) : (
+                                <span>
+                                  Falta <strong className="text-white font-mono">R$ {(metasInfo.metaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> em acessórios para atingir a meta e desbloquear comissão de 2,5%.
+                                </span>
+                              )}
+                            </p>
                           </div>
 
-                          <p className="text-xs text-gray-400 leading-relaxed">
-                            {metasInfo.progressoPercent >= 100
-                              ? '🚀 Excelente! Você superou o seu objetivo de vendas para o mês. Continue faturando!'
-                              : isUnitMetric(metasInfo.tipoMeta)
-                                ? `Progresso em ${getMetricName(metasInfo.tipoMeta)}: ${Math.round(metasInfo.totalVendas)} de ${formatMetaValue(metasInfo.metaObjetivo, metasInfo.tipoMeta)}. Falta ${Math.max(0, Math.round(metasInfo.metaObjetivo - metasInfo.totalVendas))} ${getMetricLabel(metasInfo.tipoMeta)}.`
-                                : `Falta ${(metasInfo.metaObjetivo - metasInfo.totalVendas).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} em vendas brutas para atingir seu objetivo.`}
-                          </p>
                         </div>
+
+                        {/* PARTE 2: 4. GRÁFICOS VISUAIS (Evolução Diária & Donut de Composição) */}
+                        <GraficosMinhasMetas metasInfo={metasInfo} />
 
                         {/* Minhas Vendas Recentes */}
                         <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
@@ -28847,6 +29076,23 @@ export default function Dashboard({ session, profileDataProps }) {
           }}
           onSuccess={(regrasAtualizadas) => {
             showToast('Metas e comissões atualizadas com sucesso!', 'success');
+          }}
+        />
+
+        {/* Modal Ajustar Metas Individuais do Vendedor */}
+        <ModalMetasVendedor
+          vendedor={vendedorMetasSelecionado}
+          filialId={activeFilialId || profile?.filial_id}
+          empresaId={activeEmpresaId || profile?.empresa_id}
+          isOpen={modalMetasVendedorOpen}
+          onClose={() => {
+            setModalMetasVendedorOpen(false);
+            setVendedorMetasSelecionado(null);
+          }}
+          onSuccess={(dadosSalvos) => {
+            showToast(`Metas de ${vendedorMetasSelecionado?.nome || 'vendedor'} atualizadas com sucesso!`, 'success');
+            fetchVendedores(activeEmpresaId || profile?.empresa_id);
+            fetchVendedoresAndMetas(activeEmpresaId || profile?.empresa_id, activeFilialId || profile?.filial_id);
           }}
         />
 
