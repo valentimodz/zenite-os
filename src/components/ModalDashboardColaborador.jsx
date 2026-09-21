@@ -393,7 +393,7 @@ export default function ModalDashboardColaborador({
       if (!dStr) return;
       const dt = new Date(dStr);
       if (!isNaN(dt.getTime())) {
-        const diaNum = dt.getDate();
+        const diaNum = dt.getUTCDate() || dt.getDate();
         if (diaNum >= 1 && diaNum <= diasNoMes) {
           evolucaoDiaria[diaNum - 1].total += parseFloat(s.valor_total || s.valor || 0);
         }

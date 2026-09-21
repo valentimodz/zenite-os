@@ -4692,48 +4692,88 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   };
 
-  // Função de busca defensiva solicitada com relação itens_venda
-  const carregarVendas = async () => {
+  // 1. Identificar o Vendedor Conectado e Carregar Vendas do Período
+  const carregarVendas = async (forceUserId = null, forceMonth = null) => {
     try {
-      // 1. Consulta com os itens da venda e campos explicitos produto_nome e imei
-      let { data, error } = await supabase
+      const currentUserId = forceUserId || session?.user?.id || profile?.id;
+      const userNome = (profile?.nome || session?.user?.user_metadata?.nome || '').trim();
+
+      const mesAlvo = forceMonth || filtroMes || '2026-09';
+      const [anoStr, mesStr] = mesAlvo.split('-');
+      const anoNum = parseInt(anoStr, 10);
+      const mesNum = parseInt(mesStr, 10);
+      const ultimoDia = new Date(anoNum, mesNum, 0).getDate();
+      const dataInicio = `${mesAlvo}-01T00:00:00.000Z`;
+      const dataFim = `${mesAlvo}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999Z`;
+
+      // 2. Ajustar a Query de Busca no Supabase (não restringir apenas por vendedor_id se o nome estiver disponível):
+      let queryVendas = supabase
         .from('vendas')
         .select(`
           id,
           created_at,
           valor_total,
           metodo_pagamento,
+          forma_pagamento,
           categoria,
           comissao,
           vendedor_id,
           vendedor_nome,
           produto_nome,
+          descricao,
+          produtos_descricao,
+          quantidade,
           imei,
+          filial_id,
+          vendas_pagamentos (*),
           itens_venda (
             id,
             produto_nome,
             quantidade,
-            preco_unitario
+            preco_unitario,
+            categoria
           )
         `)
-        .eq('filial_id', '2c3f0242-1b0a-455b-bf48-168ea5bfc46a');
+        .gte('created_at', dataInicio)
+        .lte('created_at', dataFim);
+
+      if (profile?.nome && currentUserId) {
+        // Permite capturar tanto pelo UUID quanto pelo nome registrado nas vendas
+        queryVendas = queryVendas.or(`vendedor_id.eq.${currentUserId},vendedor_nome.ilike.%${profile.nome.trim()}%`);
+      } else if (currentUserId) {
+        queryVendas = queryVendas.eq('vendedor_id', currentUserId);
+      } else if (profile?.nome) {
+        queryVendas = queryVendas.ilike('vendedor_nome', `%${profile.nome.trim()}%`);
+      }
+
+      let { data: listaVendas, error } = await queryVendas.order('created_at', { ascending: false });
 
       if (error) {
-        console.error("ERRO SUPABASE AO BUSCAR VENDAS:", error);
-        // Fallback defensivo caso a relação com itens_venda encontre divergência de coluna
-        const fbRes = await supabase
+        console.warn("[Dashboard] Tentando fallback de query de vendas sem joins:", error);
+        let fallbackQuery = supabase
           .from('vendas')
-          .select('id, created_at, valor_total, metodo_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei')
-          .eq('filial_id', '2c3f0242-1b0a-455b-bf48-168ea5bfc46a');
-        if (!fbRes.error && fbRes.data) {
-          data = fbRes.data;
+          .select('*')
+          .gte('created_at', dataInicio)
+          .lte('created_at', dataFim);
+
+        if (profile?.nome && currentUserId) {
+          fallbackQuery = fallbackQuery.or(`vendedor_id.eq.${currentUserId},vendedor_nome.ilike.%${profile.nome.trim()}%`);
+        } else if (currentUserId) {
+          fallbackQuery = fallbackQuery.eq('vendedor_id', currentUserId);
+        } else if (profile?.nome) {
+          fallbackQuery = fallbackQuery.ilike('vendedor_nome', `%${profile.nome.trim()}%`);
+        }
+
+        const fbRes = await fallbackQuery.order('created_at', { ascending: false });
+        if (fbRes.data) {
+          listaVendas = fbRes.data;
         }
       }
 
-      console.log("Vendas brutas recebidas:", data);
+      console.log("Vendas do vendedor conectado recebidas:", listaVendas);
 
       // Normalizar itens_venda garantindo valor_unitario e categoria em cada item
-      const dataNormalizada = (data || []).map(v => {
+      const dataNormalizada = (listaVendas || []).map(v => {
         const itensNorm = (v.itens_venda || []).map(it => ({
           ...it,
           valor_unitario: it.valor_unitario || it.preco_unitario || 0,
@@ -4745,33 +4785,21 @@ export default function Dashboard({ session, profileDataProps }) {
         };
       });
 
-      // Filtrar as vendas de Setembro de 2026 e associadas à Islayne (por ID ou Nome)
-      const vendasFiltradas = dataNormalizada.filter((v) => {
-        const dataVenda = new Date(v.created_at);
-        const mesCorreto = dataVenda.getFullYear() === 2026 && dataVenda.getMonth() === 8; // 8 = Setembro (0-indexed)
-        
-        const isIslayne = 
-          v.vendedor_id === '2dd56ca8-2eab-4cac-aa6c-6576005cc9ee' ||
-          (v.vendedor_nome && v.vendedor_nome.toUpperCase().includes('ISLAYNE'));
-
-        return mesCorreto && isIslayne;
-      });
-
-      console.log("Vendas filtradas da Islayne:", vendasFiltradas);
-
-      const total = vendasFiltradas.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
-      const qtd = vendasFiltradas.length;
+      const total = dataNormalizada.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
+      const qtd = dataNormalizada.length;
       const media = qtd > 0 ? total / qtd : 0;
 
       // Atualizar os estados da UI
       setTotalVendas(total);
       setQtdVendas(qtd);
       setTicketMedio(media);
-      setVendas(vendasFiltradas);
-      setVendasVendedor(vendasFiltradas);
+      setVendas(dataNormalizada);
+      setVendasVendedor(dataNormalizada);
 
+      return dataNormalizada;
     } catch (err) {
-      console.error("ERRO INESPERADO NO COMPONENTE:", err);
+      console.error("ERRO AO CARREGAR VENDAS DO VENDEDOR:", err);
+      return [];
     }
   };
 
@@ -4780,10 +4808,12 @@ export default function Dashboard({ session, profileDataProps }) {
     setLoadingDados(true);
     try {
       const empId = forceEmpresaId || profile?.empresa_id || company?.id || activeEmpresaId;
-      const targetFilial = filialId || activeFilialId || profile?.filial_id || '2c3f0242-1b0a-455b-bf48-168ea5bfc46a';
+      const targetFilial = filialId || activeFilialId || profile?.filial_id;
+      const currentSellerId = sellerId || session?.user?.id || profile?.id;
+      const mesConsulta = targetMes || filtroMes;
 
-      // Executar carregarVendas seguro
-      await carregarVendas();
+      // Executar carregarVendas com o vendedor conectado e mês alvo
+      await carregarVendas(currentSellerId, mesConsulta);
 
       if (targetFilial || empId) {
         fetchProdutosPDV(targetFilial || empId);
@@ -14600,19 +14630,21 @@ export default function Dashboard({ session, profileDataProps }) {
     const totalComissoesHistorico = currentMonthSales.reduce((acc, s) => acc + calcularComissaoItem(s), 0);
     const totalComissoes = Math.max(comissaoCalculadaPorMetas, totalComissoesHistorico);
 
-    // Evolução diária (dias 1 a 28/30/31)
+    // 3. Garantir a Distribuição no Gráfico Diário (Dias 1 a 30):
     const diasNoMes = new Date(anoAlvo, mesAlvoIdx + 1, 0).getDate();
     const evolucaoDiaria = [];
     for (let d = 1; d <= diasNoMes; d++) {
       evolucaoDiaria.push({ dia: d, total: 0 });
     }
-    currentMonthSales.forEach(s => {
+    listaVendas.forEach(s => {
       const dStr = s.created_at || s.data;
       if (dStr) {
         const dt = new Date(dStr);
-        const diaNum = dt.getDate();
-        if (diaNum >= 1 && diaNum <= diasNoMes) {
-          evolucaoDiaria[diaNum - 1].total += parseFloat(s.valor_total || s.valor || 0);
+        if (!isNaN(dt.getTime())) {
+          const diaNum = dt.getUTCDate() || dt.getDate();
+          if (diaNum >= 1 && diaNum <= diasNoMes) {
+            evolucaoDiaria[diaNum - 1].total += parseFloat(s.valor_total || s.valor || 0);
+          }
         }
       }
     });
@@ -14645,8 +14677,8 @@ export default function Dashboard({ session, profileDataProps }) {
       progressoTotal,
       // Gráficos
       evolucaoDiaria,
-      // Histórico
-      historico: currentMonthSales,
+      // 4. Histórico Recente de Vendas
+      historico: listaVendas,
       metaRegistro: m
     };
   };
