@@ -25111,47 +25111,8 @@ export default function Dashboard({ session, profileDataProps }) {
                                 </div>
                               </div>
 
-                              {/* CARD INFORMATIVO DE CONTRATOS (FINANCIADORAS) */}
-                              <div className="bg-[#111115] border border-purple-900/40 rounded-xl p-4 space-y-2.5 shadow-sm">
-                                <div className="flex items-center justify-between border-b border-purple-900/30 pb-2">
-                                  <div className="flex items-center gap-2">
-                                    <FileText size={15} className="text-purple-400" />
-                                    <h4 className="text-xs font-bold text-purple-200">
-                                      Contratos de Financiadoras (Previsão de Repasse Bancário)
-                                    </h4>
-                                  </div>
-                                  <span className="font-mono font-extrabold text-xs text-purple-300 bg-purple-950/40 px-2 py-0.5 rounded border border-purple-800/40">
-                                    Total: R$ {(vendasEsperadasHoje.totalFinanciadoras || auditoriaSistema.financiadoraSistema || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                  </span>
-                                </div>
-
-                                {/* Somatório do turno agrupado por financeira */}
-                                {Object.keys(vendasEsperadasHoje.contratosFinanciadoras || {}).length > 0 ? (
-                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
-                                    {Object.entries(vendasEsperadasHoje.contratosFinanciadoras).map(([finNome, finTotal]) => (
-                                      <div key={finNome} className="bg-black/50 border border-purple-900/30 px-2.5 py-1.5 rounded-lg flex items-center justify-between">
-                                        <span className="text-[11px] font-bold text-gray-300">{finNome}:</span>
-                                        <span className="text-[11px] font-mono font-black text-emerald-400">
-                                          R$ {Number(finTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-[11px] text-gray-500 italic py-1">
-                                    Nenhum contrato de financiadora registrado no turno de hoje.
-                                  </p>
-                                )}
-
-                                {/* Texto explicativo sutil */}
-                                <p className="text-[10px] text-gray-400/90 leading-tight pt-1 border-t border-purple-900/20 flex items-center gap-1.5">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0"></span>
-                                  <span>Valores repassados mensalmente via depósito em conta bancária PJ. (Não compõem dinheiro físico na gaveta)</span>
-                                </p>
-                              </div>
-
                               {/* Comprovante Upload */}
-                              <div className="space-y-2">
+                              <div className="space-y-2 pt-2">
                                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide">
                                   Foto do Comprovante da Maquininha (Obrigatório)
                                 </label>
@@ -25256,37 +25217,6 @@ export default function Dashboard({ session, profileDataProps }) {
                                     {auditoriaSistema.financiadoraSistema.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                   </span>
                                 </div>
-                              </div>
-
-                              {/* Resumo e Divergência */}
-                              <div className="mt-2 pt-3 border-t border-zinc-800 flex flex-col gap-2">
-                                <div className="flex justify-between text-xs text-zinc-400">
-                                  <span>Total Esperado:</span>
-                                  <span className="font-bold text-white font-mono">
-                                    {auditoriaSistema.totalEsperadoSistema.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                  </span>
-                                </div>
-
-                                <div className="flex justify-between text-xs text-zinc-400">
-                                  <span>Total Digitado no Caixa:</span>
-                                  <span className="font-bold text-purple-300 font-mono">
-                                    {totalDigitado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                  </span>
-                                </div>
-                                
-                                {/* Alerta se houver discrepância entre o digitado e o sistema */}
-                                {diferenca !== 0 && totalDigitado > 0 && (
-                                  <div className={`p-2.5 rounded text-xs font-medium ${diferenca > 0 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                                    {diferenca > 0 ? `Sobra no caixa: +R$ ${diferenca.toFixed(2)}` : `Falta no caixa: -R$ ${Math.abs(diferenca).toFixed(2)}`}
-                                  </div>
-                                )}
-
-                                {diferenca === 0 && totalDigitado > 0 && (
-                                  <div className="p-2.5 rounded text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                                    <CheckCircle2 size={14} className="shrink-0" />
-                                    <span>Caixa 100% conferido e batido com o sistema!</span>
-                                  </div>
-                                )}
                               </div>
                             </div>
                           </div>
