@@ -2281,6 +2281,42 @@ export default function Dashboard({ session, profileDataProps }) {
     }
   }, [pdvReciboAtivo, formatoImpressao]);
 
+  // Carregar dados reais da filial para o comprovante
+  useEffect(() => {
+    if (!pdvReciboAtivo || !pdvReciboDados) return;
+    const targetFilialId = pdvReciboDados.filial_id || activeFilialId;
+    if (!targetFilialId) return;
+
+    let isMounted = true;
+    (async () => {
+      try {
+        const { data: dadosFilial } = await supabase
+          .from('filiais')
+          .select('nome, cnpj, endereco, telefone, logo_url')
+          .eq('id', targetFilialId)
+          .single();
+
+        if (dadosFilial && isMounted) {
+          setPdvReciboDados(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              filial_nome: dadosFilial.nome || prev.filial_nome || 'MONKEY SHOP',
+              filial_logo: dadosFilial.logo_url || prev.filial_logo || null,
+              filial_cnpj: dadosFilial.cnpj || prev.filial_cnpj || '',
+              filial_endereco: dadosFilial.endereco || prev.filial_endereco || '',
+              filial_telefone: dadosFilial.telefone || prev.filial_telefone || ''
+            };
+          });
+        }
+      } catch (err) {
+        console.warn("Aviso ao carregar filial do recibo:", err);
+      }
+    })();
+
+    return () => { isMounted = false; };
+  }, [pdvReciboAtivo, pdvReciboDados?.filial_id, activeFilialId]);
+
   const restoreDraft = () => {
     if (draftDataToRestore) {
       setPdvCart(draftDataToRestore.pdvCart || []);
@@ -12912,7 +12948,32 @@ export default function Dashboard({ session, profileDataProps }) {
       }
 
       // Preparar Recibo
-      const filialDados = filiais.find(f => f.id === activeFilialId) || {};
+      const filialDados = filiais.find(f => String(f.id) === String(activeFilialId)) || {};
+      let realFilialNome = filialDados.nome || activeFilialNome || 'MONKEY SHOP';
+      let realFilialLogo = filialDados.logo_url || null;
+      let realFilialEndereco = filialDados.endereco || '';
+      let realFilialCnpj = filialDados.cnpj || '';
+      let realFilialTelefone = filialDados.telefone || '';
+
+      try {
+        if (activeFilialId) {
+          const { data: df } = await supabase
+            .from('filiais')
+            .select('nome, cnpj, endereco, telefone, logo_url')
+            .eq('id', activeFilialId)
+            .single();
+          if (df) {
+            realFilialNome = df.nome || realFilialNome;
+            realFilialLogo = df.logo_url || realFilialLogo;
+            realFilialEndereco = df.endereco || realFilialEndereco;
+            realFilialCnpj = df.cnpj || realFilialCnpj;
+            realFilialTelefone = df.telefone || realFilialTelefone;
+          }
+        }
+      } catch (e) {
+        console.warn("Aviso ao buscar filial ativa para recibo:", e);
+      }
+
       const totalNovoAjustado = subtotalCart * feeFactor;
       const finalSaldoPagar = Math.max(0, totalNovoAjustado - valorUsadoTotal);
 
@@ -12922,13 +12983,14 @@ export default function Dashboard({ session, profileDataProps }) {
       const dadosRecibo = {
         venda_id: createdVendaIds[0],
         vendas_ids: createdVendaIds,
+        filial_id: activeFilialId,
         data: new Date().toISOString(),
         vendedor_nome: profile.nome,
-        filial_nome: activeFilialNome,
-        filial_logo: filialDados.logo_url || null,
-        filial_endereco: filialDados.endereco || 'Endereço não cadastrado',
-        filial_cnpj: filialDados.cnpj || 'CNPJ não cadastrado',
-        filial_telefone: filialDados.telefone || 'Telefone não cadastrado',
+        filial_nome: realFilialNome,
+        filial_logo: realFilialLogo,
+        filial_endereco: realFilialEndereco,
+        filial_cnpj: realFilialCnpj,
+        filial_telefone: realFilialTelefone,
         cliente_id: (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID)
           ? clienteIdBanco
           : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID) ? selectedPdvClienteId : null),
@@ -13912,7 +13974,7 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   // --- IMPRESSÃO / REIMPRESSÃO DE RECIBO DE VENDA (À VISTA OU DETALHADO) ---
-  const imprimirReciboPDV = (vendaOuDados, tipo = 'DETALHADO') => {
+  const imprimirReciboPDV = async (vendaOuDados, tipo = 'DETALHADO') => {
     let dados = null;
 
     if (modalSucessoVenda && modalSucessoVenda.dadosRecibo && (vendaOuDados === modalSucessoVenda.venda || !vendaOuDados || vendaOuDados === modalSucessoVenda.dadosRecibo)) {
@@ -13920,10 +13982,31 @@ export default function Dashboard({ session, profileDataProps }) {
     } else if (vendaOuDados && vendaOuDados.itens && vendaOuDados.financeiro) {
       dados = JSON.parse(JSON.stringify(vendaOuDados));
     } else if (vendaOuDados) {
-      return imprimirReciboVenda(vendaOuDados, tipo);
+      return await imprimirReciboVenda(vendaOuDados, tipo);
     }
 
     if (!dados) return;
+
+    try {
+      const targetFilialId = dados.filial_id || activeFilialId;
+      if (targetFilialId) {
+        const { data: dadosFilial } = await supabase
+          .from('filiais')
+          .select('nome, cnpj, endereco, telefone, logo_url')
+          .eq('id', targetFilialId)
+          .single();
+
+        if (dadosFilial) {
+          dados.filial_nome = dadosFilial.nome || 'MONKEY SHOP';
+          dados.filial_logo = dadosFilial.logo_url || null;
+          dados.filial_cnpj = dadosFilial.cnpj || '';
+          dados.filial_endereco = dadosFilial.endereco || '';
+          dados.filial_telefone = dadosFilial.telefone || '';
+        }
+      }
+    } catch (e) {
+      console.warn('Aviso ao consultar dados reais da filial para recibo:', e);
+    }
 
     dados.tipo_recibo = tipo;
     setTipoReciboAtual(tipo);
@@ -13934,7 +14017,7 @@ export default function Dashboard({ session, profileDataProps }) {
     setModalEscolhaRecibo(null);
   };
 
-  const imprimirReciboVenda = (venda, tipo = 'DETALHADO') => {
+  const imprimirReciboVenda = async (venda, tipo = 'DETALHADO') => {
     if (!venda) return;
 
     const sellerObj = teamMembers.find(m => String(m.id) === String(venda.vendedor_id));
@@ -13943,8 +14026,34 @@ export default function Dashboard({ session, profileDataProps }) {
     const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(venda.produto_id));
     const produtoNome = venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || prodObj?.nome || 'Produto';
 
-    const filialObj = filiais.find(f => String(f.id) === String(venda.filial_id));
-    const filialNome = filialObj?.nome || venda.filial_nome || 'Filial';
+    const filialObj = filiais.find(f => String(f.id) === String(venda.filial_id || activeFilialId));
+    let filialNome = filialObj?.nome || venda.filial_nome || 'MONKEY SHOP';
+    let filialLogo = filialObj?.logo_url || null;
+    let filialEndereco = filialObj?.endereco || '';
+    let filialCnpj = filialObj?.cnpj || '';
+    let filialTelefone = filialObj?.telefone || '';
+
+    // Carregar dados reais diretamente da tabela 'filiais'
+    try {
+      const targetFilialId = venda.filial_id || activeFilialId;
+      if (targetFilialId) {
+        const { data: dadosFilial } = await supabase
+          .from('filiais')
+          .select('nome, cnpj, endereco, telefone, logo_url')
+          .eq('id', targetFilialId)
+          .single();
+
+        if (dadosFilial) {
+          filialNome = dadosFilial.nome || filialNome || 'MONKEY SHOP';
+          filialLogo = dadosFilial.logo_url || filialLogo || null;
+          filialCnpj = dadosFilial.cnpj || filialCnpj || '';
+          filialEndereco = dadosFilial.endereco || filialEndereco || '';
+          filialTelefone = dadosFilial.telefone || filialTelefone || '';
+        }
+      }
+    } catch (e) {
+      console.warn('Aviso ao consultar filial:', e);
+    }
 
     const metodoPag = venda.metodo_pagamento || venda.forma_pagamento || 'N/A';
     const valorTotalNum = parseFloat(venda.valor_total || venda.valor || 0);
@@ -13957,14 +14066,15 @@ export default function Dashboard({ session, profileDataProps }) {
 
     const dadosRecibo = {
       venda_id: venda.id,
+      filial_id: venda.filial_id || activeFilialId,
       tipo_recibo: tipo,
       data: venda.created_at || new Date().toISOString(),
       vendedor_nome: vendedorNome,
       filial_nome: filialNome,
-      filial_logo: filialObj?.logo_url || null,
-      filial_endereco: filialObj?.endereco || 'Endereço não informado',
-      filial_cnpj: filialObj?.cnpj || 'CNPJ não informado',
-      filial_telefone: filialObj?.telefone || '',
+      filial_logo: filialLogo,
+      filial_endereco: filialEndereco,
+      filial_cnpj: filialCnpj,
+      filial_telefone: filialTelefone,
       cliente_id: venda.cliente_id || clienteObj?.id || null,
       cliente_nome: (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final')
         ? venda.cliente_nome
@@ -26650,22 +26760,26 @@ export default function Dashboard({ session, profileDataProps }) {
 
             <div
               id="area-cupom-impressao"
-              className={`bg-card text-card-foreground border border-border rounded-2xl w-full p-6 space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:shadow-none transition-all ${
-                formatoImpressao === 'a4' ? 'max-w-4xl modo-a4' : 'max-w-md modo-termica'
+              className={`w-full space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:shadow-none transition-all ${
+                formatoImpressao === 'a4'
+                  ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8'
+                  : 'max-w-md modo-termica bg-card text-card-foreground border border-border rounded-2xl p-6'
               }`}
             >
               {/* Barra Superior de Seleção de Formato e Fechar (Apenas na Tela) */}
               <div className="flex items-center justify-between pb-3 border-b border-border/60 print:hidden gap-2 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-muted-foreground font-semibold">Modelo de Impressão:</span>
-                  <div className="inline-flex p-1 bg-surface-elevated border border-border rounded-xl">
+                  <span className={`text-xs font-semibold ${formatoImpressao === 'a4' ? 'text-zinc-600' : 'text-muted-foreground'}`}>
+                    Modelo de Impressão:
+                  </span>
+                  <div className={`inline-flex p-1 rounded-xl border ${formatoImpressao === 'a4' ? 'bg-zinc-100 border-zinc-300' : 'bg-surface-elevated border-border'}`}>
                     <button
                       type="button"
                       onClick={() => setFormatoImpressao('termica')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                         formatoImpressao === 'termica'
                           ? 'bg-zinc-800 text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
+                          : 'text-zinc-600 hover:text-black'
                       }`}
                     >
                       <Printer size={13} />
@@ -26677,7 +26791,7 @@ export default function Dashboard({ session, profileDataProps }) {
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                         formatoImpressao === 'a4'
                           ? 'bg-[#6A0DAD] text-white shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
+                          : 'text-zinc-600 hover:text-black'
                       }`}
                     >
                       <FileText size={13} />
@@ -26689,7 +26803,11 @@ export default function Dashboard({ session, profileDataProps }) {
                 <button
                   type="button"
                   onClick={() => setPdvReciboAtivo(false)}
-                  className="p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                  className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                    formatoImpressao === 'a4'
+                      ? 'bg-zinc-100 border-zinc-300 hover:border-red-500 text-zinc-600 hover:text-red-600'
+                      : 'bg-surface border-border hover:border-destructive text-muted-foreground hover:text-destructive'
+                  }`}
                   title="Fechar"
                 >
                   <X size={16} />
@@ -26698,6 +26816,34 @@ export default function Dashboard({ session, profileDataProps }) {
 
               {/* Cálculos e Normalização de Dados */}
               {(() => {
+                const formatarDataHora = (dataStr) => {
+                  if (!dataStr) return new Date().toLocaleString('pt-BR');
+                  try {
+                    return new Date(dataStr).toLocaleString('pt-BR');
+                  } catch {
+                    return String(dataStr);
+                  }
+                };
+
+                const filialCadastrada = filiais.find(f => String(f.id) === String(pdvReciboDados.filial_id || activeFilialId));
+                const logoLoja = pdvReciboDados.filial_logo || filialCadastrada?.logo_url || null;
+                const nomeLoja = (pdvReciboDados.filial_nome && pdvReciboDados.filial_nome !== 'Filial')
+                  ? pdvReciboDados.filial_nome
+                  : (filialCadastrada?.nome || 'MONKEY SHOP');
+                const cnpjLoja = (pdvReciboDados.filial_cnpj && !['CNPJ não informado', 'CNPJ não cadastrado'].includes(pdvReciboDados.filial_cnpj))
+                  ? pdvReciboDados.filial_cnpj
+                  : (filialCadastrada?.cnpj || '');
+                const enderecoLoja = (pdvReciboDados.filial_endereco && !['Endereço não informado', 'Endereço não cadastrado'].includes(pdvReciboDados.filial_endereco))
+                  ? pdvReciboDados.filial_endereco
+                  : (filialCadastrada?.endereco || '');
+                const telefoneLoja = (pdvReciboDados.filial_telefone && !['Telefone não cadastrado'].includes(pdvReciboDados.filial_telefone))
+                  ? pdvReciboDados.filial_telefone
+                  : (filialCadastrada?.telefone || '');
+
+                const idVendaFormatado = pdvReciboDados.venda_id
+                  ? String(pdvReciboDados.venda_id).slice(0, 8).toUpperCase()
+                  : '00000000';
+
                 const isAvista = pdvReciboDados.tipo_recibo === 'AVISTA';
                 const itens = pdvReciboDados.itens && pdvReciboDados.itens.length > 0
                   ? pdvReciboDados.itens
@@ -26765,9 +26911,10 @@ export default function Dashboard({ session, profileDataProps }) {
                   }
                 }
 
-                const textoGarantia = (pdvReciboDados.obs_garantia && pdvReciboDados.obs_garantia.trim())
+                const textoGarantiaPadrao = 'Garantia legal conforme Art. 26 do Código de Defesa do Consumidor (CDC) de 90 dias contra defeitos de fabricação. A garantia não cobre avarias decorrentes de quedas, trincados, contato com líquidos ou uso indevido de acessórios não homologados.';
+                const textoGarantiaExibido = (pdvReciboDados.obs_garantia && pdvReciboDados.obs_garantia.trim())
                   ? pdvReciboDados.obs_garantia.trim()
-                  : 'Garantia legal conforme CDC de 90 dias contra defeitos de fabricação.';
+                  : textoGarantiaPadrao;
 
                 return (
                   <>
@@ -26775,8 +26922,8 @@ export default function Dashboard({ session, profileDataProps }) {
                         LAYOUT 1: TÉRMICA (80MM)
                         ======================================================== */}
                     {formatoImpressao === 'termica' ? (
-                      <div className="space-y-4 text-xs font-mono">
-                        {/* Cabeçalho Térmica */}
+                      <div className="space-y-4 text-xs font-mono text-zinc-200 print:text-black">
+                        {/* 3. Cabeçalho no Modelo Térmico (80mm) */}
                         <div className="text-center space-y-1">
                           <span className={`text-[10px] border px-2.5 py-0.5 rounded-full font-bold uppercase print:hidden ${
                             isAvista
@@ -26786,25 +26933,25 @@ export default function Dashboard({ session, profileDataProps }) {
                             {isAvista ? 'Recibo à Vista (80mm)' : 'Recibo Detalhado (80mm)'}
                           </span>
 
-                          {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
-                            <div className="recibo-logo-container w-full flex justify-center items-center my-2">
+                          {logoLoja && (
+                            <div className="recibo-logo-container w-full flex justify-center items-center my-1">
                               <img
-                                src={pdvReciboDados.filial_logo}
-                                alt="Logo da Filial"
+                                src={logoLoja}
+                                alt={nomeLoja}
                                 onLoad={() => setIsImageLoaded(true)}
-                                className="recibo-logo-img max-w-[140px] max-h-[75px] w-auto h-auto object-contain block mx-auto"
+                                className="recibo-logo-img max-h-12 mx-auto mb-1 w-auto object-contain block"
+                                crossOrigin="anonymous"
                               />
                             </div>
-                          ) : (
-                            <h2 className="text-base font-bold text-white print:text-black tracking-tight mb-1 uppercase">
-                              {pdvReciboDados.filial_nome}
-                            </h2>
                           )}
 
-                          <div className="text-[10px] text-zinc-400 print:text-black leading-tight space-y-0.5">
-                            <p className="font-bold text-zinc-200 print:text-black">{pdvReciboDados.filial_nome}</p>
-                            <p>{pdvReciboDados.filial_endereco}</p>
-                            <p>CNPJ: {pdvReciboDados.filial_cnpj || '---'} {pdvReciboDados.filial_telefone ? `| Tel: ${pdvReciboDados.filial_telefone}` : ''}</p>
+                          <div className="font-black text-sm text-center text-white print:text-black uppercase">
+                            {nomeLoja}
+                          </div>
+
+                          <div className="text-[10px] text-center text-zinc-300 print:text-black leading-tight">
+                            {enderecoLoja && <>{enderecoLoja}<br /></>}
+                            CNPJ: {cnpjLoja || '---'} {telefoneLoja && `| Tel: ${telefoneLoja}`}
                           </div>
 
                           {pdvReciboDados.is_trainee && (
@@ -26813,9 +26960,9 @@ export default function Dashboard({ session, profileDataProps }) {
                             </div>
                           )}
 
-                          <div className="text-[10px] text-zinc-500 print:text-black pt-1 border-t border-dashed border-zinc-800 print:border-black flex justify-between">
-                            <span>Venda #{pdvReciboDados.venda_id}</span>
-                            <span>{new Date(pdvReciboDados.data).toLocaleString('pt-BR')}</span>
+                          <div className="text-[10px] text-zinc-400 print:text-black pt-1 border-t border-dashed border-zinc-700 print:border-black flex justify-between">
+                            <span>Venda #{idVendaFormatado}</span>
+                            <span>{formatarDataHora(pdvReciboDados.data)}</span>
                           </div>
                         </div>
 
@@ -26824,14 +26971,14 @@ export default function Dashboard({ session, profileDataProps }) {
                         {/* Informações Básicas */}
                         <div className="space-y-1 text-[11px] leading-tight">
                           <div className="flex justify-between">
-                            <span className="text-zinc-500 print:text-black uppercase text-[9px] font-bold">Vendedor:</span>
-                            <span className="text-zinc-200 print:text-black font-semibold">{pdvReciboDados.vendedor_nome}</span>
+                            <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">Vendedor:</span>
+                            <span className="text-zinc-100 print:text-black font-semibold">{pdvReciboDados.vendedor_nome}</span>
                           </div>
                           {(pdvReciboDados.cliente_nome || pdvReciboDados.cliente_cpf_cnpj) && (
                             <div className="pt-1 border-t border-dashed border-zinc-800 print:border-black">
                               <div className="flex justify-between">
-                                <span className="text-zinc-500 print:text-black uppercase text-[9px] font-bold">Cliente:</span>
-                                <span className="text-zinc-200 print:text-black font-semibold text-right max-w-[180px] truncate">
+                                <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">Cliente:</span>
+                                <span className="text-zinc-100 print:text-black font-semibold text-right max-w-[180px] truncate">
                                   {pdvReciboDados.cliente_nome || 'Consumidor Final'}
                                 </span>
                               </div>
@@ -26938,16 +27085,16 @@ export default function Dashboard({ session, profileDataProps }) {
                         </div>
 
                         {/* BLOCO DESTACADO: TERMO DE GARANTIA (Alto Contraste P&B) */}
-                        <div className="border border-zinc-300 dark:border-zinc-700 rounded p-2 bg-zinc-50 dark:bg-zinc-900/50 my-2 print:border-black print:bg-transparent">
-                          <div className="text-[11px] font-bold text-zinc-950 dark:text-zinc-100 print:text-black flex items-center gap-1 mb-0.5 uppercase">
-                            <span>🛡️ TERMO DE GARANTIA</span>
+                        <div className="border border-black rounded p-2.5 bg-white text-black my-2 print:border-black print:bg-white">
+                          <div className="text-[11px] font-black uppercase text-black flex items-center gap-1.5 mb-1">
+                            <span>🛡️ TERMO DE GARANTIA LEGAL</span>
                           </div>
-                          <p className="text-[10px] text-zinc-800 dark:text-zinc-200 print:text-black font-semibold leading-tight whitespace-pre-wrap">
-                            {textoGarantia}
+                          <p className="text-[10px] text-black font-normal leading-tight whitespace-pre-wrap">
+                            {textoGarantiaExibido}
                           </p>
                         </div>
 
-                        <p className="text-[9px] text-center text-zinc-500 print:text-black pt-1">
+                        <p className="text-[9px] text-center text-zinc-400 print:text-black pt-1">
                           Obrigado pela preferência!
                         </p>
                       </div>
@@ -26955,133 +27102,122 @@ export default function Dashboard({ session, profileDataProps }) {
                       /* ========================================================
                          LAYOUT 2: RELATÓRIO / TERMO EXTENDIDO (A4)
                          ======================================================== */
-                      <div className="space-y-6 text-xs font-sans text-zinc-900 dark:text-zinc-100 print:text-black">
-                        {/* 1. Cabeçalho Corporativo */}
-                        <div className="flex justify-between items-start border-b-2 border-zinc-900 dark:border-zinc-700 print:border-black pb-4">
-                          <div className="space-y-1.5 max-w-[50%]">
-                            {pdvReciboDados.filial_logo && pdvReciboDados.filial_logo.trim() !== '' ? (
-                              <div className="recibo-logo-container">
-                                <img
-                                  src={pdvReciboDados.filial_logo}
-                                  alt="Logo da Filial"
-                                  onLoad={() => setIsImageLoaded(true)}
-                                  className="recibo-logo-img max-h-16 w-auto object-contain block"
-                                />
-                              </div>
+                      <div className="space-y-6 text-xs font-sans text-black bg-white print:bg-white print:text-black">
+                        {/* 2. Montar o Cabeçalho Oficial no Modelo A4 */}
+                        <div className="flex items-start justify-between border-b-2 border-black pb-4 mb-4">
+                          <div className="flex items-center gap-4">
+                            {logoLoja ? (
+                              <img 
+                                src={logoLoja} 
+                                alt={nomeLoja} 
+                                className="h-16 max-w-[160px] object-contain"
+                                crossOrigin="anonymous"
+                              />
                             ) : (
-                              <h1 className="text-2xl font-black text-zinc-900 dark:text-white print:text-black tracking-tight uppercase">
-                                {pdvReciboDados.filial_nome}
-                              </h1>
+                              <h1 className="text-2xl font-black tracking-tight text-black">{nomeLoja}</h1>
                             )}
-                            <div className="inline-block px-2 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary dark:text-[#A78BFA] print:text-black print:border-black text-[11px] font-bold uppercase tracking-wider">
-                              Comprovante de Venda & Termo de Garantia
+                            <div>
+                              <h2 className="text-base font-bold text-black uppercase">{nomeLoja}</h2>
+                              <p className="text-xs text-zinc-800 max-w-sm leading-snug">{enderecoLoja}</p>
                             </div>
                           </div>
 
-                          <div className="text-right space-y-0.5 text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
-                            <p className="font-bold text-sm text-zinc-900 dark:text-white print:text-black">{pdvReciboDados.filial_nome}</p>
-                            <p>CNPJ: {pdvReciboDados.filial_cnpj || '---'}</p>
-                            <p>{pdvReciboDados.filial_endereco}</p>
-                            {pdvReciboDados.filial_telefone && <p>Telefone: {pdvReciboDados.filial_telefone}</p>}
-                            <div className="pt-1.5">
-                              <p className="font-mono font-extrabold text-xs text-zinc-950 dark:text-white print:text-black">
-                                Venda Nº: #{pdvReciboDados.venda_id}
-                              </p>
-                              <p className="text-[11px] text-zinc-500 print:text-black">
-                                Emissão: {new Date(pdvReciboDados.data).toLocaleString('pt-BR')}
-                              </p>
-                            </div>
+                          <div className="text-right text-xs text-zinc-900 space-y-0.5">
+                            <p><span className="font-bold">CNPJ:</span> {cnpjLoja}</p>
+                            {telefoneLoja && <p><span className="font-bold">Contato:</span> {telefoneLoja}</p>}
+                            <p><span className="font-bold">Emissão:</span> {formatarDataHora(pdvReciboDados.data)}</p>
+                            <p className="font-mono text-[11px] text-zinc-600">Venda #{idVendaFormatado}</p>
                           </div>
                         </div>
 
-                        {/* 2. Identificação das Partes (Cliente & Operação) */}
+                        {/* Identificação das Partes (Cliente & Operação) */}
                         <div className="grid grid-cols-2 gap-4">
                           {/* Dados do Cliente */}
-                          <div className="border border-zinc-300 dark:border-zinc-800 print:border-zinc-400 rounded-lg p-3 bg-zinc-50/60 dark:bg-zinc-900/40 print:bg-transparent space-y-1">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block border-b border-zinc-200 dark:border-zinc-800 print:border-zinc-400 pb-1">
+                          <div className="border border-black rounded-lg p-3 bg-white text-black space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-black block border-b border-black pb-1">
                               Identificação do Cliente / Destinatário
                             </span>
-                            <p className="font-bold text-sm text-zinc-900 dark:text-white print:text-black">
+                            <p className="font-bold text-sm text-black">
                               {pdvReciboDados.cliente_nome || 'Consumidor Final'}
                             </p>
-                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
-                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">CPF/CNPJ:</strong> {pdvReciboDados.cliente_cpf_cnpj || 'Não informado'}
+                            <p className="text-xs text-black">
+                              <strong className="font-bold">CPF/CNPJ:</strong> {pdvReciboDados.cliente_cpf_cnpj || 'Não informado'}
                             </p>
                             {pdvReciboDados.cliente_telefone && (
-                              <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
-                                <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Telefone:</strong> {pdvReciboDados.cliente_telefone}
+                              <p className="text-xs text-black">
+                                <strong className="font-bold">Telefone:</strong> {pdvReciboDados.cliente_telefone}
                               </p>
                             )}
                             {pdvReciboDados.cliente_email && (
-                              <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
-                                <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">E-mail:</strong> {pdvReciboDados.cliente_email}
+                              <p className="text-xs text-black">
+                                <strong className="font-bold">E-mail:</strong> {pdvReciboDados.cliente_email}
                               </p>
                             )}
                           </div>
 
                           {/* Dados da Operação */}
-                          <div className="border border-zinc-300 dark:border-zinc-800 print:border-zinc-400 rounded-lg p-3 bg-zinc-50/60 dark:bg-zinc-900/40 print:bg-transparent space-y-1">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block border-b border-zinc-200 dark:border-zinc-800 print:border-zinc-400 pb-1">
+                          <div className="border border-black rounded-lg p-3 bg-white text-black space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-black block border-b border-black pb-1">
                               Dados da Operação Comercial
                             </span>
-                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
-                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Vendedor(a):</strong> {pdvReciboDados.vendedor_nome}
+                            <p className="text-xs text-black">
+                              <strong className="font-bold">Vendedor(a):</strong> {pdvReciboDados.vendedor_nome}
                             </p>
-                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
-                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Filial Emissora:</strong> {pdvReciboDados.filial_nome}
+                            <p className="text-xs text-black">
+                              <strong className="font-bold">Filial Emissora:</strong> {nomeLoja}
                             </p>
-                            <p className="text-xs text-zinc-600 dark:text-zinc-300 print:text-black">
-                              <strong className="text-zinc-700 dark:text-zinc-200 print:text-black">Tipo de Documento:</strong> {isAvista ? 'Venda À Vista (Simplificado)' : 'Venda Detalhada'}
+                            <p className="text-xs text-black">
+                              <strong className="font-bold">Tipo de Documento:</strong> {isAvista ? 'Venda À Vista (Simplificado)' : 'Venda Detalhada'}
                             </p>
                             {pdvReciboDados.is_trainee && (
-                              <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 print:text-black">
+                              <p className="text-xs font-semibold text-black">
                                 Atendimento com participação de Trainee
                               </p>
                             )}
                           </div>
                         </div>
 
-                        {/* 3. Tabela Estilizada de Produtos (100% de largura) */}
+                        {/* 4. Tabela de Produtos (100% de largura, text-black, sem tons claros) */}
                         <div className="space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-black block">
                             Produtos / Itens Adquiridos
                           </span>
                           <table className="w-full border-collapse text-left text-xs">
                             <thead>
-                              <tr className="bg-zinc-100 dark:bg-zinc-800 print:bg-zinc-100 border-y border-zinc-300 dark:border-zinc-700 print:border-black text-[10px] font-bold uppercase text-zinc-700 dark:text-zinc-300 print:text-black">
-                                <th className="py-2.5 px-3 w-12 text-center">ITEM</th>
-                                <th className="py-2.5 px-3">PRODUTO / IMEI</th>
-                                <th className="py-2.5 px-3 w-16 text-center">QTD</th>
-                                <th className="py-2.5 px-3 w-32 text-right">VALOR UNIT.</th>
-                                <th className="py-2.5 px-3 w-32 text-right">TOTAL</th>
+                              <tr className="bg-zinc-100 print:bg-transparent border-y-2 border-black text-[11px] font-bold uppercase text-black">
+                                <th className="py-2.5 px-3 w-12 text-center text-black">ITEM</th>
+                                <th className="py-2.5 px-3 text-black">PRODUTO / IMEI</th>
+                                <th className="py-2.5 px-3 w-16 text-center text-black">QTD</th>
+                                <th className="py-2.5 px-3 w-32 text-right text-black">VALOR UNIT.</th>
+                                <th className="py-2.5 px-3 w-32 text-right text-black">TOTAL</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 print:divide-zinc-300">
+                            <tbody className="divide-y divide-zinc-300 print:divide-zinc-400">
                               {itens.map((item, idx) => {
                                 const itemPrecoUnitario = Number((isAvista ? (item.preco_original ?? item.valor_unitario) : (item.valor_unitario ?? item.preco_original)) ?? 0);
                                 const itemSubtotal = Number((isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1))) : (item.valor_total ?? (itemPrecoUnitario * Number(item.quantidade || 1)))) ?? 0);
                                 return (
-                                  <tr key={idx} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 print:hover:bg-transparent">
-                                    <td className="py-2.5 px-3 text-center font-bold text-zinc-500 print:text-black">
+                                  <tr key={idx}>
+                                    <td className="py-2.5 px-3 text-center font-bold text-black">
                                       {idx + 1}
                                     </td>
                                     <td className="py-2.5 px-3">
-                                      <span className="font-bold text-zinc-900 dark:text-zinc-100 print:text-black block">
+                                      <span className="font-bold text-black text-xs block">
                                         {item.nome}
                                       </span>
                                       {item.imei && (
-                                        <span className="inline-block mt-0.5 text-[10px] font-mono text-zinc-600 dark:text-zinc-400 print:text-black bg-zinc-100 dark:bg-zinc-800 print:bg-transparent px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 print:border-none">
+                                        <span className="inline-block mt-0.5 text-[11px] font-mono text-zinc-800">
                                           IMEI: {item.imei}
                                         </span>
                                       )}
                                     </td>
-                                    <td className="py-2.5 px-3 text-center font-medium text-zinc-700 dark:text-zinc-300 print:text-black">
+                                    <td className="py-2.5 px-3 text-center font-medium text-black">
                                       {item.quantidade || 1} un.
                                     </td>
-                                    <td className="py-2.5 px-3 text-right font-mono text-zinc-700 dark:text-zinc-300 print:text-black">
+                                    <td className="py-2.5 px-3 text-right font-mono text-black">
                                       R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
-                                    <td className="py-2.5 px-3 text-right font-mono font-bold text-zinc-900 dark:text-zinc-100 print:text-black">
+                                    <td className="py-2.5 px-3 text-right font-mono font-bold text-black">
                                       R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
                                   </tr>
@@ -27091,30 +27227,30 @@ export default function Dashboard({ session, profileDataProps }) {
                           </table>
                         </div>
 
-                        {/* 4. Aparelhos Recebidos na Troca se houver */}
+                        {/* Aparelhos Recebidos na Troca se houver */}
                         {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
                           <div className="space-y-1">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-black block">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-black block">
                               Aparelho(s) Recebido(s) na Troca (Trade-in)
                             </span>
-                            <table className="w-full border-collapse text-left text-xs border border-zinc-200 dark:border-zinc-800 print:border-zinc-400 rounded-lg overflow-hidden">
+                            <table className="w-full border-collapse text-left text-xs border border-black rounded-lg overflow-hidden">
                               <thead>
-                                <tr className="bg-zinc-100 dark:bg-zinc-800 print:bg-zinc-100 border-b border-zinc-300 dark:border-zinc-700 print:border-black text-[10px] font-bold uppercase text-zinc-700 dark:text-zinc-300 print:text-black">
-                                  <th className="py-2 px-3">APARELHO</th>
-                                  <th className="py-2 px-3">IMEI</th>
-                                  <th className="py-2 px-3">ESTADO / BATERIA</th>
-                                  <th className="py-2 px-3 text-right">VALOR DEDUZIDO</th>
+                                <tr className="bg-zinc-100 print:bg-transparent border-b border-black text-[10px] font-bold uppercase text-black">
+                                  <th className="py-2 px-3 text-black">APARELHO</th>
+                                  <th className="py-2 px-3 text-black">IMEI</th>
+                                  <th className="py-2 px-3 text-black">ESTADO / BATERIA</th>
+                                  <th className="py-2 px-3 text-right text-black">VALOR DEDUZIDO</th>
                                 </tr>
                               </thead>
-                              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 print:divide-zinc-300">
+                              <tbody className="divide-y divide-zinc-300 print:divide-zinc-400">
                                 {pdvReciboDados.trocas.map((troca, idx) => (
                                   <tr key={idx}>
-                                    <td className="py-2 px-3 font-bold text-zinc-900 dark:text-zinc-100 print:text-black">{troca.nome}</td>
-                                    <td className="py-2 px-3 font-mono text-zinc-600 dark:text-zinc-400 print:text-black">{troca.imei}</td>
-                                    <td className="py-2 px-3 text-zinc-600 dark:text-zinc-300 print:text-black">
+                                    <td className="py-2 px-3 font-bold text-black">{troca.nome}</td>
+                                    <td className="py-2 px-3 font-mono text-zinc-800">{troca.imei}</td>
+                                    <td className="py-2 px-3 text-zinc-800">
                                       Cor: {troca.cor} · Bateria: {troca.bateria}% {troca.obs ? `(${troca.obs})` : ''}
                                     </td>
-                                    <td className="py-2 px-3 text-right font-mono font-bold text-red-600 print:text-black">
+                                    <td className="py-2 px-3 text-right font-mono font-bold text-black">
                                       - R$ {Number(troca.valor_avaliacao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
                                   </tr>
@@ -27124,66 +27260,65 @@ export default function Dashboard({ session, profileDataProps }) {
                           </div>
                         )}
 
-                        {/* 5. Totais e Pagamentos alinhados à direita */}
+                        {/* Totais e Pagamentos alinhados à direita */}
                         <div className="flex justify-end pt-2">
-                          <div className="w-80 space-y-1.5 text-xs">
-                            <div className="flex justify-between text-zinc-600 dark:text-zinc-400 print:text-black">
+                          <div className="w-80 space-y-1.5 text-xs text-black">
+                            <div className="flex justify-between text-black">
                               <span>Subtotal dos Produtos:</span>
                               <span className="font-mono font-semibold">R$ {subtotalExibido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                             </div>
                             {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                              <div className="flex justify-between text-red-600 print:text-black font-semibold">
+                              <div className="flex justify-between text-black font-semibold">
                                 <span>Abatimento por Troca:</span>
                                 <span className="font-mono">- R$ {Number(fin.desconto_troca || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                               </div>
                             )}
-                            <div className="flex justify-between text-zinc-600 dark:text-zinc-400 print:text-black">
+                            <div className="flex justify-between text-black">
                               <span>Forma de Pagamento:</span>
                               <span className="font-mono font-bold uppercase">{descricaoPagamento}</span>
                             </div>
                             {parcelamentoTexto && (
-                              <div className="flex justify-between text-zinc-600 dark:text-zinc-400 print:text-black">
+                              <div className="flex justify-between text-black">
                                 <span>Parcelamento:</span>
                                 <span className="font-mono font-semibold">{parcelamentoTexto}</span>
                               </div>
                             )}
-                            <div className="border-t-2 border-zinc-900 dark:border-zinc-700 print:border-black pt-2 mt-2 flex justify-between text-sm font-extrabold text-zinc-950 dark:text-white print:text-black">
-                              <span>TOTAL PAGO:</span>
+                            <div className="border-t-2 border-black pt-2 mt-2 flex justify-between text-sm font-extrabold text-black">
+                              <span>VALOR TOTAL PAGO:</span>
                               <span className="font-mono text-base">R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                             </div>
                           </div>
                         </div>
 
-                        {/* 6. Bloco do Termo de Garantia (Alto Contraste P&B) */}
-                        <div className="border border-zinc-300 dark:border-zinc-700 rounded-lg p-3 bg-zinc-50 dark:bg-zinc-900/50 my-4 print:border-black print:bg-transparent">
-                          <div className="text-[11px] font-bold text-zinc-950 dark:text-zinc-100 print:text-black flex items-center gap-1.5 mb-1 uppercase tracking-wide">
-                            <span>🛡️</span>
-                            <span>TERMO DE GARANTIA E CONDIÇÕES DE COMPRA</span>
+                        {/* 4. BLOCO "TERMO DE GARANTIA E CONDIÇÕES DE COMPRA" (Alto Contraste P&B) */}
+                        <div className="border border-black rounded p-3 bg-white text-black my-4 print:border-black print:bg-white">
+                          <div className="text-xs font-black uppercase text-black flex items-center gap-1.5 mb-1">
+                            <span>🛡️ TERMO DE GARANTIA LEGAL</span>
                           </div>
-                          <p className="text-[10px] text-zinc-800 dark:text-zinc-200 print:text-black font-semibold leading-relaxed whitespace-pre-wrap">
-                            {textoGarantia}
+                          <p className="text-[11px] text-black font-normal leading-relaxed whitespace-pre-wrap">
+                            {textoGarantiaExibido}
                           </p>
                         </div>
 
-                        {/* 7. Campo para Assinatura do Cliente */}
-                        <div className="mt-10 pt-4 border-t border-zinc-200 dark:border-zinc-800 print:border-zinc-400">
-                          <div className="grid grid-cols-2 gap-12 text-center text-xs">
+                        {/* Campo para Assinatura do Cliente */}
+                        <div className="mt-8 pt-4 border-t border-black">
+                          <div className="grid grid-cols-2 gap-12 text-center text-xs text-black">
                             <div>
-                              <div className="border-b border-zinc-400 dark:border-zinc-600 print:border-black pb-10 mb-2"></div>
-                              <p className="font-bold text-zinc-900 dark:text-zinc-100 print:text-black">{pdvReciboDados.filial_nome}</p>
-                              <p className="text-[10px] text-zinc-500 print:text-black">Vendedor(a): {pdvReciboDados.vendedor_nome}</p>
+                              <div className="border-b border-black pb-10 mb-2"></div>
+                              <p className="font-bold text-black">{nomeLoja}</p>
+                              <p className="text-[10px] text-zinc-700 print:text-black">Vendedor(a): {pdvReciboDados.vendedor_nome}</p>
                             </div>
                             <div>
-                              <div className="border-b border-zinc-400 dark:border-zinc-600 print:border-black pb-10 mb-2"></div>
-                              <p className="font-bold text-zinc-900 dark:text-zinc-100 print:text-black">
+                              <div className="border-b border-black pb-10 mb-2"></div>
+                              <p className="font-bold text-black">
                                 {pdvReciboDados.cliente_nome || 'Assinatura do Cliente / Recebido'}
                               </p>
-                              <p className="text-[10px] text-zinc-500 print:text-black">
+                              <p className="text-[10px] text-zinc-700 print:text-black">
                                 {pdvReciboDados.cliente_cpf_cnpj ? `CPF/CNPJ: ${pdvReciboDados.cliente_cpf_cnpj}` : 'Recebido em perfeitas condições'}
                               </p>
                             </div>
                           </div>
-                          <p className="text-[9px] text-center text-zinc-400 print:text-black mt-4">
+                          <p className="text-[9px] text-center text-zinc-600 print:text-black mt-4">
                             Documento emitido para conferência e garantia de compra · Zênite OS
                           </p>
                         </div>
