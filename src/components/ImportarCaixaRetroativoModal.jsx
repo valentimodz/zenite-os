@@ -23,13 +23,34 @@ import {
   Trash2
 } from 'lucide-react';
 
+// Helper de parsing para identificar Vendedor Titular e Trainee (ex: "ISLAYNE COELHO/JARDEL", "AMANDA/PAULA")
+export function parsearVendedores(rawVendedor) {
+  if (!rawVendedor) return { vendedorNome: 'DESCONHECIDO', isTrainee: false, traineeNome: null };
+
+  const partes = String(rawVendedor).split('/').map(p => p.trim().toUpperCase());
+  
+  if (partes.length > 1) {
+    return {
+      vendedorNome: partes[0],          // Ex: "ISLAYNE COELHO", "AMANDA", "SENA"
+      isTrainee: true,
+      traineeNome: partes[1]           // Ex: "JARDEL", "PAULA"
+    };
+  }
+
+  return {
+    vendedorNome: partes[0],
+    isTrainee: false,
+    traineeNome: null
+  };
+}
+
 export default function ImportarCaixaRetroativoModal({
   isOpen,
   onClose,
-  perfilUsuario,
   company,
   filiais = [],
-  onSuccess
+  perfilUsuario,
+  onImportSuccess
 }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
@@ -117,19 +138,25 @@ export default function ImportarCaixaRetroativoModal({
         }
       }
 
-      // Mapear itens da venda com estado de IMEI controlado
-      const mapped = (result.vendas || []).map((item, idx) => ({
-        id: `item-${idx}-${Date.now()}`,
-        produto_nome: item.produto_nome || 'Produto Sem Nome',
-        vendedor_nome: item.vendedor_nome || 'Vendedor Padrão',
-        categoria: item.categoria || (item.tipo_item === 'APARELHO' ? 'Celulares' : 'Acessórios'),
-        tipo_item: item.tipo_item === 'APARELHO' ? 'APARELHO' : 'ACESSORIO',
-        cor: item.cor || '',
-        quantidade: Math.max(1, Number(item.quantidade) || 1),
-        valor_total: Number(item.valor_total) || 0,
-        forma_pagamento: item.forma_pagamento_principal || 'PIX',
-        imei: '' // preenchido pelo usuário para aparelhos
-      }));
+      // Mapear itens da venda com parsing de vendedor e trainee
+      const mapped = (result.vendas || []).map((item, idx) => {
+        const parsedVend = parsearVendedores(item.vendedor_nome);
+        return {
+          id: `item-${idx}-${Date.now()}`,
+          produto_nome: item.produto_nome || 'Produto Sem Nome',
+          vendedor_nome: parsedVend.vendedorNome || 'Vendedor Padrão',
+          is_trainee: parsedVend.isTrainee,
+          trainee_nome: parsedVend.traineeNome,
+          raw_vendedor: item.vendedor_nome || '',
+          categoria: item.categoria || (item.tipo_item === 'APARELHO' ? 'Celulares' : 'Acessórios'),
+          tipo_item: item.tipo_item === 'APARELHO' ? 'APARELHO' : 'ACESSORIO',
+          cor: item.cor || '',
+          quantidade: Math.max(1, Number(item.quantidade) || 1),
+          valor_total: Number(item.valor_total) || 0,
+          forma_pagamento: item.forma_pagamento_principal || 'PIX',
+          imei: '' // preenchido pelo usuário para aparelhos
+        };
+      });
 
       setItensVenda(mapped);
       setSuccessMessage(`IA processou a folha com sucesso! ${mapped.length} itens extraídos.`);
@@ -144,6 +171,16 @@ export default function ImportarCaixaRetroativoModal({
   const handleUpdateItem = (id, field, value) => {
     setItensVenda(prev => prev.map(item => {
       if (item.id === id) {
+        if (field === 'vendedor_nome') {
+          const parsed = parsearVendedores(value);
+          return {
+            ...item,
+            vendedor_nome: parsed.vendedorNome,
+            is_trainee: parsed.isTrainee,
+            trainee_nome: parsed.traineeNome,
+            raw_vendedor: value
+          };
+        }
         return { ...item, [field]: value };
       }
       return item;
@@ -183,6 +220,43 @@ export default function ImportarCaixaRetroativoModal({
     try {
       // Formatar a data ISO retroativa (ex: 2026-09-16T18:00:00.000Z)
       const dataIsoRetroativa = `${dataCaixa}T18:00:00.000Z`;
+
+      // 0. Carregar profiles em cache para associar titular e trainee
+      let profilesList = [];
+      try {
+        const { data: profs } = await supabase.from('profiles').select('id, nome, role, is_treinner, filial_id');
+        if (profs && profs.length > 0) profilesList = profs;
+      } catch (eProf) {
+        console.warn('Erro ao carregar profiles:', eProf);
+      }
+
+      const cleanStr = (s) => (s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const encontrarProfile = (nomeBusca) => {
+        if (!nomeBusca || profilesList.length === 0) return null;
+        const normBusca = cleanStr(nomeBusca);
+        if (!normBusca) return null;
+
+        // Match exato ou includes nas palavras
+        let match = profilesList.find(p => {
+          const normP = cleanStr(p.nome);
+          const palavras = normP.split(' ');
+          return normP === normBusca || palavras.includes(normBusca) || normP.startsWith(normBusca) || normP.endsWith(normBusca);
+        });
+        if (!match) {
+          match = profilesList.find(p => {
+            const normP = cleanStr(p.nome);
+            return normP.includes(normBusca) || normBusca.includes(normP);
+          });
+        }
+        return match || null;
+      };
 
       let salvosCount = 0;
 
@@ -250,26 +324,47 @@ export default function ImportarCaixaRetroativoModal({
           }
         }
 
-        // 3. Inserir a venda na tabela 'vendas' com created_at retroativo
-        const precoUnitario = item.quantidade > 0 ? (item.valor_total / item.quantidade) : item.valor_total;
-        
-        let resolvedVendedorId = perfilUsuario?.id || null;
-        const targetVendNome = (item.vendedor_nome || '').trim();
-        if (targetVendNome) {
-          try {
-            const { data: profMatch } = await supabase
-              .from('profiles')
-              .select('id, nome')
-              .ilike('nome', `%${targetVendNome}%`)
-              .limit(1)
-              .maybeSingle();
-            if (profMatch?.id) {
-              resolvedVendedorId = profMatch.id;
-            }
-          } catch (eMatch) {
-            console.warn('Aviso ao associar vendedor_id:', eMatch);
+        // 3. Tratamento e parsing de Vendedor Titular e Trainee
+        const info = parsearVendedores(item.vendedor_nome || item.raw_vendedor);
+        const titularProfile = encontrarProfile(info.vendedorNome) || (perfilUsuario ? { id: perfilUsuario.id, nome: perfilUsuario.nome } : null);
+        const traineeProfile = info.isTrainee ? encontrarProfile(info.traineeNome) : null;
+
+        // Regra de Comissionamento na Importação
+        const valorTotalNum = Number(item.valor_total) || 0;
+        const isAcessorio = (item.tipo_item === 'ACESSORIO' || (item.categoria || '').toUpperCase().includes('ACESS'));
+        const formaPagtoNorm = (item.forma_pagamento || '').toUpperCase();
+        const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => formaPagtoNorm.includes(m));
+
+        let comissaoTitular = 0;
+        let comissaoTrainee = 0;
+
+        if (!info.isTrainee) {
+          if (isAcessorio) {
+            comissaoTitular = valorTotalNum * 0.025; // 2.5%
+          } else if (isFinanciado) {
+            comissaoTitular = valorTotalNum * 0.020; // 2.0%
+          } else {
+            comissaoTitular = valorTotalNum * 0.010; // 1.0%
+          }
+          comissaoTrainee = 0;
+        } else {
+          // Divisão de comissão quando há participação de trainee
+          if (isAcessorio) {
+            comissaoTitular = valorTotalNum * 0.015; // 1.5%
+            comissaoTrainee = valorTotalNum * 0.010; // 1.0%
+          } else if (isFinanciado) {
+            comissaoTitular = valorTotalNum * 0.015; // 1.5%
+            comissaoTrainee = valorTotalNum * 0.010; // 1.0%
+          } else {
+            comissaoTitular = valorTotalNum * 0.005; // 0.5%
+            comissaoTrainee = valorTotalNum * 0.005; // 0.5%
           }
         }
+
+        const resolvedVendedorId = titularProfile?.id || perfilUsuario?.id || null;
+        const resolvedVendedorNome = titularProfile?.nome || info.vendedorNome || perfilUsuario?.nome || 'Vendedor';
+        const resolvedTraineeId = traineeProfile?.id || null;
+        const precoUnitario = item.quantidade > 0 ? (item.valor_total / item.quantidade) : item.valor_total;
 
         const payloadVenda = {
           empresa_id: empresaIdFinal,
@@ -277,7 +372,7 @@ export default function ImportarCaixaRetroativoModal({
           vendedor_id: resolvedVendedorId,
           usuario_id: resolvedVendedorId,
           criado_por: resolvedVendedorId,
-          vendedor_nome: item.vendedor_nome || perfilUsuario?.nome || 'Vendedor',
+          vendedor_nome: resolvedVendedorNome,
           produto_nome: item.produto_nome,
           categoria: item.categoria,
           produto_id: produtoId,
@@ -288,7 +383,13 @@ export default function ImportarCaixaRetroativoModal({
           metodo_pagamento: item.forma_pagamento || 'PIX',
           status_pagamento: 'PAGO',
           imei: item.imei?.trim() || null,
-          created_at: dataIsoRetroativa
+          created_at: dataIsoRetroativa,
+          teve_participacao_trainee: info.isTrainee,
+          trainee_nome: info.traineeNome,
+          trainee_id: resolvedTraineeId,
+          treener_id: resolvedTraineeId,
+          comissao: comissaoTitular,
+          comissao_trainee: comissaoTrainee
         };
 
         const { error: vendaErr } = await supabase
@@ -647,6 +748,11 @@ export default function ImportarCaixaRetroativoModal({
                                 onChange={(e) => handleUpdateItem(item.id, 'vendedor_nome', e.target.value)}
                                 className="bg-black/40 border border-[#333] focus:border-[#6A0DAD] rounded px-2 py-1 text-xs text-gray-200 w-28 outline-none"
                               />
+                              {item.is_trainee && (
+                                <span className="block text-[10px] text-purple-400 font-semibold truncate mt-0.5" title={`Trainee: ${item.trainee_nome}`}>
+                                  + {item.trainee_nome} (Trainee)
+                                </span>
+                              )}
                             </td>
 
                             {/* Forma de Pagamento */}

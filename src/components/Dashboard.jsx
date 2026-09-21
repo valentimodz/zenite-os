@@ -34,6 +34,7 @@ import ModalMetasFilial from './ModalMetasFilial';
 import ModalMetasVendedor from './ModalMetasVendedor';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
+import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1396,6 +1397,7 @@ export default function Dashboard({ session, profileDataProps }) {
   // Estado para visualização de comprovante em Modal (Gerente)
   const [modalComprovante, setModalComprovante] = useState(null);
   const [modalRelatorioAberto, setModalRelatorioAberto] = useState(false);
+  const [filialModal, setFilialModal] = useState(null);
 
   // Estados para Torre de Controlo
   const [catalogoTab, setCatalogoTab] = useState('catalogo');
@@ -20446,33 +20448,137 @@ export default function Dashboard({ session, profileDataProps }) {
                           const vendedorMap = {};
                           vendasMes.forEach(s => {
                             const vendedorId = s.vendedor_id;
-                            const profileMatch = (teamMembers || []).find(p => vendedorId && String(p.id) === String(vendedorId)) ||
-                              (vendedores || []).find(p => vendedorId && String(p.id) === String(vendedorId));
+                            const rawVendedorNome = (s.vendedor_nome || '').trim();
+                            const hasSlash = rawVendedorNome.includes('/');
+                            const partes = hasSlash ? rawVendedorNome.split('/').map(p => p.trim()) : [rawVendedorNome];
+                            const nomeTitular = partes[0] || '';
+                            const nomeTrainee = partes[1] || '';
 
-                            // Fallback Seguro: Só categorizar como 'Vendas de Balcão / Sem Vendedor' se TANTO s.vendedor_id QUANTO s.vendedor_nome forem nulos ou vazios
-                            const isSemVendedor = !vendedorId && (!s.vendedor_nome || !s.vendedor_nome.trim());
-                            const nomeExibicao = (s.vendedor_nome && s.vendedor_nome.trim()) || profileMatch?.nome || (vendedorId ? 'Vendedor Cadastrado' : 'Vendas de Balcão / Sem Vendedor');
-                            const key = vendedorId ? String(vendedorId) : (isSemVendedor ? 'sem_vendedor' : `nome_${s.vendedor_nome.trim().toLowerCase()}`);
+                            const isTraineeVenda = s.teve_participacao_trainee === true ||
+                              hasSlash ||
+                              Boolean(s.treener_id) ||
+                              Boolean(s.trainee_id) ||
+                              Number(s.comissao_trainee) > 0;
 
-                            if (!vendedorMap[key]) {
-                              vendedorMap[key] = { id: vendedorId || key, nome: nomeExibicao, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
+                            // Localizar perfil do Titular (antes da barra ou por vendedor_id)
+                            let titularProfile = null;
+                            if (vendedorId) {
+                              titularProfile = (teamMembers || []).find(p => String(p.id) === String(vendedorId)) ||
+                                (vendedores || []).find(p => String(p.id) === String(vendedorId));
                             }
-                            const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
-                            vendedorMap[key].totalVendido += val;
-                            vendedorMap[key].qtdVendas += 1;
-                            vendedorMap[key].comissaoTotal += (parseFloat(s.comissao_vendedor || s.comissao || 0));
+                            if (!titularProfile && nomeTitular) {
+                              const nTit = nomeTitular.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                              titularProfile = (teamMembers || []).find(p => {
+                                const pNome = (p.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                                return pNome === nTit || pNome.includes(nTit) || nTit.includes(pNome);
+                              }) || (vendedores || []).find(p => {
+                                const pNome = (p.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                                return pNome === nTit || pNome.includes(nTit) || nTit.includes(pNome);
+                              });
+                            }
 
+                            // Localizar perfil da Trainee (Paula Thaynara / Jardel)
                             const tId = s.treener_id || s.trainee_id;
-                            if (tId && (s.teve_participacao_trainee || Number(s.comissao_trainee) > 0)) {
-                              const traineeKey = String(tId);
-                              const traineeMember = (teamMembers || []).find(p => String(p.id) === traineeKey) || (vendedores || []).find(p => String(p.id) === traineeKey);
-                              const tNome = traineeMember?.nome || 'Trainee';
+                            let traineeProfile = null;
+                            if (tId) {
+                              traineeProfile = (teamMembers || []).find(p => String(p.id) === String(tId)) ||
+                                (vendedores || []).find(p => String(p.id) === String(tId));
+                            }
+                            if (!traineeProfile && nomeTrainee) {
+                              const nTra = nomeTrainee.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                              traineeProfile = (teamMembers || []).find(p => {
+                                const pNome = (p.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                                return pNome.includes(nTra) || nTra.includes(pNome);
+                              }) || (vendedores || []).find(p => {
+                                const pNome = (p.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                                return pNome.includes(nTra) || nTra.includes(pNome);
+                              });
+                            }
+                            if (!traineeProfile && isTraineeVenda) {
+                              traineeProfile = (teamMembers || []).find(p => {
+                                const pNome = (p.nome || '').toUpperCase();
+                                return pNome.includes('PAULA') || p.role === 'TRAINEE' || p.is_treinner;
+                              }) || (vendedores || []).find(p => {
+                                const pNome = (p.nome || '').toUpperCase();
+                                return pNome.includes('PAULA') || p.role === 'TRAINEE' || p.is_treinner;
+                              });
+                            }
+
+                            const val = parseFloat(s.valor_total || s.total || s.valor_vendido || (s.preco * s.quantidade) || s.valor_pago || 0) || 0;
+
+                            // Cálculo de comissão dinâmico do titular
+                            let comissaoTitular = 0;
+                            if (Number(s.comissao) > 0) {
+                              comissaoTitular = Number(s.comissao);
+                            } else {
+                              const cat = (s.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                              const metodo = (s.metodo_pagamento || s.forma_pagamento || '').toUpperCase();
+                              if (cat.includes('ACESS')) {
+                                comissaoTitular = val * (isTraineeVenda ? 0.015 : 0.025);
+                              } else {
+                                const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => metodo.includes(m));
+                                if (isFinanciado) {
+                                  comissaoTitular = val * (isTraineeVenda ? 0.015 : 0.020);
+                                } else {
+                                  comissaoTitular = val * (isTraineeVenda ? 0.005 : 0.010);
+                                }
+                              }
+                            }
+
+                            // Cálculo de comissão da Trainee
+                            let comissaoTrainee = 0;
+                            if (isTraineeVenda) {
+                              if (Number(s.comissao_trainee) > 0) {
+                                comissaoTrainee = Number(s.comissao_trainee);
+                              } else {
+                                const cat = (s.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                                const metodo = (s.metodo_pagamento || s.forma_pagamento || '').toUpperCase();
+                                if (cat.includes('ACESS')) {
+                                  comissaoTrainee = val * 0.010;
+                                } else {
+                                  const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => metodo.includes(m));
+                                  if (isFinanciado) {
+                                    comissaoTrainee = val * 0.010;
+                                  } else {
+                                    comissaoTrainee = val * 0.005;
+                                  }
+                                }
+                              }
+                            }
+
+                            // Chave e Nome limpo do Titular (sempre sem barra!)
+                            const isSemVendedor = !titularProfile && !vendedorId && (!nomeTitular || !nomeTitular.trim());
+                            const keyTitular = titularProfile?.id ? String(titularProfile.id) : (vendedorId ? String(vendedorId) : (isSemVendedor ? 'sem_vendedor' : `nome_${nomeTitular.toLowerCase()}`));
+                            const nomeExibicaoTitular = titularProfile?.nome || nomeTitular || (vendedorId ? 'Vendedor Cadastrado' : 'Vendas de Balcão / Sem Vendedor');
+
+                            if (!vendedorMap[keyTitular]) {
+                              vendedorMap[keyTitular] = {
+                                id: titularProfile?.id || vendedorId || keyTitular,
+                                nome: nomeExibicaoTitular,
+                                totalVendido: 0,
+                                qtdVendas: 0,
+                                comissaoTotal: 0
+                              };
+                            }
+                            vendedorMap[keyTitular].totalVendido += val;
+                            vendedorMap[keyTitular].qtdVendas += 1;
+                            vendedorMap[keyTitular].comissaoTotal += comissaoTitular;
+
+                            // Atribuição no perfil da Trainee participante
+                            if (isTraineeVenda && traineeProfile && String(traineeProfile.id) !== String(keyTitular)) {
+                              const traineeKey = String(traineeProfile.id);
                               if (!vendedorMap[traineeKey]) {
-                                vendedorMap[traineeKey] = { id: traineeKey, nome: tNome, totalVendido: 0, qtdVendas: 0, comissaoTotal: 0 };
+                                vendedorMap[traineeKey] = {
+                                  id: traineeKey,
+                                  nome: traineeProfile.nome,
+                                  totalVendido: 0,
+                                  qtdVendas: 0,
+                                  comissaoTotal: 0
+                                };
                               }
                               vendedorMap[traineeKey].totalVendido += val;
                               vendedorMap[traineeKey].qtdVendas += 1;
-                              vendedorMap[traineeKey].comissaoTotal += (parseFloat(s.comissao_trainee) || 0);
+                              vendedorMap[traineeKey].comissaoTotal += comissaoTrainee;
                             }
                           });
 
@@ -20597,10 +20703,15 @@ export default function Dashboard({ session, profileDataProps }) {
                                 {/* Card e: Visão Geral por Filial & Estoque Parado */}
                                 <div className="bg-black border border-[#222222] rounded-xl p-5 flex flex-col justify-between">
                                   <div>
-                                    <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
-                                      <Store size={16} className="text-purple-400" />
-                                      Visão Geral por Filial (Faturamento &amp; Estoque Parado)
-                                    </h3>
+                                    <div className="flex items-center justify-between mb-4">
+                                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                        <Store size={16} className="text-purple-400" />
+                                        Visão Geral por Filial (Faturamento &amp; Estoque Parado)
+                                      </h3>
+                                      <span className="text-[10px] bg-purple-950/40 text-purple-400 border border-purple-800/40 px-2 py-0.5 rounded font-bold uppercase tracking-wider hidden sm:inline-block">
+                                        Clique para Redlines
+                                      </span>
+                                    </div>
                                     {comparativoFiliais.length === 0 ? (
                                         <p className="text-xs text-gray-500 italic py-6 text-center">Sem vendas registradas no mês.</p>
                                     ) : (
@@ -20608,17 +20719,27 @@ export default function Dashboard({ session, profileDataProps }) {
                                         {comparativoFiliais.map((f, idx) => {
                                           const pct = faturamentoBruto > 0 ? ((f.totalVendido / faturamentoBruto) * 100) : 0;
                                           return (
-                                            <div key={idx} className="bg-[#0A0A0A] border border-[#222222] p-3.5 rounded-lg space-y-2">
+                                            <div
+                                              key={idx}
+                                              onClick={() => setFilialModal({ ...f, faturamentoTotalRede: faturamentoBruto })}
+                                              className="bg-[#0A0A0A] border border-[#222222] hover:border-purple-500/60 hover:bg-white/[0.03] p-3.5 rounded-lg space-y-2 cursor-pointer transition-all group"
+                                              title="Clique para ver o Diagnóstico Estratégico & Redlines desta filial"
+                                            >
                                               <div className="flex justify-between items-center text-xs">
-                                                <span className="font-bold text-white flex items-center gap-2">
-                                                  <span className="w-5 h-5 rounded-full bg-purple-950/60 border border-purple-800/40 text-purple-400 text-[10px] font-extrabold flex items-center justify-center">
+                                                <span className="font-bold text-white flex items-center gap-2 group-hover:text-purple-300 transition-colors">
+                                                  <span className="w-5 h-5 rounded-full bg-purple-950/60 border border-purple-800/40 text-purple-400 text-[10px] font-extrabold flex items-center justify-center group-hover:scale-110 transition-transform">
                                                     {idx + 1}
                                                   </span>
                                                   {f.nome}
                                                 </span>
-                                                <span className="font-mono font-bold text-white">
-                                                  {formatBRL(f.totalVendido)}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                  <span className="font-mono font-bold text-white">
+                                                    {formatBRL(f.totalVendido)}
+                                                  </span>
+                                                  <span className="text-[10px] text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity font-bold">
+                                                    Redlines →
+                                                  </span>
+                                                </div>
                                               </div>
                                               <div className="w-full bg-[#151515] h-2 rounded-full overflow-hidden">
                                                 <div
@@ -29260,6 +29381,25 @@ export default function Dashboard({ session, profileDataProps }) {
             window.dispatchEvent(new Event('estoque_updated'));
           }}
         />
+
+        {/* Modal Analítico de Diagnóstico & Redlines da Filial */}
+        {filialModal && (
+          <ModalDiagnosticoFilial
+            filial={filialModal}
+            mesAno={filtroMes}
+            empresaId={profile?.empresa_id || company?.id || activeEmpresaId}
+            faturamentoTotalRede={filialModal.faturamentoTotalRede || 0}
+            onClose={() => setFilialModal(null)}
+            onVerEstoqueParado={() => {
+              setFilialModal(null);
+              setActiveTab('estoque');
+            }}
+            onFiltrarVendedores={() => {
+              setFilialModal(null);
+              setActiveTab('metas');
+            }}
+          />
+        )}
 
         {/* Toast Notification Container */}
         {toast && (

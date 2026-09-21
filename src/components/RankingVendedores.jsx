@@ -1,7 +1,51 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Award, RefreshCw, Calendar, Store, Filter, Eye } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import ModalDashboardColaborador, { calcularComissaoItem } from './ModalDashboardColaborador';
+import ModalDashboardColaborador from './ModalDashboardColaborador';
+
+// Helper de cálculo dinâmico de comissão do vendedor titular
+export function calcularComissaoVendedorItem(v, teveTrainee = false) {
+  if (Number(v?.comissao) > 0) {
+    return Number(v.comissao);
+  }
+  const valor = Number(v?.valor_total || v?.valor_vendido || v?.total || (v?.preco * v?.quantidade) || v?.valor_pago || 0);
+  const cat = (v?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  const metodo = (v?.metodo_pagamento || v?.forma_pagamento || '').toUpperCase();
+
+  // 1. Acessórios: aplicar alíquota base (2,5% titular sem trainee, ou 1,5% se teve trainee)
+  if (cat.includes('ACESS')) {
+    return valor * (teveTrainee ? 0.015 : 0.025);
+  }
+
+  // 2. Boleto / Financiadoras (PayJoy, Aiva, Crediário, UME, WATU, etc.)
+  const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => metodo.includes(m));
+  if (isFinanciado) {
+    const taxa = teveTrainee ? 0.015 : 0.020;
+    return valor * taxa;
+  }
+
+  // 3. Demais vendas (Cartão, Dinheiro, Pix em celulares)
+  return valor * (teveTrainee ? 0.005 : 0.010);
+}
+
+// Helper de cálculo dinâmico de comissão da trainee participante
+export function calcularComissaoTraineeItem(v) {
+  if (Number(v?.comissao_trainee) > 0) {
+    return Number(v.comissao_trainee);
+  }
+  const valor = Number(v?.valor_total || v?.valor_vendido || v?.total || (v?.preco * v?.quantidade) || v?.valor_pago || 0);
+  const cat = (v?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  const metodo = (v?.metodo_pagamento || v?.forma_pagamento || '').toUpperCase();
+
+  if (cat.includes('ACESS')) {
+    return valor * 0.010;
+  }
+  const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => metodo.includes(m));
+  if (isFinanciado) {
+    return valor * 0.010;
+  }
+  return valor * 0.005;
+}
 
 export default function RankingVendedores({
   vendedores = [],
@@ -48,7 +92,7 @@ export default function RankingVendedores({
 
       let query = supabase
         .from('vendas')
-        .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, produto_nome, imei, created_at, status')
+        .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, categoria, comissao, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id, created_at')
         .gte('created_at', dataInicio)
         .lte('created_at', dataFim)
         .order('created_at', { ascending: false });
@@ -122,9 +166,40 @@ export default function RankingVendedores({
   // 3. Agrupamento e Ordenação:
   // - Agrupe as vendas pelo vendedor_id.
   // - Some 'valor_total' para Volume, conte as vendas para 'Transações', calcule a média para 'Ticket Médio' e some a comissão acumulada.
-  // - Ordene o array final por Volume decrescente (b.volume - a.volume).
+  // 3. Agrupamento e Ordenação:
   const rankingData = useMemo(() => {
     if (!vendedores || vendedores.length === 0) return [];
+
+    // Helper de limpeza e normalização para busca tolerante de nomes
+    const cleanStr = (s) => (s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // 1. Inicializar o mapa exclusivamente com os colaboradores cadastrados (profiles)
+    const rankingMap = {};
+    (vendedores || []).forEach(colab => {
+      if (filtroFilial && filtroFilial !== 'TODAS' && String(colab.filial_id) !== String(filtroFilial)) {
+        return;
+      }
+      const colabKey = String(colab.id);
+      const filialObj = filiais?.find(f => String(f.id) === String(colab.filial_id));
+      rankingMap[colabKey] = {
+        id: colabKey,
+        nome: colab.nome,
+        cargo: colab.role === 'TRAINEE' || colab.is_treinner ? 'Trainee' : (colab.cargo || 'Profissional'),
+        filial_id: colab.filial_id,
+        filialNome: filialObj?.nome || 'Rede Cred',
+        transacoes: 0,
+        volume: 0,
+        ticketMedio: 0,
+        comissaoAcumulada: 0,
+        isSemVendedor: false
+      };
+    });
 
     // Filtrar vendas pela filial selecionada, se houver filtro ativo
     const vendasFiltradas = (vendasPeriodo || []).filter(v => {
@@ -132,63 +207,80 @@ export default function RankingVendedores({
       return String(v.filial_id) === String(filtroFilial);
     });
 
-    // 1. Agrupamento rigoroso por vendedor com fallback seguro (Map/Reduce)
-    const rankingMap = {};
-
+    // 2. Processar vendas com normalização de nomes compostos com barra ("AMANDA/PAULA", "SENA/PAULA")
     vendasFiltradas.forEach(v => {
-      const vendedorId = v.vendedor_id;
-      // Buscar o perfil correspondente na lista de profiles carregada da filial/empresa
-      const perfil = (vendedores || []).find(p => vendedorId && String(p.id) === String(vendedorId));
-      
-      // Fallback Seguro: Só categorizar como 'Vendas de Balcão / Sem Vendedor' se TANTO v.vendedor_id QUANTO v.vendedor_nome forem nulos ou vazios
-      const isSemVendedor = !vendedorId && (!v.vendedor_nome || !v.vendedor_nome.trim());
-      const nomeExibicao = (v.vendedor_nome && v.vendedor_nome.trim()) || perfil?.nome || (vendedorId ? 'Vendedor Cadastrado' : 'Vendas de Balcão / Sem Vendedor');
-      
-      // Chave única para o mapa
-      const key = vendedorId ? String(vendedorId) : (isSemVendedor ? 'sem_vendedor' : `nome_${v.vendedor_nome.trim().toLowerCase()}`);
-      const val = parseFloat(v.valor_total || v.valor_vendido || v.total || (v.preco * v.quantidade) || v.valor_pago || 0);
-      const safeVal = isNaN(val) ? 0 : val;
-      const isColabTrainee = perfil?.role === 'TRAINEE' || perfil?.is_treinner;
-      const comissaoVend = calcularComissaoItem(v, isColabTrainee);
+      const rawNome = (v.vendedor_nome || '').trim();
+      const hasSlash = rawNome.includes('/');
+      const partesNome = hasSlash ? rawNome.split('/') : [rawNome];
+      const nomeTitular = partesNome[0].trim();
+      const nomeTrainee = partesNome[1]?.trim() || '';
 
-      if (!rankingMap[key]) {
-        let vendedorCargo = isSemVendedor ? 'Balcão / Geral' : ((perfil?.role === 'TRAINEE' || perfil?.is_treinner) ? 'Trainee' : 'Profissional');
-        let filialIdColab = perfil?.filial_id || v.filial_id || null;
-        const filialObj = filiais?.find(f => String(f.id) === String(filialIdColab));
+      const isTraineeVenda = v.teve_participacao_trainee === true || 
+                             hasSlash || 
+                             Boolean(v.treener_id) || 
+                             Boolean(v.trainee_id) || 
+                             Number(v.comissao_trainee) > 0;
 
-        rankingMap[key] = {
-          id: vendedorId || key,
-          nome: nomeExibicao,
-          cargo: vendedorCargo,
-          filial_id: filialIdColab,
-          filialNome: filialObj?.nome || (isSemVendedor ? 'Balcão' : 'Rede Cred'),
-          transacoes: 0,
-          volume: 0,
-          ticketMedio: 0,
-          comissaoAcumulada: 0,
-          isSemVendedor: isSemVendedor
-        };
+      // 1. Identificar Perfil do Vendedor Titular (antes da barra)
+      let titularProfile = null;
+      if (v.vendedor_id) {
+        titularProfile = (vendedores || []).find(p => String(p.id) === String(v.vendedor_id));
+      }
+      if (!titularProfile && nomeTitular) {
+        const normTitular = cleanStr(nomeTitular);
+        titularProfile = (vendedores || []).find(p => {
+          const normP = cleanStr(p.nome);
+          const palavras = normP.split(' ');
+          return normP === normTitular || palavras.includes(normTitular) || normP.startsWith(normTitular) || normP.endsWith(normTitular);
+        }) || (vendedores || []).find(p => {
+          const normP = cleanStr(p.nome);
+          return normP.includes(normTitular) || normTitular.includes(normP);
+        });
       }
 
-      rankingMap[key].transacoes += 1;
-      rankingMap[key].volume += safeVal;
-      rankingMap[key].comissaoAcumulada += (isNaN(comissaoVend) ? 0 : comissaoVend);
-
-      // Trainee participante
+      // 2. Identificar Perfil da Trainee (ex: Paula Thaynara)
+      let traineeProfile = null;
       const tId = v.treener_id || v.trainee_id;
-      if (tId && (v.teve_participacao_trainee || Number(v.comissao_trainee) > 0)) {
-        const traineeKey = String(tId);
-        const traineeProfile = (vendedores || []).find(p => String(p.id) === traineeKey);
-        const traineeNome = traineeProfile?.nome || 'Trainee';
-        const comissaoTrainee = Number(v.comissao_trainee) > 0 ? parseFloat(v.comissao_trainee) : (comissaoVend * 0.5);
-        const filialObj = filiais?.find(f => String(f.id) === String(traineeProfile?.filial_id || v.filial_id));
+      if (tId) {
+        traineeProfile = (vendedores || []).find(p => String(p.id) === String(tId));
+      }
+      if (!traineeProfile && nomeTrainee) {
+        const normTrainee = cleanStr(nomeTrainee);
+        traineeProfile = (vendedores || []).find(p => {
+          const normP = cleanStr(p.nome);
+          const palavras = normP.split(' ');
+          return normP === normTrainee || palavras.includes(normTrainee) || normP.startsWith(normTrainee);
+        }) || (vendedores || []).find(p => {
+          const normP = cleanStr(p.nome);
+          return normP.includes(normTrainee) || normTrainee.includes(normP);
+        });
+      }
+      if (!traineeProfile && isTraineeVenda) {
+        // Localizar a trainee cadastrada no sistema (Paula Thaynara)
+        traineeProfile = (vendedores || []).find(p => {
+          const normP = cleanStr(p.nome);
+          return normP.includes('PAULA') || p.role === 'TRAINEE' || p.is_treinner;
+        });
+      }
 
-        if (!rankingMap[traineeKey]) {
-          rankingMap[traineeKey] = {
-            id: traineeKey,
-            nome: traineeNome,
-            cargo: 'Trainee',
-            filial_id: traineeProfile?.filial_id || v.filial_id,
+      // Valores monetários
+      const val = parseFloat(v.valor_total || v.valor_vendido || v.total || (v.preco * v.quantidade) || v.valor_pago || 0);
+      const safeVal = isNaN(val) ? 0 : val;
+
+      // Cálculo de comissão dinâmico
+      const comissaoTitular = calcularComissaoVendedorItem(v, isTraineeVenda);
+      const comissaoTrainee = isTraineeVenda ? calcularComissaoTraineeItem(v) : 0;
+
+      // Atribuição ao Titular
+      if (titularProfile) {
+        const key = String(titularProfile.id);
+        if (!rankingMap[key]) {
+          const filialObj = filiais?.find(f => String(f.id) === String(titularProfile.filial_id));
+          rankingMap[key] = {
+            id: key,
+            nome: titularProfile.nome,
+            cargo: titularProfile.role === 'TRAINEE' || titularProfile.is_treinner ? 'Trainee' : 'Profissional',
+            filial_id: titularProfile.filial_id,
             filialNome: filialObj?.nome || 'Rede Cred',
             transacoes: 0,
             volume: 0,
@@ -197,30 +289,52 @@ export default function RankingVendedores({
             isSemVendedor: false
           };
         }
-        rankingMap[traineeKey].transacoes += 1;
-        rankingMap[traineeKey].volume += safeVal;
-        rankingMap[traineeKey].comissaoAcumulada += (isNaN(comissaoTrainee) ? 0 : comissaoTrainee);
+        rankingMap[key].transacoes += 1;
+        rankingMap[key].volume += safeVal;
+        rankingMap[key].comissaoAcumulada += comissaoTitular;
+      } else if (!isTraineeVenda && !rawNome) {
+        // Venda Balcão sem nenhum vendedor identificado
+        const key = 'sem_vendedor';
+        if (!rankingMap[key]) {
+          rankingMap[key] = {
+            id: key,
+            nome: 'Vendas de Balcão / Sem Vendedor',
+            cargo: 'Balcão / Geral',
+            filial_id: v.filial_id || null,
+            filialNome: 'Balcão',
+            transacoes: 0,
+            volume: 0,
+            ticketMedio: 0,
+            comissaoAcumulada: 0,
+            isSemVendedor: true
+          };
+        }
+        rankingMap[key].transacoes += 1;
+        rankingMap[key].volume += safeVal;
+        rankingMap[key].comissaoAcumulada += comissaoTotalVenda;
       }
-    });
 
-    // Também incluir colaboradores cadastrados que não tenham realizado vendas no período (volume 0)
-    vendedores.forEach(colab => {
-      const colabKey = String(colab.id);
-      if (filtroFilial && filtroFilial !== 'TODAS' && String(colab.filial_id) !== String(filtroFilial)) {
-        return;
-      }
-      if (!rankingMap[colabKey]) {
-        const filialObj = filiais?.find(f => String(f.id) === String(colab.filial_id));
-        rankingMap[colabKey] = {
-          ...colab,
-          cargo: colab.role === 'TRAINEE' || colab.is_treinner ? 'Trainee' : 'Profissional',
-          filialNome: filialObj?.nome || 'Rede Cred',
-          transacoes: 0,
-          volume: 0,
-          ticketMedio: 0,
-          comissaoAcumulada: 0,
-          isSemVendedor: false
-        };
+      // Atribuição à Trainee participante (Paula Thaynara)
+      if (isTraineeVenda && traineeProfile) {
+        const tKey = String(traineeProfile.id);
+        if (!rankingMap[tKey]) {
+          const filialObj = filiais?.find(f => String(f.id) === String(traineeProfile.filial_id));
+          rankingMap[tKey] = {
+            id: tKey,
+            nome: traineeProfile.nome,
+            cargo: 'Trainee',
+            filial_id: traineeProfile.filial_id,
+            filialNome: filialObj?.nome || 'Rede Cred',
+            transacoes: 0,
+            volume: 0,
+            ticketMedio: 0,
+            comissaoAcumulada: 0,
+            isSemVendedor: false
+          };
+        }
+        rankingMap[tKey].transacoes += 1;
+        rankingMap[tKey].volume += safeVal;
+        rankingMap[tKey].comissaoAcumulada += comissaoTrainee;
       }
     });
 

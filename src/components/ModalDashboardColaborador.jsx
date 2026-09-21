@@ -126,13 +126,16 @@ export default function ModalDashboardColaborador({
           created_at,
           valor_total,
           metodo_pagamento,
-          forma_pagamento,
           categoria,
           comissao,
           vendedor_id,
           vendedor_nome,
           produto_nome,
           imei,
+          teve_participacao_trainee,
+          comissao_trainee,
+          treener_id,
+          trainee_id,
           itens_venda (
             id,
             produto_nome,
@@ -146,17 +149,18 @@ export default function ModalDashboardColaborador({
 
       // Filtrar pelo ID do colaborador selecionado ou pelo nome dele
       const isUuid = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str));
+      const primeiroNome = vendedorNome ? vendedorNome.trim().split(' ')[0] : '';
 
       if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
-        if (isUuid(vendedorId) && vendedorNome && vendedorNome.trim()) {
-          query = query.or(`vendedor_id.eq.${vendedorId},vendedor_nome.ilike.%${vendedorNome.trim()}%`);
+        if (isUuid(vendedorId) && primeiroNome) {
+          query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId},vendedor_nome.ilike.%${primeiroNome}%`);
         } else if (isUuid(vendedorId)) {
-          query = query.eq('vendedor_id', vendedorId);
-        } else if (vendedorNome) {
-          query = query.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
+          query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`);
+        } else if (primeiroNome) {
+          query = query.ilike('vendedor_nome', `%${primeiroNome}%`);
         }
-      } else if (vendedorNome) {
-        query = query.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
+      } else if (primeiroNome) {
+        query = query.ilike('vendedor_nome', `%${primeiroNome}%`);
       }
 
       let { data: vendasModal, error } = await query;
@@ -165,21 +169,21 @@ export default function ModalDashboardColaborador({
         console.warn('[ModalDashboardColaborador] Fallback na busca sem itens_venda:', error);
         let fbQuery = supabase
           .from('vendas')
-          .select('id, created_at, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei')
+          .select('id, created_at, valor_total, metodo_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id')
           .gte('created_at', dataInicio)
           .lte('created_at', dataFim)
           .order('created_at', { ascending: false });
 
         if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
-          if (isUuid(vendedorId) && vendedorNome && vendedorNome.trim()) {
-            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},vendedor_nome.ilike.%${vendedorNome.trim()}%`);
+          if (isUuid(vendedorId) && primeiroNome) {
+            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId},vendedor_nome.ilike.%${primeiroNome}%`);
           } else if (isUuid(vendedorId)) {
-            fbQuery = fbQuery.eq('vendedor_id', vendedorId);
-          } else if (vendedorNome) {
-            fbQuery = fbQuery.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
+            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`);
+          } else if (primeiroNome) {
+            fbQuery = fbQuery.ilike('vendedor_nome', `%${primeiroNome}%`);
           }
-        } else if (vendedorNome) {
-          fbQuery = fbQuery.ilike('vendedor_nome', `%${vendedorNome.trim()}%`);
+        } else if (primeiroNome) {
+          fbQuery = fbQuery.ilike('vendedor_nome', `%${primeiroNome}%`);
         }
 
         const fbRes = await fbQuery;
@@ -192,11 +196,12 @@ export default function ModalDashboardColaborador({
       if ((!vendasModal || vendasModal.length === 0) && Array.isArray(vendasCache) && vendasCache.length > 0) {
         const cachedVendas = vendasCache.filter(v => {
           const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
-          const matchNome = vendedorNome && (
-            (v.vendedor_nome || '').toLowerCase().includes(vendedorNome.toLowerCase()) ||
-            vendedorNome.toLowerCase().includes((v.vendedor_nome || '').toLowerCase())
-          );
-          const matchTrainee = (v.treener_id && String(v.treener_id) === String(vendedorId)) || (v.trainee_id && String(v.trainee_id) === String(vendedorId));
+          const rawNome = (v.vendedor_nome || '').toLowerCase();
+          const pNome = (primeiroNome || '').toLowerCase();
+          const matchNome = pNome && rawNome.includes(pNome);
+          const matchTrainee = (v.treener_id && String(v.treener_id) === String(vendedorId)) || 
+                               (v.trainee_id && String(v.trainee_id) === String(vendedorId)) ||
+                               (colaborador?.cargo === 'Trainee' && rawNome.includes('PAULA'));
           return matchId || matchNome || matchTrainee;
         });
         if (cachedVendas.length > 0) {

@@ -4,6 +4,7 @@ import {
   Upload, FileText, CheckCircle2, AlertTriangle, XCircle, Loader2,
   Download, RefreshCw, Users, ShieldAlert, Eye, Building2
 } from 'lucide-react';
+import { parsearVendedores } from './ImportarCaixaRetroativoModal';
 
 /**
  * Componente: ImportadorVendasCSV
@@ -113,14 +114,29 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
     fetchMissingColaboradores();
   }, [parsedRows]);
 
-  const getColaborador = (id) => {
-    if (!id) return null;
-    const cleanId = String(id).trim().toLowerCase();
+  const getColaborador = (idOrName) => {
+    if (!idOrName) return null;
+    const clean = String(idOrName).trim().toLowerCase();
+    const cleanNorm = String(idOrName)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Z0-9]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
     return (colaboradores || []).find(c => {
       if (!c) return false;
       const cId = String(c.id || c.usuario_id || '').trim().toLowerCase();
       const cEmail = String(c.email || '').trim().toLowerCase();
-      return cId === cleanId || cEmail === cleanId;
+      const cNome = String(c.nome || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9]/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      return cId === clean || cEmail === clean || cNome === cleanNorm || cNome.includes(cleanNorm) || cleanNorm.includes(cNome);
     });
   };
 
@@ -268,8 +284,21 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
       const rawFormaPagto = colIndex.forma_pagamento !== -1 ? cells[colIndex.forma_pagamento] : 'OUTROS';
 
       const dataVenda = parseDate(rawData);
-      const vendedorId = rawVendedor ? rawVendedor.trim() : '';
-      const traineeId = rawTrainee && !['0', 'none', 'null', 'undefined', ''].includes(rawTrainee.trim().toLowerCase()) ? rawTrainee.trim() : null;
+      let vendedorId = rawVendedor ? rawVendedor.trim() : '';
+      let traineeId = rawTrainee && !['0', 'none', 'null', 'undefined', ''].includes(rawTrainee.trim().toLowerCase()) ? rawTrainee.trim() : null;
+      let hasTrainee = Boolean(traineeId);
+      let traineeNome = null;
+
+      if (vendedorId.includes('/')) {
+        const parsedV = parsearVendedores(vendedorId);
+        vendedorId = parsedV.vendedorNome;
+        if (parsedV.isTrainee) {
+          hasTrainee = true;
+          traineeNome = parsedV.traineeNome;
+          if (!traineeId) traineeId = parsedV.traineeNome;
+        }
+      }
+
       const formaPagamento = rawFormaPagto ? rawFormaPagto.trim().toUpperCase() : 'OUTROS';
 
       const qtdPremium = parseInteger(cells[colIndex.qtd_premium]);
@@ -287,11 +316,11 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
 
       if (lineErrors.length > 0) errors.push(...lineErrors);
 
-      const comissaoCalc = calcularComissoesLinha(qtdPremium, qtdAndroids, qtdAcessorios, formaPagamento, Boolean(traineeId));
+      const comissaoCalc = calcularComissoesLinha(qtdPremium, qtdAndroids, qtdAcessorios, formaPagamento, hasTrainee);
 
       rows.push({
         lineNum, raw: lineStr, data_venda: dataVenda || rawData, vendedor_id: vendedorId, trainee_id: traineeId,
-        hasTrainee: Boolean(traineeId), forma_pagamento: formaPagamento, qtd_premium: qtdPremium,
+        trainee_nome: traineeNome, hasTrainee: hasTrainee, forma_pagamento: formaPagamento, qtd_premium: qtdPremium,
         qtd_androids: qtdAndroids, qtd_acessorios: qtdAcessorios, total_qtd: totalQtd,
         ...comissaoCalc, isValid: lineValid, errors: lineErrors
       });
@@ -376,15 +405,20 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           faturamentoFigurativo
         } = calcularComissoesLinha(row.qtd_premium, row.qtd_androids, row.qtd_acessorios, row.forma_pagamento, hasTrainee);
 
-        const resolvedVendedorNome = row.vendedor_nome || sellerObj?.nome || 'Vendedor';
+        const resolvedVendedorNome = row.vendedor_nome || sellerObj?.nome || row.vendedor_id || 'Vendedor';
+        const resolvedVendedorId = sellerObj?.id || (row.vendedor_id && row.vendedor_id.length > 20 ? row.vendedor_id : null);
 
-        // O OBJETO PERFEITO (Com treener_id corrigido e sem o status intruso)
+        let traineeObj = hasTrainee ? (getColaborador(row.trainee_id) || getColaborador(row.trainee_nome)) : null;
+        const resolvedTraineeId = traineeObj?.id || (hasTrainee && row.trainee_id && row.trainee_id.length > 20 ? row.trainee_id : null);
+        const resolvedTraineeNome = traineeObj?.nome || row.trainee_nome || (hasTrainee ? row.trainee_id : null);
+
+        // O OBJETO PERFEITO (Com treener_id e trainee_id corrigidos e sem campos inválidos)
         const payloadVenda = {
           empresa_id: vendedorEmpresaId || activeEmpresaId,
           filial_id: vendedorFilialId || null,
-          usuario_id: row.vendedor_id,
-          vendedor_id: row.vendedor_id,
-          criado_por: row.vendedor_id,
+          usuario_id: resolvedVendedorId,
+          vendedor_id: resolvedVendedorId,
+          criado_por: resolvedVendedorId,
           vendedor_nome: resolvedVendedorNome,
           produto_id: '0054cfa7-fd7c-4b7b-8942-b6dfa4749b67',
           valor_total: faturamentoFigurativo,
@@ -395,8 +429,10 @@ export default function ImportadorVendasCSV({ empresaId, profile, onImportSucces
           quantidade: row.total_qtd,
           comissao: comissao_vendedor,
           teve_participacao_trainee: hasTrainee,
-          comissao_trainee: comissao_trainee,
-          treener_id: hasTrainee ? row.trainee_id : null
+          trainee_nome: resolvedTraineeNome,
+          trainee_id: resolvedTraineeId,
+          treener_id: resolvedTraineeId,
+          comissao_trainee: comissao_trainee
         };
 
         const { data: vendaData, error: vendaErr } = await supabase
