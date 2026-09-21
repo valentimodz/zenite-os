@@ -4565,7 +4565,7 @@ export default function Dashboard({ session, profileDataProps }) {
   // Função de busca defensiva solicitada com relação itens_venda
   const carregarVendas = async () => {
     try {
-      // 1. Consulta com os itens da venda
+      // 1. Consulta com os itens da venda e campos explicitos produto_nome e imei
       let { data, error } = await supabase
         .from('vendas')
         .select(`
@@ -4577,6 +4577,8 @@ export default function Dashboard({ session, profileDataProps }) {
           comissao,
           vendedor_id,
           vendedor_nome,
+          produto_nome,
+          imei,
           itens_venda (
             id,
             produto_nome,
@@ -4591,7 +4593,7 @@ export default function Dashboard({ session, profileDataProps }) {
         // Fallback defensivo caso a relação com itens_venda encontre divergência de coluna
         const fbRes = await supabase
           .from('vendas')
-          .select('id, created_at, valor_total, metodo_pagamento, categoria, comissao, vendedor_id, vendedor_nome')
+          .select('id, created_at, valor_total, metodo_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei')
           .eq('filial_id', '2c3f0242-1b0a-455b-bf48-168ea5bfc46a');
         if (!fbRes.error && fbRes.data) {
           data = fbRes.data;
@@ -24605,14 +24607,11 @@ export default function Dashboard({ session, profileDataProps }) {
                                     const itens = Array.isArray(sale.itens_venda) ? sale.itens_venda : [];
 
                                     // 2. Nome do Produto conforme especificado
-                                    let produtoNome = 'Produto Geral';
-                                    if (itens.length === 1) {
-                                      produtoNome = itens[0]?.produto_nome || 'Produto Geral';
-                                    } else if (itens.length > 1) {
+                                    let nomeBase = sale.produto_nome || sale.descricao || (itens.length > 0 ? itens[0]?.produto_nome : null) || sale.produtos_descricao || sale.itens_resumo || 'Produto Geral';
+                                    let produtoNome = nomeBase;
+                                    if (itens.length > 1) {
                                       const sobram = itens.length - 1;
-                                      produtoNome = `${itens[0]?.produto_nome || 'Produto'} (+${sobram} ${sobram === 1 ? 'item' : 'itens'})`;
-                                    } else {
-                                      produtoNome = sale.produto_nome || sale.descricao || sale.produtos_descricao || sale.itens_resumo || 'Produto Geral';
+                                      produtoNome = `${nomeBase} (+${sobram} ${sobram === 1 ? 'item' : 'itens'})`;
                                     }
 
                                     // Quantidade: Somar a quantidade dos itens
@@ -24717,7 +24716,14 @@ export default function Dashboard({ session, profileDataProps }) {
                                         <td className="py-3 text-gray-400 font-mono">
                                           {new Date(sale.created_at).toLocaleDateString('pt-BR')}
                                         </td>
-                                        <td className="py-3 font-semibold text-white">{produtoNome}</td>
+                                        <td className="py-3">
+                                          <div className="flex flex-col">
+                                            <span className="font-medium text-white">{sale.produto_nome || sale.descricao || produtoNome}</span>
+                                            {sale.imei && (
+                                              <span className="text-[10px] text-zinc-500 font-mono">IMEI: ...{String(sale.imei).slice(-4)}</span>
+                                            )}
+                                          </div>
+                                        </td>
                                         <td className="py-3">
                                           <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-[#6A0DAD]/10 text-purple-300">
                                             {categoriaExibida}
