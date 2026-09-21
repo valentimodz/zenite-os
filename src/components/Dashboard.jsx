@@ -14097,11 +14097,38 @@ export default function Dashboard({ session, profileDataProps }) {
     // 2. CÁLCULO E DISTRIBUIÇÃO DAS VENDAS NOS CARDS:
     const listaVendas = (currentMonthSales && currentMonthSales.length > 0) ? currentMonthSales : (vendasVendedor || []);
 
+    // Helper robusto para identificar se a venda é de acessório (resiliente a acentos, case e singular/plural)
+    const isAcessorio = (venda) => {
+      const cat = (venda.categoria || venda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+      const prod = (venda.produto_nome || venda.produtos?.nome || venda.descricao || venda.produtos_descricao || venda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+      
+      // Checa se a categoria é ACESSORIO(S)
+      if (cat.includes('ACESSORIO')) return true;
+
+      // Fallback se a categoria estiver genérica mas o nome do produto indicar acessório
+      const termosAcessorios = ['CAPA', 'CASE', 'PELICULA', 'FILME', 'FONE', 'FONTE', 'CABO', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
+      if (termosAcessorios.some(termo => prod.includes(termo))) return true;
+
+      // Checagem complementar nos itens da venda se existirem
+      if (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0) {
+        return venda.itens_venda.some(item => {
+          const iCat = (item.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+          const iProd = (item.produto_nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+          return iCat.includes('ACESSORIO') || termosAcessorios.some(termo => iProd.includes(termo));
+        });
+      }
+
+      return false;
+    };
+
+    // Calcular o Total de Acessórios Realizado
+    const totalAcessorios = listaVendas
+      .filter(isAcessorio)
+      .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
+
     // Somar apenas vendas onde metodo_pagamento ou financeira pertence a financiamentos/boletos: ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO']
     const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO'];
-
     let totalBoletos = 0;
-    let totalAcessorios = 0;
 
     listaVendas.forEach(sale => {
       const val = parseFloat(sale.valor_total || sale.valor || 0);
@@ -14119,38 +14146,6 @@ export default function Dashboard({ session, profileDataProps }) {
       if (isBoleto) {
         totalBoletos += val;
       }
-
-      // Detecção de Acessórios: Somar valores onde o item/categoria seja do tipo acessório (capas, películas, fones, cabos, etc.)
-      let acVal = 0;
-      if (Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0) {
-        sale.itens_venda.forEach(item => {
-          const iname = String(item.produto_nome || '').toUpperCase();
-          const icat = String(item.categoria || '').toUpperCase();
-          if (icat.includes('ACESSORIO') || iname.includes('CAPA') || iname.includes('PELICULA') || 
-              iname.includes('FONE') || iname.includes('CABO') || iname.includes('CARREGADOR') || 
-              iname.includes('ACESSORIO') || iname.includes('SUPORTE') || iname.includes('POWERBANK') || 
-              iname.includes('ADAPTADOR')) {
-            acVal += (Number(item.subtotal || item.valor_total || (Number(item.preco_unitario || 0) * Number(item.quantidade || 1))));
-          }
-        });
-      }
-
-      if (acVal > 0) {
-        totalAcessorios += acVal;
-      } else {
-        const cat = String(sale.produtos?.categoria || sale.categoria || '').toUpperCase();
-        const tipo = String(sale.produtos?.tipo || sale.tipo || '').toUpperCase();
-        const pnome = String(sale.produto_nome || sale.produtos?.nome || sale.produtos_descricao || sale.itens_resumo || '').toUpperCase();
-        const isAc = tipo === 'ACESSORIO' || cat.includes('ACESSORIO') || cat.includes('CAPA') || 
-                     cat.includes('PELICULA') || cat.includes('FONE') || pnome.includes('CAPA') || 
-                     pnome.includes('PELICULA') || pnome.includes('FONE') || pnome.includes('CABO') || 
-                     pnome.includes('CARREGADOR');
-        const isCel = tipo === 'CELULAR' || cat === 'ANDROID' || cat === 'IOS' || cat.includes('CELULAR') || 
-                      cat === 'APPLE_JBL_CONSOLE' || !!sale.imei || pnome.includes('IPHONE') || pnome.includes('GALAXY');
-        if (isAc && !isCel) {
-          totalAcessorios += val;
-        }
-      }
     });
 
     const totalVendasGeral = listaVendas.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
@@ -14162,6 +14157,9 @@ export default function Dashboard({ session, profileDataProps }) {
     const progressoBoleto = metaBoleto > 0 ? Math.min(100, Math.round((totalBoletos / metaBoleto) * 100)) : 0;
     const progressoAcessorios = metaAcessorios > 0 ? Math.min(100, Math.round((totalAcessorios / metaAcessorios) * 100)) : 0;
     const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((totalVendasGeral / metaTotal) * 100)) : 0;
+
+    const faltaAcessorios = Math.max(0, metaAcessorios - totalAcessorios);
+    const faltaSuperAcessorios = Math.max(0, superMetaAcessorios - totalAcessorios);
 
     // Badges e Faixas de Comissão Boletos
     let taxaBoletoNum = 0.01;
@@ -14189,7 +14187,10 @@ export default function Dashboard({ session, profileDataProps }) {
       };
     }
 
-    // Badges e Faixas de Comissão Acessórios
+    // Badges e Faixas de Comissão Acessórios:
+    // * < R$ 10.000: "Faixa Atual: 1,0% (Abaixo da Meta)"
+    // * >= R$ 10.000 e < R$ 15.000: "Faixa Atual: 2,5% (Meta Batida! 🚀)"
+    // * >= R$ 15.000: "Faixa Atual: 3,0% (Super Meta! 🔥)"
     let taxaAcessoriosNum = 0.01;
     let badgeAcessorios = {
       taxa: '1,0%',
@@ -14197,7 +14198,7 @@ export default function Dashboard({ session, profileDataProps }) {
       status: 'abaixo',
       classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
     };
-    if (totalAcessorios >= superMetaAcessorios) {
+    if (totalAcessorios >= 15000 || totalAcessorios >= superMetaAcessorios) {
       taxaAcessoriosNum = 0.03;
       badgeAcessorios = {
         taxa: '3,0%',
@@ -14205,7 +14206,7 @@ export default function Dashboard({ session, profileDataProps }) {
         status: 'super',
         classe: 'bg-pink-950/60 text-pink-300 border border-pink-700/60 shadow-[0_0_12px_rgba(244,114,182,0.3)]'
       };
-    } else if (totalAcessorios >= metaAcessorios) {
+    } else if (totalAcessorios >= 10000 || totalAcessorios >= metaAcessorios) {
       taxaAcessoriosNum = 0.025;
       badgeAcessorios = {
         taxa: '2,5%',
@@ -14260,6 +14261,8 @@ export default function Dashboard({ session, profileDataProps }) {
       metaAcessorios,
       superMetaAcessorios,
       progressoAcessorios,
+      faltaAcessorios,
+      faltaSuperAcessorios,
       badgeAcessorios,
       // À Vista
       totalAVista,
@@ -24546,12 +24549,14 @@ export default function Dashboard({ session, profileDataProps }) {
                             <div className="space-y-1.5">
                               <div className="flex justify-between text-xs font-bold">
                                 <span className="text-gray-400">Progresso do Objetivo</span>
-                                <span className="text-pink-400 font-mono">{metasInfo.progressoAcessorios}% atingido</span>
+                                <span className="text-pink-400 font-mono">
+                                  {(metasInfo.metaAcessorios > 0 ? ((metasInfo.totalAcessorios / metasInfo.metaAcessorios) * 100) : 0).toFixed(1)}% atingido
+                                </span>
                               </div>
                               <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
                                 <div
                                   className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-pink-600 via-pink-500 to-rose-400 shadow-[0_0_10px_#ec4899]"
-                                  style={{ width: `${metasInfo.progressoAcessorios}%` }}
+                                  style={{ width: `${Math.min(100, Math.max(0, metasInfo.metaAcessorios > 0 ? (metasInfo.totalAcessorios / metasInfo.metaAcessorios) * 100 : 0))}%` }}
                                 ></div>
                               </div>
                             </div>
@@ -24564,11 +24569,11 @@ export default function Dashboard({ session, profileDataProps }) {
                                 </span>
                               ) : metasInfo.totalAcessorios >= metasInfo.metaAcessorios ? (
                                 <span className="text-emerald-400 font-bold">
-                                  🚀 Meta batida! Falta R$ {(metasInfo.superMetaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para a Super Meta (3,0%).
+                                  🚀 Meta batida! Falta R$ {Math.max(0, metasInfo.superMetaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} para a Super Meta (3,0%).
                                 </span>
                               ) : (
                                 <span>
-                                  Falta <strong className="text-white font-mono">R$ {(metasInfo.metaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> em acessórios para atingir a meta e desbloquear comissão de 2,5%.
+                                  Falta <strong className="text-white font-mono">R$ {Math.max(0, metasInfo.metaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> em acessórios para atingir a meta e desbloquear comissão de 2,5%.
                                 </span>
                               )}
                             </p>
