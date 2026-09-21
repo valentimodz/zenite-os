@@ -217,6 +217,19 @@ const RoleProtectedRoute = ({ session, isCeoRoute }) => {
     }
   }
 
+  // Proteção de Rota Direta (/estoque ou /entrada-estoque) para Gerente (Rodrigo)
+  const isEstoqueRoute = window.location.pathname.toLowerCase() === '/estoque' || window.location.pathname.toLowerCase() === '/entrada-estoque';
+  if (isEstoqueRoute) {
+    const cargoUsuario = (profile?.cargo || profile?.role || '').toUpperCase();
+    const userEmail = (session?.user?.email || '').toLowerCase().trim();
+    const isGerente = cargoUsuario === 'GERENTE' || userEmail === 'rodrigo.gerenciamonkeyshop@gmail.com' || userEmail === 'rodrigo.gerenciaredecred@gmail.com';
+    if (isGerente) {
+      window.history.replaceState({}, '', '/dashboard');
+      window.location.href = '/dashboard';
+      return null;
+    }
+  }
+
   return <Dashboard session={session} profileDataProps={profile} />;
 }
 

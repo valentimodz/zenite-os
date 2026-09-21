@@ -710,6 +710,11 @@ export default function Dashboard({ session, profileDataProps }) {
     ''
   ).toUpperCase();
 
+  const userEmail = (profile?.email || profileDataProps?.email || session?.user?.email || '').toLowerCase().trim();
+  const cargoUsuario = (profile?.cargo || profile?.role || profileDataProps?.cargo || profileDataProps?.role || userRole || '').toUpperCase();
+  const isGerente = cargoUsuario === 'GERENTE' || userRole === 'GERENTE' || userEmail === 'rodrigo.gerenciamonkeyshop@gmail.com' || userEmail === 'rodrigo.gerenciaredecred@gmail.com';
+  const isDonoOuAdmin = ['DONO', 'ADMIN', 'ADMINISTRADOR', 'OWNER', 'SUPER_ADMIN', 'MASTER'].includes(cargoUsuario) && !isGerente;
+
   const [toast, setToast] = useState(null); // { message: '', type: 'success' | 'error' | 'warning' | 'info' }
 
   const showToast = (message, type = 'success') => {
@@ -9400,9 +9405,11 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
-    if (view === 'transferencias') {
+    if (['estoque', 'catalogo_mestre', 'categorias', 'transferencias'].includes(view)) {
       if (isGerente) {
-        showToast('Acesso Negado: O perfil Gerente não possui permissão para acessar o módulo de Transferência de Estoque.', 'error');
+        showToast('Acesso Negado: O perfil de Gerente não possui permissão para acessar a Gestão de Estoque.', 'error');
+        setCurrentView('gestao');
+        setActiveTab('gestao');
         return;
       }
     }
@@ -9447,6 +9454,21 @@ export default function Dashboard({ session, profileDataProps }) {
       fetchTenantFaturas();
     }
   };
+
+  // Guarda de Rota: Redirecionamento e proteção de acesso ao Estoque para perfil GERENTE (Rodrigo)
+  useEffect(() => {
+    const path = window.location.pathname.toLowerCase();
+    const isUrlEstoque = path === '/estoque' || path === '/entrada-estoque';
+
+    if (isGerente && (isUrlEstoque || currentView === 'estoque' || activeTab === 'estoque' || currentView === 'catalogo_mestre' || activeTab === 'catalogo_mestre')) {
+      showToast('Acesso Não Autorizado: O perfil de Gerente não possui permissão para acessar a Gestão de Estoque.', 'error');
+      setCurrentView('gestao');
+      setActiveTab('gestao');
+      if (isUrlEstoque) {
+        window.history.replaceState({}, '', '/dashboard');
+      }
+    }
+  }, [isGerente, currentView, activeTab]);
 
   // Feedback sonoro: beep de sucesso (WebAudio API)
   const playBeepSucesso = () => {
@@ -19322,8 +19344,9 @@ export default function Dashboard({ session, profileDataProps }) {
         items.push(sidebarItem('auditoria_credito', 'Auditoria Vendas & Crédito', ShieldCheck));
       }
 
-      // 8. Gestão de Estoque - Exclusivo para ADMIN / GERENTE / ESTOQUISTA (Oculto para VENDEDOR e DONO)
-      if (['ADMIN', 'OWNER', 'ESTOQUISTA', 'GERENTE'].includes(currentRole) && currentRole !== 'DONO') {
+      // 8. Gestão de Estoque - Exclusivo para ADMIN / ESTOQUISTA (Oculto estritamente para GERENTE, VENDEDOR e DONO)
+      const podeVerEstoque = (isDonoOuAdmin || ['ESTOQUISTA'].includes(currentRole)) && !isGerente && currentRole !== 'GERENTE' && currentRole !== 'DONO';
+      if (podeVerEstoque) {
         const showEstoque = true;
         const isStrictAdmin = ['ADMIN', 'MASTER', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || currentRole || '').toUpperCase());
         const showCatalogoMestre = isStrictAdmin;
@@ -19391,7 +19414,7 @@ export default function Dashboard({ session, profileDataProps }) {
       if (!item) return false;
       if (isGerente) {
         const key = item.key;
-        if (['transferencias', 'assinatura', 'pdv'].includes(key)) {
+        if (['agrupador-estoque', 'estoque', 'catalogo_mestre', 'categorias', 'transferencias', 'assinatura', 'pdv'].includes(key)) {
           return false;
         }
       }
@@ -23568,9 +23591,24 @@ export default function Dashboard({ session, profileDataProps }) {
                   </div>
                 )}
 
-                {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE (EXCLUSIVO PARA ADMIN / GERENTE / ESTOQUISTA) */}
-                {(activeTab === 'estoque' || currentView === 'estoque') && profile?.role !== 'RH_ADMIN' && profile?.role !== 'VENDEDOR' && (
+                {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE (EXCLUSIVO PARA ADMIN / ESTOQUISTA - BLOQUEADO PARA GERENTE, VENDEDOR E DONO) */}
+                {(activeTab === 'estoque' || currentView === 'estoque') && profile?.role !== 'RH_ADMIN' && profile?.role !== 'VENDEDOR' && !isGerente && profile?.role !== 'GERENTE' && (
                   renderEstoqueContent()
+                )}
+
+                {/* Bloqueio de Acesso para Gerente caso tente acessar a tela de estoque */}
+                {(activeTab === 'estoque' || currentView === 'estoque') && (isGerente || profile?.role === 'GERENTE') && (
+                  <div className="p-8 text-center bg-black/60 border border-red-900/30 rounded-2xl max-w-lg mx-auto mt-12 space-y-4 animate-fadeIn">
+                    <ShieldAlert size={48} className="mx-auto text-rose-500" />
+                    <h2 className="text-lg font-bold text-white">Acesso Não Autorizado</h2>
+                    <p className="text-xs text-gray-400">O perfil de Gerente não possui permissão para acessar o módulo de Gestão de Estoque.</p>
+                    <button
+                      onClick={() => { setCurrentView('gestao'); setActiveTab('gestao'); }}
+                      className="px-5 py-2.5 bg-[#6A0DAD] hover:bg-[#7B1FA2] text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-purple-950/30"
+                    >
+                      Voltar ao Dashboard
+                    </button>
+                  </div>
                 )}
 
 
@@ -29924,7 +29962,11 @@ export default function Dashboard({ session, profileDataProps }) {
             onClose={() => setFilialModal(null)}
             onVerEstoqueParado={() => {
               setFilialModal(null);
-              setActiveTab('estoque');
+              if (!isGerente) {
+                handleNavigate('estoque');
+              } else {
+                showToast('Acesso Restrito: A Gestão de Estoque é gerenciada pela administração central.', 'info');
+              }
             }}
             onFiltrarVendedores={() => {
               setFilialModal(null);
