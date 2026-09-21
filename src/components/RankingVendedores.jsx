@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Award, RefreshCw, Calendar, Store, Filter } from 'lucide-react';
+import { Award, RefreshCw, Calendar, Store, Filter, Eye } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import ModalDashboardColaborador, { calcularComissaoItem } from './ModalDashboardColaborador';
 
 export default function RankingVendedores({
   vendedores = [],
@@ -11,6 +12,9 @@ export default function RankingVendedores({
   empresaId,
   fetchGerenteData
 }) {
+  // Estado para controlar o modal de dashboard individual do colaborador selecionado
+  const [vendedorSelecionadoModal, setVendedorSelecionadoModal] = useState(null);
+
   // 1. Filtro de Mês/Ano Dinâmico no Topo (padrão: Mês Atual dinâmico YYYY-MM)
   const currentMonthStr = useMemo(() => {
     const d = new Date();
@@ -32,8 +36,6 @@ export default function RankingVendedores({
 
   // 2. Ajuste na Query de Vendas:
   // Remova qualquer data fixa. Calcule o range com base no mês selecionado:
-  // dataInicio = new Date(ano, mes, 1).toISOString();
-  // dataFim = new Date(ano, mes + 1, 0, 23, 59, 59).toISOString();
   const fetchVendasRanking = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -46,7 +48,7 @@ export default function RankingVendedores({
 
       let query = supabase
         .from('vendas')
-        .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at, status')
+        .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, produto_nome, imei, created_at, status')
         .gte('created_at', dataInicio)
         .lte('created_at', dataFim)
         .order('created_at', { ascending: false });
@@ -146,7 +148,8 @@ export default function RankingVendedores({
       const key = vendedorId ? String(vendedorId) : (isSemVendedor ? 'sem_vendedor' : `nome_${v.vendedor_nome.trim().toLowerCase()}`);
       const val = parseFloat(v.valor_total || v.valor_vendido || v.total || (v.preco * v.quantidade) || v.valor_pago || 0);
       const safeVal = isNaN(val) ? 0 : val;
-      const comissaoVend = parseFloat(v.comissao || 0);
+      const isColabTrainee = perfil?.role === 'TRAINEE' || perfil?.is_treinner;
+      const comissaoVend = calcularComissaoItem(v, isColabTrainee);
 
       if (!rankingMap[key]) {
         let vendedorCargo = isSemVendedor ? 'Balcão / Geral' : ((perfil?.role === 'TRAINEE' || perfil?.is_treinner) ? 'Trainee' : 'Profissional');
@@ -177,7 +180,7 @@ export default function RankingVendedores({
         const traineeKey = String(tId);
         const traineeProfile = (vendedores || []).find(p => String(p.id) === traineeKey);
         const traineeNome = traineeProfile?.nome || 'Trainee';
-        const comissaoTrainee = parseFloat(v.comissao_trainee || 0);
+        const comissaoTrainee = Number(v.comissao_trainee) > 0 ? parseFloat(v.comissao_trainee) : (comissaoVend * 0.5);
         const filialObj = filiais?.find(f => String(f.id) === String(traineeProfile?.filial_id || v.filial_id));
 
         if (!rankingMap[traineeKey]) {
@@ -302,15 +305,26 @@ export default function RankingVendedores({
               <th className="py-3 px-4 text-right">Volume</th>
               <th className="py-3 px-4 text-right">Ticket Médio</th>
               <th className="py-3 px-4 text-right text-emerald-400">Comissão Acumulada</th>
+              <th className="py-3 px-4 text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#1A1A1A]">
             {rankingData.map((colab, idx) => (
-              <tr key={colab.id} className="hover:bg-white/5 transition-colors">
+              <tr 
+                key={colab.id} 
+                onClick={() => !colab.isSemVendedor && setVendedorSelecionadoModal(colab)}
+                className={`transition-all ${
+                  colab.isSemVendedor 
+                    ? 'hover:bg-white/5' 
+                    : 'cursor-pointer hover:bg-purple-950/20 hover:border-[#6A0DAD]/30 group'
+                }`}
+              >
                 <td className="py-3 px-4 font-mono font-bold text-gray-400">
                   {idx === 0 ? '🥇 1º' : idx === 1 ? '🥈 2º' : idx === 2 ? '🥉 3º' : `${idx + 1}º`}
                 </td>
-                <td className="py-3 px-4 font-bold text-white uppercase">{colab.nome}</td>
+                <td className="py-3 px-4 font-bold text-white uppercase group-hover:text-purple-300 transition-colors">
+                  {colab.nome}
+                </td>
                 <td className="py-3 px-4 text-gray-400 text-[11px]">{colab.filialNome}</td>
                 <td className="py-3 px-4">
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -333,12 +347,28 @@ export default function RankingVendedores({
                 <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400">
                   {colab.comissaoAcumulada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </td>
+                <td className="py-3 px-4 text-center">
+                  {!colab.isSemVendedor && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setVendedorSelecionadoModal(colab);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#6A0DAD]/15 hover:bg-[#6A0DAD]/30 text-purple-300 hover:text-white border border-[#6A0DAD]/30 text-[11px] font-bold transition-all shadow-sm cursor-pointer"
+                      title="Ver Dashboard e Metas do Colaborador"
+                    >
+                      <Eye size={12} />
+                      <span>Ver Metas</span>
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
 
             {rankingData.length === 0 && (
               <tr>
-                <td colSpan="8" className="py-10 text-center text-gray-500 italic">
+                <td colSpan="9" className="py-10 text-center text-gray-500 italic">
                   {isLoading ? 'Carregando dados do período...' : 'Nenhum colaborador ou venda encontrada para os filtros selecionados.'}
                 </td>
               </tr>
@@ -346,6 +376,16 @@ export default function RankingVendedores({
           </tbody>
         </table>
       </div>
+
+      {/* 3. MODAL DE DASHBOARD INDIVIDUAL DO COLABORADOR */}
+      {vendedorSelecionadoModal && (
+        <ModalDashboardColaborador
+          colaborador={vendedorSelecionadoModal}
+          filtroMes={filtroMes}
+          filiais={filiais}
+          onClose={() => setVendedorSelecionadoModal(null)}
+        />
+      )}
     </div>
   );
 }

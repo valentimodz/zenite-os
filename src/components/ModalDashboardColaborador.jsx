@@ -1,0 +1,768 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+  X, 
+  Award, 
+  TrendingUp, 
+  Target, 
+  DollarSign, 
+  Receipt, 
+  Sparkles, 
+  Calendar, 
+  Store, 
+  User, 
+  CreditCard, 
+  ShoppingBag,
+  Zap,
+  CheckCircle2,
+  RefreshCw
+} from 'lucide-react';
+import { supabase } from '../supabaseClient';
+import GraficosMinhasMetas from './GraficosMinhasMetas';
+
+// Helper robusto de comissão para cada item
+export const calcularComissaoItem = (sale, isTrainee = false) => {
+  if (!sale) return 0;
+  
+  if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
+    const val = parseFloat(sale.comissao);
+    if (!isNaN(val) && val > 0) return val;
+  }
+  if (sale.valor_comissao !== undefined && sale.valor_comissao !== null && sale.valor_comissao !== '') {
+    const val = parseFloat(sale.valor_comissao);
+    if (!isNaN(val) && val > 0) return val;
+  }
+  if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
+    const val = parseFloat(sale.comissao_vendedor);
+    if (!isNaN(val) && val > 0) return val;
+  }
+
+  const totalBruto = parseFloat(sale.valor_total || sale.valor || sale.preco || 0);
+  const qtd = parseInt(sale.quantidade || 1, 10);
+  if (totalBruto <= 0) return 0;
+
+  const cat = (sale.produtos?.categoria || sale.categoria || '').toUpperCase();
+  const tipo = (sale.produtos?.tipo || sale.tipo || '').toUpperCase();
+  const nomeProd = (sale.produto_nome || sale.produtos?.nome || '').toUpperCase();
+
+  // Serviços
+  if (cat === 'SERVICO' || tipo === 'SERVICO') {
+    return totalBruto * (isTrainee ? 0.02 : 0.03);
+  }
+  
+  // Acessórios
+  if (tipo === 'ACESSORIO' || cat.includes('ACESSORIO') || cat.includes('CAPA') || cat.includes('PELICULA') || cat.includes('FONE')) {
+    return totalBruto * 0.025;
+  }
+
+  // Celulares / Aparelhos
+  const isCelular = tipo === 'CELULAR' || cat === 'ANDROID' || cat === 'IOS' || cat.includes('CELULAR') || cat === 'APPLE_JBL_CONSOLE' || !!sale.imei;
+  if (isCelular) {
+    if (cat === 'IOS' || cat === 'APPLE_JBL_CONSOLE' || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE')) {
+      return Math.max(30 * qtd, totalBruto * 0.02);
+    }
+    return totalBruto * 0.02;
+  }
+
+  return totalBruto * 0.02;
+};
+
+// Helper robusto para identificar se a venda é de acessório
+export const isAcessorio = (venda) => {
+  const cat = (venda.categoria || venda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  const prod = (venda.produto_nome || venda.produtos?.nome || venda.descricao || venda.produtos_descricao || venda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  
+  if (cat.includes('ACESSORIO')) return true;
+
+  const termosAcessorios = ['CAPA', 'CASE', 'PELICULA', 'FILME', 'FONE', 'FONTE', 'CABO', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
+  if (termosAcessorios.some(termo => prod.includes(termo))) return true;
+
+  if (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0) {
+    return venda.itens_venda.some(item => {
+      const iCat = (item.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+      const iProd = (item.produto_nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+      return iCat.includes('ACESSORIO') || termosAcessorios.some(termo => iProd.includes(termo));
+    });
+  }
+
+  return false;
+};
+
+export default function ModalDashboardColaborador({
+  colaborador,
+  filtroMes: mesInicial,
+  filiais = [],
+  onClose
+}) {
+  const [mesAtivo, setMesAtivo] = useState(() => mesInicial || new Date().toISOString().slice(0, 7));
+  const [vendasColaborador, setVendasColaborador] = useState([]);
+  const [metaIndividual, setMetaIndividual] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Carregar dados de vendas e metas do colaborador selecionado
+  const carregarDadosVendedor = useCallback(async () => {
+    if (!colaborador) return;
+    setIsLoading(true);
+
+    try {
+      const [anoStr, mesStr] = (mesAtivo || new Date().toISOString().slice(0, 7)).split('-');
+      const ano = parseInt(anoStr, 10);
+      const mes = parseInt(mesStr, 10) - 1;
+      const inicioMes = new Date(ano, mes, 1, 0, 0, 0, 0).toISOString();
+      const fimMes = new Date(ano, mes + 1, 0, 23, 59, 59, 999).toISOString();
+
+      // 1. Consulta de vendas com relação itens_venda e colunas explícitas
+      let query = supabase
+        .from('vendas')
+        .select(`
+          id,
+          created_at,
+          valor_total,
+          metodo_pagamento,
+          forma_pagamento,
+          categoria,
+          comissao,
+          vendedor_id,
+          vendedor_nome,
+          produto_nome,
+          imei,
+          filial_id,
+          itens_venda (
+            id,
+            produto_nome,
+            quantidade,
+            preco_unitario
+          )
+        `)
+        .gte('created_at', inicioMes)
+        .lte('created_at', fimMes)
+        .order('created_at', { ascending: false });
+
+      if (colaborador.filial_id) {
+        query = query.eq('filial_id', colaborador.filial_id);
+      }
+
+      // Filtrar especificamente pelo ID do colaborador ou por vendedor_nome
+      if (colaborador.id && colaborador.nome && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
+        query = query.or(`vendedor_id.eq.${colaborador.id},vendedor_nome.ilike.%${colaborador.nome}%`);
+      } else if (colaborador.id && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
+        query = query.eq('vendedor_id', colaborador.id);
+      } else if (colaborador.nome) {
+        query = query.ilike('vendedor_nome', `%${colaborador.nome}%`);
+      }
+
+      let { data, error } = await query;
+
+      if (error) {
+        console.warn('[ModalDashboardColaborador] Fallback na busca com itens_venda:', error);
+        let fbQuery = supabase
+          .from('vendas')
+          .select('id, created_at, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei, filial_id')
+          .gte('created_at', inicioMes)
+          .lte('created_at', fimMes)
+          .order('created_at', { ascending: false });
+
+        if (colaborador.filial_id) fbQuery = fbQuery.eq('filial_id', colaborador.filial_id);
+        if (colaborador.id && colaborador.nome && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
+          fbQuery = fbQuery.or(`vendedor_id.eq.${colaborador.id},vendedor_nome.ilike.%${colaborador.nome}%`);
+        } else if (colaborador.id && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
+          fbQuery = fbQuery.eq('vendedor_id', colaborador.id);
+        } else if (colaborador.nome) {
+          fbQuery = fbQuery.ilike('vendedor_nome', `%${colaborador.nome}%`);
+        }
+
+        const fbRes = await fbQuery;
+        if (!fbRes.error && fbRes.data) {
+          data = fbRes.data;
+        }
+      }
+
+      setVendasColaborador(data || []);
+
+      // 2. Consulta de Metas configuradas para o vendedor no mês
+      let metaEncontrada = null;
+      if (colaborador.id && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
+        try {
+          const { data: mData } = await supabase
+            .from('metas')
+            .select('*')
+            .eq('vendedor_id', colaborador.id)
+            .or(`mes_ano.eq.${mesAtivo},mes_referencia.eq.${mesAtivo}`)
+            .maybeSingle();
+
+          if (mData) {
+            metaEncontrada = mData;
+          }
+        } catch (e) {
+          console.warn('Erro ao consultar metas do vendedor:', e);
+        }
+      }
+
+      // Fallback para metas da filial
+      if (!metaEncontrada && colaborador.filial_id) {
+        try {
+          const { data: cData } = await supabase
+            .from('configuracoes_metas_filial')
+            .select('*')
+            .eq('filial_id', colaborador.filial_id)
+            .eq('mes_ano', mesAtivo)
+            .maybeSingle();
+          if (cData) metaEncontrada = cData;
+        } catch (e) {}
+      }
+
+      setMetaIndividual(metaEncontrada);
+    } catch (err) {
+      console.error('[ModalDashboardColaborador] Erro ao carregar dados:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [colaborador, mesAtivo]);
+
+  useEffect(() => {
+    carregarDadosVendedor();
+  }, [carregarDadosVendedor]);
+
+  // Cálculos do Dashboard do Colaborador
+  const dashboardInfo = useMemo(() => {
+    const isTrainee = colaborador?.cargo === 'Trainee' || colaborador?.role === 'TRAINEE' || Boolean(colaborador?.is_treinner);
+
+    const metaBoleto = Number(metaIndividual?.meta_boleto) > 0 
+      ? Number(metaIndividual.meta_boleto) 
+      : (isTrainee ? 40000 : 67500);
+
+    const superMetaBoleto = Number(metaIndividual?.super_meta_boleto) > 0 
+      ? Number(metaIndividual.super_meta_boleto) 
+      : (isTrainee ? 50000 : 87000);
+
+    const metaAcessorios = Number(metaIndividual?.meta_acessorios) > 0 
+      ? Number(metaIndividual.meta_acessorios) 
+      : 10000;
+
+    const superMetaAcessorios = Number(metaIndividual?.super_meta_acessorios) > 0 
+      ? Number(metaIndividual.super_meta_acessorios) 
+      : 15000;
+
+    const metaTotal = Number(metaIndividual?.valor_meta) > 0 
+      ? Number(metaIndividual.valor_meta) 
+      : (metaBoleto + metaAcessorios);
+
+    const sales = vendasColaborador || [];
+    const salesCount = sales.length;
+    const totalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
+    const ticketMedio = salesCount > 0 ? totalVendasGeral / salesCount : 0;
+
+    // Detecção de Acessórios com helper isAcessorio robusto
+    const totalAcessorios = sales
+      .filter(isAcessorio)
+      .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
+
+    // Boletos / Financiamentos
+    const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO'];
+    let totalBoletos = 0;
+    sales.forEach(sale => {
+      const val = parseFloat(sale.valor_total || sale.valor || 0);
+      const mpUpper = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
+      const finUpper = String(sale.financeira || sale.financeira_parceira || '').toUpperCase();
+      const pags = Array.isArray(sale.vendas_pagamentos) ? sale.vendas_pagamentos : [];
+
+      const isBoleto = BOLETO_KEYWORDS.some(k => mpUpper.includes(k) || finUpper.includes(k)) ||
+        pags.some(p => {
+          const pMp = String(p.metodo_pagamento || '').toUpperCase();
+          const pFin = String(p.financeira || '').toUpperCase();
+          return BOLETO_KEYWORDS.some(k => pMp.includes(k) || pFin.includes(k));
+        });
+
+      if (isBoleto) {
+        totalBoletos += val;
+      }
+    });
+
+    const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
+
+    // Progressos
+    const progressoBoleto = metaBoleto > 0 ? Math.min(100, Math.round((totalBoletos / metaBoleto) * 100)) : 0;
+    const progressoAcessorios = metaAcessorios > 0 ? Math.min(100, Math.round((totalAcessorios / metaAcessorios) * 100)) : 0;
+    const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((totalVendasGeral / metaTotal) * 100)) : 0;
+
+    // Badges Boletos
+    let taxaBoletoNum = 0.01;
+    let badgeBoleto = {
+      taxa: '1,0%',
+      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+      status: 'abaixo',
+      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
+    };
+    if (totalBoletos >= superMetaBoleto) {
+      taxaBoletoNum = 0.032;
+      badgeBoleto = {
+        taxa: '3,2%',
+        texto: 'Faixa Atual: 3,2% (Super Meta! 🔥)',
+        status: 'super',
+        classe: 'bg-purple-950/60 text-purple-300 border border-purple-700/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+      };
+    } else if (totalBoletos >= metaBoleto) {
+      taxaBoletoNum = 0.03;
+      badgeBoleto = {
+        taxa: '3,0%',
+        texto: 'Faixa Atual: 3,0% (Meta Batida! 🚀)',
+        status: 'batida',
+        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
+      };
+    }
+
+    // Badges Acessórios
+    let taxaAcessoriosNum = 0.01;
+    let badgeAcessorios = {
+      taxa: '1,0%',
+      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+      status: 'abaixo',
+      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
+    };
+    if (totalAcessorios >= 15000 || totalAcessorios >= superMetaAcessorios) {
+      taxaAcessoriosNum = 0.03;
+      badgeAcessorios = {
+        taxa: '3,0%',
+        texto: 'Faixa Atual: 3,0% (Super Meta! 🔥)',
+        status: 'super',
+        classe: 'bg-pink-950/60 text-pink-300 border border-pink-700/60 shadow-[0_0_12px_rgba(244,114,182,0.3)]'
+      };
+    } else if (totalAcessorios >= 10000 || totalAcessorios >= metaAcessorios) {
+      taxaAcessoriosNum = 0.025;
+      badgeAcessorios = {
+        taxa: '2,5%',
+        texto: 'Faixa Atual: 2,5% (Meta Batida! 🚀)',
+        status: 'batida',
+        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
+      };
+    }
+
+    // Comissões Acumuladas
+    const comissaoBoletosCalc = totalBoletos * taxaBoletoNum;
+    const comissaoAcessoriosCalc = totalAcessorios * taxaAcessoriosNum;
+    const comissaoAVistaCalc = totalAVista * 0.01;
+    const comissaoCalculadaPorMetas = comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc;
+
+    const totalComissoesHistorico = sales.reduce((acc, s) => acc + calcularComissaoItem(s, isTrainee), 0);
+    const totalComissoes = Math.max(comissaoCalculadaPorMetas, totalComissoesHistorico);
+
+    // Evolução diária (dias 1 a fim do mês)
+    const [anoStr, mesStr] = (mesAtivo || new Date().toISOString().slice(0, 7)).split('-');
+    const ano = parseInt(anoStr, 10);
+    const mes = parseInt(mesStr, 10) - 1;
+    const diasNoMes = new Date(ano, mes + 1, 0).getDate();
+
+    const evolucaoDiaria = [];
+    for (let d = 1; d <= diasNoMes; d++) {
+      evolucaoDiaria.push({ dia: d, total: 0 });
+    }
+    sales.forEach(s => {
+      const dStr = s.created_at || s.data;
+      if (!dStr) return;
+      const dt = new Date(dStr);
+      if (!isNaN(dt.getTime())) {
+        const diaNum = dt.getDate();
+        if (diaNum >= 1 && diaNum <= diasNoMes) {
+          evolucaoDiaria[diaNum - 1].total += parseFloat(s.valor_total || s.valor || 0);
+        }
+      }
+    });
+
+    return {
+      mesReferencia: mesAtivo,
+      isTrainee,
+      totalVendasGeral,
+      ticketMedio,
+      totalComissoes,
+      metaTotal,
+      salesCount,
+      totalBoletos,
+      metaBoleto,
+      superMetaBoleto,
+      progressoBoleto,
+      badgeBoleto,
+      totalAcessorios,
+      metaAcessorios,
+      superMetaAcessorios,
+      progressoAcessorios,
+      badgeAcessorios,
+      totalAVista,
+      progressoTotal,
+      evolucaoDiaria,
+      historico: sales
+    };
+  }, [vendasColaborador, metaIndividual, colaborador, mesAtivo]);
+
+  if (!colaborador) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+      <div className="bg-[#050505] border border-[#222222] rounded-2xl w-full max-w-6xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-scaleIn">
+        
+        {/* CABEÇALHO DO MODAL */}
+        <div className="p-4 sm:p-6 bg-[#0B0B0B] border-b border-[#222222] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#6A0DAD] to-purple-950 flex items-center justify-center text-white font-black text-lg border border-purple-500/30 shadow-lg shadow-purple-950/50">
+              {colaborador.nome ? colaborador.nome.charAt(0).toUpperCase() : 'C'}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-lg font-black text-white uppercase tracking-wider">
+                  Desempenho &amp; Metas: {colaborador.nome}
+                </h3>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  colaborador.cargo === 'Trainee' || colaborador.role === 'TRAINEE'
+                    ? 'bg-purple-950/60 text-purple-300 border border-purple-800/60'
+                    : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/60'
+                }`}>
+                  {colaborador.cargo || 'Profissional'}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#1A1A1A] text-gray-300 border border-[#333333] flex items-center gap-1">
+                  <Store size={11} className="text-[#6A0DAD]" />
+                  {colaborador.filialNome || 'Filial Principal'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Visão detalhada de faturamento, metas, evolução diária e comissões individuais
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-auto">
+            {/* Seletor de Competência */}
+            <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg">
+              <Calendar size={14} className="text-[#6A0DAD]" />
+              <span className="text-[11px] font-bold text-gray-400 uppercase">Mês:</span>
+              <input
+                type="month"
+                value={mesAtivo}
+                onChange={(e) => setMesAtivo(e.target.value)}
+                className="bg-transparent text-white text-xs font-bold font-mono outline-none cursor-pointer"
+              />
+            </div>
+
+            {/* Botão Recarregar */}
+            <button
+              type="button"
+              onClick={carregarDadosVendedor}
+              disabled={isLoading}
+              className="p-2 rounded-lg bg-black border border-[#222222] hover:border-[#6A0DAD]/50 text-gray-300 hover:text-white transition-colors cursor-pointer"
+              title="Recarregar dados"
+            >
+              <RefreshCw size={15} className={isLoading ? 'animate-spin text-[#6A0DAD]' : ''} />
+            </button>
+
+            {/* Botão Fechar */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-lg bg-[#151515] hover:bg-rose-950/40 text-gray-400 hover:text-rose-400 border border-[#2A2A2A] hover:border-rose-800/60 transition-colors cursor-pointer"
+              title="Fechar Dashboard"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* CORPO DO MODAL (SCROLLÁVEL) */}
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
+          
+          {/* CARDS SUPERIORES DE MÉTRICAS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            
+            {/* Vendas Totais */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 flex flex-col justify-between shadow-lg">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Vendas Totais ({dashboardInfo.mesReferencia})</span>
+                <div className="w-7 h-7 rounded-lg bg-[#6A0DAD]/20 text-purple-300 flex items-center justify-center border border-[#6A0DAD]/40">
+                  <DollarSign size={14} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-xl sm:text-2xl font-black text-white font-mono block">
+                  R$ {dashboardInfo.totalVendasGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-[11px] text-gray-400 mt-1 block">
+                  {dashboardInfo.salesCount} {dashboardInfo.salesCount === 1 ? 'venda realizada' : 'vendas realizadas'}
+                </span>
+              </div>
+            </div>
+
+            {/* Ticket Médio */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 flex flex-col justify-between shadow-lg">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Ticket Médio</span>
+                <div className="w-7 h-7 rounded-lg bg-blue-950/30 text-blue-400 flex items-center justify-center border border-blue-800/40">
+                  <TrendingUp size={14} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-xl sm:text-2xl font-black text-blue-400 font-mono block">
+                  R$ {dashboardInfo.ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-[11px] text-gray-400 mt-1 block">Média por transação faturada</span>
+              </div>
+            </div>
+
+            {/* Comissões Acumuladas */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 flex flex-col justify-between shadow-lg">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Comissões Acumuladas</span>
+                <div className="w-7 h-7 rounded-lg bg-emerald-950/30 text-emerald-400 flex items-center justify-center border border-emerald-800/40">
+                  <Award size={14} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono block">
+                  R$ {dashboardInfo.totalComissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-[11px] text-emerald-400/80 mt-1 block font-medium">
+                  Comissão calculada no período
+                </span>
+              </div>
+            </div>
+
+            {/* Meta Total Combinada */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 flex flex-col justify-between shadow-lg">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Meta Total Combinada</span>
+                <div className="w-7 h-7 rounded-lg bg-purple-950/30 text-purple-400 flex items-center justify-center border border-purple-800/40">
+                  <Target size={14} />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-xl sm:text-2xl font-black text-purple-300 font-mono block">
+                  R$ {dashboardInfo.metaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <div className="w-full bg-[#1A1A1A] rounded-full h-1.5 mt-2 overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-[#6A0DAD] to-purple-400"
+                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.progressoTotal))}%` }}
+                  ></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* BLOCOS DE METAS: BOLETOS & ACESSÓRIOS */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            
+            {/* BLOCO 1: META DE BOLETOS */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4 shadow-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1A1A1A] pb-3">
+                <div>
+                  <h4 className="text-sm font-extrabold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                    <CreditCard size={16} /> Meta de Boletos / Financiadoras
+                  </h4>
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">
+                    Boleto, PayJoy, Watu, Ume, Aiva e Crediário
+                  </span>
+                </div>
+                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${dashboardInfo.badgeBoleto.classe}`}>
+                  {dashboardInfo.badgeBoleto.texto}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 bg-[#111111] p-3 rounded-lg border border-[#222222] text-center font-mono">
+                <div>
+                  <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
+                  <span className="text-sm sm:text-base font-black text-amber-400 mt-0.5 block">
+                    R$ {dashboardInfo.totalBoletos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="border-x border-[#222222]">
+                  <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
+                  <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
+                    R$ {dashboardInfo.metaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-purple-300 uppercase font-bold block flex items-center justify-center gap-0.5">
+                    <Sparkles size={10} /> Super Meta
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-purple-300 mt-0.5 block">
+                    R$ {dashboardInfo.superMetaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-bold">
+                  <span className="text-gray-400">Progresso do Objetivo</span>
+                  <span className="text-amber-400 font-mono">{dashboardInfo.progressoBoleto}% atingido</span>
+                </div>
+                <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
+                  <div
+                    className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-400 shadow-[0_0_10px_#f59e0b]"
+                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.progressoBoleto))}%` }}
+                  ></div>
+                </div>
+              </div>
+            </div>
+
+            {/* BLOCO 2: META DE ACESSÓRIOS */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4 shadow-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1A1A1A] pb-3">
+                <div>
+                  <h4 className="text-sm font-extrabold text-pink-400 uppercase tracking-wider flex items-center gap-2">
+                    <ShoppingBag size={16} /> Meta de Acessórios
+                  </h4>
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">
+                    Capas, Películas, Fones, Carregadores e Cabos
+                  </span>
+                </div>
+                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${dashboardInfo.badgeAcessorios.classe}`}>
+                  {dashboardInfo.badgeAcessorios.texto}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 bg-[#111111] p-3 rounded-lg border border-[#222222] text-center font-mono">
+                <div>
+                  <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
+                  <span className="text-sm sm:text-base font-black text-pink-400 mt-0.5 block">
+                    R$ {dashboardInfo.totalAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="border-x border-[#222222]">
+                  <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
+                  <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
+                    R$ {dashboardInfo.metaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-pink-300 uppercase font-bold block flex items-center justify-center gap-0.5">
+                    <Sparkles size={10} /> Super Meta
+                  </span>
+                  <span className="text-sm sm:text-base font-black text-pink-300 mt-0.5 block">
+                    R$ {dashboardInfo.superMetaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-bold">
+                  <span className="text-gray-400">Progresso do Objetivo</span>
+                  <span className="text-pink-400 font-mono">
+                    {(dashboardInfo.metaAcessorios > 0 ? ((dashboardInfo.totalAcessorios / dashboardInfo.metaAcessorios) * 100) : 0).toFixed(1)}% atingido
+                  </span>
+                </div>
+                <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
+                  <div
+                    className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-pink-600 via-pink-500 to-rose-400 shadow-[0_0_10px_#ec4899]"
+                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.metaAcessorios > 0 ? (dashboardInfo.totalAcessorios / dashboardInfo.metaAcessorios) * 100 : 0))}%` }}
+                  ></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* GRÁFICOS DINÂMICOS DO COLABORADOR */}
+          <GraficosMinhasMetas metasInfo={dashboardInfo} />
+
+          {/* TABELA COM O HISTÓRICO RECENTE DE VENDAS */}
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
+            <h4 className="text-sm font-bold text-gray-300 mb-4 uppercase tracking-wider flex items-center gap-2">
+              <Receipt size={16} className="text-[#6A0DAD]" />
+              Histórico de Vendas do Colaborador ({dashboardInfo.historico.length})
+            </h4>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                    <th className="pb-3">Data</th>
+                    <th className="pb-3">Produto</th>
+                    <th className="pb-3">Categoria</th>
+                    <th className="pb-3 text-center">Quantidade</th>
+                    <th className="pb-3 text-right">Total Bruto</th>
+                    <th className="pb-3 text-center">Pagamento</th>
+                    <th className="pb-3 text-right text-emerald-400">Comissão</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#222222]/50">
+                  {dashboardInfo.historico.length === 0 ? (
+                    <tr>
+                      <td colSpan="7" className="py-8 text-center italic text-gray-600">
+                        {isLoading ? 'Carregando vendas...' : `Nenhuma venda registrada para ${colaborador.nome} no mês ${dashboardInfo.mesReferencia}.`}
+                      </td>
+                    </tr>
+                  ) : (
+                    dashboardInfo.historico.map(sale => {
+                      const itens = Array.isArray(sale.itens_venda) ? sale.itens_venda : [];
+                      let nomeBase = sale.produto_nome || sale.descricao || (itens.length > 0 ? itens[0]?.produto_nome : null) || 'Produto Geral';
+                      let produtoNome = nomeBase;
+                      if (itens.length > 1) {
+                        const sobram = itens.length - 1;
+                        produtoNome = `${nomeBase} (+${sobram} ${sobram === 1 ? 'item' : 'itens'})`;
+                      }
+
+                      const quantidadeItens = itens.length > 0
+                        ? itens.reduce((acc, cur) => acc + (Number(cur.quantidade) || 1), 0)
+                        : (Number(sale.quantidade) || 1);
+
+                      const categoriaExibida = (itens.length > 0 && itens[0]?.categoria)
+                        ? itens[0].categoria
+                        : (sale.categoria || 'Geral');
+
+                      const valorComissaoBruto = Number(calcularComissaoItem(sale, dashboardInfo.isTrainee));
+                      const comissaoFormatada = valorComissaoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                      const metodoRaw = String(sale.forma_pagamento || sale.metodo_pagamento || 'N/A').toUpperCase();
+
+                      return (
+                        <tr key={sale.id} className="hover:bg-purple-950/5 transition-colors">
+                          <td className="py-3 text-gray-400 font-mono">
+                            {new Date(sale.created_at).toLocaleDateString('pt-BR')}
+                          </td>
+                          <td className="py-3">
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white">{produtoNome}</span>
+                              {sale.imei && (
+                                <span className="text-[10px] text-zinc-500 font-mono">IMEI: ...{String(sale.imei).slice(-4)}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3">
+                            <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-[#6A0DAD]/10 text-purple-300">
+                              {categoriaExibida}
+                            </span>
+                          </td>
+                          <td className="py-3 text-center font-bold text-gray-300">{quantidadeItens}</td>
+                          <td className="py-3 text-right font-mono font-bold text-white">
+                            R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 text-center">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#111] text-gray-300 border border-[#333] uppercase">
+                              {metodoRaw}
+                            </span>
+                          </td>
+                          <td className="py-3 text-right font-mono font-bold text-emerald-400">
+                            R$ {comissaoFormatada}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+        {/* RODAPÉ DO MODAL */}
+        <div className="p-4 bg-[#0B0B0B] border-t border-[#222222] flex items-center justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl bg-[#1F1F1F] hover:bg-[#2A2A2A] text-white text-xs font-bold transition-colors cursor-pointer"
+          >
+            Fechar
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
