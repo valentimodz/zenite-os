@@ -35,6 +35,7 @@ import ModalMetasVendedor from './ModalMetasVendedor';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
+import ModalAbrirCaixa from './ModalAbrirCaixa';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1333,7 +1334,6 @@ export default function Dashboard({ session, profileDataProps }) {
   const [isLoadingCaixa, setIsLoadingCaixa] = useState(false);
   const [isModalAbrirCaixaOpen, setIsModalAbrirCaixaOpen] = useState(false);
   const [fundoTrocoInput, setFundoTrocoInput] = useState('');
-  const [depositoInicialInput, setDepositoInicialInput] = useState('');
   const [obsAberturaInput, setObsAberturaInput] = useState('');
   const [isSubmittingAbertura, setIsSubmittingAbertura] = useState(false);
 
@@ -4289,8 +4289,19 @@ export default function Dashboard({ session, profileDataProps }) {
   };
 
   // Confirmar Abertura de Caixa (Inserir registro no Supabase e liberar PDV)
-  const handleConfirmarAberturaCaixa = async (e) => {
-    if (e) e.preventDefault();
+  const handleConfirmarAberturaCaixa = async (dadosOuEvento) => {
+    let valorNum = 0;
+    let obsStr = null;
+
+    if (dadosOuEvento && typeof dadosOuEvento === 'object' && ('fundoTrocoInicial' in dadosOuEvento || 'observacaoAbertura' in dadosOuEvento)) {
+      valorNum = Number(dadosOuEvento.fundoTrocoInicial || 0);
+      obsStr = dadosOuEvento.observacaoAbertura?.trim() || null;
+    } else {
+      if (dadosOuEvento?.preventDefault) dadosOuEvento.preventDefault();
+      valorNum = parseFloat(String(fundoTrocoInput).replace(/\./g, '').replace(',', '.')) || 0;
+      obsStr = obsAberturaInput?.trim() || null;
+    }
+
     const targetFilialId = activeFilialId || profile?.filial_id;
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
     const operadorId = session?.user?.id || profile?.id;
@@ -4300,62 +4311,80 @@ export default function Dashboard({ session, profileDataProps }) {
       return;
     }
 
-    const saldoInicialNum = parseFloat(String(fundoTrocoInput).replace(/\./g, '').replace(',', '.')) || 0;
-    const depositoInicialNum = parseFloat(String(depositoInicialInput).replace(/\./g, '').replace(',', '.')) || 0;
-    const obsAberturaStr = obsAberturaInput.trim() || null;
     setIsSubmittingAbertura(true);
 
     try {
+      // Payload estrito conforme especificado:
+      // {
+      //   operador_id: user.id,
+      //   filial_id: filialAtivaId,
+      //   valor_abertura: Number(fundoTrocoInicial || 0),
+      //   status: 'ABERTO',
+      //   data_abertura: new Date().toISOString(),
+      //   observacao: observacaoAbertura?.trim() || null
+      // }
       const payload = {
-        empresa_id: targetEmpresaId,
-        filial_id: targetFilialId,
         operador_id: operadorId,
-        saldo_inicial: saldoInicialNum,
-        deposito_inicial: depositoInicialNum,
-        observacao_abertura: obsAberturaStr,
-        observacoes_abertura: obsAberturaStr,
-        status: 'aberto',
+        filial_id: targetFilialId,
+        empresa_id: targetEmpresaId,
+        valor_abertura: valorNum,
+        saldo_inicial: valorNum,
+        status: 'ABERTO',
         data_abertura: new Date().toISOString(),
+        observacao: obsStr,
+        observacao_abertura: obsStr,
+        observacoes_abertura: obsStr,
         data_fechamento: null
       };
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('caixas')
         .insert(payload)
         .select()
         .single();
 
       if (error) {
-        console.error('Erro ao abrir caixa no Supabase (tentando fallback):', error);
-        // Fallback defensivo caso colunas novas ainda não existam no schema
+        console.warn('[handleConfirmarAberturaCaixa] Tentando fallback para colunas existentes em caixas:', error);
         const fallbackPayload = {
           empresa_id: targetEmpresaId,
           filial_id: targetFilialId,
           operador_id: operadorId,
-          saldo_inicial: saldoInicialNum,
-          observacoes_abertura: obsAberturaStr ? `Depósito: R$ ${depositoInicialNum.toFixed(2)} | ${obsAberturaStr}` : (depositoInicialNum > 0 ? `Depósito: R$ ${depositoInicialNum.toFixed(2)}` : null),
-          status: 'aberto',
+          saldo_inicial: valorNum,
+          observacoes_abertura: obsStr,
+          observacao_abertura: obsStr,
+          status: 'ABERTO',
           data_abertura: new Date().toISOString(),
           data_fechamento: null
         };
         const resFallback = await supabase.from('caixas').insert(fallbackPayload).select().single();
-        if (resFallback.error) throw resFallback.error;
-        setCaixaAtual(resFallback.data);
-      } else {
-        setCaixaAtual(data);
+        if (resFallback.error) {
+          // Tentativa na tabela fechamentos_caixa
+          const resFechamentos = await supabase.from('fechamentos_caixa').insert({
+            operador_id: operadorId,
+            filial_id: targetFilialId,
+            valor_abertura: valorNum,
+            status: 'ABERTO',
+            data_abertura: new Date().toISOString(),
+            observacao: obsStr
+          }).select().single();
+          if (resFechamentos.error) throw resFallback.error;
+          data = resFechamentos.data;
+        } else {
+          data = resFallback.data;
+        }
       }
+
+      setCaixaAtual(data);
       setIsCaixaAberto(true);
       setIsModalAbrirCaixaOpen(false);
       setFundoTrocoInput('');
-      setDepositoInicialInput('');
       setObsAberturaInput('');
       invalidateCache('status_caixa_');
       invalidateCache('sessoes_caixas_');
-      const msgSucesso = depositoInicialNum > 0
-        ? `Caixa aberto com sucesso! Fundo: R$ ${saldoInicialNum.toFixed(2)} | Depósito: R$ ${depositoInicialNum.toFixed(2)}`
-        : `Caixa aberto com sucesso! Fundo inicial: R$ ${saldoInicialNum.toFixed(2)}`;
+      const msgSucesso = `Caixa aberto com sucesso! Fundo inicial: R$ ${valorNum.toFixed(2)}`;
       showToast(msgSucesso, 'success');
       fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+      return data;
     } catch (err) {
       console.error('Falha crítica ao abrir caixa:', err);
       showToast(`Erro ao abrir caixa: ${err.message || 'Verifique se a migration da tabela caixas foi executada.'}`, 'error');
@@ -26661,149 +26690,26 @@ export default function Dashboard({ session, profileDataProps }) {
 
 
         {/* MODAL DE ABERTURA DE CAIXA (BLOQUEIO PDV MULTI-FILIAIS) */}
-        {isModalAbrirCaixaOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fadeIn">
-            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/50 rounded-2xl max-w-md w-full p-6 space-y-5 flex flex-col relative shadow-[0_0_50px_rgba(106,13,173,0.25)] font-sans">
-
-              {/* Header do Modal */}
-              <div className="flex items-center justify-between pb-3 border-b border-[#222]">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-[#c084fc]">
-                    <Store size={22} />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-extrabold text-white tracking-tight flex items-center gap-2">
-                      Abrir Caixa
-                      <span className="text-[10px] bg-amber-950/40 text-amber-300 border border-amber-800/40 px-2 py-0.5 rounded-full font-bold uppercase">
-                        Início de Turno
-                      </span>
-                    </h3>
-                    <p className="text-xs text-gray-400">
-                      {activeFilialNome || 'Filial Selecionada'} • Operador: {profile?.nome || session?.user?.email || 'Operador'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Fechar modal se não for vendedor ou se não estiver na aba PDV */}
-                {(!['VENDEDOR'].includes(String(profile?.role || profile?.cargo || '').toUpperCase()) && !String(profile?.role || profile?.cargo || '').toUpperCase().startsWith('VENDEDOR_') || activeTab !== 'pdv') && (
-                  <button
-                    onClick={() => setIsModalAbrirCaixaOpen(false)}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-                    title="Fechar modal de abertura"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
-              </div>
-
-              <form onSubmit={handleConfirmarAberturaCaixa} className="space-y-4">
-                {/* Aviso de Bloqueio */}
-                <div className="p-3.5 bg-purple-950/20 border border-[#6A0DAD]/30 rounded-xl flex items-start gap-2.5 text-xs text-purple-200/90">
-                  <ShieldCheck size={18} className="text-[#c084fc] shrink-0 mt-0.5" />
-                  <p>
-                    O PDV requer a abertura do caixa para emissão de pedidos e controle da gaveta nesta filial.
-                  </p>
-                </div>
-
-                {/* Campo Fundo de Troco (R$) */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>Fundo de Troco Inicial (R$) *</span>
-                    <span className="text-[10px] text-gray-500 font-normal">Dinheiro físico em gaveta</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-[#6A0DAD] font-mono">
-                      R$
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      autoFocus
-                      value={fundoTrocoInput}
-                      onChange={(e) => setFundoTrocoInput(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
-                    />
-                  </div>
-
-                  {/* Atalhos Rápidos de Fundo de Troco */}
-                  <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
-                    {[0, 50, 100, 200, 300, 500].map((val) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setFundoTrocoInput(val.toFixed(2))}
-                        className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-[#222] hover:border-[#6A0DAD]/50 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-all cursor-pointer shrink-0"
-                      >
-                        R$ {val}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Campo Depósito / Suprimento Inicial (R$) Opcional */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>Depósito / Suprimento Inicial (R$)</span>
-                    <span className="text-[10px] text-purple-400 font-normal">Opcional</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-purple-400 font-mono">
-                      R$
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={depositoInicialInput}
-                      onChange={(e) => setDepositoInicialInput(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-black border border-[#333] focus:border-purple-500 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Observação / Referência do Depósito / Abertura */}
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>Observação / Referência do Depósito</span>
-                    <span className="text-[10px] text-gray-500 font-normal">Opcional</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={obsAberturaInput}
-                    onChange={(e) => setObsAberturaInput(e.target.value)}
-                    placeholder="Ex: Reforço de troco, sangria devolvida, notas miúdas..."
-                    className="w-full bg-black border border-[#222] focus:border-[#6A0DAD] rounded-xl px-3.5 py-2 text-xs text-white outline-none transition-all"
-                  />
-                </div>
-
-                {/* Rodapé e Botões */}
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={isSubmittingAbertura}
-                    className="w-full py-3 bg-[#6A0DAD] hover:bg-[#500885] text-white text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-[#6A0DAD]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {isSubmittingAbertura ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin text-white" />
-                        Registrando Abertura de Caixa...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={16} />
-                        Confirmar e Abrir Caixa
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+        <ModalAbrirCaixa
+          isOpen={isModalAbrirCaixaOpen}
+          onClose={() => setIsModalAbrirCaixaOpen(false)}
+          filialId={activeFilialId || profile?.filial_id}
+          filialNome={activeFilialNome}
+          operadorId={session?.user?.id || profile?.id}
+          operadorNome={profile?.nome || session?.user?.email || 'Operador'}
+          empresaId={profile?.empresa_id || company?.id || activeEmpresaId}
+          canClose={(!['VENDEDOR'].includes(String(profile?.role || profile?.cargo || '').toUpperCase()) && !String(profile?.role || profile?.cargo || '').toUpperCase().startsWith('VENDEDOR_') || activeTab !== 'pdv')}
+          handleAbrirCaixa={handleConfirmarAberturaCaixa}
+          onCaixaAberto={(novoCaixa) => {
+            setCaixaAtual(novoCaixa);
+            setIsCaixaAberto(true);
+            setIsModalAbrirCaixaOpen(false);
+            invalidateCache('status_caixa_');
+            invalidateCache('sessoes_caixas_');
+            const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+            fetchSessoesCaixas(targetEmpresaId, filtroFilialCaixa, filtroMes);
+          }}
+        />
 
         {/* MODAL DE RESTAURAÇÃO DE RASCUNHO (SRE) */}
         {showDraftModal && (
