@@ -167,7 +167,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   }
 
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  const modelosTentativa = ['gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
+  const modelosTentativa = ['gemini-1.5-flash', 'gemini-2.0-flash'];
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
@@ -256,9 +256,9 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
 }
 
 /**
- * Gera uma estratégia de giro acelerado para um produto parado no estoque via Gemini 2.5
+ * Gera uma estratégia de giro acelerado para um produto parado no estoque via Gemini 1.5 Flash (Ultrarrápido)
  */
-export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja', customApiKey = '' }) {
+export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja', customApiKey = '', promptPersonalizado = '', signal }) {
   const effectiveApiKey =
     customApiKey?.trim() ||
     localStorage.getItem('@zenite_gemini_api_key') ||
@@ -267,28 +267,47 @@ export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja',
     '';
 
   const valorUnitario = Number(produto.preco_venda || produto.preco || produto.preco_custo || 0);
-  const diasSemGiro = Number(produto.dias_sem_giro || 30);
+  const diasSemGiro = Number(produto.dias_sem_giro || produto.dias_parado || 30);
+  const saldo = Number(produto.quantidade || 1);
 
-  // Fallback rápido se não houver chave de API configurada
+  const prompt = promptPersonalizado || `Você é o Feijão IA, consultor executivo da rede de lojas Monkey Shop.
+Produto: ${produto.nome} (${produto.categoria || 'Geral'})
+Preço: R$ ${valorUnitario.toFixed(2)} | Dias parado: ${diasSemGiro} dias | Saldo: ${saldo} un.
+Gere uma estratégia rápida de giro em 3 tópicos curtos:
+1. Combo com aparelho ou brinde estratégico.
+2. Argumento de balcão para os vendedores (Islayne, Regiane, Amanda, Sena).
+3. Oferta relâmpago de queima para liberar capital.
+Seja direto e comercial.`;
+
+  // 1. Tentar primeiro o backend Vite se disponível (/api/feijao-ia/estrategia)
+  try {
+    const apiBackendResponse = await fetch('/api/feijao-ia/estrategia', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, modelo: 'gemini-1.5-flash', apiKey: effectiveApiKey }),
+      signal
+    });
+
+    if (apiBackendResponse.ok) {
+      const data = await apiBackendResponse.json();
+      const resposta = data.texto || data.resposta;
+      if (resposta && resposta.trim().length > 15) {
+        return resposta.trim();
+      }
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    // Backend indisponível ou em build de produção estática, seguir para fallback direto REST
+  }
+
+  // 2. Se não houver chave de API configurada no cliente, usar gerador estratégico heurístico instantâneo
   if (!effectiveApiKey) {
-    console.warn('[GeminiService] Chave Gemini não encontrada, usando gerador estratégico heurístico.');
+    console.warn('[GeminiService] Chave Gemini não encontrada, usando gerador tático instantâneo.');
     return gerarEstrategiaGiroFallback(produto, filialNome);
   }
 
-  const prompt = `Você é a Feijão IA, a inteligência artificial especialista em inteligência comercial e varejo de tecnologia da rede Zênite. Atue como uma estrategista comercial de varejo de celulares.
-O produto a seguir está parado no estoque da filial ${filialNome}:
-- Item: ${produto.nome}
-- Categoria: ${produto.categoria || 'Celulares / Geral'}
-- Quantidade Imobilizada: ${produto.quantidade || 1} un.
-- Preço Unitário: R$ ${valorUnitario.toFixed(2)}
-- Dias em Estoque: ${diasSemGiro} dias
-
-Forneça um plano tático imediato com:
-1. Oferta de Combinação/Cross-selling (ex.: condição com película, capinha ou financiamento PayJoy/Aiva)
-2. Argumento de Venda Rápido para a equipe no balcão
-3. Ação Comercial Imediata para desovar o lote esta semana`;
-
-  const modelosTentativa = ['gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
+  // 3. Chamada direta ao Google Gen AI REST API com modelo ultrarrápido Flash e maxOutputTokens 500
+  const modelosTentativa = ['gemini-1.5-flash', 'gemini-2.0-flash'];
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
@@ -297,6 +316,7 @@ Forneça um plano tático imediato com:
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal,
         body: JSON.stringify({
           contents: [{
             role: 'user',
@@ -304,7 +324,7 @@ Forneça um plano tático imediato com:
           }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 1000
+            maxOutputTokens: 500
           }
         })
       });
@@ -312,14 +332,15 @@ Forneça um plano tático imediato com:
       if (response.ok) {
         const data = await response.json();
         const texto = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (texto && texto.trim().length > 20) {
-          return texto;
+        if (texto && texto.trim().length > 15) {
+          return texto.trim();
         }
       } else {
         const errJson = await response.json().catch(() => ({}));
         lastError = new Error(errJson.error?.message || `Erro HTTP ${response.status}`);
       }
     } catch (e) {
+      if (e?.name === 'AbortError') throw e;
       lastError = e;
     }
   }
@@ -329,22 +350,13 @@ Forneça um plano tático imediato com:
 }
 
 /**
- * Fallback heurístico inteligente caso a API esteja temporariamente indisponível
+ * Fallback tático instantâneo para nunca travar a tela do usuário
  */
 export function gerarEstrategiaGiroFallback(produto, filialNome = 'Loja') {
-  const preco = Number(produto.preco_venda || produto.preco || produto.preco_custo || 0);
-  const entradaBoleto = (preco * 0.15).toFixed(2);
-  const parcelaEstimada = ((preco * 1.15) / 12).toFixed(2);
-
-  return `### 1. Oferta de Combinação / Cross-selling (Acessórios & PayJoy/Aiva)
-* **Combo Proteção Total**: Na compra do **${produto.nome}**, leve Capa Anti-Impacto + Película 3D com 50% de desconto ou grátis na entrada via PIX.
-* **Condição PayJoy / Aiva**: Entrada facilitada de apenas **R$ ${entradaBoleto}** e saldo em parcelas acessíveis de ~R$ ${parcelaEstimada}/mês.
-
-### 2. Argumento de Venda Rápido para a Equipe no Balcão
-* *"Este modelo oferece excelente autonomia de bateria, tela de alta nitidez e suporte oficial. Conseguimos liberar uma condição autorizada pela diretoria exclusiva para esta unidade em estoque aqui na loja ${filialNome}."*
-* *"Fechando hoje, já te entrego o aparelho com a película aplicada e todos os seus dados transferidos sem nenhum custo adicional."*
-
-### 3. Ação Comercial Imediata para Desovar o Lote Esta Semana
-* **Incentivo Direto aos Consultores**: Bônus de **R$ 25,00 a R$ 35,00 adicionais** pagos na hora para o consultor que faturar este item nas próximas 48 horas.
-* **Vitrine & Ponto Focal**: Posicionar na prateleira central da loja ${filialNome} com tag *"Destaque da Semana - Condição Exclusiva"*.`;
+  return (
+    `🔥 **Estratégia Recomendada:**\n` +
+    `• **Combo Venda Casada:** Ofereça este item com 30% de desconto na compra de qualquer celular no crediário/boleto.\n` +
+    `• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há +30 dias.\n` +
+    `• **Queima no Balcão:** Exponha na bandeja de frente de caixa com etiqueta de "Oportunidade da Semana".`
+  );
 }

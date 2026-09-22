@@ -121,6 +121,69 @@ export default defineConfig({
             return;
           }
 
+          // ROUTE: AI Feijão IA Estratégia de Giro (Gemini 1.5 Flash)
+          if (pathname === '/api/feijao-ia/estrategia') {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Headers', '*');
+            res.setHeader('Access-Control-Allow-Methods', '*');
+
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', async () => {
+              try {
+                const payload = body ? JSON.parse(body) : {};
+                const { prompt, modelo = 'gemini-1.5-flash', apiKey } = payload;
+                const effectiveApiKey =
+                  apiKey ||
+                  getEnvVar('VITE_GEMINI_API_KEY') ||
+                  getEnvVar('VITE_GOOGLE_GENAI_API_KEY') ||
+                  getEnvVar('GEMINI_API_KEY') ||
+                  process.env.VITE_GEMINI_API_KEY ||
+                  process.env.GEMINI_API_KEY ||
+                  '';
+
+                if (!effectiveApiKey) {
+                  res.statusCode = 200;
+                  res.end(JSON.stringify({
+                    texto: `🔥 **Estratégia Recomendada:**\n• **Combo Venda Casada:** Ofereça este item com 30% de desconto na compra de qualquer celular no crediário/boleto.\n• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há +30 dias.\n• **Queima no Balcão:** Exponha na bandeja de frente de caixa com etiqueta de "Oportunidade da Semana".`
+                  }));
+                  return;
+                }
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveApiKey}`;
+                const apiRes = await fetch(url, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    generationConfig: {
+                      temperature: 0.7,
+                      maxOutputTokens: 500
+                    }
+                  })
+                });
+
+                if (!apiRes.ok) {
+                  const errData = await apiRes.json().catch(() => ({}));
+                  throw new Error(errData?.error?.message || `Erro HTTP ${apiRes.status}`);
+                }
+
+                const data = await apiRes.json();
+                const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                res.statusCode = 200;
+                res.end(JSON.stringify({ texto, resposta: texto }));
+              } catch (iaErr) {
+                console.warn('Falha na requisição Feijão IA, retornando fallback tático:', iaErr?.message);
+                res.statusCode = 200;
+                res.end(JSON.stringify({
+                  texto: `🔥 **Estratégia Recomendada:**\n• **Combo Venda Casada:** Ofereça este item com 30% de desconto na compra de qualquer celular no crediário/boleto.\n• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há +30 dias.\n• **Queima no Balcão:** Exponha na bandeja de frente de caixa com etiqueta de "Oportunidade da Semana".`
+                }));
+              }
+            });
+            return;
+          }
+
           if (
             pathname.startsWith('/api/super-admin/') || 
             pathname.startsWith('/api/fiscal/') || 

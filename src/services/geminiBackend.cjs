@@ -103,8 +103,8 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
     throw new Error('Chave da API Gemini não fornecida. Configure VITE_GEMINI_API_KEY no arquivo .env ou informe-a no modal.');
   }
 
-  // Modelos para chamada direta REST
-  const modelosTentativa = ['gemini-2.5-flash', 'gemini-flash-latest'];
+  // Modelos para chamada direta REST ultrarrápidos
+  const modelosTentativa = ['gemini-1.5-flash', 'gemini-2.0-flash'];
   let lastError = null;
 
   for (const modelo of modelosTentativa) {

@@ -44,17 +44,81 @@ export default function EstrategiaProdutoModal({
     if (!produto) return;
     setIsLoading(true);
     setErro('');
+
+    // Adicionar timeout de segurança de 8 segundos
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     try {
-      const texto = await gerarEstrategiaGiroProduto({
-        produto,
-        filialNome
-      });
-      setEstrategiaTexto(texto || '');
+      const precoValor = produto.preco || produto.preco_venda || produto.preco_custo || 0;
+      const diasParado = produto.dias_sem_giro || produto.dias_parado || 30;
+      const saldo = produto.quantidade || 1;
+
+      const prompt = `Você é o Feijão IA, consultor executivo da rede de lojas Monkey Shop.
+Produto: ${produto.nome} (${produto.categoria || 'Geral'})
+Preço: R$ ${precoValor} | Dias parado: ${diasParado} dias | Saldo: ${saldo} un.
+Gere uma estratégia rápida de giro em 3 tópicos curtos:
+1. Combo com aparelho ou brinde estratégico.
+2. Argumento de balcão para os vendedores (Islayne, Regiane, Amanda, Sena).
+3. Oferta relâmpago de queima para liberar capital.
+Seja direto e comercial.`;
+
+      // 1. Tenta endpoint direto da API se disponível
+      let respostaTexto = '';
+      try {
+        const response = await fetch('/api/feijao-ia/estrategia', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, modelo: 'gemini-1.5-flash' }),
+          signal: controller.signal
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          respostaTexto = data.texto || data.resposta || '';
+        }
+      } catch (apiErr) {
+        if (apiErr?.name === 'AbortError') throw apiErr;
+        // Prosseguir para o cliente direto do GeminiService
+      }
+
+      // 2. Se a API não respondeu, utiliza o GeminiService resiliente
+      if (!respostaTexto) {
+        respostaTexto = await gerarEstrategiaGiroProduto({
+          produto: {
+            ...produto,
+            preco: precoValor,
+            dias_parado: diasParado,
+            quantidade: saldo
+          },
+          filialNome,
+          promptPersonalizado: prompt,
+          signal: controller.signal
+        });
+      }
+
+      if (!respostaTexto || !respostaTexto.trim()) {
+        throw new Error('Falha na resposta da API');
+      }
+
+      setEstrategiaTexto(respostaTexto.trim());
     } catch (err) {
-      console.error('Erro ao gerar estratégia com Feijão IA:', err);
-      setErro(err.message || 'Falha ao conectar com a Feijão IA para gerar estratégia.');
+      console.error("Erro ao gerar estratégia Feijão IA:", err);
+      // Fallback tático instantâneo para nunca travar a tela do usuário
+      setEstrategiaTexto(
+        `🔥 **Estratégia Recomendada:**\n` +
+        `• **Combo Venda Casada:** Ofereça este item com 30% de desconto na compra de qualquer celular no crediário/boleto.\n` +
+        `• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há +30 dias.\n` +
+        `• **Queima no Balcão:** Exponha na bandeja de frente de caixa com etiqueta de "Oportunidade da Semana".`
+      );
+      if (err?.name === 'AbortError') {
+        setErro('Tempo limite de 8 segundos atingido. Estratégia recomendada de giro liberada imediatamente.');
+      } else {
+        setErro('Instabilidade na conexão da IA. Estratégia recomendada de giro liberada imediatamente.');
+      }
     } finally {
-      setIsLoading(false);
+      clearTimeout(timeoutId);
+      setIsLoading(false); // CRÍTICO: nunca deixar o loading ativo
     }
   };
 
@@ -81,14 +145,15 @@ export default function EstrategiaProdutoModal({
 
   // Copiar para WhatsApp
   const handleCopiarWhatsApp = () => {
-    const precoFormatado = formatBRL(produto?.preco || produto?.preco_custo || 0);
-    const msg = `⚡ *PLANO DE DESOVA & GIRO IMEDIATO - FEIJÃO IA (ZÊNITE)* ⚡\n` +
+    const precoFormatado = formatBRL(produto?.preco || produto?.preco_venda || produto?.preco_custo || 0);
+    const diasImobilizado = produto?.dias_sem_giro || produto?.dias_parado || 30;
+    const msg = `⚡ *PLANO DE DESOVA & GIRO IMEDIATO - FEIJÃO IA (MONKEY SHOP / ZÊNITE)* ⚡\n` +
       `📍 *Unidade:* ${filialNome}\n` +
       `📦 *Item em Estoque:* ${produto?.nome}\n` +
       `💰 *Preço Tabela:* ${precoFormatado}\n` +
-      `⏳ *Dias Imobilizado:* ${produto?.dias_sem_giro || 30} dias\n\n` +
+      `⏳ *Dias Imobilizado:* ${diasImobilizado} dias\n\n` +
       `${estrategiaTexto}\n\n` +
-      `_Ação gerada pela Feijão IA - Inteligência Comercial da Rede Zênite_`;
+      `_Ação gerada pela Feijão IA - Inteligência Comercial de Varejo_`;
 
     navigator.clipboard.writeText(msg);
     setCopiado(true);
@@ -178,15 +243,19 @@ export default function EstrategiaProdutoModal({
             </div>
           )}
 
-          {/* ERRO STATE */}
+          {/* AVISO / MODO DE CONTINGÊNCIA SE HOUVER ERRO */}
           {!isLoading && erro && (
-            <div className="p-4 bg-rose-950/30 border border-rose-800/40 rounded-xl text-xs text-rose-200 flex items-center justify-between gap-3">
-              <span>{erro}</span>
+            <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-xl text-xs text-amber-200 flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2">
+                <Flame size={15} className="text-amber-400 shrink-0" />
+                {erro}
+              </span>
               <button
                 onClick={carregarEstrategia}
-                className="px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-white font-bold flex items-center gap-1.5 shrink-0"
+                disabled={isLoading}
+                className="px-2.5 py-1 rounded-lg bg-amber-900/60 hover:bg-amber-800 text-white font-bold flex items-center gap-1.5 shrink-0 text-[11px] cursor-pointer"
               >
-                <RefreshCw size={12} /> Tentar Novamente
+                <RefreshCw size={11} className={isLoading ? 'animate-spin' : ''} /> Tentar Novamente
               </button>
             </div>
           )}
@@ -216,7 +285,7 @@ export default function EstrategiaProdutoModal({
           <button
             onClick={carregarEstrategia}
             disabled={isLoading}
-            className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-bold text-gray-300 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+            className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-bold text-gray-300 hover:text-white transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
           >
             <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
             Gerar Nova Sugestão
@@ -226,7 +295,7 @@ export default function EstrategiaProdutoModal({
             <button
               onClick={handleCopiarWhatsApp}
               disabled={isLoading || !estrategiaTexto}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-bold text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center gap-2 disabled:opacity-50"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-bold text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             >
               {copiado ? (
                 <>
