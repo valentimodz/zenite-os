@@ -771,6 +771,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     };
   }, []);
 
+  // Ref de guarda para evitar loops de sincronização de vendas/metas do vendedor
+  const lastLoadedSellerKeyRef = useRef('');
+
   // Estados do Painel Supremo (ADMIN)
   const [allCompanies, setAllCompanies] = useState([]);
 
@@ -2724,12 +2727,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   // Sincronizar Meta do Vendedor Logado e Vendas quando mudar a aba de Metas ou o Filtro de Mês
   useEffect(() => {
     const currentUserId = session?.user?.id || profile?.id;
-    const currentFilialId = activeFilialId || profile?.filial_id;
+    const currentFilialId = activeFilialId || profile?.filial_id || '';
     const isMetasTab = activeSellerTab === 'metas' || activeTab === 'metas' || currentView === 'metas';
     const isVendedor = profile?.role === 'VENDEDOR' || !['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role);
+    const syncKey = `${currentUserId}_${currentFilialId}_${filtroMes}_${isMetasTab ? 'metas' : 'geral'}`;
 
     if (currentUserId && (isMetasTab || isVendedor)) {
-      carregarVendas();
+      if (lastLoadedSellerKeyRef.current === syncKey) {
+        return;
+      }
+      lastLoadedSellerKeyRef.current = syncKey;
+      carregarVendas(currentUserId, filtroMes);
       carregarMetaVendedor(currentUserId, currentFilialId, filtroMes);
       fetchVendedorData(currentFilialId, currentUserId, null, filtroMes);
     }
@@ -4750,8 +4758,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             id,
             produto_nome,
             quantidade,
-            preco_unitario,
-            categoria
+            preco_unitario
           )
         `)
         .gte('created_at', dataInicio)
