@@ -300,7 +300,7 @@ export default function ModalDesempenhoVendedor({
       lastLoadedVendedorRef.current = key;
       carregarDadosVendedor();
     }
-  }, [colaboradorId, mesAtivo, carregarDadosVendedor]);
+  }, [colaboradorId, mesAtivo]);
 
   // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'metas'
   const dashboardInfo = useMemo(() => {

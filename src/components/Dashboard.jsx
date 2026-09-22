@@ -15050,7 +15050,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     profile?.is_treinner,
     profile?.role,
     filtroMes,
-    metaVendedorLogado,
+    metaVendedorLogado?.id,
+    metaVendedorLogado?.valor_meta,
+    metaVendedorLogado?.meta_boleto,
     metas?.length,
     vendasVendedor?.length
   ]);

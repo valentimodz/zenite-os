@@ -123,21 +123,15 @@ Seja direto e comercial.`;
     }
   };
 
-  const produtoId = produto?.id || produto?.produto_id || (produto?.nome ? `${produto.nome}_${produto.preco || 0}` : null);
-
+  // Resetar estados apenas quando o modal for fechado (sem disparo automático)
   useEffect(() => {
-    if (isOpen && produtoId) {
-      if (lastLoadedIdRef.current !== produtoId) {
-        lastLoadedIdRef.current = produtoId;
-        carregarEstrategia();
-      }
-    } else if (!isOpen) {
-      lastLoadedIdRef.current = null;
+    if (!isOpen) {
       setEstrategiaTexto('');
       setCopiado(false);
       setErro('');
+      setIsLoading(false);
     }
-  }, [isOpen, produtoId]);
+  }, [isOpen]);
 
   // Tecla ESC para fechar
   useEffect(() => {
@@ -230,6 +224,31 @@ Seja direto e comercial.`;
         {/* CORPO DO MODAL */}
         <div className="p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
 
+          {/* ESTADO INICIAL: CONVITE PARA GERAR A ESTRATÉGIA VOLUNTARIAMENTE */}
+          {!isLoading && !estrategiaTexto && !erro && (
+            <div className="py-12 flex flex-col items-center justify-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-purple-950/60 border border-purple-500/50 flex items-center justify-center text-purple-300 shadow-[0_0_30px_rgba(168,85,247,0.3)]">
+                <Zap size={32} className="text-yellow-400 animate-pulse" />
+              </div>
+              <div className="max-w-md space-y-1.5">
+                <h3 className="text-base font-extrabold text-white">
+                  Pronto para acelerar o giro deste item?
+                </h3>
+                <p className="text-xs text-gray-400">
+                  Clique no botão abaixo para consultar a inteligência executiva da Feijão IA e obter combos rápidos, argumentos de balcão e ofertas relâmpago de queima de estoque.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => carregarEstrategia()}
+                className="px-6 py-3 rounded-xl bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs transition-all shadow-[0_0_20px_rgba(168,85,247,0.4)] flex items-center gap-2 cursor-pointer active:scale-95"
+              >
+                <Zap size={16} className="text-yellow-300" />
+                ⚡ Gerar Estratégia (Feijão IA)
+              </button>
+            </div>
+          )}
+
           {/* LOADING STATE */}
           {isLoading && (
             <div className="py-14 flex flex-col items-center justify-center space-y-4">
@@ -258,7 +277,8 @@ Seja direto e comercial.`;
                 {erro}
               </span>
               <button
-                onClick={carregarEstrategia}
+                type="button"
+                onClick={() => carregarEstrategia()}
                 disabled={isLoading}
                 className="px-2.5 py-1 rounded-lg bg-amber-900/60 hover:bg-amber-800 text-white font-bold flex items-center gap-1.5 shrink-0 text-[11px] cursor-pointer"
               >
@@ -290,17 +310,23 @@ Seja direto e comercial.`;
         {/* RODAPÉ COM AÇÕES */}
         <div className="px-6 py-4 border-t border-[#222] bg-[#0A0A0A] flex flex-wrap items-center justify-between gap-3 shrink-0">
           <button
-            onClick={carregarEstrategia}
+            type="button"
+            onClick={() => carregarEstrategia()}
             disabled={isLoading}
-            className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-bold text-gray-300 hover:text-white transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-xl bg-purple-950/80 hover:bg-purple-800 border border-purple-600/60 text-xs font-bold text-purple-200 hover:text-white transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed shadow-[0_0_15px_rgba(168,85,247,0.2)]"
           >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
-            Gerar Nova Sugestão
+            {isLoading ? (
+              <RefreshCw size={14} className="animate-spin text-purple-400" />
+            ) : (
+              <Zap size={14} className="text-yellow-400" />
+            )}
+            {estrategiaTexto ? 'Gerar Nova Sugestão' : '⚡ Gerar Estratégia (Feijão IA)'}
           </button>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={handleCopiarWhatsApp}
+              type="button"
+              onClick={() => handleCopiarWhatsApp()}
               disabled={isLoading || !estrategiaTexto}
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-bold text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             >
