@@ -134,31 +134,9 @@ const calcularIdade = (dataStr) => {
   return age;
 };
 
-// Validador de Elegibilidade de Participação Trainee/Treener (Exige Celular/Smartphone no carrinho)
+// Validador de Elegibilidade de Participação Trainee/Treener (Permite sempre que houver produtos no carrinho)
 const permiteParticipacaoTreener = (carrinho) => {
-  if (!carrinho || carrinho.length === 0) return false;
-
-  return carrinho.some(item => {
-    const prod = item.produto || item;
-    const nome = (prod.nome || item.nome || "").toLowerCase();
-    const categoria = (prod.categoria || item.categoria || prod.tipo || item.tipo || "").toLowerCase();
-    const tipo = (prod.tipo || item.tipo || "").toLowerCase();
-
-    return (
-      categoria.includes('celular') ||
-      categoria.includes('smartphone') ||
-      categoria.includes('ios') ||
-      categoria.includes('android') ||
-      tipo.includes('celular') ||
-      nome.includes('iphone') ||
-      nome.includes('galaxy') ||
-      nome.includes('motorola') ||
-      nome.includes('xiaomi') ||
-      nome.includes('redmi') ||
-      nome.includes('realme') ||
-      nome.includes('poco')
-    );
-  });
+  return Boolean(carrinho && carrinho.length > 0);
 };
 
 // Categorias Críticas que exigem cadastro e identificação completa do cliente no PDV (Regra das Duas Esteiras)
@@ -2010,10 +1988,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           data = profs || [];
         }
 
-        // Filtrar estritamente apenas os colaboradores com perfil TRAINEE ou TREENER
+        // Filtrar estritamente apenas os colaboradores com perfil TRAINEE, TREENER ou is_treinner
         const filteredTreeners = (data || []).filter(u => {
           const roleUpper = (u.role || u.cargo || u.perfil || '').toUpperCase();
-          return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER');
+          return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER') || Boolean(u.is_treinner);
         });
 
         console.log("🔥 [FETCH TREENERS] Treeners/Trainees elegíveis encontrados:", filteredTreeners.length);
@@ -2026,7 +2004,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     fetchTreeners();
   }, [activeFilialId]);
 
-  // Trava de Trainee: Se não houver celular no carrinho, limpa a seleção de Treener Responsável
+  // Trava de Trainee: Se o carrinho for esvaziado, limpa a seleção de Treener Responsável
   useEffect(() => {
     if (!permiteParticipacaoTreener(pdvCart)) {
       if (selectedTreenerId) setSelectedTreenerId('');
@@ -4742,7 +4720,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const dataInicio = `${mesAlvo}-01T00:00:00.000Z`;
       const dataFim = `${mesAlvo}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999Z`;
 
-      // 2. Ajustar a Query de Busca no Supabase (não restringir apenas por vendedor_id se o nome estiver disponível):
+      // 2. Ajustar a Query de Busca no Supabase (incluindo vendas como titular ou participação como trainee):
       let queryVendas = supabase
         .from('vendas')
         .select(`
@@ -4751,8 +4729,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           valor_total,
           metodo_pagamento,
           forma_pagamento,
+          financeira,
+          financeira_parceira,
           categoria,
           comissao,
+          comissao_trainee,
+          teve_participacao_trainee,
+          trainee_id,
+          treener_id,
           vendedor_id,
           vendedor_nome,
           produto_nome,
@@ -4773,11 +4757,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         .gte('created_at', dataInicio)
         .lte('created_at', dataFim);
 
-      if (profile?.nome && currentUserId) {
-        // Permite capturar tanto pelo UUID quanto pelo nome registrado nas vendas
-        queryVendas = queryVendas.or(`vendedor_id.eq.${currentUserId},vendedor_nome.ilike.%${profile.nome.trim()}%`);
-      } else if (currentUserId) {
-        queryVendas = queryVendas.eq('vendedor_id', currentUserId);
+      if (currentUserId) {
+        const orClauses = [
+          `vendedor_id.eq.${currentUserId}`,
+          `trainee_id.eq.${currentUserId}`,
+          `treener_id.eq.${currentUserId}`
+        ];
+        if (profile?.nome) {
+          orClauses.push(`vendedor_nome.ilike.%${profile.nome.trim()}%`);
+        }
+        queryVendas = queryVendas.or(orClauses.join(','));
       } else if (profile?.nome) {
         queryVendas = queryVendas.ilike('vendedor_nome', `%${profile.nome.trim()}%`);
       }
@@ -4792,10 +4781,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           .gte('created_at', dataInicio)
           .lte('created_at', dataFim);
 
-        if (profile?.nome && currentUserId) {
-          fallbackQuery = fallbackQuery.or(`vendedor_id.eq.${currentUserId},vendedor_nome.ilike.%${profile.nome.trim()}%`);
-        } else if (currentUserId) {
-          fallbackQuery = fallbackQuery.eq('vendedor_id', currentUserId);
+        if (currentUserId) {
+          const orClauses = [
+            `vendedor_id.eq.${currentUserId}`,
+            `trainee_id.eq.${currentUserId}`,
+            `treener_id.eq.${currentUserId}`
+          ];
+          if (profile?.nome) {
+            orClauses.push(`vendedor_nome.ilike.%${profile.nome.trim()}%`);
+          }
+          fallbackQuery = fallbackQuery.or(orClauses.join(','));
         } else if (profile?.nome) {
           fallbackQuery = fallbackQuery.ilike('vendedor_nome', `%${profile.nome.trim()}%`);
         }
@@ -11485,22 +11480,180 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   };
 
-  // --- MOTOR DE COMISSÕES E VENDAS ---
+  // --- MOTOR DE COMISSÕES E VENDAS CORPORATIVO ---
 
-  const calcularComissao = (produto, quantidade, isTreinner, participouTrainee = false, precoCustomizado = null) => {
-    const precoBase = precoCustomizado !== null && precoCustomizado > 0 ? precoCustomizado : (produto.preco || 0);
-    const precoTotal = precoBase * quantidade;
-    if (produto.categoria === 'ANDROID') {
-      return precoTotal * 0.02; // Android 2%
-    } else if (produto.categoria === 'IOS' || produto.categoria === 'APPLE_JBL_CONSOLE') {
-      return 30 * quantidade; // Apple / JBL / Consoles R$ 30 fixo por item
-    } else if (produto.categoria === 'SERVICO') {
-      const taxa = (isTreinner || participouTrainee) ? 0.02 : 0.03; // Serviços: 3%, ou 2% se for trainee
-      return precoTotal * taxa;
-    } else if (produto.tipo === 'ACESSORIO') {
-      return precoTotal * 0.025; // Acessórios 2.5%
+  // Helper robusto para identificar se o método/financeira é Boleto ou Financiadora (PayJoy, Aiva, Ume, Watu, Crediário)
+  const isBoletoOuFinanciadora = (metodo, financeira) => {
+    const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO'];
+    const m = String(metodo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    const f = String(financeira || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    return BOLETO_KEYWORDS.some(k => m.includes(k) || f.includes(k));
+  };
+
+  // Identificador de Especiais por Unidade: JBL, iPhones, Consoles, Drones, Apple Watch, AirPods
+  const isProdutoEspecialPorUnidade = (produto) => {
+    if (!produto) return false;
+    const cat = String(produto.categoria || produto.tipo || '').toUpperCase();
+    const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
+    if (cat === 'APPLE_JBL_CONSOLE' || cat === 'IOS') return true;
+    const termos = ['JBL', 'IPHONE', 'CONSOLE', 'PLAYSTATION', 'PS4', 'PS5', 'XBOX', 'NINTENDO', 'SWITCH', 'DRONE', 'DJI', 'APPLE WATCH', 'AIRPOD'];
+    return termos.some(t => nome.includes(t));
+  };
+
+  // Identificador de Acessórios
+  const isProdutoAcessorio = (produto) => {
+    if (!produto) return false;
+    const cat = String(produto.categoria || '').toUpperCase();
+    const tipo = String(produto.tipo || '').toUpperCase();
+    const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
+    if (tipo === 'ACESSORIO' || cat.includes('ACESSORIO')) return true;
+    const termos = ['CAPA', 'CASE', 'PELICULA', 'FILME', 'FONE', 'FONTE', 'CABO', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
+    return termos.some(t => nome.includes(t));
+  };
+
+  // Identificador de Celulares
+  const isProdutoCelular = (produto) => {
+    if (!produto) return false;
+    const cat = String(produto.categoria || '').toUpperCase();
+    const tipo = String(produto.tipo || '').toUpperCase();
+    const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
+    return tipo === 'CELULAR' || cat.includes('CELULAR') || cat === 'ANDROID' || cat === 'IOS' || nome.includes('CELULAR') || nome.includes('SMARTPHONE');
+  };
+
+  // Motor Centralizado de Cálculo de Comissões (Vendedor e Trainee Bonificado)
+  const calcularComissaoVenda = ({
+    produto,
+    quantidade = 1,
+    valorTotal = 0,
+    metodoPagamento = '',
+    financeira = '',
+    hasTrainee = false,
+    isTreinner = false,
+    metasState = null
+  }) => {
+    const qtd = Math.max(1, Number(quantidade) || 1);
+    const total = Number(valorTotal) > 0 ? Number(valorTotal) : (Number(produto?.preco || 0) * qtd);
+
+    // Obter referências de metas do vendedor
+    const metasRef = metasState || (typeof getMetasVendedor === 'function' ? getMetasVendedor() : null);
+    const totalBoletos = Number(metasRef?.totalBoletos || 0);
+    const metaBoleto = Number(metasRef?.metaBoleto || 67500);
+    const superMetaBoleto = Number(metasRef?.superMetaBoleto || 87000);
+
+    const totalAcessorios = Number(metasRef?.totalAcessorios || 0);
+    const metaAcessorios = Number(metasRef?.metaAcessorios || 10000);
+    const superMetaAcessorios = Number(metasRef?.superMetaAcessorios || 15000);
+
+    const totalVendasGeral = Number(metasRef?.totalVendasGeral || 0);
+    const metaTotal = Number(metasRef?.metaTotal || 77500);
+    const isMetaBatidaGeral = Boolean(
+      metasRef?.metaBatida ||
+      (metaBoleto > 0 && totalBoletos >= metaBoleto) ||
+      (metaTotal > 0 && totalVendasGeral >= metaTotal) ||
+      (Number(metasRef?.progressoTotal || 0) >= 100) ||
+      (Number(metasRef?.progressoBoleto || 0) >= 100) ||
+      metasRef?.badgeBoleto?.status === 'batida' ||
+      metasRef?.badgeBoleto?.status === 'super'
+    );
+
+    const isBoleto = isBoletoOuFinanciadora(metodoPagamento, financeira);
+
+    let comissaoVendedor = 0;
+    let comissaoTrainee = 0;
+    let teveParticipacaoTrainee = false;
+
+    // REGRA 1: Boletos / Financiadoras (PayJoy, Aiva, Ume, Watu, Crediário)
+    if (isBoleto) {
+      // Vendedor: 1% (meta não batida) | 3% (meta batida) | 3,2% (super meta)
+      let taxaVendedor = 0.01;
+      if (
+        (superMetaBoleto > 0 && totalBoletos >= superMetaBoleto) ||
+        (Number(metasRef?.progressoBoleto || 0) >= 120) ||
+        metasRef?.badgeBoleto?.status === 'super'
+      ) {
+        taxaVendedor = 0.032;
+      } else if (
+        (metaBoleto > 0 && totalBoletos >= metaBoleto) ||
+        (Number(metasRef?.progressoBoleto || 0) >= 100) ||
+        metasRef?.badgeBoleto?.status === 'batida'
+      ) {
+        taxaVendedor = 0.030;
+      }
+      comissaoVendedor = Number((total * taxaVendedor).toFixed(2));
+
+      // Trainee Bonificado: 1% fixo sobre o valor_total da venda no boleto quando houver trainee selecionado
+      if (hasTrainee) {
+        teveParticipacaoTrainee = true;
+        comissaoTrainee = Number((total * 0.01).toFixed(2));
+      }
+      return { comissaoVendedor, comissaoTrainee, teveParticipacaoTrainee, taxaVendedor };
     }
-    return 0;
+
+    // REGRA 4: Especiais por Unidade (JBL, iPhones, Consoles, Drones, Apple Watch, AirPods)
+    // R$ 15,00 (não batida) | R$ 30,00 (batida)
+    if (isProdutoEspecialPorUnidade(produto)) {
+      const valorPorUnidade = isMetaBatidaGeral ? 30.00 : 15.00;
+      comissaoVendedor = Number((valorPorUnidade * qtd).toFixed(2));
+      return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
+    }
+
+    // REGRA 2: Acessórios: 1% (não batida) | 2,5% (batida) | 3% (super meta)
+    if (isProdutoAcessorio(produto)) {
+      let taxaAcessorio = 0.01;
+      if (
+        (superMetaAcessorios > 0 && totalAcessorios >= superMetaAcessorios) ||
+        (Number(metasRef?.progressoAcessorios || 0) >= 150) ||
+        metasRef?.badgeAcessorios?.status === 'super'
+      ) {
+        taxaAcessorio = 0.030;
+      } else if (
+        (metaAcessorios > 0 && totalAcessorios >= metaAcessorios) ||
+        (Number(metasRef?.progressoAcessorios || 0) >= 100) ||
+        metasRef?.badgeAcessorios?.status === 'batida'
+      ) {
+        taxaAcessorio = 0.025;
+      }
+      comissaoVendedor = Number((total * taxaAcessorio).toFixed(2));
+      return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
+    }
+
+    // REGRA 3: Celulares À Vista / Cartão / Pix: 1% (não batida) | 2% (batida)
+    if (isProdutoCelular(produto)) {
+      const taxaCelular = isMetaBatidaGeral ? 0.02 : 0.01;
+      comissaoVendedor = Number((total * taxaCelular).toFixed(2));
+      return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
+    }
+
+    // Serviços Técnicos
+    if (String(produto?.categoria || '').toUpperCase() === 'SERVICO' || String(produto?.tipo || '').toUpperCase() === 'SERVICO') {
+      const taxaServico = (isTreinner || hasTrainee) ? 0.02 : 0.03;
+      comissaoVendedor = Number((total * taxaServico).toFixed(2));
+      return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
+    }
+
+    // Fallback Geral
+    const taxaGeral = isMetaBatidaGeral ? 0.02 : 0.01;
+    comissaoVendedor = Number((total * taxaGeral).toFixed(2));
+    return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
+  };
+
+  const calcularComissao = (produto, quantidade, isTreinner, participouTrainee = false, precoCustomizado = null, metodo = null, financeira = null) => {
+    if (!produto) return 0;
+    const qtd = Math.max(1, Number(quantidade) || 1);
+    const precoBase = precoCustomizado !== null && precoCustomizado > 0 ? precoCustomizado : (produto.preco || 0);
+    const total = precoBase * qtd;
+
+    const res = calcularComissaoVenda({
+      produto,
+      quantidade: qtd,
+      valorTotal: total,
+      metodoPagamento: metodo || pdvMetodoPagamento,
+      financeira: financeira || pdvFinanceiraParceira,
+      hasTrainee: Boolean(participouTrainee || selectedTreenerId),
+      isTreinner: Boolean(isTreinner || profile?.is_treinner)
+    });
+
+    return res.comissaoVendedor;
   };
 
 
@@ -12827,18 +12980,41 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const createdVendaIds = [];
       const itemsForRecibo = [];
 
+      const mapNomeMetodo = {
+        'pix': 'PIX',
+        'cartao': 'CARTÃO DE CRÉDITO',
+        'cartao_credito': 'CARTÃO DE CRÉDITO',
+        'cartao_debito': 'CARTÃO DE DÉBITO',
+        'dinheiro': 'DINHEIRO',
+        'boleto': 'BOLETO',
+        'troca': 'TROCA'
+      };
+      const metodoNomeFormatado = mapNomeMetodo[metodoEfetivo?.toLowerCase()] || (metodoEfetivo ? metodoEfetivo.toUpperCase() : 'PIX');
+      const resolvedFinanceira = (metodoEfetivo === 'boleto')
+        ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
+        : metodoNomeFormatado;
+
       // Loop para processar os itens
       for (let idx = 0; idx < pdvCart.length; idx++) {
         const item = pdvCart[idx];
         const valorTotalNovo = item.valorUnitario * item.quantidade * feeFactor;
 
-        const comissaoCalculada = calcularComissao(
-          item.produto,
-          item.quantidade,
-          profile?.is_treinner,
-          item.vendaTrainee,
-          item.valorUnitario * feeFactor
-        );
+        // Cálculo de comissões corporativo (Vendedor e Trainee)
+        const hasTraineeSelecionado = Boolean(selectedTreenerId && selectedTreenerId.trim() !== '');
+        const comissaoInfo = calcularComissaoVenda({
+          produto: item.produto,
+          quantidade: item.quantidade,
+          valorTotal: valorTotalNovo,
+          metodoPagamento: metodoEfetivo,
+          financeira: resolvedFinanceira,
+          hasTrainee: hasTraineeSelecionado,
+          isTreinner: Boolean(profile?.is_treinner),
+          metasState: metasInfo
+        });
+
+        const comissaoCalculada = comissaoInfo.comissaoVendedor;
+        const comissaoTraineeCalculada = comissaoInfo.comissaoTrainee;
+        const teveParticipacaoTraineeFinal = comissaoInfo.teveParticipacaoTrainee;
 
         // Só vincula trocas e desconto de troca no primeiro item
         const itemTrocaJson = idx === 0 && isTrocaAtiva ? pdvUsadoList : [];
@@ -12894,8 +13070,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           p_valor_desconto_troca: itemDescontoTroca,
           p_used_valor_avaliacao: itemDescontoTroca,
           p_trocas_json: itemTrocaJson,
-          p_teve_participacao_trainee: item.vendaTrainee && item.produto.categoria === 'SERVICO',
-          p_comissao_trainee: (item.vendaTrainee && item.produto.categoria === 'SERVICO') ? valorTotalNovo * 0.01 : 0
+          p_teve_participacao_trainee: teveParticipacaoTraineeFinal,
+          p_comissao_trainee: comissaoTraineeCalculada
         });
 
         if (rpcErr) throw rpcErr;
@@ -12935,19 +13111,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
           const resolvedClienteNome = isConsumidorFinal ? 'Consumidor Final' : (nomeClienteFinal || 'Consumidor Final');
           const resolvedClienteCpf = isConsumidorFinal ? null : (pdvClienteCpfCnpj.trim() || null);
-          const mapNomeMetodo = {
-            'pix': 'PIX',
-            'cartao': 'CARTÃO DE CRÉDITO',
-            'cartao_credito': 'CARTÃO DE CRÉDITO',
-            'cartao_debito': 'CARTÃO DE DÉBITO',
-            'dinheiro': 'DINHEIRO',
-            'boleto': 'BOLETO',
-            'troca': 'TROCA'
-          };
-          const metodoNomeFormatado = mapNomeMetodo[metodoEfetivo?.toLowerCase()] || (metodoEfetivo ? metodoEfetivo.toUpperCase() : 'PIX');
-          const resolvedFinanceira = (metodoEfetivo === 'boleto')
-            ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
-            : metodoNomeFormatado;
 
           const actualValorPago = pdvStatusPagamento === 'PAGO'
             ? valorTotalNovo
@@ -12987,7 +13150,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             usuario_id: vendedor_id,
             criado_por: vendedor_id,
             vendedor_nome: resolvedVendedorNome,
+            trainee_id: selectedTreenerId || null,
             treener_id: selectedTreenerId || null,
+            comissao: comissaoCalculada,
+            comissao_trainee: comissaoTraineeCalculada,
+            teve_participacao_trainee: teveParticipacaoTraineeFinal,
             metodo_pagamento: metodoEfetivo,
             forma_pagamento: metodoEfetivo,
             parcelas: parcelasEfetivo,
@@ -13199,12 +13366,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           console.error('Erro ao atualizar dados estendidos e pagamentos na venda:', clientUpdateErr);
         }
 
-        // Se tiver comissão trainee de serviço
-        if (item.vendaTrainee && item.produto.categoria === 'SERVICO') {
-          const comissaoTrainee = valorTotalNovo * 0.01;
+        // Se houver participação de trainee bonificado registrada no boleto/financiadora
+        if (teveParticipacaoTraineeFinal && comissaoTraineeCalculada > 0) {
           await supabase.from('vendas').update({
             teve_participacao_trainee: true,
-            comissao_trainee: comissaoTrainee
+            comissao_trainee: comissaoTraineeCalculada,
+            trainee_id: selectedTreenerId || null,
+            treener_id: selectedTreenerId || null
           }).eq('id', rpcRes.venda_id);
         }
 
@@ -14431,38 +14599,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       if (!isNaN(val) && val > 0) return val;
     }
 
-    // 2. Se não estiver gravada ou for 0, calcula dinamicamente no frontend
+    // 2. Se não estiver gravada ou for 0, calcula dinamicamente no frontend com as regras corporativas
     const totalBruto = parseFloat(sale.valor_total || sale.valor || sale.preco || 0);
     const qtd = parseInt(sale.quantidade || 1, 10);
     if (totalBruto <= 0) return 0;
 
-    const cat = (sale.produtos?.categoria || sale.categoria || '').toUpperCase();
-    const tipo = (sale.produtos?.tipo || sale.tipo || '').toUpperCase();
-    const nomeProd = (sale.produto_nome || sale.produtos?.nome || '').toUpperCase();
-    const isTreinner = profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee;
+    const res = calcularComissaoVenda({
+      produto: {
+        nome: sale.produto_nome || sale.produtos?.nome || sale.descricao || '',
+        categoria: sale.produtos?.categoria || sale.categoria || '',
+        tipo: sale.produtos?.tipo || sale.tipo || '',
+        preco: totalBruto / qtd
+      },
+      quantidade: qtd,
+      valorTotal: totalBruto,
+      metodoPagamento: sale.metodo_pagamento || sale.forma_pagamento || '',
+      financeira: sale.financeira || sale.financeira_parceira || '',
+      hasTrainee: Boolean(sale.trainee_id || sale.treener_id || sale.teve_participacao_trainee),
+      isTreinner: Boolean(profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee)
+    });
 
-    // Regra A: Serviços
-    if (cat === 'SERVICO' || tipo === 'SERVICO') {
-      return totalBruto * (isTreinner ? 0.02 : 0.03);
-    }
-    
-    // Regra B: Acessórios (taxa fixa de 2,5% conforme regra operacional)
-    if (tipo === 'ACESSORIO' || cat.includes('ACESSORIO') || cat.includes('CAPA') || cat.includes('PELICULA') || cat.includes('FONE')) {
-      return totalBruto * 0.025;
-    }
-
-    // Regra C: Celulares e Aparelhos (Android, Apple, iOS, Seminovo ou Geral)
-    const isCelular = tipo === 'CELULAR' || cat === 'ANDROID' || cat === 'IOS' || cat.includes('CELULAR') || cat === 'APPLE_JBL_CONSOLE' || !!sale.imei;
-    if (isCelular) {
-      if (cat === 'IOS' || cat === 'APPLE_JBL_CONSOLE' || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE')) {
-        return Math.max(30 * qtd, totalBruto * 0.02); // R$ 30 fixo por aparelho ou 2%
-      }
-      // Demais celulares (Android / Outros): taxa padrão de 2% sobre o valor da venda
-      return totalBruto * 0.02;
-    }
-
-    // Regra D: Fallback Geral (garante que nunca retorne 0 se houver valor faturado)
-    return totalBruto * 0.02;
+    return res.comissaoVendedor;
   };
 
   // --- HELPERS DE METAS DINÂMICAS & REBRANDING ---
@@ -14582,21 +14739,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ? Number(m.valor_meta) 
       : (metaBoleto + metaAcessorios);
 
-    // Todas as vendas do mês corrente/filtrado deste vendedor (resiliente a fuso horário e nulos)
+    // Todas as vendas do mês corrente/filtrado deste vendedor/trainee (resiliente a fuso horário e nulos)
     const currentMonthSales = (vendasVendedor || []).filter(sale => {
       const saleUserId = sale.vendedor_id || sale.usuario_id || sale.criado_por;
+      const saleTraineeId = sale.trainee_id || sale.treener_id;
       const saleNome = (sale.vendedor_nome || '').toLowerCase().trim();
       const userNome = profileNome.toLowerCase();
 
       const matchesAuthId = userAuthId && saleUserId && String(saleUserId) === String(userAuthId);
       const matchesProfileId = profileId && saleUserId && String(saleUserId) === String(profileId);
       const matchesCurrentId = currentUserId && saleUserId && String(saleUserId) === String(currentUserId);
+      const matchesTrainee = currentUserId && saleTraineeId && (
+        String(saleTraineeId) === String(currentUserId) ||
+        (userAuthId && String(saleTraineeId) === String(userAuthId)) ||
+        (profileId && String(saleTraineeId) === String(profileId))
+      );
       const matchesNome = userNome && saleNome && (saleNome.includes(userNome) || userNome.includes(saleNome));
 
-      if (currentUserId && saleUserId && !matchesAuthId && !matchesProfileId && !matchesCurrentId && !matchesNome) {
+      if (currentUserId && (saleUserId || saleTraineeId) && !matchesAuthId && !matchesProfileId && !matchesCurrentId && !matchesTrainee && !matchesNome) {
         return false;
       }
-      if (!saleUserId && userNome && !matchesNome) {
+      if (!saleUserId && !saleTraineeId && userNome && !matchesNome) {
         return false;
       }
 
@@ -14735,14 +14898,68 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       };
     }
 
-    // "COMISSÕES ACUMULADAS": Somatório da comissão gerada em boletos + comissão gerada em acessórios + comissão de vendas à vista
+    // "COMISSÕES ACUMULADAS": Somatório das comissões como vendedor titular + comissão bonificada de trainee
+    let totalComissoesHistorico = 0;
+    let totalComissaoComoTitular = 0;
+    let totalComissaoComoTrainee = 0;
+
+    currentMonthSales.forEach(s => {
+      const saleUserId = s.vendedor_id || s.usuario_id || s.criado_por;
+      const saleTraineeId = s.trainee_id || s.treener_id;
+
+      const isTitular = (
+        (userAuthId && String(saleUserId) === String(userAuthId)) ||
+        (profileId && String(saleUserId) === String(profileId)) ||
+        (currentUserId && String(saleUserId) === String(currentUserId)) ||
+        (userNome && (s.vendedor_nome || '').toLowerCase().includes(userNome))
+      );
+
+      const isTraineePart = (
+        (userAuthId && String(saleTraineeId) === String(userAuthId)) ||
+        (profileId && String(saleTraineeId) === String(profileId)) ||
+        (currentUserId && String(saleTraineeId) === String(currentUserId))
+      );
+
+      let comissaoTitular = 0;
+      let comissaoTraineePart = 0;
+
+      if (isTitular) {
+        comissaoTitular = Number(s.comissao || 0);
+        if (comissaoTitular <= 0) {
+          comissaoTitular = calcularComissaoItem(s);
+        }
+      }
+
+      if (isTraineePart) {
+        comissaoTraineePart = Number(s.comissao_trainee || 0);
+        if (comissaoTraineePart <= 0 && s.teve_participacao_trainee) {
+          comissaoTraineePart = Number((Number(s.valor_total || 0) * 0.01).toFixed(2));
+        }
+      }
+
+      // Se não caiu estritamente em nenhum, fallback inteligente
+      if (!isTitular && !isTraineePart) {
+        if (isTrainee) {
+          comissaoTitular = Number(s.comissao || 0) || calcularComissaoItem(s);
+          comissaoTraineePart = Number(s.comissao_trainee || 0);
+        } else {
+          comissaoTitular = Number(s.comissao || 0) || calcularComissaoItem(s);
+        }
+      }
+
+      totalComissaoComoTitular += comissaoTitular;
+      totalComissaoComoTrainee += comissaoTraineePart;
+      totalComissoesHistorico += (comissaoTitular + comissaoTraineePart);
+    });
+
     const comissaoBoletosCalc = totalBoletos * taxaBoletoNum;
     const comissaoAcessoriosCalc = totalAcessorios * taxaAcessoriosNum;
     const comissaoAVistaCalc = totalAVista * 0.01;
     const comissaoCalculadaPorMetas = comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc;
 
-    const totalComissoesHistorico = currentMonthSales.reduce((acc, s) => acc + calcularComissaoItem(s), 0);
-    const totalComissoes = Math.max(comissaoCalculadaPorMetas, totalComissoesHistorico);
+    const totalComissoes = isTrainee
+      ? totalComissoesHistorico
+      : Math.max(comissaoCalculadaPorMetas, totalComissoesHistorico);
 
     // 3. Garantir a Distribuição no Gráfico Diário (Dias 1 a 30):
     const diasNoMes = new Date(anoAlvo, mesAlvoIdx + 1, 0).getDate();
@@ -14769,6 +14986,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       totalVendasGeral,
       ticketMedio,
       totalComissoes,
+      totalComissaoComoTitular,
+      totalComissaoComoTrainee,
       metaTotal,
       salesCount,
       // Boletos
@@ -17540,10 +17759,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         {permiteParticipacaoTreener(pdvCart) && (
                           <div>
                             <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-primary uppercase tracking-wide flex items-center justify-between mb-1">
-                              <span>Treener Responsável (Participação em Celulares)</span>
+                              <span>Trainee Bonificado (1% em Boletos / Financiadoras)</span>
                               {selectedTreenerId && (
                                 <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded-lg border border-primary/20 font-mono">
-                                  Selecionado
+                                  Bonificação Ativa
                                 </span>
                               )}
                             </label>
@@ -17557,7 +17776,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               }}
                               className="w-full bg-surface border border-border focus:border-primary rounded-lg px-3 py-2 text-xs text-foreground outline-none cursor-pointer font-bold"
                             >
-                              <option value="">Sem participação de Treener</option>
+                              <option value="">Sem participação de Trainee</option>
                               {treenersFilial.map((t) => (
                                 <option key={t.id} value={t.id}>
                                   {t.nome} {t.role ? `(${t.role})` : ''}
@@ -25092,9 +25311,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <span className="text-2xl font-black text-[#A78BFA] mt-1.5 block font-mono">
                               R$ {metasInfo.totalComissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
-                            <span className="text-[10px] text-emerald-400 mt-1 block font-semibold flex items-center gap-1">
-                              <Sparkles size={11} /> Ganhos gerados no mês
-                            </span>
+                            {metasInfo.totalComissaoComoTrainee > 0 ? (
+                              <span className="text-[9px] text-purple-300 mt-1 block font-medium">
+                                Titular: R$ {metasInfo.totalComissaoComoTitular.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Trainee: R$ {metasInfo.totalComissaoComoTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-emerald-400 mt-1 block font-semibold flex items-center gap-1">
+                                <Sparkles size={11} /> Ganhos gerados no mês
+                              </span>
+                            )}
                           </div>
 
                           {/* Card 4: META TOTAL */}
