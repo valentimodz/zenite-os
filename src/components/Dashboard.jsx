@@ -36,6 +36,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
+import { parseMonetaryValue, formatCurrency, getFundoSessao } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1208,6 +1209,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [filtroFilialCaixa, setFiltroFilialCaixa] = useState('todas');
   const [filtroStatusCaixa, setFiltroStatusCaixa] = useState('TODOS');
   const [modalDetalheCaixa, setModalDetalheCaixa] = useState(null);
+  const [editandoFundoTroco, setEditandoFundoTroco] = useState(false);
+  const [novoValorFundoTroco, setNovoValorFundoTroco] = useState('');
+  const [salvandoAjusteFundo, setSalvandoAjusteFundo] = useState(false);
   const [comprovantesOnDemand, setComprovantesOnDemand] = useState([]);
   const [loadingComprovantesOnDemand, setLoadingComprovantesOnDemand] = useState(false);
   const [loadingDados, setLoadingDados] = useState(false);
@@ -4121,10 +4125,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
   // Helper robusto para extração numérica de valores monetários
   const extrairValor = (val) => {
-    if (typeof val === 'number') return isNaN(val) ? 0 : val;
-    if (!val) return 0;
-    const parsed = parseFloat(String(val).replace(/[^\d,-]/g, '').replace(',', '.'));
-    return isNaN(parsed) ? 0 : parsed;
+    return parseMonetaryValue(val);
   };
 
   // Buscar Sessões de Caixa (Aberturas e Fechamentos) para o Relatório Gerencial
@@ -4248,19 +4249,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           const filialNome = cx.filial_nome || filialEncontrada?.nome || 'Sem Filial';
           const operadorNome = cx.profiles?.nome || cx.operador_nome || profileEncontrado?.nome || 'Operador PDV';
 
-          // Fundo de abertura unificado garantindo compatibilidade com saldo_inicial e valor_abertura
-          const valorAberturaFundo = extrairValor(
-            cx.saldo_inicial !== undefined && cx.saldo_inicial !== null && cx.saldo_inicial !== ''
-              ? cx.saldo_inicial
-              : (cx.valor_abertura !== undefined && cx.valor_abertura !== null && cx.valor_abertura !== ''
-                ? cx.valor_abertura
-                : (cx.fundo_troco || cx.saldo_abertura || cx.valor_inicial || 0))
-          );
-
-          const depositoInicialNum = extrairValor(cx.deposito_inicial || 0);
+          // Fundo de abertura unificado com critério exato: fundo_troco ?? valor_abertura ?? saldo_inicial ?? 0
+          const valorAberturaFundo = getFundoSessao(cx);
+          const depositoInicialNum = parseMonetaryValue(cx.deposito_inicial || 0);
 
           return {
             ...cx,
+            fundo_troco: valorAberturaFundo,
             saldo_inicial: valorAberturaFundo,
             valor_abertura: valorAberturaFundo,
             deposito_inicial: depositoInicialNum,
@@ -4348,11 +4343,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     let obsStr = null;
 
     if (dadosOuEvento && typeof dadosOuEvento === 'object' && ('fundoTrocoInicial' in dadosOuEvento || 'observacaoAbertura' in dadosOuEvento)) {
-      valorNum = Number(dadosOuEvento.fundoTrocoInicial || 0);
+      valorNum = parseMonetaryValue(dadosOuEvento.fundoTrocoInicial);
       obsStr = dadosOuEvento.observacaoAbertura?.trim() || null;
     } else {
       if (dadosOuEvento?.preventDefault) dadosOuEvento.preventDefault();
-      valorNum = parseFloat(String(fundoTrocoInput).replace(/\./g, '').replace(',', '.')) || 0;
+      valorNum = parseMonetaryValue(fundoTrocoInput);
       obsStr = obsAberturaInput?.trim() || null;
     }
 
@@ -4368,21 +4363,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setIsSubmittingAbertura(true);
 
     try {
-      // Payload estrito conforme especificado:
-      // {
-      //   operador_id: user.id,
-      //   filial_id: filialAtivaId,
-      //   valor_abertura: Number(fundoTrocoInicial || 0),
-      //   status: 'ABERTO',
-      //   data_abertura: new Date().toISOString(),
-      //   observacao: observacaoAbertura?.trim() || null
-      // }
       const payload = {
         operador_id: operadorId,
         filial_id: targetFilialId,
         empresa_id: targetEmpresaId,
         valor_abertura: valorNum,
         saldo_inicial: valorNum,
+        fundo_troco: valorNum,
         status: 'ABERTO',
         data_abertura: new Date().toISOString(),
         observacao: obsStr,
@@ -6974,6 +6961,115 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       showToast(`Erro ao fechar caixa: ${err.message || 'Falha na comunicação'}`, 'error');
     } finally {
       setLoadingFecharCaixaGerencial(false);
+    }
+  };
+
+  // Ajustar valor do fundo de troco inicial de caixa aberto (Apenas Admin)
+  const handleSalvarAjusteFundo = async (novoValorDireto) => {
+    if (!modalDetalheCaixa?.id) {
+      showToast('Nenhuma sessão de caixa ativa selecionada.', 'error');
+      return;
+    }
+
+    const valorStr = novoValorDireto !== undefined ? String(novoValorDireto) : novoValorFundoTroco;
+    const valorAjustado = parseMonetaryValue(valorStr);
+
+    if (isNaN(valorAjustado) || valorAjustado < 0) {
+      showToast('Informe um valor de fundo de troco válido.', 'error');
+      return;
+    }
+
+    setSalvandoAjusteFundo(true);
+    try {
+      // 1. Tentar atualização com todas as possíveis colunas de fundo de troco
+      let atualizado = false;
+      const { error: errFull } = await supabase
+        .from('caixas')
+        .update({
+          saldo_inicial: valorAjustado,
+          valor_abertura: valorAjustado,
+          fundo_troco: valorAjustado
+        })
+        .eq('id', modalDetalheCaixa.id);
+
+      if (!errFull) {
+        atualizado = true;
+      } else {
+        console.warn('[handleSalvarAjusteFundo] Tentando update com saldo_inicial e valor_abertura:', errFull);
+        const { error: errParcial } = await supabase
+          .from('caixas')
+          .update({
+            saldo_inicial: valorAjustado,
+            valor_abertura: valorAjustado
+          })
+          .eq('id', modalDetalheCaixa.id);
+
+        if (!errParcial) {
+          atualizado = true;
+        } else {
+          console.warn('[handleSalvarAjusteFundo] Tentando update com apenas saldo_inicial:', errParcial);
+          const { error: errMin } = await supabase
+            .from('caixas')
+            .update({ saldo_inicial: valorAjustado })
+            .eq('id', modalDetalheCaixa.id);
+
+          if (!errMin) {
+            atualizado = true;
+          } else {
+            // Tentativa na tabela fechamentos_caixa caso a linha tenha sido criada lá
+            const { error: errFechamentos } = await supabase
+              .from('fechamentos_caixa')
+              .update({ valor_abertura: valorAjustado })
+              .eq('id', modalDetalheCaixa.id);
+            if (!errFechamentos) atualizado = true;
+            else throw errFull || errParcial || errMin || errFechamentos;
+          }
+        }
+      }
+
+      // 2. Atualizar estado modalDetalheCaixa
+      setModalDetalheCaixa(prev => prev ? ({
+        ...prev,
+        saldo_inicial: valorAjustado,
+        valor_abertura: valorAjustado,
+        fundo_troco: valorAjustado
+      }) : null);
+
+      // 3. Atualizar sessoesCaixas localmente
+      setSessoesCaixas(prev => (prev || []).map(cx => {
+        if (cx.id === modalDetalheCaixa.id) {
+          return {
+            ...cx,
+            saldo_inicial: valorAjustado,
+            valor_abertura: valorAjustado,
+            fundo_troco: valorAjustado
+          };
+        }
+        return cx;
+      }));
+
+      // 4. Se for o caixa atual do operador/PDV ativo, atualizar também
+      if (caixaAtual?.id === modalDetalheCaixa.id) {
+        setCaixaAtual(prev => prev ? ({
+          ...prev,
+          saldo_inicial: valorAjustado,
+          valor_abertura: valorAjustado,
+          fundo_troco: valorAjustado
+        }) : null);
+      }
+
+      // 5. Invalidar caches
+      invalidateCache('status_caixa_');
+      invalidateCache('sessoes_caixas_');
+
+      setEditandoFundoTroco(false);
+      setNovoValorFundoTroco('');
+      showToast(`Fundo de troco inicial ajustado para R$ ${valorAjustado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} com sucesso! Dinheiro esperado na gaveta recalculado.`, 'success');
+    } catch (err) {
+      console.error('[handleSalvarAjusteFundo] Erro ao ajustar fundo de troco:', err);
+      showToast(err?.message || 'Erro ao ajustar fundo de troco no Supabase.', 'error');
+    } finally {
+      setSalvandoAjusteFundo(false);
     }
   };
 
@@ -16433,12 +16529,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               <span className="w-2.5 h-2.5 rounded-full bg-[#157347] dark:bg-emerald-400 animate-pulse shrink-0"></span>
               <span className="font-extrabold text-[#0f5132] dark:text-white">Caixa Aberto</span>
               <span className="text-[#157347] dark:text-gray-300">• Operador: <strong className="text-[#0f5132] dark:text-white font-bold">{caixaAtual.operador_nome || profile?.nome || 'Operador'}</strong></span>
-              <span className="text-[#157347] dark:text-gray-300">• Fundo Inicial: <strong className="text-[#0f5132] dark:text-emerald-400 font-mono font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+              <span className="text-[#157347] dark:text-gray-300">• Fundo Inicial: <strong className="text-[#0f5132] dark:text-emerald-400 font-mono font-bold">R$ {Number(getFundoSessao(caixaAtual)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
               <span className="text-[#157347]/80 dark:text-gray-400 font-mono text-[11px] hidden md:inline">({new Date(caixaAtual.data_abertura).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})</span>
             </div>
             <div className="text-[11px] text-[#0f5132] dark:text-emerald-300 bg-white/80 dark:bg-black/60 border border-[#BADBCC] dark:border-emerald-900/40 px-2.5 py-1 rounded-lg font-mono flex items-center gap-1.5 shadow-sm">
               <span className="text-[#157347] dark:text-gray-400">Gaveta (Dinheiro) =</span>
-              <span className="text-[#0f5132] dark:text-emerald-400 font-bold">R$ {Number(caixaAtual.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
+              <span className="text-[#0f5132] dark:text-emerald-400 font-bold">R$ {Number(getFundoSessao(caixaAtual)).toFixed(2)} + Vendas Dinheiro</span>
             </div>
           </div>
         )}
@@ -24335,7 +24431,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                         const totalAbertos = sessoesFiltradasGerais.filter(c => checkCaixaAberto(c)).length;
                         const totalFechados = sessoesFiltradasGerais.filter(c => !checkCaixaAberto(c)).length;
-                        const somaFundoTroco = sessoesFiltradasGerais.reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
+                        const somaFundoTroco = sessoesFiltradasGerais.reduce((acc, c) => acc + Number(getFundoSessao(c) || 0), 0);
                         const somaVendasFechadas = sessoesFiltradasGerais.reduce((acc, c) => {
                           const totalVendas = Number(c.total_vendas || (Number(c.total_dinheiro || 0) + Number(c.total_cartao || 0) + Number(c.total_pix || 0)) || c.saldo_final || 0);
                           return acc + totalVendas;
@@ -24530,7 +24626,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                           {dataAberturaFormatada}
                                         </span>
                                         <span className="text-green-400 font-mono font-extrabold text-xs">
-                                          Fundo: R$ {Number(cx.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                          Fundo: R$ {Number(getFundoSessao(cx)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                         </span>
                                         {Number(cx.deposito_inicial || 0) > 0 && (
                                           <span className="text-purple-400 font-mono font-semibold text-[11px]">
@@ -24561,7 +24657,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     <td className="py-3.5 pr-4 font-mono">
                                       {isAberto ? (
                                         <div className="text-[11px] text-gray-400 flex flex-col gap-0.5">
-                                          <span className="text-green-400 font-bold">R$ {Number(cx.saldo_inicial || 0).toFixed(2)} + Vendas Dinheiro</span>
+                                          <span className="text-green-400 font-bold">R$ {Number(getFundoSessao(cx)).toFixed(2)} + Vendas Dinheiro</span>
                                           <span className="text-gray-500 text-[10px]">(Gaveta Ativa)</span>
                                         </div>
                                       ) : (
@@ -26509,6 +26605,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 <button
                   onClick={() => {
                     setModalDetalheCaixa(null);
+                    setEditandoFundoTroco(false);
+                    setNovoValorFundoTroco('');
                     setIsConfirmingFecharCaixaGerencial(false);
                   }}
                   className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground bg-surface hover:bg-surface-elevated transition-colors cursor-pointer"
@@ -26548,11 +26646,80 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       })()}
                     </span>
                   </div>
-                  <div>
-                    <span className="text-gray-500 text-[10px] block">Fundo de Troco Inicial</span>
-                    <span className="text-green-400 font-mono font-extrabold text-sm">
-                      R$ {Number(modalDetalheCaixa.saldo_inicial || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </span>
+                  <div className="col-span-1">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-gray-500 text-[10px] block">Fundo de Troco Inicial</span>
+                      {(() => {
+                        const isDetalheFechado = !!(modalDetalheCaixa.data_fechamento || modalDetalheCaixa.fechado_em || String(modalDetalheCaixa.status || '').toUpperCase() === 'FECHADO');
+                        const isDetalheAberto = !isDetalheFechado;
+                        const isUserAdmin = ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'MASTER', 'GERENTE'].includes(
+                          String(profile?.role || profile?.cargo || '').toUpperCase()
+                        );
+                        if (!isDetalheAberto || !isUserAdmin || editandoFundoTroco) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNovoValorFundoTroco(String(getFundoSessao(modalDetalheCaixa)));
+                              setEditandoFundoTroco(true);
+                            }}
+                            className="text-[10px] font-bold text-purple-400 hover:text-purple-300 flex items-center gap-1 cursor-pointer transition-colors bg-purple-950/40 hover:bg-purple-900/50 px-1.5 py-0.5 rounded border border-purple-800/40"
+                            title="Ajustar valor do fundo de troco deste caixa ativo"
+                          >
+                            <Edit2 size={10} />
+                            Ajustar
+                          </button>
+                        );
+                      })()}
+                    </div>
+
+                    {!editandoFundoTroco ? (
+                      <span className="text-green-400 font-mono font-extrabold text-sm">
+                        R$ {Number(getFundoSessao(modalDetalheCaixa)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    ) : (
+                      <div className="mt-1 space-y-1.5 p-2 bg-black/80 border border-purple-500/40 rounded-lg">
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-purple-400">R$</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={novoValorFundoTroco}
+                            onChange={(e) => setNovoValorFundoTroco(e.target.value)}
+                            className="w-full bg-black border border-purple-500/50 rounded px-2 pl-7 py-1 text-xs text-white font-mono font-bold outline-none"
+                            placeholder="0,00"
+                            autoFocus
+                          />
+                        </div>
+                        {parseMonetaryValue(novoValorFundoTroco) > 2000 && (
+                          <p className="text-[10px] text-amber-300 font-bold">
+                            ⚠️ Atenção: Valor acima de R$ 2.000,00!
+                          </p>
+                        )}
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <button
+                            type="button"
+                            disabled={salvandoAjusteFundo}
+                            onClick={() => handleSalvarAjusteFundo()}
+                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            {salvandoAjusteFundo ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />}
+                            Salvar
+                          </button>
+                          <button
+                            type="button"
+                            disabled={salvandoAjusteFundo}
+                            onClick={() => {
+                              setEditandoFundoTroco(false);
+                              setNovoValorFundoTroco('');
+                            }}
+                            className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-[10px] cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <span className="text-gray-500 text-[10px] block">Depósito / Suprimento</span>
@@ -26613,7 +26780,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <div className="flex items-center justify-between pt-1 text-[11px] text-gray-400">
                               <span>Dinheiro Esperado na Gaveta:</span>
                               <strong className="text-emerald-400 font-mono">
-                                R$ {(Number(modalDetalheCaixa.saldo_inicial || 0) + totaisVendasSessaoDetalhe.dinheiro).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                R$ {(Number(getFundoSessao(modalDetalheCaixa)) + totaisVendasSessaoDetalhe.dinheiro).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                               </strong>
                             </div>
 
@@ -26974,6 +27141,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     type="button"
                     onClick={() => {
                       setModalDetalheCaixa(null);
+                      setEditandoFundoTroco(false);
+                      setNovoValorFundoTroco('');
                       setIsConfirmingFecharCaixaGerencial(false);
                     }}
                     className="flex-1 py-2.5 bg-[#222] hover:bg-[#333] text-white font-bold rounded-xl text-xs transition-all cursor-pointer"

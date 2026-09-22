@@ -6,6 +6,7 @@ import {
   Target, Award
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { getFundoSessao } from '../utils/currencyUtils';
 
 // Helper para formatação amigável dos métodos de pagamento
 const formatarMetodoPagamento = (metodo) => {
@@ -565,7 +566,7 @@ export default function ModalDetalheRelatorio({
                       ) : (
                         caixas.slice(0, 5).map(cx => {
                           const isAberto = String(cx.status || '').toLowerCase() === 'aberto' && !cx.data_fechamento;
-                          const fundo = Number(cx.saldo_inicial || 0);
+                          const fundo = Number(getFundoSessao(cx));
                           const totalDinheiro = Number(cx.total_dinheiro || 0);
                           const emGaveta = fundo + totalDinheiro;
 

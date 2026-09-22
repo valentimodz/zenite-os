@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Store, ShieldCheck, CheckCircle2, Loader2, X, AlertCircle } from 'lucide-react';
+import { Store, ShieldCheck, CheckCircle2, Loader2, X, AlertCircle, AlertTriangle } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { parseMonetaryValue, formatCurrency } from '../utils/currencyUtils';
 
 export interface ModalAbrirCaixaProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ export interface ModalAbrirCaixaProps {
   empresaId?: string;
   canClose?: boolean;
   onCaixaAberto?: (caixa: any) => void;
-  handleAbrirCaixa?: (data: { fundoTrocoInicial: number; observacaoAbertura: string | null }) => Promise<any> | any;
+  handleAbrirCaixa?: (data: { fundoTrocoInicial: number; observacaoAbertura: string | null; confirmadoAlto?: boolean }) => Promise<any> | any;
 }
 
 export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
@@ -29,21 +30,27 @@ export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
 }) => {
   const [fundoTrocoInicial, setFundoTrocoInicial] = useState<string>('');
   const [observacaoAbertura, setObservacaoAbertura] = useState<string>('');
+  const [confirmouValorAlto, setConfirmouValorAlto] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const quickValues = [0, 50, 100, 200, 300, 500];
+  const valorAberturaCalculado = parseMonetaryValue(fundoTrocoInicial);
+  const isValorAlto = valorAberturaCalculado > 2000;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    const valorAbertura = Number(
-      parseFloat(String(fundoTrocoInicial).replace(/\./g, '').replace(',', '.')) || 0
-    );
+    const valorAbertura = parseMonetaryValue(fundoTrocoInicial);
     const obsAbertura = observacaoAbertura?.trim() || null;
+
+    if (valorAbertura > 2000 && !confirmouValorAlto) {
+      setErrorMsg(`O valor de R$ ${valorAbertura.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} é anormalmente alto. Por favor, confirme a autorização marcando a caixa de seleção.`);
+      return;
+    }
 
     setIsSubmitting(true);
 
@@ -51,31 +58,26 @@ export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
       if (handleAbrirCaixa) {
         const resultado = await handleAbrirCaixa({
           fundoTrocoInicial: valorAbertura,
-          observacaoAbertura: obsAbertura
+          observacaoAbertura: obsAbertura,
+          confirmadoAlto: confirmouValorAlto
         });
         if (onCaixaAberto && resultado) {
           onCaixaAberto(resultado);
         }
         setFundoTrocoInicial('');
         setObservacaoAbertura('');
+        setConfirmouValorAlto(false);
         onClose?.();
         return;
       }
 
-      // Payload estrito conforme especificado:
-      // {
-      //   operador_id: user.id,
-      //   filial_id: filialAtivaId,
-      //   valor_abertura: Number(fundoTrocoInicial || 0),
-      //   status: 'ABERTO',
-      //   data_abertura: new Date().toISOString(),
-      //   observacao: observacaoAbertura?.trim() || null
-      // }
+      // Payload estrito conforme especificado garantindo compatibilidade com todas as colunas
       const payloadCompleto: Record<string, any> = {
         operador_id: operadorId,
         filial_id: filialId,
         valor_abertura: valorAbertura,
         saldo_inicial: valorAbertura,
+        fundo_troco: valorAbertura,
         status: 'ABERTO',
         data_abertura: new Date().toISOString(),
         observacao: obsAbertura,
@@ -95,11 +97,12 @@ export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
 
       if (error) {
         console.warn('[ModalAbrirCaixa] Tentando inserção com colunas padrão de caixas:', error);
-        // Fallback caso colunas como valor_abertura / observacao não existam no schema
+        // Fallback caso colunas extras não existam no schema
         const fallbackCaixas = {
           operador_id: operadorId,
           filial_id: filialId,
           saldo_inicial: valorAbertura,
+          valor_abertura: valorAbertura,
           observacao_abertura: obsAbertura,
           observacoes_abertura: obsAbertura,
           status: 'ABERTO',
@@ -142,6 +145,7 @@ export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
 
       setFundoTrocoInicial('');
       setObservacaoAbertura('');
+      setConfirmouValorAlto(false);
       if (onCaixaAberto) {
         onCaixaAberto(insertedData);
       }
@@ -208,17 +212,71 @@ export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
                 R$
               </span>
               <input
-                type="number"
-                step="0.01"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 required
                 autoFocus
                 value={fundoTrocoInicial}
-                onChange={(e) => setFundoTrocoInicial(e.target.value)}
-                placeholder="0.00"
-                className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
+                onChange={(e) => {
+                  setErrorMsg(null);
+                  setFundoTrocoInicial(e.target.value);
+                }}
+                placeholder="0,00"
+                className="w-full bg-black border border-[#333] focus:border-[#6A0DAD] rounded-xl pl-10 pr-24 py-2.5 text-sm text-white font-mono font-bold outline-none transition-all"
               />
+              {fundoTrocoInicial && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-gray-400 font-mono select-none">
+                  = R$ {valorAberturaCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              )}
             </div>
+
+            {/* Trava e Alerta de Segurança para Valores Anormalmente Altos (> R$ 2.000,00) */}
+            {isValorAlto && (
+              <div className="mt-2 p-3 bg-amber-950/40 border border-amber-600/50 rounded-xl space-y-2 text-xs animate-fadeIn">
+                <div className="flex items-start gap-2 text-amber-300">
+                  <AlertTriangle size={18} className="shrink-0 mt-0.5 text-amber-400" />
+                  <div>
+                    <strong className="block font-bold">Atenção: Valor de Troco Anormalmente Alto</strong>
+                    <p className="text-amber-200/90 text-[11px] mt-0.5 leading-relaxed">
+                      O valor informado é de <strong className="font-mono text-white underline">R$ {valorAberturaCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>. Por segurança, aberturas com troco superior a R$ 2.000,00 exigem conferência.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Sugestão de divisão caso tenha digitado sem vírgula (ex: 62300 em vez de 623,00) */}
+                {valorAberturaCalculado >= 10000 && (
+                  <div className="flex items-center justify-between bg-black/50 p-2 rounded-lg border border-amber-800/40">
+                    <span className="text-[11px] text-gray-300">
+                      Você pretendia informar <strong className="text-emerald-400 font-mono">R$ {(valorAberturaCalculado / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const corrigido = (valorAberturaCalculado / 100).toFixed(2);
+                        setFundoTrocoInicial(corrigido);
+                      }}
+                      className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[10px] font-bold cursor-pointer transition-colors"
+                    >
+                      Ajustar (/100)
+                    </button>
+                  </div>
+                )}
+
+                {/* Checkbox de confirmação explícita */}
+                <label className="flex items-center gap-2 cursor-pointer pt-1 text-amber-200 select-none">
+                  <input
+                    type="checkbox"
+                    checked={confirmouValorAlto}
+                    onChange={(e) => setConfirmouValorAlto(e.target.checked)}
+                    className="rounded border-amber-600 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span className="text-[11px] font-semibold">
+                    Confirmo que o valor de R$ {valorAberturaCalculado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para troco inicial está correto
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* Botões Rápidos de Troco */}
             <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
@@ -226,7 +284,10 @@ export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
                 <button
                   key={val}
                   type="button"
-                  onClick={() => setFundoTrocoInicial(val.toFixed(2))}
+                  onClick={() => {
+                    setFundoTrocoInicial(val.toFixed(2));
+                    setConfirmouValorAlto(false);
+                  }}
                   className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-[#222] hover:border-[#6A0DAD]/50 rounded-lg text-[10px] font-mono text-gray-300 hover:text-white transition-all cursor-pointer shrink-0"
                 >
                   R$ {val}
@@ -262,7 +323,7 @@ export const ModalAbrirCaixa: React.FC<ModalAbrirCaixaProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || (isValorAlto && !confirmouValorAlto)}
               className="w-full py-3 bg-[#6A0DAD] hover:bg-[#500885] text-white text-xs font-extrabold rounded-xl transition-all shadow-lg shadow-[#6A0DAD]/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               {isSubmitting ? (
