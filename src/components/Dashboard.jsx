@@ -4747,8 +4747,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           vendedor_id,
           vendedor_nome,
           produto_nome,
-          descricao,
-          produtos_descricao,
           quantidade,
           imei,
           filial_id,
@@ -14623,7 +14621,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       financeira: sale.financeira || sale.financeira_parceira || '',
       hasTrainee: Boolean(sale.trainee_id || sale.treener_id || sale.teve_participacao_trainee),
       isTreinner: Boolean(profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee),
-      metasState: metasInfo || { metaBatida: false }
+      metasState: { metaBatida: false }
     });
 
     return res.comissaoVendedor;
