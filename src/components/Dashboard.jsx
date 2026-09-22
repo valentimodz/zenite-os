@@ -36,7 +36,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
-import { parseMonetaryValue, formatCurrency, getFundoSessao } from '../utils/currencyUtils';
+import { parseMonetaryValue, formatCurrency, getFundoSessao, obterUuidPuro } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -12048,8 +12048,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           .select('id, imei, produto_id, filial_id, status, created_at')
           .in('status', ['DISPONÍVEL', 'DISPONIVEL', 'Disponível', 'Disponivel']);
 
-        if (prodIds.length > 0) {
-          query = query.in('produto_id', prodIds);
+        const validUuidsForImeis = Array.from(new Set(
+          prodIds.map(obterUuidPuro).filter(id => id && typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
+        ));
+        if (validUuidsForImeis.length > 0) {
+          query = query.in('produto_id', validUuidsForImeis);
         }
 
         const targetFid = activeFilialId || profile?.filial_id;
@@ -13182,24 +13185,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const itemDescontoTroca = idx === 0 ? valorUsadoTotal : 0;
 
         // Assegurar que o produto tem um UUID real no banco de dados para evitar erro de sintaxe UUID no RPC
-        let realProdutoId = item.produto.id;
-        if (!realProdutoId || String(realProdutoId).startsWith('synth_')) {
+        const candidateProdId = obterUuidPuro(item.produto?.id || item.produto?.produto_id || item.produto?.catalogo_id);
+        let realProdutoId = candidateProdId;
+        if (!realProdutoId || String(realProdutoId).startsWith('synth_') || !isValidUuid(realProdutoId)) {
           const { data: exProds } = await supabase
             .from('produtos')
             .select('id')
-            .eq('empresa_id', empresaId)
-            .eq('filial_id', activeFilialId)
+            .eq('empresa_id', obterUuidPuro(empresaId))
+            .eq('filial_id', obterUuidPuro(activeFilialId))
             .ilike('nome', item.produto.nome)
             .limit(1);
 
           if (exProds && exProds.length > 0) {
-            realProdutoId = exProds[0].id;
+            realProdutoId = obterUuidPuro(exProds[0].id);
           } else {
             const { data: newDbProd, error: newProdErr } = await supabase
               .from('produtos')
               .insert({
-                empresa_id: empresaId,
-                filial_id: activeFilialId,
+                empresa_id: obterUuidPuro(empresaId),
+                filial_id: obterUuidPuro(activeFilialId),
                 nome: item.produto.nome,
                 tipo: item.produto.tipo || 'ACESSORIO',
                 categoria: item.produto.categoria || 'GERAL',
@@ -13212,16 +13216,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               .single();
 
             if (!newProdErr && newDbProd) {
-              realProdutoId = newDbProd.id;
+              realProdutoId = obterUuidPuro(newDbProd.id);
             }
           }
         }
 
+        const produtoIdFinalParaRpc = obterUuidPuro(realProdutoId || item.produto?.id);
+
         const { data: rpcRes, error: rpcErr } = await supabase.rpc('registrar_venda_hibrida', {
-          p_empresa_id: empresaId,
-          p_filial_id: activeFilialId,
-          p_vendedor_id: vendedor_id || session.user.id,
-          p_produto_novo_id: realProdutoId || item.produto.id,
+          p_empresa_id: obterUuidPuro(empresaId),
+          p_filial_id: obterUuidPuro(activeFilialId),
+          p_vendedor_id: obterUuidPuro(vendedor_id || session.user.id),
+          p_produto_novo_id: produtoIdFinalParaRpc,
           p_quantidade_novo: item.quantidade,
           p_imei_novo: (item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei) ? item.imei : null,
           p_valor_total_novo: valorTotalNovo,
@@ -13296,9 +13302,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           ).trim();
 
           const payloadVendaUpdate = {
-            empresa_id: empresaId,
-            filial_id: activeFilialId,
-            caixa_id: caixaAtual?.id || null,
+            empresa_id: obterUuidPuro(empresaId),
+            filial_id: obterUuidPuro(activeFilialId),
+            caixa_id: obterUuidPuro(caixaAtual?.id) || null,
             produto_nome: item.produto.nome,
             imei_novo: item.imei || null,
             imei: item.imei || null,
@@ -13306,13 +13312,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             cliente_cpf_cnpj: resolvedClienteCpf,
             cliente_email: pdvClienteEmail.trim() || null,
             cliente_telefone: pdvClienteTelefone.trim() || null,
-            cliente_id: clienteIdFinalValido,
-            vendedor_id: vendedor_id,
-            usuario_id: vendedor_id,
-            criado_por: vendedor_id,
+            cliente_id: obterUuidPuro(clienteIdFinalValido) || null,
+            vendedor_id: obterUuidPuro(vendedor_id),
+            usuario_id: obterUuidPuro(vendedor_id),
+            criado_por: obterUuidPuro(vendedor_id),
             vendedor_nome: resolvedVendedorNome,
-            trainee_id: selectedTreenerId || null,
-            treener_id: selectedTreenerId || null,
+            trainee_id: obterUuidPuro(selectedTreenerId) || null,
+            treener_id: obterUuidPuro(selectedTreenerId) || null,
             comissao: comissaoCalculada,
             comissao_trainee: comissaoTraineeCalculada,
             teve_participacao_trainee: teveParticipacaoTraineeFinal,
@@ -13339,7 +13345,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           const { error: updateVendaErr } = await supabase
             .from('vendas')
             .update(payloadVendaUpdate)
-            .eq('id', rpcRes.venda_id);
+            .eq('id', obterUuidPuro(rpcRes.venda_id));
 
           if (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
@@ -13348,18 +13354,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               console.warn("⚠️ Tentando fallback de cliente_id na venda com cliente padrão ou null...");
               await supabase
                 .from('vendas')
-                .update({ ...payloadVendaUpdate, cliente_id: (idPadraoConsumidor || null) })
-                .eq('id', rpcRes.venda_id);
+                .update({ ...payloadVendaUpdate, cliente_id: (idPadraoConsumidor ? obterUuidPuro(idPadraoConsumidor) : null) })
+                .eq('id', obterUuidPuro(rpcRes.venda_id));
             }
           }
 
           // Registrar item_venda para auditoria detalhada com validação estrita e log agressivo
           const itemVendaPayload = {
-            venda_id: rpcRes.venda_id,
-            empresa_id: empresaId,
-            filial_id: activeFilialId,
-            vendedor_id: vendedor_id,
-            produto_id: realProdutoId || item.produto.id,
+            venda_id: obterUuidPuro(rpcRes.venda_id),
+            empresa_id: obterUuidPuro(empresaId),
+            filial_id: obterUuidPuro(activeFilialId),
+            vendedor_id: obterUuidPuro(vendedor_id),
+            produto_id: produtoIdFinalParaRpc,
             produto_nome: item.produto.nome,
             quantidade: item.quantidade,
             imei: item.imei || null,
@@ -13399,13 +13405,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               const metodoResolved = mapMetodo[pag.metodo?.toLowerCase()] || 'DINHEIRO';
               const isBoletoPag = metodoResolved === 'BOLETO' || pag.metodo?.toUpperCase() === 'BOLETO';
               const vpPayload = {
-                venda_id: rpcRes.venda_id,
+                venda_id: obterUuidPuro(rpcRes.venda_id),
                 valor_pago: pag.valor,
                 metodo_pagamento: metodoResolved,
                 parcelas: (pag.metodo === 'cartao_credito' || pag.metodo === 'cartao') ? (pag.parcelas || 1) : 1,
                 financeira: isBoletoPag ? (pag.financeira || pag.metodo_detalhe || null) : null,
                 status_repasse: isBoletoPag ? 'PENDENTE' : null,
-                tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
+                tenant_id: obterUuidPuro(company?.id || profile?.empresa_id || activeEmpresaId)
               };
               if (pag.metodo_detalhe || pag.financeira) {
                 vpPayload.metodo_detalhe = pag.metodo_detalhe || pag.financeira;
@@ -13433,13 +13439,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             const metodoResolved = mapMetodo[metodoEfetivo?.toLowerCase()] || 'DINHEIRO';
             const isBoletoSingle = metodoResolved === 'BOLETO';
             const vpSinglePayload = {
-              venda_id: rpcRes.venda_id,
+              venda_id: obterUuidPuro(rpcRes.venda_id),
               valor_pago: actualValorPago,
               metodo_pagamento: metodoResolved,
               parcelas: isCartaoEfetivo ? (parcelasEfetivo || 1) : 1,
               financeira: isBoletoSingle ? resolvedFinanceira : null,
               status_repasse: isBoletoSingle ? 'PENDENTE' : null,
-              tenant_id: company?.id || profile?.empresa_id || activeEmpresaId
+              tenant_id: obterUuidPuro(company?.id || profile?.empresa_id || activeEmpresaId)
             };
             if (isBoletoSingle && resolvedFinanceira) {
               vpSinglePayload.metodo_detalhe = resolvedFinanceira;
@@ -13502,8 +13508,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 const nomeFinanceiraFormatada = pag.financeira || (metodoNorm.includes('BOLETO') ? (pdvNovoFinanceira || pdvFinanceiraParceira || 'BOLETO') : (metodoNorm.includes('CARTAO') ? 'CARTÃO DE CRÉDITO' : finNome));
 
                 const repassePayload = {
-                  venda_id: rpcRes.venda_id,
-                  filial_id: activeFilialId || profile?.filial_id || null,
+                  venda_id: obterUuidPuro(rpcRes.venda_id),
+                  filial_id: obterUuidPuro(activeFilialId || profile?.filial_id) || null,
                   financeira: nomeFinanceiraFormatada,
                   valor_bruto: vBruto,
                   taxa_retencao: taxaValor,
@@ -13532,9 +13538,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           await supabase.from('vendas').update({
             teve_participacao_trainee: true,
             comissao_trainee: comissaoTraineeCalculada,
-            trainee_id: selectedTreenerId || null,
-            treener_id: selectedTreenerId || null
-          }).eq('id', rpcRes.venda_id);
+            trainee_id: obterUuidPuro(selectedTreenerId) || null,
+            treener_id: obterUuidPuro(selectedTreenerId) || null
+          }).eq('id', obterUuidPuro(rpcRes.venda_id));
         }
 
         const itemPrecoOriginal = Number(item.preco_original ?? item.produto?.preco ?? item.valorUnitario ?? 0);
@@ -13648,14 +13654,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         // Gravar no Supabase na tabela auditoria_descontos
         try {
           await supabase.from('auditoria_descontos').insert({
-            empresa_id: empresaId,
-            filial_id: activeFilialId,
+            empresa_id: obterUuidPuro(empresaId),
+            filial_id: obterUuidPuro(activeFilialId),
             filial_nome: activeFilialNome || 'Filial',
-            vendedor_id: session.user.id,
+            vendedor_id: obterUuidPuro(session.user.id),
             vendedor_nome: profile.nome || 'Vendedor',
-            cliente_id: cliente_id,
+            cliente_id: obterUuidPuro(cliente_id),
             cliente_nome: nomeClienteFinal || 'Cliente Balcão',
-            venda_id: createdVendaIds[0] || null,
+            venda_id: obterUuidPuro(createdVendaIds[0]) || null,
             itens_resumo: resumoItensText,
             valor_tabela: totalTabelaCart,
             valor_final: totalVendidoCart,
@@ -13691,13 +13697,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               const { data: prodExistente } = await supabase
                 .from('produtos')
                 .select('id, quantidade')
-                .eq('empresa_id', empresaId)
-                .eq('filial_id', activeFilialId)
+                .eq('empresa_id', obterUuidPuro(empresaId))
+                .eq('filial_id', obterUuidPuro(activeFilialId))
                 .ilike('nome', nomeCompletoProduto)
                 .maybeSingle();
 
               if (prodExistente && prodExistente.id) {
-                produtoIdAlvo = prodExistente.id;
+                produtoIdAlvo = obterUuidPuro(prodExistente.id);
                 // Incrementar quantidade do produto
                 await supabase
                   .from('produtos')
@@ -13711,8 +13717,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 const { data: novoProduto, error: prodErr } = await supabase
                   .from('produtos')
                   .insert({
-                    empresa_id: empresaId,
-                    filial_id: activeFilialId,
+                    empresa_id: obterUuidPuro(empresaId),
+                    filial_id: obterUuidPuro(activeFilialId),
                     nome: nomeCompletoProduto,
                     tipo: 'SEMINOVO',
                     categoria: 'CELULAR',
@@ -13724,16 +13730,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   .single();
 
                 if (!prodErr && novoProduto) {
-                  produtoIdAlvo = novoProduto.id;
+                  produtoIdAlvo = obterUuidPuro(novoProduto.id);
                 }
               }
 
               // 2. Se possuir IMEI (ou produtoIdAlvo), inserir o registro na tabela imeis
               if (produtoIdAlvo) {
                 const imeiPayload = {
-                  empresa_id: empresaId,
-                  filial_id: activeFilialId,
-                  produto_id: produtoIdAlvo,
+                  empresa_id: obterUuidPuro(empresaId),
+                  filial_id: obterUuidPuro(activeFilialId),
+                  produto_id: obterUuidPuro(produtoIdAlvo),
                   imei: imeiSeminovo || `SEMINOVO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                   status: 'DISPONIVEL',
                   vendido: false,
@@ -15666,6 +15672,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (!map[mapKey]) {
             map[mapKey] = {
               id: `${pId}_${mapKey}`,
+              produto_id: pId,
+              produto_pai_id: pId,
               nome: modeloPai.nome,
               cor: corKey,
               corReal: corKey,
@@ -15700,6 +15708,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             if (!corMap[mapKey]) {
               corMap[mapKey] = {
                 id: raw.id || `${pId}_${mapKey}`,
+                produto_id: raw.id ? obterUuidPuro(raw.id) : pId,
+                produto_pai_id: pId,
                 nome: raw.nome || modeloPai.nome,
                 cor: corKey,
                 corReal: corKey,
@@ -15760,6 +15770,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         if (!map[key]) {
           map[key] = {
             id: raw.id || `${pId}_${key}`,
+            produto_id: raw.id ? obterUuidPuro(raw.id) : pId,
+            produto_pai_id: pId,
             nome: raw.nome || modeloPai.nome,
             cor: corKey,
             corReal: corKey,

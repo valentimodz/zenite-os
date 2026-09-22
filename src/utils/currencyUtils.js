@@ -80,3 +80,14 @@ export const getFundoSessao = (sessao) => {
 
   return valorFinal;
 };
+
+/**
+ * Sanitiza identificadores que contenham sufixos (ex.: id_cor ou id_variante),
+ * extraindo estritamente a sequência correspondente a um UUID v4 para compatibilidade com o Postgres.
+ */
+export const obterUuidPuro = (id) => {
+  if (typeof id !== 'string') return id;
+  // Extrai estritamente a sequência correspondente a um UUID v4
+  const uuidMatch = id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return uuidMatch ? uuidMatch[0] : id.split('_')[0];
+};
