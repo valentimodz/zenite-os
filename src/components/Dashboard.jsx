@@ -4119,6 +4119,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   };
 
+  // Helper robusto para extração numérica de valores monetários
+  const extrairValor = (val) => {
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    if (!val) return 0;
+    const parsed = parseFloat(String(val).replace(/[^\d,-]/g, '').replace(',', '.'));
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
   // Buscar Sessões de Caixa (Aberturas e Fechamentos) para o Relatório Gerencial
   const fetchSessoesCaixas = async (empresaId, filialId, mesStr) => {
     const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
@@ -4136,10 +4144,36 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     try {
       console.log('[Caixas] 🔍 Buscando sessões de caixa...', { empresaId, filialId, mesStr });
 
-      // 1. Busca estrita dos caixas apenas com campos existentes
+      // 1. Busca completa dos caixas com colunas de abertura, fechamento e fundos
       let query = supabase
         .from('caixas')
-        .select('id, filial_id, empresa_id, operador_id, status, created_at')
+        .select(`
+          id,
+          filial_id,
+          empresa_id,
+          operador_id,
+          status,
+          saldo_inicial,
+          valor_abertura,
+          deposito_inicial,
+          total_vendas,
+          total_dinheiro,
+          total_cartao,
+          total_pix,
+          saldo_final,
+          saldo_final_dinheiro,
+          saldo_final_cartao,
+          saldo_final_pix,
+          data_abertura,
+          aberto_em,
+          data_fechamento,
+          fechado_em,
+          observacao,
+          observacao_abertura,
+          observacoes_abertura,
+          observacoes_fechamento,
+          created_at
+        `)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -4166,17 +4200,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ]);
 
       if (errorCaixas) {
-        console.warn('[Caixas] Tentando select simplificado de caixas:', errorCaixas.message || errorCaixas);
+        console.warn('[Caixas] Tentando select simplificado com fallback de colunas:', errorCaixas.message || errorCaixas);
         const fbRes = await supabase
           .from('caixas')
-          .select('id, filial_id, empresa_id, operador_id, status, created_at')
+          .select('id, filial_id, empresa_id, operador_id, saldo_inicial, status, data_abertura, data_fechamento, created_at')
           .order('created_at', { ascending: false })
           .limit(50);
         if (!fbRes.error && fbRes.data) {
           listaCaixas = fbRes.data;
           errorCaixas = null;
+        } else {
+          // Último fallback ultra-básico
+          const minRes = await supabase
+            .from('caixas')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (!minRes.error && minRes.data) {
+            listaCaixas = minRes.data;
+            errorCaixas = null;
+          }
         }
       }
+
+      console.log('Sessões de caixa carregadas:', listaCaixas);
 
       if (errorCaixas) {
         console.error('[Caixas] ⚠️ Erro na consulta de caixas do Supabase:', errorCaixas);
@@ -4193,7 +4240,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           ? profilesData
           : (Array.isArray(vendedores) ? vendedores : (Array.isArray(teamMembers) ? teamMembers : []));
 
-        // Cruzar dados em memória no frontend
+        // Cruzar dados em memória no frontend e normalizar valores numéricos
         const sessoesMapeadas = listaCaixas.map(cx => {
           const filialEncontrada = todasFiliais.find(f => String(f.id) === String(cx.filial_id));
           const profileEncontrado = todosProfiles.find(p => String(p.id) === String(cx.operador_id));
@@ -4201,8 +4248,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           const filialNome = cx.filial_nome || filialEncontrada?.nome || 'Sem Filial';
           const operadorNome = cx.profiles?.nome || cx.operador_nome || profileEncontrado?.nome || 'Operador PDV';
 
+          // Fundo de abertura unificado garantindo compatibilidade com saldo_inicial e valor_abertura
+          const valorAberturaFundo = extrairValor(
+            cx.saldo_inicial !== undefined && cx.saldo_inicial !== null && cx.saldo_inicial !== ''
+              ? cx.saldo_inicial
+              : (cx.valor_abertura !== undefined && cx.valor_abertura !== null && cx.valor_abertura !== ''
+                ? cx.valor_abertura
+                : (cx.fundo_troco || cx.saldo_abertura || cx.valor_inicial || 0))
+          );
+
+          const depositoInicialNum = extrairValor(cx.deposito_inicial || 0);
+
           return {
             ...cx,
+            saldo_inicial: valorAberturaFundo,
+            valor_abertura: valorAberturaFundo,
+            deposito_inicial: depositoInicialNum,
             filial_nome: filialNome,
             filiais: filialEncontrada ? { id: filialEncontrada.id, nome: filialEncontrada.nome } : { nome: filialNome },
             operador_nome: operadorNome,
