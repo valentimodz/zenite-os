@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   X, 
   Award, 
@@ -138,14 +138,20 @@ export default function ModalDesempenhoVendedor({
   const [metaIndividual, setMetaIndividual] = useState<MetaBanco | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  const colaboradorId = colaborador?.id;
+  const colaboradorNome = colaborador?.nome;
+  const colaboradorFilialId = colaborador?.filial_id;
+  const vendasCacheLength = Array.isArray(vendasCache) ? vendasCache.length : 0;
+  const lastLoadedVendedorRef = useRef<string | null>(null);
+
   // Carregar dados de vendas e metas do colaborador selecionado
   const carregarDadosVendedor = useCallback(async () => {
-    if (!colaborador) return;
+    if (!colaboradorId) return;
     setIsLoading(true);
 
     try {
-      const vendedorId = colaborador?.id;
-      const vendedorNome = colaborador?.nome;
+      const vendedorId = colaboradorId;
+      const vendedorNome = colaboradorNome;
 
       // Início e fim do mês selecionado
       const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
@@ -249,14 +255,13 @@ export default function ModalDesempenhoVendedor({
       setVendasColaborador(vendasModal || []);
 
       // 2. Consulta de Metas configuradas para o vendedor no mês na tabela 'metas'
-      // Colunas oficiais: valor_meta, meta_boleto, meta_acessorios, meta_trainee_boleto, super_meta_boleto, super_meta_acessorios
       let metaEncontrada: MetaBanco | null = null;
-      if (colaborador.id && colaborador.id !== 'sem_vendedor' && !String(colaborador.id).startsWith('nome_')) {
+      if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
         try {
           const { data: mData } = await supabase
             .from('metas')
             .select('*')
-            .eq('vendedor_id', colaborador.id)
+            .eq('vendedor_id', colaboradorId)
             .or(`mes_ano.eq.${mesAtivo},mes_referencia.eq.${mesAtivo}`)
             .maybeSingle();
 
@@ -269,12 +274,12 @@ export default function ModalDesempenhoVendedor({
       }
 
       // Fallback para metas da filial
-      if (!metaEncontrada && colaborador.filial_id) {
+      if (!metaEncontrada && colaboradorFilialId) {
         try {
           const { data: cData } = await supabase
             .from('configuracoes_metas_filial')
             .select('*')
-            .eq('filial_id', colaborador.filial_id)
+            .eq('filial_id', colaboradorFilialId)
             .eq('mes_ano', mesAtivo)
             .maybeSingle();
           if (cData) metaEncontrada = cData;
@@ -287,11 +292,15 @@ export default function ModalDesempenhoVendedor({
     } finally {
       setIsLoading(false);
     }
-  }, [colaborador, mesAtivo, mesCompetencia, vendasCache]);
+  }, [colaboradorId, colaboradorNome, colaboradorFilialId, mesAtivo, mesCompetencia, vendasCacheLength]);
 
   useEffect(() => {
-    carregarDadosVendedor();
-  }, [carregarDadosVendedor]);
+    const key = `${colaboradorId}_${mesAtivo}`;
+    if (colaboradorId && lastLoadedVendedorRef.current !== key) {
+      lastLoadedVendedorRef.current = key;
+      carregarDadosVendedor();
+    }
+  }, [colaboradorId, mesAtivo, carregarDadosVendedor]);
 
   // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'metas'
   const dashboardInfo = useMemo(() => {
@@ -497,7 +506,7 @@ export default function ModalDesempenhoVendedor({
       evolucaoDiaria,
       historico: sales
     };
-  }, [metaIndividual, vendasColaborador, colaborador, mesAtivo, mesCompetencia]);
+  }, [metaIndividual, vendasColaborador, colaboradorId, colaborador?.cargo, colaborador?.role, colaborador?.is_treinner, mesAtivo, mesCompetencia]);
 
   // Identificação da filial
   const filialDoColaborador = filiais.find(f => String(f.id) === String(colaborador?.filial_id)) || null;

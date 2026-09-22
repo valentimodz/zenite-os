@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Sparkles,
@@ -28,6 +28,7 @@ export default function EstrategiaProdutoModal({
   const [estrategiaTexto, setEstrategiaTexto] = useState('');
   const [copiado, setCopiado] = useState(false);
   const [erro, setErro] = useState('');
+  const lastLoadedIdRef = useRef(null);
 
   // Formatação de moeda BRL
   const formatBRL = (val) => {
@@ -122,15 +123,21 @@ Seja direto e comercial.`;
     }
   };
 
+  const produtoId = produto?.id || produto?.produto_id || (produto?.nome ? `${produto.nome}_${produto.preco || 0}` : null);
+
   useEffect(() => {
-    if (isOpen && produto) {
-      carregarEstrategia();
-    } else {
+    if (isOpen && produtoId) {
+      if (lastLoadedIdRef.current !== produtoId) {
+        lastLoadedIdRef.current = produtoId;
+        carregarEstrategia();
+      }
+    } else if (!isOpen) {
+      lastLoadedIdRef.current = null;
       setEstrategiaTexto('');
       setCopiado(false);
       setErro('');
     }
-  }, [isOpen, produto?.id]);
+  }, [isOpen, produtoId]);
 
   // Tecla ESC para fechar
   useEffect(() => {

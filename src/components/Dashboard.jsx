@@ -15018,30 +15018,42 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     };
   };
 
-  const metasInfo = getMetasVendedor() || {
-    mesReferencia: filtroMes,
-    isTrainee: false,
-    totalVendasGeral: 0,
-    ticketMedio: 0,
-    totalComissoes: 0,
-    metaTotal: 77500,
-    salesCount: 0,
-    totalBoletos: 0,
-    metaBoleto: 67500,
-    superMetaBoleto: 87000,
-    progressoBoleto: 0,
-    badgeBoleto: { taxa: '1,0%', texto: 'Faixa Atual: 1,0% (Abaixo da Meta)', classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40' },
-    totalAcessorios: 0,
-    metaAcessorios: 10000,
-    superMetaAcessorios: 15000,
-    progressoAcessorios: 0,
-    badgeAcessorios: { taxa: '1,0%', texto: 'Faixa Atual: 1,0% (Abaixo da Meta)', classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40' },
-    totalAVista: 0,
-    progressoTotal: 0,
-    evolucaoDiaria: [],
-    historico: [],
-    metaRegistro: null
-  };
+  const metasInfo = useMemo(() => {
+    return getMetasVendedor() || {
+      mesReferencia: filtroMes,
+      isTrainee: false,
+      totalVendasGeral: 0,
+      ticketMedio: 0,
+      totalComissoes: 0,
+      metaTotal: 77500,
+      salesCount: 0,
+      totalBoletos: 0,
+      metaBoleto: 67500,
+      superMetaBoleto: 87000,
+      progressoBoleto: 0,
+      badgeBoleto: { taxa: '1,0%', texto: 'Faixa Atual: 1,0% (Abaixo da Meta)', classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40' },
+      totalAcessorios: 0,
+      metaAcessorios: 10000,
+      superMetaAcessorios: 15000,
+      progressoAcessorios: 0,
+      badgeAcessorios: { taxa: '1,0%', texto: 'Faixa Atual: 1,0% (Abaixo da Meta)', classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40' },
+      totalAVista: 0,
+      progressoTotal: 0,
+      evolucaoDiaria: [],
+      historico: [],
+      metaRegistro: null
+    };
+  }, [
+    session?.user?.id,
+    profile?.id,
+    profile?.nome,
+    profile?.is_treinner,
+    profile?.role,
+    filtroMes,
+    metaVendedorLogado,
+    metas?.length,
+    vendasVendedor?.length
+  ]);
 
   // Métricas Globais do Gerente
   const getGerenteMetrics = () => {

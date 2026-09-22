@@ -192,7 +192,7 @@ export default function ModalDiagnosticoFilial({
       capitalParado30Dias: finalRiscoVal,
       itensParados30Dias: riscoQtd || Math.round(finalEstoqueQtd * 0.6)
     };
-  }, [produtosFilial, filial]);
+  }, [produtosFilial, filial?.id, filial?.estoqueParadoValor, filial?.estoqueParadoQtd]);
 
   // Taxa de Giro de Estoque
   const taxaGiro = useMemo(() => {

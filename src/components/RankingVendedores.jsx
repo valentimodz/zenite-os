@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Award, RefreshCw, Calendar, Store, Filter, Eye } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import ModalDesempenhoVendedor from './ModalDesempenhoVendedor';
@@ -196,12 +196,21 @@ export default function RankingVendedores({
     } finally {
       setIsLoading(false);
     }
-  }, [filtroMes, empresaId, currentMonthStr, initialVendas]);
+  }, [filtroMes, empresaId, currentMonthStr, initialVendas?.length]);
 
   // Carregar dados sempre que o filtroMes ou empresaId mudar
   useEffect(() => {
     fetchVendasRanking();
   }, [fetchVendasRanking]);
+
+  const fetchVendasRankingRef = useRef(fetchVendasRanking);
+  fetchVendasRankingRef.current = fetchVendasRanking;
+
+  const fetchColaboradoresRef = useRef(fetchColaboradores);
+  fetchColaboradoresRef.current = fetchColaboradores;
+
+  const fetchGerenteDataRef = useRef(fetchGerenteData);
+  fetchGerenteDataRef.current = fetchGerenteData;
 
   // 4. Canal Realtime:
   // Listener realtime na tabela 'vendas' para disparar busca novamente sempre que houver INSERT de nova venda
@@ -218,10 +227,10 @@ export default function RankingVendedores({
         },
         (payload) => {
           console.log('⚡ [Ranking Realtime] Nova venda detectada no ranking:', payload?.new);
-          fetchVendasRanking();
-          fetchColaboradores();
-          if (typeof fetchGerenteData === 'function' && empresaId) {
-            fetchGerenteData(empresaId);
+          if (fetchVendasRankingRef.current) fetchVendasRankingRef.current();
+          if (fetchColaboradoresRef.current) fetchColaboradoresRef.current();
+          if (typeof fetchGerenteDataRef.current === 'function' && empresaId) {
+            fetchGerenteDataRef.current(empresaId);
           }
         }
       )
@@ -230,7 +239,7 @@ export default function RankingVendedores({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [empresaId, fetchVendasRanking, fetchColaboradores, fetchGerenteData]);
+  }, [empresaId]);
 
   // Atualização manual via botão Recarregar
   const handleRecarregar = async () => {

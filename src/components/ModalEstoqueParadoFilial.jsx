@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   X,
@@ -29,6 +29,7 @@ export default function ModalEstoqueParadoFilial({
   const [isLoading, setIsLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('TODAS');
+  const lastLoadedFilialIdRef = useRef(null);
 
   // Formatação de moeda BRL
   const formatBRL = (val) => {
@@ -78,11 +79,18 @@ export default function ModalEstoqueParadoFilial({
     }
   };
 
+  const filialId = filial?.id;
+
   useEffect(() => {
-    if (isOpen && filial?.id) {
-      carregarProdutosParados();
+    if (isOpen && filialId) {
+      if (lastLoadedFilialIdRef.current !== filialId) {
+        lastLoadedFilialIdRef.current = filialId;
+        carregarProdutosParados();
+      }
+    } else if (!isOpen) {
+      lastLoadedFilialIdRef.current = null;
     }
-  }, [isOpen, filial?.id]);
+  }, [isOpen, filialId]);
 
   // Tecla ESC para fechar
   useEffect(() => {
@@ -97,9 +105,12 @@ export default function ModalEstoqueParadoFilial({
 
   // 2. Métricas Superiores
   const { totalItens, capitalImobilizadoTotal, itensCriticos30Dias } = useMemo(() => {
-    const qtdTotal = produtos.reduce((acc, cur) => acc + Number(cur.quantidade || 0), 0);
-    const capTotal = produtos.reduce((acc, cur) => acc + Number(cur.valorTotalLinha || 0), 0);
-    const critTotal = produtos.filter(p => p.diasSemGiro >= 30).reduce((acc, cur) => acc + Number(cur.quantidade || 0), 0);
+    if (!produtos || !Array.isArray(produtos) || produtos.length === 0) {
+      return { totalItens: 0, capitalImobilizadoTotal: 0, itensCriticos30Dias: 0 };
+    }
+    const qtdTotal = produtos.reduce((acc, cur) => acc + Number(cur?.quantidade || 0), 0);
+    const capTotal = produtos.reduce((acc, cur) => acc + Number(cur?.valorTotalLinha || 0), 0);
+    const critTotal = produtos.filter(p => Number(p?.diasSemGiro || 0) >= 30).reduce((acc, cur) => acc + Number(cur?.quantidade || 0), 0);
 
     return {
       totalItens: qtdTotal,
@@ -110,20 +121,24 @@ export default function ModalEstoqueParadoFilial({
 
   // Filtragem de produtos (Busca e Categoria)
   const produtosFiltrados = useMemo(() => {
+    if (!produtos || !Array.isArray(produtos) || produtos.length === 0) return [];
+    const buscaLimpa = (busca || '').trim().toLowerCase();
+
     return produtos.filter(p => {
-      const matchBusca = !busca.trim() ||
-        (p.nome && p.nome.toLowerCase().includes(busca.toLowerCase())) ||
-        (p.categoria && p.categoria.toLowerCase().includes(busca.toLowerCase()));
+      if (!p) return false;
+      const matchBusca = !buscaLimpa ||
+        (p.nome && String(p.nome).toLowerCase().includes(buscaLimpa)) ||
+        (p.categoria && String(p.categoria).toLowerCase().includes(buscaLimpa));
 
       if (!matchBusca) return false;
 
       if (filtroCategoria === 'CELULARES') {
-        const cat = (p.categoria || '').toUpperCase();
+        const cat = String(p.categoria || '').toUpperCase();
         return cat.includes('CEL') || cat.includes('SMART') || cat.includes('APARELHO') || cat.includes('IPHONE') || cat.includes('ANDROID');
       }
 
       if (filtroCategoria === 'ACESSORIOS') {
-        const cat = (p.categoria || '').toUpperCase();
+        const cat = String(p.categoria || '').toUpperCase();
         return cat.includes('ACESS');
       }
 
