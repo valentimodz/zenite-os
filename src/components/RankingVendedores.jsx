@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Award, RefreshCw, Calendar, Store, Filter, Eye } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import ModalDashboardColaborador from './ModalDashboardColaborador';
+import ModalDesempenhoVendedor from './ModalDesempenhoVendedor';
 import PeriodoSelector from './common/PeriodoSelector';
 
 // Helper de cálculo dinâmico de comissão do vendedor titular
@@ -626,9 +626,9 @@ export default function RankingVendedores({
         </table>
       </div>
 
-      {/* 3. MODAL DE DASHBOARD INDIVIDUAL DO COLABORADOR */}
+      {/* 3. MODAL DE DESEMPENHO E METAS INDIVIDUAL DO COLABORADOR */}
       {vendedorSelecionadoModal && (
-        <ModalDashboardColaborador
+        <ModalDesempenhoVendedor
           colaborador={vendedorSelecionadoModal}
           mesAno={filtroMes}
           filtroMes={filtroMes}

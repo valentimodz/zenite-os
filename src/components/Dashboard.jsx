@@ -14718,26 +14718,28 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     const isTrainee = Boolean(profile?.is_treinner) || (profile?.role || '').toUpperCase().includes('TRAINEE');
 
-    // Metas configuradas com fallbacks exatos conforme solicitado
+    // Metas configuradas com mapeamento oficial da tabela 'metas':
+    // Trainee: metaTotal = R$ 40.000, metaBoleto = R$ 35.000, metaAcessorios = R$ 5.000
+    // Vendedor: metaTotal = R$ 77.500, metaBoleto = R$ 67.500, metaAcessorios = R$ 10.000
+    const metaTotal = Number(m?.valor_meta) > 0 
+      ? Number(m.valor_meta) 
+      : (isTrainee ? 40000 : 77500);
+
     const metaBoleto = Number(m?.meta_boleto) > 0 
       ? Number(m.meta_boleto) 
-      : (isTrainee ? (Number(m?.meta_trainee_boleto) || 40000) : 67500);
+      : (isTrainee ? (Number(m?.meta_trainee_boleto) || 35000) : 67500);
 
     const superMetaBoleto = Number(m?.super_meta_boleto) > 0 
       ? Number(m.super_meta_boleto) 
-      : (isTrainee ? 50000 : 87000);
+      : (isTrainee ? 45000 : 87000);
 
     const metaAcessorios = Number(m?.meta_acessorios) > 0 
       ? Number(m.meta_acessorios) 
-      : 10000;
+      : (isTrainee ? 5000 : 10000);
 
     const superMetaAcessorios = Number(m?.super_meta_acessorios) > 0 
       ? Number(m.super_meta_acessorios) 
-      : 15000;
-
-    const metaTotal = Number(m?.valor_meta) > 0 
-      ? Number(m.valor_meta) 
-      : (metaBoleto + metaAcessorios);
+      : (isTrainee ? 7500 : 15000);
 
     // Todas as vendas do mês corrente/filtrado deste vendedor/trainee (resiliente a fuso horário e nulos)
     const currentMonthSales = (vendasVendedor || []).filter(sale => {
