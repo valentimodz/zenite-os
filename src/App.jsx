@@ -230,6 +230,23 @@ const RoleProtectedRoute = ({ session, isCeoRoute }) => {
     }
   }
 
+  // Proteção de Rota Direta (/contas-a-receber ou /financeiro/contas-a-receber) exclusiva para DONO / ADMIN
+  const isContasAReceberRoute = ['/contas-a-receber', '/financeiro/contas-a-receber'].includes(window.location.pathname.toLowerCase());
+  if (isContasAReceberRoute) {
+    const cargoUsuario = (profile?.cargo || profile?.role || '').toUpperCase();
+    const userEmail = (session?.user?.email || '').toLowerCase().trim();
+    const isAutorizado = ['DONO', 'ADMIN', 'ADMINISTRADOR', 'OWNER', 'SUPER_ADMIN'].includes(cargoUsuario) || userEmail === 'valentimodz2@gmail.com';
+    const isBloqueado = cargoUsuario === 'GERENTE' || cargoUsuario === 'VENDEDOR' || userEmail === 'rodrigo.gerenciamonkeyshop@gmail.com' || userEmail === 'rodrigo.gerenciaredecred@gmail.com';
+
+    if (!isAutorizado || isBloqueado) {
+      window.history.replaceState({}, '', '/dashboard');
+      window.location.href = '/dashboard';
+      return null;
+    }
+
+    return <Dashboard session={session} profileDataProps={profile} initialView="contas_a_receber" />;
+  }
+
   return <Dashboard session={session} profileDataProps={profile} />;
 }
 

@@ -36,6 +36,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
+import ContasAReceber from './ContasAReceber';
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -694,7 +695,7 @@ function ProductTableRow({
   );
 }
 
-export default function Dashboard({ session, profileDataProps }) {
+export default function Dashboard({ session, profileDataProps, initialView }) {
 
   const { theme, toggleTheme, isDark } = useTheme();
   const [vendaDetalheSelecionada, setVendaDetalheSelecionada] = useState(null);
@@ -1017,7 +1018,13 @@ export default function Dashboard({ session, profileDataProps }) {
     const saved = localStorage.getItem('zenite_sidebar_open');
     return saved !== 'false';
   });
-  const [currentView, setCurrentView] = useState('gestao');
+  const [currentView, setCurrentView] = useState(() => {
+    if (initialView) return initialView;
+    if (['/contas-a-receber', '/financeiro/contas-a-receber'].includes(window.location.pathname.toLowerCase())) {
+      return 'contas_a_receber';
+    }
+    return 'gestao';
+  });
   const [estoqueSubMenuOpen, setEstoqueSubMenuOpen] = useState(true);
 
   // --- Tenant Configurations & SaaS Faturas ---
@@ -9537,6 +9544,15 @@ export default function Dashboard({ session, profileDataProps }) {
       }
     }
 
+    if (view === 'contas_a_receber') {
+      const roleUpper = String(profile?.role || '').toUpperCase();
+      const isDonoAdmin = ['DONO', 'ADMIN', 'ADMINISTRADOR', 'OWNER', 'SUPER_ADMIN'].includes(roleUpper) || userEmail === 'valentimodz2@gmail.com';
+      if (!isDonoAdmin || isGerente || roleUpper === 'GERENTE' || roleUpper === 'VENDEDOR') {
+        showToast('Acesso Negado: O módulo de Contas a Receber é exclusivo para Administradores e Donos.', 'error');
+        return;
+      }
+    }
+
     if (['estoque', 'catalogo_mestre', 'categorias', 'transferencias'].includes(view)) {
       if (isGerente) {
         showToast('Acesso Negado: O perfil de Gerente não possui permissão para acessar a Gestão de Estoque.', 'error');
@@ -13109,6 +13125,75 @@ export default function Dashboard({ session, profileDataProps }) {
               if (vpSingleErr.message?.includes('status_repasse')) delete fallbackVpSingle.status_repasse;
               await supabase.from('vendas_pagamentos').insert(fallbackVpSingle);
             }
+          }
+
+          // GATILHO AUTOMÁTICO: Repasses de Financeiras & Contas a Receber
+          try {
+            const financeirasAlvo = ['PAYJOY', 'AIVA', 'UME', 'WATU', 'BOLETO', 'CREDIARIO', 'CARTAO_CREDITO', 'CARTAO', 'CARTAO_DEBITO'];
+            
+            const calcularDataPrevisao = (finOuMetodo) => {
+              const norm = String(finOuMetodo || '').toUpperCase().trim();
+              const hoje = new Date();
+              let dias = 30;
+              if (norm.includes('PAYJOY')) dias = 2;
+              else if (norm.includes('AIVA') || norm.includes('UME') || norm.includes('WATU')) dias = 3;
+              else if (norm.includes('DEBITO')) dias = 1;
+              else if (norm.includes('CARTAO') || norm.includes('CREDITO')) dias = 30;
+              else if (norm.includes('BOLETO') || norm.includes('CREDIARIO')) dias = 30;
+              const prev = new Date(hoje);
+              prev.setDate(prev.getDate() + dias);
+              return prev.toISOString().slice(0, 10);
+            };
+
+            const pagamentosParaRepasse = (pdvListaPagamentos && pdvListaPagamentos.length > 0)
+              ? pdvListaPagamentos
+              : [{
+                  metodo: metodoEfetivo,
+                  valor: actualValorPago || valorTotalNovo,
+                  financeira: resolvedFinanceira,
+                  parcelas: parcelasEfetivo
+                }];
+
+            for (const pag of pagamentosParaRepasse) {
+              const finNome = String(pag.financeira || pag.metodo_detalhe || pdvNovoFinanceira || pdvFinanceiraParceira || pag.metodo || metodoEfetivo || '').toUpperCase().trim();
+              const metodoNorm = String(pag.metodo || metodoEfetivo || '').toUpperCase().trim();
+
+              const isAlvo = financeirasAlvo.some(f => finNome.includes(f) || metodoNorm.includes(f));
+              if (isAlvo) {
+                const vBruto = Number(pag.valor || actualValorPago || valorTotalNovo || 0);
+                let taxaValor = 0;
+                if (metodoNorm.includes('CARTAO') || metodoNorm.includes('CREDITO')) {
+                  const feeObj = (taxasCartao || []).find(t => (t.parcela === (pag.parcelas || parcelasEfetivo) || t.parcelas === (pag.parcelas || parcelasEfetivo)));
+                  if (feeObj) {
+                    const taxaPercent = Number(feeObj.taxa ?? feeObj.fee ?? 0);
+                    taxaValor = (vBruto * taxaPercent) / 100;
+                  }
+                }
+                const vLiq = Math.max(0, vBruto - taxaValor);
+
+                const nomeFinanceiraFormatada = pag.financeira || (metodoNorm.includes('BOLETO') ? (pdvNovoFinanceira || pdvFinanceiraParceira || 'BOLETO') : (metodoNorm.includes('CARTAO') ? 'CARTÃO DE CRÉDITO' : finNome));
+
+                const repassePayload = {
+                  venda_id: rpcRes.venda_id,
+                  filial_id: activeFilialId || profile?.filial_id || null,
+                  financeira: nomeFinanceiraFormatada,
+                  valor_bruto: vBruto,
+                  taxa_retencao: taxaValor,
+                  valor_liquido: vLiq,
+                  status: 'PENDENTE',
+                  data_prevista_repasse: calcularDataPrevisao(finNome || metodoNorm),
+                  created_at: new Date().toISOString()
+                };
+
+                console.log('💰 [Repasses Financeiras] Inserindo repasse automático no PDV:', repassePayload);
+                const { error: repErr } = await supabase.from('repasses_financeiras').insert(repassePayload);
+                if (repErr) {
+                  console.warn('Aviso ao registrar repasse financeiro automático:', repErr);
+                }
+              }
+            }
+          } catch (repasseTriggerErr) {
+            console.warn('Aviso no gatilho automático de repasses financeiros:', repasseTriggerErr);
           }
         } catch (clientUpdateErr) {
           console.error('Erro ao atualizar dados estendidos e pagamentos na venda:', clientUpdateErr);
@@ -19585,12 +19670,22 @@ export default function Dashboard({ session, profileDataProps }) {
         items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
       }
 
-      // 11. Configurações - Oculto para DONO
+      // 11. Contas a Receber & Conciliação (Exclusivo DONO / ADMIN / ADMINISTRADOR)
+      const podeVerContasAReceber = (
+        ['DONO', 'ADMIN', 'ADMINISTRADOR', 'OWNER', 'SUPER_ADMIN'].includes(String(currentRole || '').toUpperCase()) ||
+        userEmail === 'valentimodz2@gmail.com'
+      ) && !isGerente && currentRole !== 'GERENTE' && currentRole !== 'VENDEDOR';
+
+      if (podeVerContasAReceber) {
+        items.push(sidebarItem('contas_a_receber', 'Contas a Receber', DollarSign));
+      }
+
+      // 12. Configurações - Oculto para DONO
       if (currentRole !== 'DONO') {
         items.push(sidebarItem('configuracoes', 'Configurações', Settings));
       }
 
-      // 12. Assinatura & Faturas - Oculto para DONO
+      // 13. Assinatura & Faturas - Oculto para DONO
       if (!isGerente && (['OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
         items.push(sidebarItem('assinatura', 'Assinatura & Faturas', CreditCard));
       }
@@ -19601,14 +19696,14 @@ export default function Dashboard({ session, profileDataProps }) {
       if (!item) return false;
       if (isGerente) {
         const key = item.key;
-        if (['agrupador-estoque', 'estoque', 'catalogo_mestre', 'categorias', 'transferencias', 'assinatura', 'pdv'].includes(key)) {
+        if (['agrupador-estoque', 'estoque', 'catalogo_mestre', 'categorias', 'transferencias', 'assinatura', 'pdv', 'contas_a_receber'].includes(key)) {
           return false;
         }
       }
       if (currentRole === 'DONO') {
         const key = item.key;
-        // O Dono deve ver apenas: Dashboard (Home), Relatórios & Fechamentos, Auditoria de Descontos, Auditoria Vendas & Crédito e Equipe / Funcionários
-        const permitidosDono = ['gestao', 'fechamentos', 'descontos', 'auditoria_credito', 'equipe'];
+        // O Dono deve ver apenas: Dashboard (Home), Relatórios & Fechamentos, Auditoria de Descontos, Auditoria Vendas & Crédito, Equipe e Contas a Receber
+        const permitidosDono = ['gestao', 'fechamentos', 'descontos', 'auditoria_credito', 'equipe', 'contas_a_receber'];
         if (!permitidosDono.includes(key)) {
           return false;
         }
@@ -24812,6 +24907,12 @@ export default function Dashboard({ session, profileDataProps }) {
 
                 {/* AUDITORIA DE VENDAS & CRÉDITO */}
                 {(activeTab === 'auditoria_credito' || currentView === 'auditoria_credito') && ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role) && renderAuditoriaCredito()}
+
+                {/* CONTAS A RECEBER & CONCILIAÇÃO DE FINANCEIRAS (EXCLUSIVO DONO / ADMIN) */}
+                {(activeTab === 'contas_a_receber' || currentView === 'contas_a_receber') &&
+                  ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'ADMINISTRADOR'].includes(String(profile?.role || '').toUpperCase()) && (
+                    <ContasAReceber profile={profile} filiais={filiais} />
+                )}
               </div>
             ) : (
               /* PAINEL DE CONTROLE DO VENDEDOR */
