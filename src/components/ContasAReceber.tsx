@@ -127,7 +127,7 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
           comprovante_repasse_url,
           created_at,
           filiais:filial_id (id, nome),
-          vendas:venda_id (id, valor_total, cliente_nome, vendedor_nome, produto_nome, forma_pagamento, metodo_pagamento, created_at)
+          vendas:venda_id (id, valor_total, cliente_nome, vendedor_nome, produto_nome, metodo_pagamento, created_at)
         `)
         .gte('created_at', inicioMes)
         .lt('created_at', fimMes)

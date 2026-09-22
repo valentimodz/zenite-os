@@ -4736,7 +4736,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           created_at,
           valor_total,
           metodo_pagamento,
-          forma_pagamento,
           financeira,
           financeira_parceira,
           categoria,
@@ -11541,8 +11540,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const qtd = Math.max(1, Number(quantidade) || 1);
     const total = Number(valorTotal) > 0 ? Number(valorTotal) : (Number(produto?.preco || 0) * qtd);
 
-    // Obter referências de metas do vendedor
-    const metasRef = metasState || (typeof getMetasVendedor === 'function' ? getMetasVendedor() : null);
+    // Obter referências de metas do vendedor (evitar getMetasVendedor recursivo)
+    const metasRef = metasState !== null && metasState !== undefined ? metasState : null;
     const totalBoletos = Number(metasRef?.totalBoletos || 0);
     const metaBoleto = Number(metasRef?.metaBoleto || 67500);
     const superMetaBoleto = Number(metasRef?.superMetaBoleto || 87000);
@@ -14623,7 +14622,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       metodoPagamento: sale.metodo_pagamento || sale.forma_pagamento || '',
       financeira: sale.financeira || sale.financeira_parceira || '',
       hasTrainee: Boolean(sale.trainee_id || sale.treener_id || sale.teve_participacao_trainee),
-      isTreinner: Boolean(profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee)
+      isTreinner: Boolean(profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee),
+      metasState: metasInfo || { metaBatida: false }
     });
 
     return res.comissaoVendedor;

@@ -169,7 +169,6 @@ export default function ModalDesempenhoVendedor({
           created_at,
           valor_total,
           metodo_pagamento,
-          forma_pagamento,
           categoria,
           comissao,
           vendedor_id,
@@ -213,7 +212,7 @@ export default function ModalDesempenhoVendedor({
         console.warn('[ModalDesempenhoVendedor] Fallback na busca sem itens_venda:', error);
         let fbQuery = supabase
           .from('vendas')
-          .select('id, created_at, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id')
+          .select('id, created_at, valor_total, metodo_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id')
           .gte('created_at', dataInicio)
           .lte('created_at', dataFim)
           .order('created_at', { ascending: false });
