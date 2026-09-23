@@ -45,6 +45,47 @@ export interface ColaboradorDesempenho {
   [key: string]: any;
 }
 
+export interface ItemVenda {
+  id?: string | number;
+  produto_nome?: string;
+  nome?: string;
+  quantidade?: number | string;
+  preco_unitario?: number | string;
+  valor_unitario?: number | string;
+  categoria?: string;
+  [key: string]: any;
+}
+
+export interface Venda {
+  id: string | number;
+  created_at?: string;
+  valor_total?: number | string;
+  valor?: number | string;
+  metodo_pagamento?: string;
+  forma_pagamento?: string;
+  categoria?: string;
+  comissao?: number | string;
+  comissao_trainee?: number | string;
+  comissao_vendedor?: number | string;
+  valor_comissao?: number | string;
+  vendedor_id?: string;
+  vendedor_nome?: string;
+  produto_nome?: string;
+  descricao?: string;
+  produtos_descricao?: string;
+  itens_resumo?: string;
+  imei?: string;
+  teve_participacao_trainee?: boolean;
+  treener_id?: string;
+  trainee_id?: string;
+  quantidade?: number | string;
+  itens_venda?: ItemVenda[] | any[];
+  produtos?: any;
+  [key: string]: any;
+}
+
+export type IVenda = Venda;
+
 export interface ModalDesempenhoVendedorProps {
   colaborador: ColaboradorDesempenho;
   mesAno?: string;
@@ -52,12 +93,12 @@ export interface ModalDesempenhoVendedorProps {
   dataInicio?: string;
   dataFim?: string;
   filiais?: any[];
-  vendasCache?: any[];
+  vendasCache?: Venda[] | any[];
   onClose: () => void;
 }
 
 // Helper robusto de comissão para cada item
-export const calcularComissaoItem = (sale: any, isTrainee = false): number => {
+export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): number => {
   if (!sale) return 0;
   
   if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
@@ -134,7 +175,7 @@ export default function ModalDesempenhoVendedor({
 }: ModalDesempenhoVendedorProps) {
   const mesCompetencia = propMesAno || filtroMes || new Date().toISOString().slice(0, 7);
   const [mesAtivo, setMesAtivo] = useState<string>(() => mesCompetencia);
-  const [vendasColaborador, setVendasColaborador] = useState<any[]>([]);
+  const [vendasColaborador, setVendasColaborador] = useState<Venda[]>([]);
   const [metaIndividual, setMetaIndividual] = useState<MetaBanco | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -206,7 +247,11 @@ export default function ModalDesempenhoVendedor({
         query = query.ilike('vendedor_nome', `%${primeiroNome}%`);
       }
 
-      let { data: vendasModal, error } = await query;
+      let vendasModal: Venda[] | null = null;
+      const { data: vendasData, error } = await query;
+      if (vendasData) {
+        vendasModal = vendasData as Venda[];
+      }
 
       if (error) {
         console.warn('[ModalDesempenhoVendedor] Fallback na busca sem itens_venda:', error);
@@ -231,13 +276,13 @@ export default function ModalDesempenhoVendedor({
 
         const fbRes = await fbQuery;
         if (!fbRes.error && fbRes.data) {
-          vendasModal = fbRes.data;
+          vendasModal = fbRes.data as Venda[];
         }
       }
 
       // Fallback em cache
       if ((!vendasModal || vendasModal.length === 0) && Array.isArray(vendasCache) && vendasCache.length > 0) {
-        const cachedVendas = vendasCache.filter(v => {
+        const cachedVendas = (vendasCache as Venda[]).filter(v => {
           const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
           const rawNome = (v.vendedor_nome || '').toLowerCase();
           const pNome = (primeiroNome || '').toLowerCase();
