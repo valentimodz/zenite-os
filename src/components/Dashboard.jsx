@@ -13311,6 +13311,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             imei: item.imei || null,
             cliente_nome: resolvedClienteNome,
             cliente_cpf_cnpj: resolvedClienteCpf,
+            cliente_cpf: resolvedClienteCpf,
+            cpf_cliente: resolvedClienteCpf,
             cliente_email: pdvClienteEmail.trim() || null,
             cliente_telefone: pdvClienteTelefone.trim() || null,
             cliente_id: obterUuidPuro(clienteIdFinalValido) || null,
@@ -13596,12 +13598,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const totalOriginalNovo = itemsForRecibo.reduce((sum, it) => sum + (Number(it.valor_total_original ?? it.valor_total ?? 0)), 0);
       const finalSaldoPagarOriginal = Math.max(0, totalOriginalNovo - valorUsadoTotal);
 
+      const resolvedVendedorNomeParaRecibo = (
+        resolvedVendedorNome ||
+        profile?.nome ||
+        session?.user?.user_metadata?.nome ||
+        (vendedores || []).find(v => String(v.id) === String(vendedor_id))?.nome ||
+        (teamMembers || []).find(m => String(m.id) === String(vendedor_id))?.nome ||
+        session?.user?.email?.split('@')[0] ||
+        'Vendedor'
+      ).trim();
+
+      const resolvedClienteNomeParaRecibo = isConsumidorFinal
+        ? 'Consumidor Final'
+        : ((nomeClienteFinal && nomeClienteFinal !== 'Consumidor Final') ? nomeClienteFinal : (pdvClienteNome || 'Consumidor Final'));
+
       const dadosRecibo = {
         venda_id: createdVendaIds[0],
         vendas_ids: createdVendaIds,
         filial_id: activeFilialId,
         data: new Date().toISOString(),
-        vendedor_nome: profile.nome,
+        vendedor_nome: resolvedVendedorNomeParaRecibo,
         filial_nome: realFilialNome,
         filial_logo: realFilialLogo,
         filial_endereco: realFilialEndereco,
@@ -13610,8 +13626,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         cliente_id: (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID)
           ? clienteIdBanco
           : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID) ? selectedPdvClienteId : null),
-        cliente_nome: nomeClienteFinal || 'Consumidor Final',
-        cliente_cpf_cnpj: pdvClienteCpfCnpj || '',
+        cliente_nome: resolvedClienteNomeParaRecibo,
+        cliente_cpf_cnpj: resolvedClienteCpf || pdvClienteCpfCnpj || '',
+        cliente_cpf: resolvedClienteCpf || pdvClienteCpfCnpj || '',
         cliente_email: pdvClienteEmail || '',
         cliente_telefone: pdvClienteTelefone || '',
         obs_garantia: pdvObsGarantia,
@@ -14747,6 +14764,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     if (!dados) return;
 
+    // Garantir vendedor e cliente preenchidos em caso de emissão imediata
+    if (!dados.vendedor_nome || dados.vendedor_nome === 'Vendedor') {
+      dados.vendedor_nome = profile?.nome || session?.user?.user_metadata?.nome || 'Vendedor';
+    }
+    if (!dados.cliente_nome) {
+      dados.cliente_nome = 'Consumidor Final';
+    }
+
     try {
       const targetFilialId = dados.filial_id || activeFilialId;
       if (targetFilialId) {
@@ -14785,37 +14810,122 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // Fetch dedicado da venda pelo ID para garantir todos os campos financeiros e itens_venda completos
     if (venda.id) {
       try {
-        const { data: vendaBanco, error: vendaErr } = await supabase
+        let { data: vendaBanco, error: vendaErr } = await supabase
           .from('vendas')
           .select(`
             *,
+            vendedor_nome,
+            cliente_nome,
+            cliente_cpf,
+            cliente_cpf_cnpj,
+            cliente_telefone,
+            cliente_email,
             itens_venda (
-              *
+              id,
+              produto_nome,
+              nome,
+              descricao,
+              preco_unitario,
+              preco_base,
+              preco_unitario_vendido,
+              quantidade,
+              valor_total,
+              imei,
+              serial,
+              numero_serie,
+              categoria
             ),
-            vendas_pagamentos (*)
+            vendas_pagamentos (*),
+            clientes (
+              id,
+              nome,
+              cpf,
+              cpf_cnpj,
+              telefone,
+              email
+            ),
+            produtos (
+              id,
+              nome,
+              imei
+            )
           `)
           .eq('id', venda.id)
           .maybeSingle();
 
-        if (vendaBanco && !vendaErr) {
-          venda = { ...venda, ...vendaBanco };
-        } else if (vendaErr) {
-          const { data: vSimples } = await supabase
+        if (vendaErr) {
+          console.warn('Fallback da query de venda para recibo sem relations:', vendaErr);
+          const { data: vFallback, error: errFallback } = await supabase
             .from('vendas')
-            .select('*')
+            .select(`
+              *,
+              itens_venda (*),
+              vendas_pagamentos (*)
+            `)
             .eq('id', venda.id)
             .maybeSingle();
-          if (vSimples) {
-            venda = { ...venda, ...vSimples };
+          if (!errFallback && vFallback) {
+            vendaBanco = vFallback;
+            vendaErr = null;
           }
+        }
+
+        if (vendaBanco && !vendaErr) {
+          venda = { ...venda, ...vendaBanco };
         }
       } catch (errVenda) {
         console.warn('Aviso ao consultar venda completa para recibo:', errVenda);
       }
     }
 
-    const sellerObj = teamMembers.find(m => String(m.id) === String(venda.vendedor_id));
-    const vendedorNome = venda.vendedor_nome || venda.vendedor?.nome || venda.profiles?.nome || sellerObj?.nome || 'Vendedor';
+    // Se cliente_nome ainda estiver indefinido ou 'Consumidor Final', busca diretamente da tabela clientes
+    if (venda.cliente_id && (!venda.cliente_nome || venda.cliente_nome === 'Consumidor Final')) {
+      try {
+        const { data: cData } = await supabase
+          .from('clientes')
+          .select('nome, cpf, cpf_cnpj, telefone, email')
+          .eq('id', venda.cliente_id)
+          .maybeSingle();
+        if (cData?.nome) {
+          venda.cliente_nome = cData.nome;
+          venda.cliente_cpf = cData.cpf || cData.cpf_cnpj;
+          venda.cliente_cpf_cnpj = cData.cpf_cnpj || cData.cpf;
+          venda.cliente_telefone = cData.telefone;
+          venda.cliente_email = cData.email;
+        }
+      } catch (eC) {
+        console.warn('Aviso ao consultar cliente vinculado:', eC);
+      }
+    }
+
+    // Se vendedor_nome estiver indefinido ou 'Vendedor', busca diretamente da tabela profiles
+    if (venda.vendedor_id && (!venda.vendedor_nome || venda.vendedor_nome === 'Vendedor')) {
+      try {
+        const { data: vData } = await supabase
+          .from('profiles')
+          .select('nome')
+          .eq('id', venda.vendedor_id)
+          .maybeSingle();
+        if (vData?.nome) {
+          venda.vendedor_nome = vData.nome;
+        }
+      } catch (eV) {
+        console.warn('Aviso ao consultar vendedor vinculado:', eV);
+      }
+    }
+
+    const sellerObj = teamMembers.find(m => String(m.id) === String(venda.vendedor_id || venda.usuario_id));
+    const vendedorNome = 
+      venda.vendedor_nome || 
+      venda.vendedor?.nome || 
+      (typeof venda.vendedor === 'string' ? venda.vendedor : null) || 
+      venda.usuario_nome || 
+      venda.usuario?.nome || 
+      venda.operador_nome || 
+      venda.profiles?.nome || 
+      sellerObj?.nome || 
+      (profile?.id === venda.vendedor_id ? profile?.nome : null) || 
+      'Vendedor';
 
     const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(venda.produto_id));
     const produtoNome = venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || prodObj?.nome || 'Produto';
@@ -14881,10 +14991,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const precoOriginalItem = parseMonetaryValue(it.preco_base ?? it.preco_original ?? precoItem);
         const totalOriginalItem = parseMonetaryValue(it.valor_total_original ?? (precoOriginalItem * qtdItem));
 
+        const nomeItem = it.produto_nome || it.nome || it.descricao || it.produto?.nome || venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || produtoNome;
+        const imeiItem = it.imei || it.serial || it.numero_serie || it.produto?.imei || venda.imei || venda.imei_novo || null;
+
         return {
           id: it.id,
-          nome: it.produto_nome ?? it.nome ?? produtoNome,
-          imei: it.imei || venda.imei || null,
+          nome: nomeItem,
+          produto_nome: nomeItem,
+          imei: imeiItem,
+          serial: imeiItem,
           quantidade: qtdItem,
           preco_unitario: precoItem,
           preco: precoItem,
@@ -14918,7 +15033,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       itensMapeados = [
         {
           nome: produtoNome,
-          imei: venda.imei || venda.imeis || null,
+          produto_nome: produtoNome,
+          imei: venda.imei || venda.imeis || venda.imei_novo || null,
+          serial: venda.imei || venda.imeis || venda.imei_novo || null,
           quantidade: qtdNum,
           preco_unitario: precoUnitarioNum,
           preco: precoUnitarioNum,
@@ -14934,6 +15051,29 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     const clienteObj = clientes.find(c => String(c.id) === String(venda.cliente_id)) || null;
 
+    const clienteNomeFinal = 
+      (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) ||
+      venda.cliente?.nome || 
+      (typeof venda.cliente === 'string' ? venda.cliente : null) || 
+      venda.nome_cliente || 
+      venda.clientes?.nome || 
+      clienteObj?.nome || 
+      venda.cliente_nome || 
+      'Consumidor Final';
+
+    const clienteCpfCnpjFinal = 
+      venda.cliente_cpf || 
+      venda.cliente?.cpf || 
+      venda.cliente?.cpf_cnpj || 
+      venda.cliente_cpf_cnpj || 
+      venda.cpf || 
+      venda.cpf_cliente || 
+      venda.clientes?.cpf_cnpj || 
+      venda.clientes?.cpf || 
+      clienteObj?.cpf_cnpj || 
+      clienteObj?.cpf || 
+      '';
+
     const dadosRecibo = {
       venda_id: venda.id,
       filial_id: venda.filial_id || activeFilialId,
@@ -14946,20 +15086,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       filial_cnpj: filialCnpj,
       filial_telefone: filialTelefone,
       cliente_id: venda.cliente_id || clienteObj?.id || null,
-      cliente_nome: (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final')
-        ? venda.cliente_nome
-        : (clienteObj?.nome
-            || (typeof venda.cliente_nome === 'string' && venda.cliente_nome)
-            || (typeof venda.cliente === 'string' && venda.cliente)
-            || venda.cliente?.nome
-            || venda.clientes?.nome
-            || 'Consumidor Final'),
-      cliente_cpf_cnpj: (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj)
-        || clienteObj?.cpf_cnpj
-        || (typeof venda.cpf_cliente === 'string' && venda.cpf_cliente)
-        || venda.cliente?.cpf_cnpj
-        || venda.clientes?.cpf_cnpj
-        || '',
+      cliente_nome: clienteNomeFinal,
+      cliente_cpf_cnpj: clienteCpfCnpjFinal,
+      cliente_cpf: clienteCpfCnpjFinal,
       cliente_email: (typeof venda.cliente_email === 'string' && venda.cliente_email)
         || clienteObj?.email
         || venda.cliente?.email
@@ -27815,7 +27944,64 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       ? [venda.produto_novo]
                       : [];
 
-                console.log('Dados do Recibo a Imprimir:', { venda, itens });
+                // Nome do Vendedor com fallback abrangente
+                const nomeVendedor = 
+                  venda.vendedor_nome || 
+                  venda.vendedor?.nome || 
+                  (typeof venda.vendedor === 'string' ? venda.vendedor : null) || 
+                  venda.usuario_nome || 
+                  venda.usuario?.nome || 
+                  venda.operador_nome || 
+                  venda.profiles?.nome ||
+                  venda.profile?.nome ||
+                  (teamMembers || []).find(m => String(m.id) === String(venda.vendedor_id || venda.usuario_id))?.nome ||
+                  (vendedores || []).find(v => String(v.id) === String(venda.vendedor_id || venda.usuario_id))?.nome ||
+                  'Vendedor';
+
+                // Nome e Documento do Cliente com fallback abrangente
+                const nomeCliente = 
+                  (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) || 
+                  venda.cliente?.nome || 
+                  (typeof venda.cliente === 'string' ? venda.cliente : null) || 
+                  venda.nome_cliente || 
+                  venda.clientes?.nome || 
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.nome ||
+                  venda.cliente_nome || 
+                  'Consumidor Final';
+
+                const clienteCpfCnpj = 
+                  venda.cliente_cpf || 
+                  venda.cliente?.cpf || 
+                  venda.cliente?.cpf_cnpj || 
+                  venda.cliente_cpf_cnpj || 
+                  venda.cpf || 
+                  venda.cpf_cliente || 
+                  venda.clientes?.cpf_cnpj || 
+                  venda.clientes?.cpf || 
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf_cnpj ||
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf || 
+                  '';
+
+                const clienteTelefone = 
+                  venda.cliente_telefone || 
+                  venda.telefone || 
+                  venda.telefone_cliente || 
+                  venda.cliente?.telefone || 
+                  venda.clientes?.telefone || 
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.telefone || 
+                  '';
+
+                const clienteEmail = 
+                  venda.cliente_email || 
+                  venda.email || 
+                  venda.email_cliente || 
+                  venda.cliente?.email || 
+                  venda.clientes?.email || 
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.email || 
+                  '';
+
+                console.log('Objeto recebido para o Recibo:', { venda, nomeVendedor, nomeCliente });
+                console.log('Dados recebidos no Modelo A4:', { venda, itens: venda.itens || venda.itens_venda });
 
                 const toNum = (val) => {
                   if (val === null || val === undefined || val === '') return 0;
@@ -27981,26 +28167,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         <div className="space-y-1 text-[11px] leading-tight">
                           <div className="flex justify-between">
                             <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">Vendedor:</span>
-                            <span className="text-zinc-100 print:text-black font-semibold">{pdvReciboDados.vendedor_nome}</span>
+                            <span className="text-zinc-100 print:text-black font-semibold">{nomeVendedor}</span>
                           </div>
-                          {(pdvReciboDados.cliente_nome || pdvReciboDados.cliente_cpf_cnpj) && (
+                          {(nomeCliente || clienteCpfCnpj) && (
                             <div className="pt-1 border-t border-dashed border-zinc-800 print:border-black">
                               <div className="flex justify-between">
                                 <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">Cliente:</span>
                                 <span className="text-zinc-100 print:text-black font-semibold text-right max-w-[180px] truncate">
-                                  {pdvReciboDados.cliente_nome || 'Consumidor Final'}
+                                  {nomeCliente}
                                 </span>
                               </div>
-                              {pdvReciboDados.cliente_cpf_cnpj && (
+                              {clienteCpfCnpj && (
                                 <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
                                   <span>CPF/CNPJ:</span>
-                                  <span>{pdvReciboDados.cliente_cpf_cnpj}</span>
+                                  <span>{clienteCpfCnpj}</span>
                                 </div>
                               )}
-                              {pdvReciboDados.cliente_telefone && (
+                              {clienteTelefone && (
                                 <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
                                   <span>Tel:</span>
-                                  <span>{pdvReciboDados.cliente_telefone}</span>
+                                  <span>{clienteTelefone}</span>
                                 </div>
                               )}
                             </div>
@@ -28016,6 +28202,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </span>
                           <div className="space-y-2 divide-y divide-dashed divide-zinc-800 print:divide-black">
                             {itens.map((item, idx) => {
+                              const nomeProduto = item.produto_nome || item.nome || item.descricao || item.produto?.nome || venda.produto_nome || 'Produto';
+                              const imeiProduto = item.imei || item.serial || item.numero_serie || item.produto?.imei || venda.imei || null;
                               const itemPrecoUnitario = toNum(
                                 (isAvista ? (item.preco_original ?? item.preco_base ?? item.valor_unitario_original) : null) ??
                                 item.preco_unitario ?? 
@@ -28039,15 +28227,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 <div key={idx} className={`pt-1.5 ${idx === 0 ? 'pt-0' : ''}`}>
                                   <div className="flex justify-between items-start gap-2">
                                     <span className="font-bold text-zinc-100 print:text-black break-words flex-1">
-                                      {item.nome || item.produto_nome || 'Produto'}
+                                      {nomeProduto}
                                     </span>
                                     <span className="font-bold text-zinc-100 print:text-black shrink-0">
                                       R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </span>
                                   </div>
-                                  {item.imei && (
+                                  {imeiProduto && (
                                     <p className="text-[10px] text-zinc-400 print:text-black font-mono break-all">
-                                      IMEI: {item.imei}
+                                      IMEI: {imeiProduto}
                                     </p>
                                   )}
                                   <p className="text-[10px] text-zinc-400 print:text-black">
@@ -28164,19 +28352,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               Identificação do Cliente / Destinatário
                             </span>
                             <p className="font-bold text-sm text-black">
-                              {pdvReciboDados.cliente_nome || 'Consumidor Final'}
+                              {nomeCliente}
                             </p>
                             <p className="text-xs text-black">
-                              <strong className="font-bold">CPF/CNPJ:</strong> {pdvReciboDados.cliente_cpf_cnpj || 'Não informado'}
+                              <strong className="font-bold">CPF/CNPJ:</strong> {clienteCpfCnpj || 'Não informado'}
                             </p>
-                            {pdvReciboDados.cliente_telefone && (
+                            {clienteTelefone && (
                               <p className="text-xs text-black">
-                                <strong className="font-bold">Telefone:</strong> {pdvReciboDados.cliente_telefone}
+                                <strong className="font-bold">Telefone:</strong> {clienteTelefone}
                               </p>
                             )}
-                            {pdvReciboDados.cliente_email && (
+                            {clienteEmail && (
                               <p className="text-xs text-black">
-                                <strong className="font-bold">E-mail:</strong> {pdvReciboDados.cliente_email}
+                                <strong className="font-bold">E-mail:</strong> {clienteEmail}
                               </p>
                             )}
                           </div>
@@ -28187,7 +28375,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               Dados da Operação Comercial
                             </span>
                             <p className="text-xs text-black">
-                              <strong className="font-bold">Vendedor(a):</strong> {pdvReciboDados.vendedor_nome}
+                              <strong className="font-bold">Vendedor(a):</strong> {nomeVendedor}
                             </p>
                             <p className="text-xs text-black">
                               <strong className="font-bold">Filial Emissora:</strong> {nomeLoja}
@@ -28220,6 +28408,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </thead>
                             <tbody className="divide-y divide-zinc-300 print:divide-zinc-400">
                               {itens.map((item, idx) => {
+                                const nomeProduto = item.produto_nome || item.nome || item.descricao || item.produto?.nome || venda.produto_nome || 'Produto';
+                                const imeiProduto = item.imei || item.serial || item.numero_serie || item.produto?.imei || venda.imei || null;
                                 const itemPrecoUnitario = toNum(
                                   (isAvista ? (item.preco_original ?? item.preco_base ?? item.valor_unitario_original) : null) ??
                                   item.preco_unitario ?? 
@@ -28246,11 +28436,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     </td>
                                     <td className="py-2.5 px-3">
                                       <span className="font-bold text-black text-xs block">
-                                        {item.nome || item.produto_nome || 'Produto'}
+                                        {nomeProduto}
                                       </span>
-                                      {item.imei && (
+                                      {imeiProduto && (
                                         <span className="inline-block mt-0.5 text-[11px] font-mono text-zinc-800">
-                                          IMEI: {item.imei}
+                                          IMEI: {imeiProduto}
                                         </span>
                                       )}
                                     </td>
@@ -28349,15 +28539,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <div>
                               <div className="border-b border-black pb-10 mb-2"></div>
                               <p className="font-bold text-black">{nomeLoja}</p>
-                              <p className="text-[10px] text-zinc-700 print:text-black">Vendedor(a): {pdvReciboDados.vendedor_nome}</p>
+                              <p className="text-[10px] text-zinc-700 print:text-black">Vendedor(a): {nomeVendedor}</p>
                             </div>
                             <div>
                               <div className="border-b border-black pb-10 mb-2"></div>
                               <p className="font-bold text-black">
-                                {pdvReciboDados.cliente_nome || 'Assinatura do Cliente / Recebido'}
+                                {nomeCliente !== 'Consumidor Final' ? nomeCliente : 'Assinatura do Cliente / Recebido'}
                               </p>
                               <p className="text-[10px] text-zinc-700 print:text-black">
-                                {pdvReciboDados.cliente_cpf_cnpj ? `CPF/CNPJ: ${pdvReciboDados.cliente_cpf_cnpj}` : 'Recebido em perfeitas condições'}
+                                {clienteCpfCnpj && clienteCpfCnpj !== 'Não informado' ? `CPF/CNPJ: ${clienteCpfCnpj}` : 'Recebido em perfeitas condições'}
                               </p>
                             </div>
                           </div>
