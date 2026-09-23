@@ -3869,7 +3869,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             produto_nome,
             cliente_nome,
             filiais ( nome ),
-            itens_venda ( id, produto_nome, quantidade )
+            itens_venda ( id, produto_nome, quantidade, preco_unitario, valor_total, preco_base, desconto )
           `;
 
           let q = supabase
@@ -4803,7 +4803,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             id,
             produto_nome,
             quantidade,
-            preco_unitario
+            preco_unitario,
+            valor_total
           )
         `)
         .gte('created_at', dataInicio)
@@ -13545,11 +13546,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         const itemPrecoOriginal = Number(item.preco_original ?? item.produto?.preco ?? item.valorUnitario ?? 0);
         const valorTotalOriginal = itemPrecoOriginal * Number(item.quantidade || 1);
+        const valorUnitarioItem = item.valorUnitario * feeFactor;
 
         itemsForRecibo.push({
           nome: item.produto.nome,
           quantidade: item.quantidade,
-          valor_unitario: item.valorUnitario * feeFactor,
+          preco_unitario: valorUnitarioItem,
+          preco: valorUnitarioItem,
+          valor: valorUnitarioItem,
+          valor_unitario: valorUnitarioItem,
+          subtotal: valorTotalNovo,
           valor_total: valorTotalNovo,
           preco_original: itemPrecoOriginal,
           valor_total_original: valorTotalOriginal,
@@ -13610,6 +13616,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         cliente_telefone: pdvClienteTelefone || '',
         obs_garantia: pdvObsGarantia,
         itens: itemsForRecibo,
+        valor_total: totalNovoAjustado,
+        total: totalNovoAjustado,
+        total_pago: finalSaldoPagar,
+        valor: finalSaldoPagar,
+        subtotal: totalNovoAjustado,
         financeiro: {
           total_novo: totalNovoAjustado,
           total_novo_original: totalOriginalNovo,
@@ -14627,8 +14638,42 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setModalEscolhaRecibo(null);
   };
 
-  const imprimirReciboVenda = async (venda, tipo = 'DETALHADO') => {
-    if (!venda) return;
+  const imprimirReciboVenda = async (vendaParam, tipo = 'DETALHADO') => {
+    if (!vendaParam) return;
+
+    let venda = { ...vendaParam };
+
+    // Fetch dedicado da venda pelo ID para garantir todos os campos financeiros e itens_venda completos
+    if (venda.id) {
+      try {
+        const { data: vendaBanco, error: vendaErr } = await supabase
+          .from('vendas')
+          .select(`
+            *,
+            itens_venda (
+              *
+            ),
+            vendas_pagamentos (*)
+          `)
+          .eq('id', venda.id)
+          .maybeSingle();
+
+        if (vendaBanco && !vendaErr) {
+          venda = { ...venda, ...vendaBanco };
+        } else if (vendaErr) {
+          const { data: vSimples } = await supabase
+            .from('vendas')
+            .select('*')
+            .eq('id', venda.id)
+            .maybeSingle();
+          if (vSimples) {
+            venda = { ...venda, ...vSimples };
+          }
+        }
+      } catch (errVenda) {
+        console.warn('Aviso ao consultar venda completa para recibo:', errVenda);
+      }
+    }
 
     const sellerObj = teamMembers.find(m => String(m.id) === String(venda.vendedor_id));
     const vendedorNome = venda.vendedor_nome || venda.vendedor?.nome || venda.profiles?.nome || sellerObj?.nome || 'Vendedor';
@@ -14666,11 +14711,87 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     const metodoPag = venda.metodo_pagamento || venda.forma_pagamento || 'N/A';
-    const valorTotalNum = parseFloat(venda.valor_total || venda.valor || 0);
-    const precoOriginalNum = parseFloat(venda.preco_original || venda.valor_original || venda.valor_tabela || valorTotalNum);
-    const qtdNum = parseInt(venda.quantidade || 1, 10);
+
+    // Mapeamento dos itens da venda com suporte a múltiplas nomenclaturas
+    let itensMapeados = [];
+    const rawItens = (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0)
+      ? venda.itens_venda
+      : (Array.isArray(venda.itens) && venda.itens.length > 0)
+        ? venda.itens
+        : null;
+
+    if (rawItens && rawItens.length > 0) {
+      itensMapeados = rawItens.map(it => {
+        const precoItem = parseMonetaryValue(
+          it.preco_unitario ??
+          it.preco ??
+          it.valor ??
+          it.valor_unitario ??
+          it.preco_unitario_vendido ??
+          it.preco_base ??
+          it.subtotal ??
+          0
+        );
+        const qtdItem = Number(it.quantidade ?? it.qtd ?? 1) || 1;
+        const totalItem = parseMonetaryValue(
+          it.valor_total ??
+          it.subtotal ??
+          it.valor ??
+          (precoItem * qtdItem)
+        );
+        const precoOriginalItem = parseMonetaryValue(it.preco_base ?? it.preco_original ?? precoItem);
+        const totalOriginalItem = parseMonetaryValue(it.valor_total_original ?? (precoOriginalItem * qtdItem));
+
+        return {
+          id: it.id,
+          nome: it.produto_nome ?? it.nome ?? produtoNome,
+          imei: it.imei || venda.imei || null,
+          quantidade: qtdItem,
+          preco_unitario: precoItem,
+          preco: precoItem,
+          valor: precoItem,
+          valor_unitario: precoItem,
+          subtotal: totalItem > 0 ? totalItem : (precoItem * qtdItem),
+          valor_total: totalItem > 0 ? totalItem : (precoItem * qtdItem),
+          preco_original: precoOriginalItem,
+          valor_total_original: totalOriginalItem > 0 ? totalOriginalItem : (precoOriginalItem * qtdItem),
+          categoria: it.categoria || venda.categoria || 'Geral'
+        };
+      });
+    }
+
+    const somaItensCalc = itensMapeados.reduce((acc, it) => acc + (parseMonetaryValue(it.preco_unitario ?? it.preco ?? it.valor ?? 0) * (it.quantidade || 1)), 0);
+
+    const totalVenda = parseMonetaryValue(
+      venda.valor_total ??
+      venda.total ??
+      venda.total_pago ??
+      venda.valor ??
+      somaItensCalc
+    );
+    const valorTotalNum = totalVenda > 0 ? totalVenda : somaItensCalc;
+    const precoOriginalNum = parseMonetaryValue(venda.preco_original ?? venda.valor_original ?? venda.valor_tabela ?? valorTotalNum);
+    const qtdNum = parseInt(venda.quantidade || 1, 10) || 1;
     const precoUnitarioNum = qtdNum > 0 ? (valorTotalNum / qtdNum) : valorTotalNum;
     const precoUnitarioOriginal = qtdNum > 0 ? (precoOriginalNum / qtdNum) : precoOriginalNum;
+
+    if (itensMapeados.length === 0) {
+      itensMapeados = [
+        {
+          nome: produtoNome,
+          imei: venda.imei || venda.imeis || null,
+          quantidade: qtdNum,
+          preco_unitario: precoUnitarioNum,
+          preco: precoUnitarioNum,
+          valor: precoUnitarioNum,
+          valor_unitario: precoUnitarioNum,
+          subtotal: valorTotalNum,
+          valor_total: valorTotalNum,
+          preco_original: precoUnitarioOriginal,
+          valor_total_original: precoOriginalNum
+        }
+      ];
+    }
 
     const clienteObj = clientes.find(c => String(c.id) === String(venda.cliente_id)) || null;
 
@@ -14711,34 +14832,35 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         || venda.clientes?.telefone
         || '',
       obs_garantia: venda.obs_garantia || venda.observacoes || '',
-      itens: [
-        {
-          nome: produtoNome,
-          imei: venda.imei || venda.imeis || null,
-          quantidade: qtdNum,
-          valor_unitario: precoUnitarioNum,
-          valor_total: valorTotalNum,
-          preco_original: precoUnitarioOriginal,
-          valor_total_original: precoOriginalNum
-        }
-      ],
+      itens: itensMapeados,
+      valor_total: valorTotalNum,
+      total: valorTotalNum,
+      total_pago: valorTotalNum,
+      valor: valorTotalNum,
+      subtotal: valorTotalNum,
       financeiro: {
         total_novo: valorTotalNum,
         total_novo_original: precoOriginalNum,
-        desconto_troca: 0,
+        desconto_troca: parseMonetaryValue(venda.desconto_troca ?? 0),
         saldo_pagar: valorTotalNum,
         saldo_pagar_original: precoOriginalNum,
         metodo: metodoPag,
         parcelas: venda.parcelas || 1,
-        pagamentos: [
-          {
-            metodo: metodoPag,
-            valor: valorTotalNum,
-            parcelas: venda.parcelas || 1
-          }
-        ]
+        pagamentos: (Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
+          ? venda.vendas_pagamentos.map(p => ({
+              metodo: p.metodo_pagamento || p.metodo || metodoPag,
+              valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
+              parcelas: p.parcelas || venda.parcelas || 1
+            }))
+          : [
+            {
+              metodo: metodoPag,
+              valor: valorTotalNum,
+              parcelas: venda.parcelas || 1
+            }
+          ]
       },
-      trocas: []
+      trocas: Array.isArray(venda.trocas) ? venda.trocas : []
     };
 
     setTipoReciboAtual(tipo);
@@ -27536,19 +27658,67 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   : '00000000';
 
                 const isAvista = pdvReciboDados.tipo_recibo === 'AVISTA';
-                const itens = pdvReciboDados.itens && pdvReciboDados.itens.length > 0
-                  ? pdvReciboDados.itens
-                  : pdvReciboDados.produto_novo
-                    ? [pdvReciboDados.produto_novo]
-                    : [];
+                const venda = pdvReciboDados;
+                const itens = (venda.itens && venda.itens.length > 0)
+                  ? venda.itens
+                  : (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0)
+                    ? venda.itens_venda
+                    : venda.produto_novo
+                      ? [venda.produto_novo]
+                      : [];
 
-                const fin = pdvReciboDados.financeiro || {};
-                const subtotalExibido = isAvista
-                  ? Number(fin.total_novo_original ?? fin.total_novo ?? 0)
-                  : Number(fin.total_novo ?? fin.total_novo_original ?? 0);
-                const totalGeral = isAvista
-                  ? Number(fin.saldo_pagar_original ?? fin.saldo_pagar ?? 0)
-                  : Number(fin.saldo_pagar ?? fin.saldo_pagar_original ?? 0);
+                console.log('Dados do Recibo a Imprimir:', { venda, itens });
+
+                const toNum = (val) => {
+                  if (val === null || val === undefined || val === '') return 0;
+                  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+                  return parseMonetaryValue(val);
+                };
+
+                const fin = venda.financeiro || {};
+
+                const somaItens = itens.reduce((acc, it) => {
+                  const p = toNum(
+                    (isAvista ? (it.preco_original ?? it.preco_base ?? it.valor_unitario_original) : null) ??
+                    it.preco_unitario ?? 
+                    it.preco ?? 
+                    it.valor ?? 
+                    it.valor_unitario ?? 
+                    it.subtotal ?? 
+                    it.preco_unitario_vendido ??
+                    0
+                  );
+                  const q = Number(it.quantidade ?? it.qtd ?? 1) || 1;
+                  const s = toNum(
+                    (isAvista ? it.valor_total_original : null) ??
+                    it.valor_total ??
+                    it.subtotal ??
+                    it.total ??
+                    (p * q)
+                  );
+                  return acc + (s > 0 ? s : (p * q));
+                }, 0);
+
+                const totalVenda = toNum(
+                  venda.valor_total ?? 
+                  venda.total ?? 
+                  venda.total_pago ?? 
+                  venda.valor ?? 
+                  (isAvista ? (fin.saldo_pagar_original ?? fin.total_novo_original) : (fin.saldo_pagar ?? fin.total_novo)) ??
+                  somaItens
+                );
+
+                const subtotalVenda = toNum(
+                  (isAvista ? (fin.total_novo_original ?? fin.saldo_pagar_original) : (fin.total_novo ?? fin.saldo_pagar)) ??
+                  venda.subtotal ??
+                  venda.valor_total ?? 
+                  venda.total ?? 
+                  venda.valor ?? 
+                  somaItens
+                );
+
+                const subtotalExibido = subtotalVenda > 0 ? subtotalVenda : (totalVenda > 0 ? totalVenda : somaItens);
+                const totalGeral = totalVenda > 0 ? totalVenda : (subtotalExibido > 0 ? subtotalExibido : somaItens);
 
                 const mNorm = String(fin.metodo || '').toLowerCase();
                 const isDebito = mNorm === 'cartao_debito';
@@ -27698,13 +27868,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </span>
                           <div className="space-y-2 divide-y divide-dashed divide-zinc-800 print:divide-black">
                             {itens.map((item, idx) => {
-                              const itemPrecoUnitario = Number((isAvista ? (item.preco_original ?? item.valor_unitario) : (item.valor_unitario ?? item.preco_original)) ?? 0);
-                              const itemSubtotal = Number((isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1))) : (item.valor_total ?? (itemPrecoUnitario * Number(item.quantidade || 1)))) ?? 0);
+                              const itemPrecoUnitario = toNum(
+                                (isAvista ? (item.preco_original ?? item.preco_base ?? item.valor_unitario_original) : null) ??
+                                item.preco_unitario ?? 
+                                item.preco ?? 
+                                item.valor ?? 
+                                item.valor_unitario ?? 
+                                item.subtotal ?? 
+                                item.preco_unitario_vendido ??
+                                item.preco_original ??
+                                0
+                              );
+                              const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
+                              const itemSubtotal = toNum(
+                                (isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * itemQtd)) : null) ??
+                                item.valor_total ??
+                                item.subtotal ??
+                                item.total ??
+                                (itemPrecoUnitario * itemQtd)
+                              );
                               return (
                                 <div key={idx} className={`pt-1.5 ${idx === 0 ? 'pt-0' : ''}`}>
                                   <div className="flex justify-between items-start gap-2">
                                     <span className="font-bold text-zinc-100 print:text-black break-words flex-1">
-                                      {item.nome}
+                                      {item.nome || item.produto_nome || 'Produto'}
                                     </span>
                                     <span className="font-bold text-zinc-100 print:text-black shrink-0">
                                       R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -27716,7 +27903,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     </p>
                                   )}
                                   <p className="text-[10px] text-zinc-400 print:text-black">
-                                    {item.quantidade || 1}x R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    {itemQtd}x R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                   </p>
                                 </div>
                               );
@@ -27885,8 +28072,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </thead>
                             <tbody className="divide-y divide-zinc-300 print:divide-zinc-400">
                               {itens.map((item, idx) => {
-                                const itemPrecoUnitario = Number((isAvista ? (item.preco_original ?? item.valor_unitario) : (item.valor_unitario ?? item.preco_original)) ?? 0);
-                                const itemSubtotal = Number((isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * Number(item.quantidade || 1))) : (item.valor_total ?? (itemPrecoUnitario * Number(item.quantidade || 1)))) ?? 0);
+                                const itemPrecoUnitario = toNum(
+                                  (isAvista ? (item.preco_original ?? item.preco_base ?? item.valor_unitario_original) : null) ??
+                                  item.preco_unitario ?? 
+                                  item.preco ?? 
+                                  item.valor ?? 
+                                  item.valor_unitario ?? 
+                                  item.subtotal ?? 
+                                  item.preco_unitario_vendido ??
+                                  item.preco_original ??
+                                  0
+                                );
+                                const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
+                                const itemSubtotal = toNum(
+                                  (isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * itemQtd)) : null) ??
+                                  item.valor_total ??
+                                  item.subtotal ??
+                                  item.total ??
+                                  (itemPrecoUnitario * itemQtd)
+                                );
                                 return (
                                   <tr key={idx}>
                                     <td className="py-2.5 px-3 text-center font-bold text-black">
@@ -27894,7 +28098,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     </td>
                                     <td className="py-2.5 px-3">
                                       <span className="font-bold text-black text-xs block">
-                                        {item.nome}
+                                        {item.nome || item.produto_nome || 'Produto'}
                                       </span>
                                       {item.imei && (
                                         <span className="inline-block mt-0.5 text-[11px] font-mono text-zinc-800">
@@ -27903,7 +28107,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       )}
                                     </td>
                                     <td className="py-2.5 px-3 text-center font-medium text-black">
-                                      {item.quantidade || 1} un.
+                                      {itemQtd} un.
                                     </td>
                                     <td className="py-2.5 px-3 text-right font-mono text-black">
                                       R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
