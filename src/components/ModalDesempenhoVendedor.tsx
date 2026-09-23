@@ -382,7 +382,7 @@ export default function ModalDesempenhoVendedor({
 
     const sales = vendasColaborador || [];
     const salesCount = sales.length;
-    const totalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
+    const totalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
     const ticketMedio = salesCount > 0 ? totalVendasGeral / salesCount : 0;
 
     // Detecção de Acessórios com helper isAcessorio robusto
@@ -394,7 +394,7 @@ export default function ModalDesempenhoVendedor({
     const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO'];
     let totalBoletos = 0;
     sales.forEach(sale => {
-      const val = parseFloat(sale.valor_total || sale.valor || 0);
+      const val = parseFloat(String(sale.valor_total || sale.valor || 0));
       const mpUpper = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
       const finUpper = String(sale.financeira || sale.financeira_parceira || '').toUpperCase();
       const pags = Array.isArray(sale.vendas_pagamentos) ? sale.vendas_pagamentos : [];
@@ -516,7 +516,7 @@ export default function ModalDesempenhoVendedor({
         if (!isNaN(dt.getTime())) {
           const diaNum = dt.getUTCDate() || dt.getDate();
           if (diaNum >= 1 && diaNum <= diasNoMes) {
-            evolucaoDiaria[diaNum - 1].total += parseFloat(s.valor_total || s.valor || 0);
+            evolucaoDiaria[diaNum - 1].total += parseFloat(String(s.valor_total || s.valor || 0));
           }
         }
       }
@@ -895,7 +895,7 @@ export default function ModalDesempenhoVendedor({
                       return (
                         <tr key={sale.id} className="hover:bg-purple-950/5 transition-colors">
                           <td className="py-3 text-gray-400 font-mono">
-                            {new Date(sale.created_at).toLocaleDateString('pt-BR')}
+                            {new Date(sale.created_at || Date.now()).toLocaleDateString('pt-BR')}
                           </td>
                           <td className="py-3">
                             <div className="flex flex-col">
@@ -912,7 +912,7 @@ export default function ModalDesempenhoVendedor({
                           </td>
                           <td className="py-3 text-center font-bold text-gray-300">{quantidadeItens}</td>
                           <td className="py-3 text-right font-mono font-bold text-white">
-                            R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            R$ {parseFloat(String(sale.valor_total || sale.valor || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                           <td className="py-3 text-center">
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#111] text-gray-300 border border-[#333] uppercase">
