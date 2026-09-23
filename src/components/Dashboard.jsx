@@ -30780,9 +30780,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           session={session}
           activeFilialId={activeFilialId}
           activeFilialNome={activeFilialNome}
-          onSuccess={(qtdAdicionada, nomeProduto) => {
+          filiais={filiais}
+          onSuccess={(qtdAdicionada, nomeProduto, filialIdSalva) => {
             showToast(`${qtdAdicionada} unidades de "${nomeProduto}" adicionadas com sucesso!`, 'success');
-            const targetFilial = activeFilialId || profile?.filial_id;
+            const targetFilial = filialIdSalva || activeFilialId || profile?.filial_id;
             if (targetFilial && typeof fetchProdutosPDV === 'function') {
               fetchProdutosPDV(targetFilial);
             }

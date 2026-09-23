@@ -35,6 +35,7 @@ export default function ModalEntradaEstoqueRapida({
   session,
   activeFilialId,
   activeFilialNome,
+  filiais,
   onSuccess
 }) {
   // Estado de seleção do modelo / catálogo
@@ -60,26 +61,76 @@ export default function ModalEntradaEstoqueRapida({
   const inputBuscaRef = useRef(null);
   const inputImeiRef = useRef(null);
 
-  // Filial fixa / travada
-  const filialIdFixa = useMemo(() => {
+  // Lista de Filiais dinâmicas
+  const [listaFiliais, setListaFiliais] = useState(filiais || []);
+  const [selectedFilialId, setSelectedFilialId] = useState('');
+
+  // Sincronizar lista de filiais caso venha por prop ou carregar do Supabase
+  useEffect(() => {
+    if (Array.isArray(filiais) && filiais.length > 0) {
+      setListaFiliais(filiais);
+    } else if (isOpen) {
+      const empId = perfilUsuario?.empresa_id || session?.user?.user_metadata?.empresa_id;
+      if (!empId) return;
+      supabase
+        .from('filiais')
+        .select('id, nome, tipo')
+        .eq('empresa_id', empId)
+        .order('nome')
+        .then(({ data, error }) => {
+          if (!error && data && data.length > 0) {
+            setListaFiliais(data);
+          }
+        });
+    }
+  }, [filiais, isOpen, perfilUsuario, session]);
+
+  // Resolver filial inicial vinculada à filial ativa ou ao perfil do usuário
+  const resolvedInitialFilialId = useMemo(() => {
     return (
       activeFilialId ||
       perfilUsuario?.filial_id ||
       session?.user?.user_metadata?.filial_id ||
       localStorage.getItem('zenite_active_filial_id') ||
       localStorage.getItem('activeFilialId') ||
-      ''
+      localStorage.getItem('@zenite_filialId') ||
+      (listaFiliais && listaFiliais.length > 0 ? listaFiliais[0].id : '')
     );
-  }, [activeFilialId, perfilUsuario, session]);
+  }, [activeFilialId, perfilUsuario, session, listaFiliais]);
 
-  const nomeFilialFixa = useMemo(() => {
-    return (
-      activeFilialNome ||
-      perfilUsuario?.filial?.nome ||
-      localStorage.getItem('zenite_active_filial_nome') ||
-      'MONKEY SHOP'
-    );
-  }, [activeFilialNome, perfilUsuario]);
+  // Sincronizar seleção ao abrir modal ou quando filial ativa mudar
+  useEffect(() => {
+    if (isOpen) {
+      const targetId = activeFilialId || perfilUsuario?.filial_id || resolvedInitialFilialId;
+      setSelectedFilialId(targetId || '');
+    }
+  }, [isOpen, activeFilialId, perfilUsuario?.filial_id, resolvedInitialFilialId]);
+
+  const selectedFilialObj = useMemo(() => {
+    if (!selectedFilialId) return null;
+    return (listaFiliais || []).find(f => String(f.id) === String(selectedFilialId));
+  }, [selectedFilialId, listaFiliais]);
+
+  const nomeFilialDestino = useMemo(() => {
+    if (selectedFilialObj?.nome) return selectedFilialObj.nome;
+    if (activeFilialNome && (!selectedFilialId || String(selectedFilialId) === String(activeFilialId))) {
+      return activeFilialNome;
+    }
+    const filialUsuario = perfilUsuario?.filial?.nome || perfilUsuario?.filiais?.nome || perfilUsuario?.filial_nome;
+    if (filialUsuario && (!selectedFilialId || String(selectedFilialId) === String(perfilUsuario?.filial_id))) {
+      return filialUsuario;
+    }
+    const storedName = localStorage.getItem('zenite_active_filial_nome') || localStorage.getItem('activeFilialNome');
+    if (storedName && (!selectedFilialId || String(selectedFilialId) === String(activeFilialId))) {
+      return storedName;
+    }
+    return selectedFilialId ? 'Filial Selecionada' : 'Filial Não Identificada';
+  }, [selectedFilialObj, activeFilialNome, selectedFilialId, activeFilialId, perfilUsuario]);
+
+  const podeTrocarFilial = useMemo(() => {
+    const role = (perfilUsuario?.role || '').toUpperCase();
+    return ['ADMIN', 'SUPER_ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(role) && listaFiliais.length > 1;
+  }, [perfilUsuario, listaFiliais]);
 
   const empresaId = useMemo(() => {
     return (
@@ -165,11 +216,11 @@ export default function ModalEntradaEstoqueRapida({
         const nomesParaChecar = modelosCatalogo.map(m => m.nome_completo);
 
         let produtosFilial = [];
-        if (filialIdFixa) {
+        if (selectedFilialId) {
           const { data: prodsData, error: errProds } = await supabase
             .from('produtos')
             .select('id, nome, quantidade, filial_id, empresa_id')
-            .eq('filial_id', filialIdFixa)
+            .eq('filial_id', selectedFilialId)
             .in('nome', nomesParaChecar);
 
           if (!errProds && prodsData) {
@@ -208,7 +259,7 @@ export default function ModalEntradaEstoqueRapida({
     }, 250);
 
     return () => clearTimeout(handler);
-  }, [buscaModelo, isOpen, produtoSelecionado, filialIdFixa]);
+  }, [buscaModelo, isOpen, produtoSelecionado, selectedFilialId]);
 
   // Foco inteligente
   useEffect(() => {
@@ -336,7 +387,7 @@ export default function ModalEntradaEstoqueRapida({
       return;
     }
 
-    if (!filialIdFixa) {
+    if (!selectedFilialId) {
       setErroMsg('Erro: Nenhuma filial ativa de trabalho identificada.');
       return;
     }
@@ -357,7 +408,7 @@ export default function ModalEntradaEstoqueRapida({
       const { data: prodExistente, error: errBuscaProd } = await supabase
         .from('produtos')
         .select('id, quantidade, preco_custo, preco_venda, cor')
-        .eq('filial_id', filialIdFixa)
+        .eq('filial_id', selectedFilialId)
         .eq('nome', nomeAparelho)
         .maybeSingle();
 
@@ -395,7 +446,7 @@ export default function ModalEntradaEstoqueRapida({
           categoria: 'Celulares',
           tipo: 'APARELHO',
           cor: corFinal,
-          filial_id: filialIdFixa,
+          filial_id: selectedFilialId,
           empresa_id: targetEmpresaId,
           quantidade: qtdTotal,
           preco_custo: 0,
@@ -416,7 +467,7 @@ export default function ModalEntradaEstoqueRapida({
       const rowsImeis = imeisBipados.map(item => ({
         imei: item.imei,
         produto_id: targetProdutoId,
-        filial_id: filialIdFixa,
+        filial_id: selectedFilialId,
         empresa_id: targetEmpresaId,
         cor: (item.cor || corFinal).trim() || corFinal,
         status: 'DISPONIVEL'
@@ -436,10 +487,11 @@ export default function ModalEntradaEstoqueRapida({
 
       // 3. Registrar movimentação em 'estoque_movimentacoes' com tipo 'ENTRADA' (se tabela existir)
       try {
-        const obsTexto = `Entrada Rápida: ${nomeAparelho} (${qtdTotal} un. - IMEIs: ${imeisBipados.map(i => i.imei).join(', ')})`;
+        const obsTexto = `Entrada Rápida: ${nomeAparelho} (${qtdTotal} un. - IMEIs: ${imeisBipados.map(i => i.imei).join(', ')}) - Filial: ${nomeFilialDestino}`;
         const movPayload = {
           empresa_id: targetEmpresaId,
-          filial_destino_id: filialIdFixa,
+          filial_destino_id: selectedFilialId,
+          filial_id: selectedFilialId,
           produto_id: targetProdutoId,
           quantidade: qtdTotal,
           tipo_movimentacao: 'ENTRADA',
@@ -467,7 +519,7 @@ export default function ModalEntradaEstoqueRapida({
       setSucessoMsg(mensagemSucesso);
       
       if (onSuccess) {
-        onSuccess(qtdTotal, nomeAparelho);
+        onSuccess(qtdTotal, nomeAparelho, selectedFilialId);
       }
 
       window.dispatchEvent(new Event('estoque_updated'));
@@ -525,18 +577,46 @@ export default function ModalEntradaEstoqueRapida({
         {/* Formulário */}
         <form onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); }} className="p-6 space-y-5 overflow-y-auto max-h-[80vh]">
           
-          {/* Filial de Destino: Travada / Fixa */}
-          <div className="flex items-center justify-between bg-black/60 border border-[#222222] rounded-xl px-4 py-3">
-            <div className="flex items-center gap-2 text-xs">
+          {/* Filial de Destino: Dinâmica com suporte a troca para Gestores/Admin */}
+          <div className="bg-black/60 border border-[#222222] rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs flex-1">
               <Store size={16} className="text-purple-400 shrink-0" />
-              <span className="text-gray-400 font-medium">Filial de Destino:</span>
-              <span className="text-white font-extrabold tracking-wide uppercase">
-                {nomeFilialFixa}
-              </span>
+              <span className="text-gray-400 font-medium whitespace-nowrap">Filial de Destino:</span>
+              
+              {podeTrocarFilial ? (
+                <select
+                  value={selectedFilialId}
+                  onChange={(e) => {
+                    const novoId = e.target.value;
+                    setSelectedFilialId(novoId);
+                    setErroMsg(null);
+                  }}
+                  className="bg-[#121212] border border-[#333333] hover:border-purple-500/50 rounded-lg px-2.5 py-1 text-xs text-white font-bold tracking-wide uppercase focus:outline-none focus:border-purple-500 transition-colors"
+                >
+                  {listaFiliais.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.nome}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-white font-extrabold tracking-wide uppercase">
+                  {nomeFilialDestino}
+                </span>
+              )}
             </div>
-            <span className="text-[10px] bg-purple-950/80 text-purple-300 font-bold px-2 py-0.5 rounded border border-purple-800/60">
-              Travada / Fixa
-            </span>
+
+            <div className="flex items-center gap-1.5 self-start sm:self-auto">
+              {podeTrocarFilial ? (
+                <span className="text-[10px] bg-purple-950/80 text-purple-300 font-bold px-2 py-0.5 rounded border border-purple-800/60">
+                  Acesso Gerencial (Multi-loja)
+                </span>
+              ) : (
+                <span className="text-[10px] bg-zinc-800 text-zinc-300 font-bold px-2 py-0.5 rounded border border-zinc-700">
+                  Filial Ativa
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Feedback de Erro ou Sucesso */}
