@@ -3863,13 +3863,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           const isGerente = (profile?.role || '').toUpperCase() === 'GERENTE';
           const gerenteFilialId = profile?.filial_id || activeFilialId;
 
-          // Consulta principal diretamente da tabela vendas sem INNER JOIN obrigatório (LEFT JOIN nativo)
+          // Consulta principal diretamente da tabela vendas trazendo itens_venda e custo dos produtos
           const vendasSelectStr = `
             id,
             created_at,
             vendedor_nome,
             vendedor_id,
             valor_total,
+            desconto,
+            valor_desconto,
+            total_desconto,
+            preco_base,
+            valor_tabela,
             metodo_pagamento,
             filial_id,
             empresa_id,
@@ -3878,7 +3883,40 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             produto_nome,
             cliente_nome,
             filiais ( nome ),
-            itens_venda ( id, produto_nome, quantidade, preco_unitario, valor_total, preco_base, desconto )
+            itens_venda (
+              id,
+              produto_id,
+              produto_nome,
+              quantidade,
+              preco_unitario,
+              valor_total,
+              preco_base,
+              desconto,
+              valor_desconto,
+              produtos ( id, nome, preco_custo )
+            )
+          `;
+
+          const vendasSelectFallbackStr = `
+            id,
+            created_at,
+            vendedor_nome,
+            vendedor_id,
+            valor_total,
+            desconto,
+            valor_desconto,
+            total_desconto,
+            preco_base,
+            valor_tabela,
+            metodo_pagamento,
+            filial_id,
+            empresa_id,
+            quantidade,
+            comissao,
+            produto_nome,
+            cliente_nome,
+            filiais ( nome ),
+            itens_venda ( * )
           `;
 
           let q = supabase
@@ -3898,6 +3936,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
           let { data, error } = await q;
 
+          // Se a query principal com produtos falhar, tentar com fallback simples de itens_venda
+          if (error) {
+            console.warn('[Dashboard] Query de vendas com produtos falhou, tentando fallback com itens_venda (*):', error);
+            let qFb = supabase
+              .from('vendas')
+              .select(vendasSelectFallbackStr)
+              .order('created_at', { ascending: false });
+            if (dtInicio) qFb = qFb.gte('created_at', dtInicio);
+            if (dtFim) qFb = qFb.lte('created_at', dtFim);
+            if (isGerente && gerenteFilialId) {
+              qFb = qFb.eq('filial_id', gerenteFilialId);
+            } else if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+              qFb = qFb.eq('empresa_id', empresaId);
+            }
+            const resFb = await qFb;
+            if (!resFb.error && resFb.data) {
+              data = resFb.data;
+              error = null;
+            }
+          }
+
           // Se for GERENTE e a query restrita por filial não retornar dados ou der erro, tentar fallback com empresa_id sem bloquear a visualização
           if (isGerente && (!data || data.length === 0 || error) && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
             let fbGerenteQ = supabase
@@ -3908,7 +3967,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             if (dtInicio) fbGerenteQ = fbGerenteQ.gte('created_at', dtInicio);
             if (dtFim) fbGerenteQ = fbGerenteQ.lte('created_at', dtFim);
 
-            const { data: fbData, error: fbErr } = await fbGerenteQ;
+            let { data: fbData, error: fbErr } = await fbGerenteQ;
+            if (fbErr) {
+              const resFbSimple = await supabase
+                .from('vendas')
+                .select(vendasSelectFallbackStr)
+                .eq('empresa_id', empresaId)
+                .order('created_at', { ascending: false });
+              fbData = resFbSimple.data;
+              fbErr = resFbSimple.error;
+            }
             if (!fbErr && fbData && fbData.length > 0) {
               data = fbData;
               error = null;
@@ -3927,7 +3995,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               fallbackQ = fallbackQ.eq('empresa_id', empresaId);
             }
 
-            const { data: fallbackSales } = await fallbackQ;
+            let { data: fallbackSales, error: fbRecentErr } = await fallbackQ;
+            if (fbRecentErr) {
+              const resRecentFb = await supabase
+                .from('vendas')
+                .select(vendasSelectFallbackStr)
+                .order('created_at', { ascending: false })
+                .limit(100);
+              fallbackSales = resRecentFb.data;
+            }
             if (fallbackSales && fallbackSales.length > 0) {
               data = fallbackSales;
             }
@@ -21908,6 +21984,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             return d >= dataInicioMes && d <= dataFimMes;
                           };
 
+                          // Log de inspeção dos dados brutos solicitado para auditoria
+                          console.log('Amostra de Vendas para Análise de CMV/Descontos:', (vendas || []).slice(0, 5));
+
                           // Vendas do mês selecionado da base de vendas globais (sem corte restritivo de filial para o Dono)
                           const vendasMes = (vendas || []).filter(sale => isVendaNoMes(sale.created_at || sale.data || sale.date || sale.data_venda));
 
@@ -21919,46 +21998,160 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             return acc + (isNaN(val) ? 0 : val);
                           }, 0);
 
-                          // Custo CMV: soma dos custos de cada venda (lê preco_custo da venda ou do relacionamento com produtos)
-                          const custoTotal = vendasMes.reduce((acc, sale) => {
-                            const prodObj = (produtos || []).find(p => p.id === sale.produto_id || p.nome === sale.produtos?.nome || p.nome === sale.produto_nome);
-                            const unitCost = parseFloat(
-                              sale.preco_custo ||
-                              sale.custo_unitario ||
-                              sale.produtos?.preco_custo ||
-                              prodObj?.preco_custo ||
+                          // Tenta ler o campo de desconto explícito ou calcula a diferença entre subtotal e valor_total
+                          const extrairDescontoVenda = (venda) => {
+                            if (!venda) return 0;
+                            const descontoRegistrado = Number(
+                              venda.desconto ??
+                              venda.valor_desconto ??
+                              venda.total_desconto ??
                               0
                             );
-                            const qty = parseInt(sale.quantidade || 1, 10);
-                            return acc + (unitCost * qty);
+                            if (descontoRegistrado > 0) return descontoRegistrado;
+
+                            // Fallback se houver subtotal / valor_tabela / preco_base gravado maior que valor_total
+                            const subtotal = Number(
+                              venda.subtotal ??
+                              venda.valor_bruto ??
+                              venda.valor_tabela ??
+                              venda.preco_base ??
+                              0
+                            );
+                            const totalPago = Number(venda.valor_total ?? venda.total ?? 0);
+                            if (subtotal > totalPago && totalPago > 0) {
+                              return subtotal - totalPago;
+                            }
+
+                            // Fallback se os itens individuais da venda tiverem desconto registrado
+                            const itens = (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0)
+                              ? venda.itens_venda
+                              : (Array.isArray(venda.itens) && venda.itens.length > 0 ? venda.itens : []);
+                            if (itens.length > 0) {
+                              const descItens = itens.reduce((acc, it) => {
+                                const dItem = Number(it.desconto ?? it.valor_desconto ?? 0);
+                                if (dItem > 0) return acc + dItem;
+                                const pBase = Number(it.preco_base ?? 0);
+                                const pCobrado = Number(it.preco_unitario ?? it.preco_unitario_vendido ?? 0);
+                                const qtd = Number(it.quantidade ?? 1);
+                                if (pBase > pCobrado && pCobrado > 0) {
+                                  return acc + ((pBase - pCobrado) * qtd);
+                                }
+                                return acc;
+                              }, 0);
+                              if (descItens > 0) return descItens;
+                            }
+
+                            return 0;
+                          };
+
+                          // Total em Descontos somando a extração flexível das vendas do período
+                          const totalDescontosConcedidos = vendasMes.reduce((acc, s) => {
+                            return acc + extrairDescontoVenda(s);
                           }, 0);
 
-                          // Lucro Real: faturamento - custo
-                          const lucroReal = faturamentoBruto - custoTotal;
-                          const margemLucro = faturamentoBruto > 0 ? ((lucroReal / faturamentoBruto) * 100) : 0;
-                          const roiCalculado = custoTotal > 0 ? ((lucroReal / custoTotal) * 100) : 0;
+                          // 2. Apuração do CMV (Custo das Mercadorias Vendidas)
+                          let itensSemCustoCount = 0;
+
+                          const calcularCmvTotal = (vendasList) => {
+                            itensSemCustoCount = 0;
+                            return (vendasList || []).reduce((totalGeral, venda) => {
+                              const itens = (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0)
+                                ? venda.itens_venda
+                                : (Array.isArray(venda.itens) && venda.itens.length > 0 ? venda.itens : null);
+
+                              if (itens && itens.length > 0) {
+                                const custoDaVenda = itens.reduce((sub, item) => {
+                                  // Procura no estoque físico (produtos)
+                                  const prodEstoque = (produtos || []).find(p =>
+                                    (item.produto_id && String(p.id) === String(item.produto_id)) ||
+                                    (p.nome && item.produto_nome && p.nome.trim().toLowerCase() === item.produto_nome.trim().toLowerCase())
+                                  );
+
+                                  // Procura no catálogo mestre consolidado (catalogoProdutos)
+                                  const prodCatalogo = (catalogoProdutos || []).find(c =>
+                                    (item.produto_id && String(c.id) === String(item.produto_id)) ||
+                                    (c.nome && item.produto_nome && c.nome.trim().toLowerCase() === item.produto_nome.trim().toLowerCase())
+                                  );
+
+                                  const custoUnitario = Number(
+                                    item.preco_custo ??
+                                    item.custo_unitario ??
+                                    item.produtos?.preco_custo ??
+                                    item.produtos?.custo ??
+                                    item.produto?.preco_custo ??
+                                    item.produto?.custo ??
+                                    prodEstoque?.preco_custo ??
+                                    prodCatalogo?.preco_custo ??
+                                    0
+                                  );
+                                  const qtd = Number(item.quantidade ?? 1);
+
+                                  if (custoUnitario <= 0) {
+                                    itensSemCustoCount += qtd;
+                                  }
+
+                                  return sub + (custoUnitario * qtd);
+                                }, 0);
+
+                                return totalGeral + custoDaVenda;
+                              } else {
+                                // Venda legada ou sem linhas em itens_venda
+                                const prodEstoque = (produtos || []).find(p =>
+                                  (venda.produto_id && String(p.id) === String(venda.produto_id)) ||
+                                  (p.nome && venda.produto_nome && p.nome.trim().toLowerCase() === venda.produto_nome.trim().toLowerCase())
+                                );
+                                const prodCatalogo = (catalogoProdutos || []).find(c =>
+                                  (venda.produto_id && String(c.id) === String(venda.produto_id)) ||
+                                  (c.nome && venda.produto_nome && c.nome.trim().toLowerCase() === venda.produto_nome.trim().toLowerCase())
+                                );
+
+                                const custoUnitario = Number(
+                                  venda.preco_custo ??
+                                  venda.custo_unitario ??
+                                  venda.produto?.preco_custo ??
+                                  venda.produto?.custo ??
+                                  venda.produtos?.preco_custo ??
+                                  venda.produtos?.custo ??
+                                  prodEstoque?.preco_custo ??
+                                  prodCatalogo?.preco_custo ??
+                                  0
+                                );
+                                const qtd = Number(venda.quantidade ?? 1);
+
+                                if (custoUnitario <= 0) {
+                                  itensSemCustoCount += qtd;
+                                }
+
+                                return totalGeral + (custoUnitario * qtd);
+                              }
+                            }, 0);
+                          };
+
+                          const custoTotal = calcularCmvTotal(vendasMes);
+
+                          // 3. Faturamento Líquido, Lucro Real, Margem e ROI
+                          const faturamentoBrutoNum = Number(faturamentoBruto || 0);
+                          const descontosTotais = Number(totalDescontosConcedidos || 0);
+                          const faturamentoLiquido = Math.max(0, faturamentoBrutoNum - descontosTotais);
+
+                          // Lucro Real Bruto da Operação
+                          const lucroReal = faturamentoLiquido - custoTotal;
+
+                          // Margem de Lucro Real (%) sobre o faturamento
+                          const margemLucro = faturamentoLiquido > 0
+                            ? (lucroReal / faturamentoLiquido) * 100
+                            : 0;
+
+                          // ROI (Retorno sobre o Investimento em Estoque Vendido)
+                          const roiCalculado = custoTotal > 0
+                            ? (lucroReal / custoTotal) * 100
+                            : 0;
 
                           // Descontos do mês: alinhado rigorosamente com as vendas do período
                           const vendasComDesconto = vendasMes.filter(s => {
-                            const descVal = parseFloat(s.desconto || s.valor_desconto || s.total_desconto || 0);
-                            const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
-                            const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
-                            const temDiferenca = pBase > 0 && pVendido > 0 && pBase > (pVendido + 0.001);
-                            return descVal > 0.001 || temDiferenca || Boolean(s.desconto_autorizado_por);
+                            const descVal = extrairDescontoVenda(s);
+                            return descVal > 0.001 || Boolean(s.desconto_autorizado_por);
                           });
-
-                          // Total em Descontos somando a coluna desconto das vendas do período
-                          const totalDescontosConcedidos = vendasMes.reduce((acc, s) => {
-                            let val = parseFloat(s.desconto || s.valor_desconto || s.total_desconto || 0);
-                            if ((!val || isNaN(val) || val <= 0) && s.preco_base && s.preco_base > 0) {
-                              const pBase = parseFloat(s.preco_base || s.valor_tabela || 0);
-                              const pVendido = parseFloat(s.preco_unitario_vendido || s.preco_unitario || s.valor_total || s.valor_vendido || (s.preco * s.quantidade) || 0);
-                              if (pBase > pVendido) {
-                                val = pBase - pVendido;
-                              }
-                            }
-                            return acc + (isNaN(val) || !val || val <= 0 ? 0 : val);
-                          }, 0);
 
                           // Lista para a tabela de Auditoria Executiva de Descontos
                           const descontosMesLogs = (descontosLogs || []).filter(d => isVendaNoMes(d.created_at));
@@ -22197,7 +22390,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 {/* Card c: Custo de Mercadorias (Saídas) */}
                                 <div className="bg-black/60 border border-[#222222] p-5 rounded-xl flex flex-col justify-between">
                                   <div>
-                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Custo de Produtos (CMV / Saídas)</span>
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Custo de Produtos (CMV / Saídas)</span>
+                                      {itensSemCustoCount > 0 && (
+                                        <span className="text-[9px] font-bold bg-amber-950/60 border border-amber-800/60 text-amber-300 px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm" title="Existem produtos vendidos no período cujo custo unitário não está cadastrado no banco">
+                                          <AlertTriangle size={10} className="text-amber-400 shrink-0" />
+                                          <span>Atenção: {itensSemCustoCount} {itensSemCustoCount === 1 ? 'item vendido' : 'itens vendidos'} sem custo cadastrado</span>
+                                        </span>
+                                      )}
+                                    </div>
                                     <span className="text-xl font-extrabold text-gray-300 font-mono mt-1 block">
                                       {formatBRL(custoTotal)}
                                     </span>

@@ -257,7 +257,29 @@ export default function ModalDetalheRelatorio({
     });
 
     // Cálculo real do CMV abatendo o preco_custo dos itens vendidos
-    const custoTotal = vendas.reduce((acc, v) => acc + Number(v.preco_custo || 0), 0);
+    const custoTotal = vendas.reduce((acc, v) => {
+      const itens = (Array.isArray(v.itens_venda) && v.itens_venda.length > 0)
+        ? v.itens_venda
+        : (Array.isArray(v.itens) && v.itens.length > 0 ? v.itens : null);
+
+      if (itens && itens.length > 0) {
+        const custoVenda = itens.reduce((sub, item) => {
+          const custoUnit = Number(
+            item.preco_custo ??
+            item.custo_unitario ??
+            item.produtos?.preco_custo ??
+            item.produtos?.custo ??
+            item.produto?.preco_custo ??
+            item.produto?.custo ??
+            0
+          );
+          const qtd = Number(item.quantidade ?? 1);
+          return sub + (custoUnit * qtd);
+        }, 0);
+        return acc + custoVenda;
+      }
+      return acc + Number(v.preco_custo || v.custo_unitario || v.produtos?.preco_custo || 0);
+    }, 0);
     const lucroBruto = faturamentoTotal - custoTotal;
     const margem = faturamentoTotal > 0 ? ((lucroBruto / faturamentoTotal) * 100).toFixed(1) : 0;
     const ticketMedio = vendas.length > 0 ? faturamentoTotal / vendas.length : 0;
