@@ -13549,11 +13549,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
       const vendedor_id = session?.user?.id || profile?.id || null;
 
+      // Resolver o nome e ID do vendedor selecionado com fallbacks seguros no escopo principal da venda:
+      const resolvedVendedorNome = (
+        profile?.nome ||
+        (vendedores || []).find(v => String(v.id) === String(vendedor_id) || v.nome === vendedor_id)?.nome ||
+        (teamMembers || []).find(m => String(m.id) === String(vendedor_id))?.nome ||
+        session?.user?.user_metadata?.nome ||
+        session?.user?.email?.split('@')[0] ||
+        'Vendedor Não Identificado'
+      ).trim();
+
+      const resolvedVendedorId = (
+        vendedor_id ||
+        (vendedores || []).find(v => v.nome === resolvedVendedorNome)?.id ||
+        (teamMembers || []).find(m => m.nome === resolvedVendedorNome)?.id ||
+        null
+      );
+
       console.log("🔥 [PRE-SAVE CHECK] Contexto do Checkout:", {
         selectedPdvClienteId,
         clienteIdBanco,
         cliente_id,
         vendedor_id,
+        resolvedVendedorId,
+        resolvedVendedorNome,
         nomeClienteFinal,
         isConsumidorFinal,
         pdvClienteCpfCnpj: pdvClienteCpfCnpj.trim()
