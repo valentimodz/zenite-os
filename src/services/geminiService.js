@@ -267,7 +267,17 @@ export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja',
     '';
 
   const valorUnitario = Number(produto.preco_venda || produto.preco || produto.preco_custo || 0);
-  const diasSemGiro = Number(produto.dias_sem_giro || produto.dias_parado || 30);
+  const diasSemGiro = Number(
+    produto.dias_parado ??
+    produto.diasParado ??
+    produto.diasSemGiro ??
+    produto.dias_sem_giro ??
+    produto.dias_sem_venda ??
+    produto.diasInativo ??
+    (produto.created_at || produto.data_ultima_venda
+      ? Math.max(0, Math.floor((Date.now() - new Date(produto.created_at || produto.data_ultima_venda).getTime()) / (1000 * 60 * 60 * 24)))
+      : 0)
+  );
   const saldo = Number(produto.quantidade || 1);
 
   const prompt = promptPersonalizado || `Você é o Feijão IA, consultor executivo da rede de lojas Monkey Shop.
@@ -353,10 +363,18 @@ Seja direto e comercial.`;
  * Fallback tático instantâneo para nunca travar a tela do usuário
  */
 export function gerarEstrategiaGiroFallback(produto, filialNome = 'Loja') {
+  const dias = Number(
+    produto?.dias_parado ??
+    produto?.diasParado ??
+    produto?.diasSemGiro ??
+    produto?.dias_sem_giro ??
+    (produto?.created_at ? Math.max(0, Math.floor((Date.now() - new Date(produto.created_at).getTime()) / (1000 * 60 * 60 * 24))) : 0)
+  );
+  const diasTexto = dias > 0 ? `+${dias}` : '+30';
   return (
     `🔥 **Estratégia Recomendada:**\n` +
     `• **Combo Venda Casada:** Ofereça este item com 30% de desconto na compra de qualquer celular no crediário/boleto.\n` +
-    `• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há +30 dias.\n` +
+    `• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há ${diasTexto} dias.\n` +
     `• **Queima no Balcão:** Exponha na bandeja de frente de caixa com etiqueta de "Oportunidade da Semana".`
   );
 }

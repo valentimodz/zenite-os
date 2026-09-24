@@ -66,6 +66,10 @@ export default function ModalEstoqueParadoFilial({
         return {
           ...item,
           diasSemGiro,
+          dias_sem_giro: diasSemGiro,
+          dias_parado: diasSemGiro,
+          diasParado: diasSemGiro,
+          dias_sem_venda: diasSemGiro,
           valorUnitario,
           valorTotalLinha
         };
@@ -299,7 +303,13 @@ export default function ModalEstoqueParadoFilial({
                     return (
                       <tr
                         key={item.id}
-                        onClick={() => onSelecionarProduto(item)}
+                        onClick={() => onSelecionarProduto({
+                          ...item,
+                          dias_parado: item.dias_parado ?? item.diasParado ?? item.diasSemGiro ?? dias,
+                          diasParado: item.diasParado ?? item.dias_parado ?? item.diasSemGiro ?? dias,
+                          dias_sem_giro: item.dias_sem_giro ?? item.diasSemGiro ?? dias,
+                          diasSemGiro: item.diasSemGiro ?? dias
+                        })}
                         className="hover:bg-purple-950/[0.12] transition-colors cursor-pointer group"
                       >
                         {/* PRODUTO */}
@@ -359,7 +369,13 @@ export default function ModalEstoqueParadoFilial({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              onSelecionarProduto(item);
+                              onSelecionarProduto({
+                                ...item,
+                                dias_parado: item.dias_parado ?? item.diasParado ?? item.diasSemGiro ?? dias,
+                                diasParado: item.diasParado ?? item.dias_parado ?? item.diasSemGiro ?? dias,
+                                dias_sem_giro: item.dias_sem_giro ?? item.diasSemGiro ?? dias,
+                                diasSemGiro: item.diasSemGiro ?? dias
+                              });
                             }}
                             className="px-3 py-1.5 rounded-lg bg-purple-950/60 hover:bg-purple-600 border border-purple-700/60 text-xs font-bold text-purple-200 hover:text-white transition-all inline-flex items-center gap-1.5 shadow-[0_0_10px_rgba(168,85,247,0.25)] group-hover:bg-purple-600 group-hover:text-white"
                           >

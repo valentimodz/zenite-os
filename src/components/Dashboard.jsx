@@ -7104,15 +7104,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
   // Buscar catálogo de produtos (produtos_catalogo + produtos com suporte a busca server-side ilike, categoria e fallback)
   const fetchCatalogoProdutos = async (empIdParam = null, searchParam = '', categoryParam = 'TODAS', page = 0, isEanImeiSearch = '', limitParam = 1000) => {
-    const empresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
-    if (!empresaId) {
-      console.warn("fetchCatalogoProdutos: ID da empresa não encontrado.");
-      setLoadingCatalogo(false);
-      return;
-    }
+    const rawEmpresaId = empIdParam || profile?.empresa_id || company?.id || activeEmpresaId;
+    const isValidUuid = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+    const validEmpresaId = isValidUuid(rawEmpresaId) ? rawEmpresaId.trim() : null;
+    const cacheKey = `catalogo_produtos_${validEmpresaId || 'global'}`;
 
     const isDefaultQuery = !searchParam && (categoryParam === 'TODAS' || !categoryParam) && page === 0 && !isEanImeiSearch;
-    const cacheKey = `catalogo_produtos_${empresaId}`;
 
     if (isDefaultQuery) {
       const cached = getCache(cacheKey);
@@ -7127,10 +7124,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setLoadingCatalogo(true);
     try {
       // 1. Busca pura da tabela mestre de catálogo (produtos_catalogo)
-      let catQuery = supabase
-        .from('produtos_catalogo')
-        .select('*')
-        .eq('empresa_id', empresaId);
+      let catQuery = supabase.from('produtos_catalogo').select('*');
+      if (validEmpresaId) {
+        catQuery = catQuery.eq('empresa_id', validEmpresaId);
+      }
 
       if (searchParam && searchParam.trim() !== '') {
         catQuery = catQuery.ilike('nome', `%${searchParam.trim()}%`);
@@ -7138,22 +7135,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       if (categoryParam && categoryParam !== 'TODAS' && categoryParam !== 'todas') {
         catQuery = catQuery.ilike('categoria', `%${categoryParam.trim()}%`);
       }
-      const { data: catData } = await catQuery;
+      let { data: catData, error: catError } = await catQuery;
+      if (catError) {
+        console.error('ERRO CRÍTICO NA QUERY DE MODELOS (produtos_catalogo):', catError);
+      } else {
+        console.log('Modelos produtos_catalogo retornados com sucesso:', catData?.length);
+        if (catData && catData.length > 0) {
+          console.log('🔥 [COLUNAS REAIS PRODUTOS_CATALOGO]:', Object.keys(catData[0]));
+          console.log('🔥 [PRIMEIRO ITEM PRODUTOS_CATALOGO]:', catData[0]);
+        }
+      }
 
       // 2. Busca relacional direta da tabela de produtos reais -> imeis desambiguada via produto_id
-      let query = supabase
-        .from('produtos')
-        .select(`
-    *,
-    imeis!imeis_produto_id_fkey (
-      id,
-      imei,
-      cor,
-      status,
-      filial_id
-    )
-  `)
-        .eq('empresa_id', empresaId);
+      let query = supabase.from('produtos').select(`
+        *,
+        imeis!imeis_produto_id_fkey (
+          id,
+          imei,
+          cor,
+          status,
+          filial_id
+        )
+      `);
+      if (validEmpresaId) {
+        query = query.eq('empresa_id', validEmpresaId);
+      }
 
       if (searchParam && searchParam.trim() !== '') {
         query = query.ilike('nome', `%${searchParam.trim()}%`);
@@ -7187,10 +7193,41 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         query = query.order('nome', { ascending: true });
       }
 
-      const { data: prodData, error } = await query;
+      let { data: prodData, error } = await query;
+
+      // Fallback caso o relacionamento relacional com imeis falhe
+      if (error) {
+        console.warn("Aviso na busca relacional de produtos com IMEIs, tentando select('*'):", error);
+        let fallbackQuery = supabase.from('produtos').select('*');
+        if (validEmpresaId) fallbackQuery = fallbackQuery.eq('empresa_id', validEmpresaId);
+        const { data: fbData, error: fbError } = await fallbackQuery;
+        if (fbError) {
+          console.error('ERRO CRÍTICO NA QUERY DE MODELOS (produtos):', fbError);
+          alert(`Erro ao buscar modelos: ${fbError.message}`);
+        } else {
+          prodData = fbData;
+          error = null;
+        }
+      }
 
       if (error) {
-        console.error("Erro na busca relacional de produtos com IMEIs:", error);
+        console.error('ERRO CRÍTICO NA QUERY DE MODELOS:', error);
+        alert(`Erro ao buscar modelos: ${error.message}`);
+      } else {
+        console.log('Modelos retornados com sucesso:', prodData?.length);
+        if (prodData && prodData.length > 0) {
+          console.log('🔥 [COLUNAS REAIS PRODUTOS]:', Object.keys(prodData[0]));
+          console.log('🔥 [PRIMEIRO ITEM PRODUTOS]:', prodData[0]);
+        }
+      }
+
+      // Fallback global caso nenhum produto tenha sido encontrado pelo empresa_id (evita catálogo zerado)
+      if ((!catData || catData.length === 0) && (!prodData || prodData.length === 0)) {
+        console.warn('[Catálogo] Nenhum item retornado com empresa_id. Buscando fallback global sem restrição...');
+        const { data: fallbackCat } = await supabase.from('produtos_catalogo').select('*');
+        const { data: fallbackProd } = await supabase.from('produtos').select('*');
+        if (fallbackCat && fallbackCat.length > 0) catData = fallbackCat;
+        if (fallbackProd && fallbackProd.length > 0) prodData = fallbackProd;
       }
 
       // Consolidar e mesclar produtos_catalogo com produtos sem duplicidade
@@ -7249,10 +7286,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const imeisDiretos = imeisRes || [];
 
       // Buscar quantidades da tabela public.produtos para acessórios/produtos gerais
-      const { data: prodsData } = await supabase
+      let prodsDataQuery = supabase
         .from('produtos')
-        .select('id, nome, quantidade, filial_id, codigo_barras, cor, sku')
-        .eq('empresa_id', empresaId);
+        .select('id, nome, quantidade, filial_id, codigo_barras, cor, sku');
+      if (validEmpresaId) {
+        prodsDataQuery = prodsDataQuery.eq('empresa_id', validEmpresaId);
+      }
+      const { data: prodsData } = await prodsDataQuery;
 
       const counts = {};
       if (imeisDiretos) {

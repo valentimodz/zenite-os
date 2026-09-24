@@ -896,7 +896,21 @@ export default function ModalDiagnosticoFilial({
           filial={filial}
           empresaId={empresaId}
           onSelecionarProduto={(prod) => {
-            setProdutoParaEstrategia(prod);
+            const diasCalculados = Number(
+              prod?.dias_parado ??
+              prod?.diasParado ??
+              prod?.diasSemGiro ??
+              prod?.dias_sem_giro ??
+              prod?.dias_sem_venda ??
+              (prod?.created_at ? Math.max(0, Math.floor((Date.now() - new Date(prod.created_at).getTime()) / (1000 * 60 * 60 * 24))) : 0)
+            );
+            setProdutoParaEstrategia({
+              ...prod,
+              dias_parado: diasCalculados,
+              diasParado: diasCalculados,
+              dias_sem_giro: diasCalculados,
+              diasSemGiro: diasCalculados
+            });
           }}
         />
       )}

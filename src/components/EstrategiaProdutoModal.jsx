@@ -30,6 +30,26 @@ export default function EstrategiaProdutoModal({
   const [erro, setErro] = useState('');
   const lastLoadedIdRef = useRef(null);
 
+  // Cálculo de dias com fallback na data de referência
+  const calcularDias = (dataReferencia) => {
+    if (!dataReferencia) return 0;
+    const diffMs = Date.now() - new Date(dataReferencia).getTime();
+    return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+  };
+
+  const getDiasParado = (prod) => {
+    if (!prod) return 0;
+    const val = prod.dias_parado ?? prod.diasParado ?? prod.diasSemGiro ?? prod.dias_sem_giro ?? prod.dias_sem_venda ?? prod.diasInativo;
+    if (val !== undefined && val !== null && !isNaN(Number(val))) {
+      return Number(val);
+    }
+    const dataRef = prod.created_at || prod.data_ultima_venda || prod.data_entrada;
+    if (dataRef) {
+      return calcularDias(dataRef);
+    }
+    return 0;
+  };
+
   // Formatação de moeda BRL
   const formatBRL = (val) => {
     return (Number(val) || 0).toLocaleString('pt-BR', {
@@ -52,7 +72,7 @@ export default function EstrategiaProdutoModal({
 
     try {
       const precoValor = produto.preco || produto.preco_venda || produto.preco_custo || 0;
-      const diasParado = produto.dias_sem_giro || produto.dias_parado || 30;
+      const diasParado = getDiasParado(produto);
       const saldo = produto.quantidade || 1;
 
       const prompt = `Você é o Feijão IA, consultor executivo da rede de lojas Monkey Shop.
@@ -90,6 +110,9 @@ Seja direto e comercial.`;
             ...produto,
             preco: precoValor,
             dias_parado: diasParado,
+            diasParado: diasParado,
+            dias_sem_giro: diasParado,
+            diasSemGiro: diasParado,
             quantidade: saldo
           },
           filialNome,
@@ -105,11 +128,12 @@ Seja direto e comercial.`;
       setEstrategiaTexto(respostaTexto.trim());
     } catch (err) {
       console.error("Erro ao gerar estratégia Feijão IA:", err);
+      const fallbackDias = getDiasParado(produto);
       // Fallback tático instantâneo para nunca travar a tela do usuário
       setEstrategiaTexto(
         `🔥 **Estratégia Recomendada:**\n` +
         `• **Combo Venda Casada:** Ofereça este item com 30% de desconto na compra de qualquer celular no crediário/boleto.\n` +
-        `• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há +30 dias.\n` +
+        `• **Ação de Balcão:** Bonifique o vendedor com R$ 5,00 extra no pix pela saída imediata desta peça parada há +${fallbackDias} dias.\n` +
         `• **Queima no Balcão:** Exponha na bandeja de frente de caixa com etiqueta de "Oportunidade da Semana".`
       );
       if (err?.name === 'AbortError') {
@@ -147,7 +171,7 @@ Seja direto e comercial.`;
   // Copiar para WhatsApp
   const handleCopiarWhatsApp = () => {
     const precoFormatado = formatBRL(produto?.preco || produto?.preco_venda || produto?.preco_custo || 0);
-    const diasImobilizado = produto?.dias_sem_giro || produto?.dias_parado || 30;
+    const diasImobilizado = getDiasParado(produto);
     const msg = `⚡ *PLANO DE DESOVA & GIRO IMEDIATO - FEIJÃO IA (MONKEY SHOP / ZÊNITE)* ⚡\n` +
       `📍 *Unidade:* ${filialNome}\n` +
       `📦 *Item em Estoque:* ${produto?.nome}\n` +
@@ -216,7 +240,7 @@ Seja direto e comercial.`;
               Preço: <strong className="text-emerald-400">{formatBRL(produto.preco || produto.preco_custo || 0)}</strong>
             </span>
             <span className="text-amber-400 bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded text-[11px] font-bold">
-              {produto.dias_sem_giro || 30} dias parado
+              {produto?.dias_parado ?? produto?.diasParado ?? produto?.diasSemGiro ?? produto?.dias_sem_giro ?? getDiasParado(produto)} dias parado
             </span>
           </div>
         </div>
