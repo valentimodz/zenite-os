@@ -170,6 +170,9 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
             lastError = new Error(errMessage);
             break;
           }
+          if (res.status === 429 || errMessage.includes('Quota exceeded') || errMessage.includes('RESOURCE_EXHAUSTED')) {
+            throw new Error(`[429 Quota Exceeded] ${errMessage}`);
+          }
           throw new Error(errMessage);
         }
 
@@ -186,6 +189,9 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
       } catch (err) {
         lastError = err;
         const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
+          throw err;
+        }
         if (msg.includes('503') || msg.includes('high demand') || msg.includes('temporarily overloaded')) {
           console.warn(`[GeminiBackend] Erro 503 detectado: ${err.message}. Aguardando 2 segundos...`);
           await sleep(2000);

@@ -69,6 +69,22 @@ export default function ImportarCaixaRetroativoModal({
   const [progressMsg, setProgressMsg] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [countdownSeconds, setCountdownSeconds] = useState(0);
+
+  // Timer de contagem regressiva para Rate Limit (429)
+  useEffect(() => {
+    if (countdownSeconds <= 0) return;
+    const interval = setInterval(() => {
+      setCountdownSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [countdownSeconds]);
 
   const fileInputRef = useRef(null);
 
@@ -162,7 +178,15 @@ export default function ImportarCaixaRetroativoModal({
       setSuccessMessage(`IA processou a folha com sucesso! ${mapped.length} itens extraídos.`);
     } catch (err) {
       console.error('Erro no processamento da IA:', err);
-      setErrorMessage(err.message || 'Falha ao processar o arquivo com a IA do Gemini.');
+      const errMsg = err?.message || String(err || '');
+      if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota exceeded') || errMsg.toLowerCase().includes('resource_exhausted')) {
+        const match = errMsg.match(/retry in ([0-9.]+)s/i);
+        const segundos = match ? Math.ceil(parseFloat(match[1])) : 60;
+        setCountdownSeconds(segundos);
+        setErrorMessage(`Limite de requisições temporariamente atingido. Aguarde ${segundos} segundos para tentar novamente ou utilize uma chave com faturação ativada.`);
+      } else {
+        setErrorMessage(`Falha ao processar folha: ${errMsg}`);
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -455,7 +479,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 flex items-center gap-1">
-                  ⚡ {GEMINI_MODEL.replace('models/', '')}
+                  ⚡ gemini-3.6-flash
                 </span>
               </div>
               <p className="text-xs text-gray-400">
@@ -573,13 +597,18 @@ export default function ImportarCaixaRetroativoModal({
                 <button
                   type="button"
                   onClick={handleProcessarComIA}
-                  disabled={!selectedFile || isProcessing}
+                  disabled={!selectedFile || isProcessing || countdownSeconds > 0}
                   className="bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] hover:from-[#5A0896] hover:to-[#7822C8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold px-8 py-3 rounded-xl text-sm shadow-xl shadow-purple-950/40 transition-all flex items-center gap-2.5 cursor-pointer"
                 >
                   {isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin text-yellow-300" />
-                      <span>Analisando documento com IA ({GEMINI_MODEL.replace('models/', '')})...</span>
+                      <span>Analisando documento com IA (gemini-3.6-flash)...</span>
+                    </>
+                  ) : countdownSeconds > 0 ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin text-amber-400" />
+                      <span>Aguarde {countdownSeconds}s para tentar novamente</span>
                     </>
                   ) : (
                     <>
