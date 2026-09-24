@@ -197,7 +197,7 @@ export function fileToBase64(file) {
 /**
  * Executa o parse com IA através da API /api/ai/parse-caixa ou diretamente via SDK no cliente
  */
-export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
+export async function parseCaixaComGeminiClient({ file, customApiKey = '', onRetryCountdown = null, max429Retries = 2 }) {
   const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
   const base64Data = await fileToBase64(file);
 
@@ -215,6 +215,20 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   if (!geminiClientInstance || activeApiKey !== effectiveApiKey) {
     redefinirInstanciaGemini(effectiveApiKey);
   }
+
+  // Helper de extração de segundos de espera para rate limit 429
+  const extrairSegundosEspera = (textoErro) => {
+    if (!textoErro) return 30;
+    const match = String(textoErro).match(/retry in ([0-9.]+)s/i) ||
+                  String(textoErro).match(/retry after ([0-9.]+)s/i) ||
+                  String(textoErro).match(/wait ([0-9.]+)s/i) ||
+                  String(textoErro).match(/([0-9]+)\s*seconds/i);
+    if (match && match[1]) {
+      const seg = Math.ceil(parseFloat(match[1]));
+      return seg > 0 && seg <= 120 ? seg : 35;
+    }
+    return 35;
+  };
 
   // 1. Tentar primeiro o backend Vite (/api/ai/parse-caixa) passando a chave limpa
   try {
@@ -256,9 +270,10 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   for (const modelo of modelosTentativa) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(effectiveApiKey)}`;
 
-    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    let retentativas429 = 0;
+    while (retentativas429 <= max429Retries) {
       try {
-        console.log(`[GeminiClient] Chamando REST API modelo "${modelo}" (tentativa ${tentativa}/3)...`);
+        console.log(`[GeminiClient] Chamando REST API modelo "${modelo}" (tentativa rate-limit ${retentativas429 + 1}/${max429Retries + 1})...`);
 
         const requestBody = {
           systemInstruction: {
@@ -297,7 +312,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
         });
 
         if (res.status === 503) {
-          console.warn(`[GeminiClient] Erro 503 (Sobrecarga Temporária / High Demand). Aguardando 2s antes do retry (${tentativa}/3)...`);
+          console.warn(`[GeminiClient] Erro 503 (Sobrecarga Temporária / High Demand). Aguardando 2s antes do retry...`);
           await sleep(2000);
           continue;
         }
@@ -318,7 +333,18 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
             lastError = new Error(errMessage);
             break;
           }
-          if (res.status === 429 || errMessage.includes('Quota exceeded') || errMessage.includes('RESOURCE_EXHAUSTED')) {
+          if (res.status === 429 || errMessage.toLowerCase().includes('quota exceeded') || errMessage.toLowerCase().includes('resource_exhausted')) {
+            const segundosEspera = extrairSegundosEspera(errMessage);
+            if (retentativas429 < max429Retries) {
+              console.warn(`[GeminiClient] Rate Limit 429 detectado. Iniciando espera transparente de ${segundosEspera}s antes do auto-retry (${retentativas429 + 1}/${max429Retries})...`);
+              if (typeof onRetryCountdown === 'function') {
+                await onRetryCountdown(segundosEspera, retentativas429 + 1, max429Retries);
+              } else {
+                await sleep(segundosEspera * 1000);
+              }
+              retentativas429++;
+              continue;
+            }
             throw new Error(`[429 Quota Exceeded] ${errMessage}`);
           }
           throw new Error(errMessage);
@@ -340,6 +366,17 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
           throw err;
         }
         if (msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
+          const segundosEspera = extrairSegundosEspera(err?.message);
+          if (retentativas429 < max429Retries) {
+            console.warn(`[GeminiClient] Rate Limit 429 na exceção. Aguardando ${segundosEspera}s antes da retentativa (${retentativas429 + 1}/${max429Retries})...`);
+            if (typeof onRetryCountdown === 'function') {
+              await onRetryCountdown(segundosEspera, retentativas429 + 1, max429Retries);
+            } else {
+              await sleep(segundosEspera * 1000);
+            }
+            retentativas429++;
+            continue;
+          }
           throw err;
         }
         if (msg.includes('503') || msg.includes('high demand') || msg.includes('temporarily overloaded')) {

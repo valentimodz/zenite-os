@@ -199,7 +199,19 @@ export default function ImportarCaixaRetroativoModal({
 
       const result = await parseCaixaComGeminiClient({
         file: selectedFile,
-        customApiKey: effectiveKey
+        customApiKey: effectiveKey,
+        onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
+          setCountdownSeconds(segundos);
+          setErrorMessage(`Limite de requisições por minuto atingido (429). Aguardando liberação da quota em ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
+          
+          for (let s = segundos; s > 0; s--) {
+            setCountdownSeconds(s);
+            await new Promise(r => setTimeout(r, 1000));
+          }
+          setCountdownSeconds(0);
+          setErrorMessage('');
+        },
+        max429Retries: 2
       });
 
       if (!result || !result.vendas) {
@@ -252,10 +264,10 @@ export default function ImportarCaixaRetroativoModal({
         setErrorMessage("Erro de autenticação da chave Gemini: Credenciais inválidas ou não autorizadas pelo Google AI Studio. Verifique sua chave em aistudio.google.com/apikey e atualize-a no botão 'Chave Gemini' acima.");
         setShowKeyInput(true);
       } else if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota exceeded') || errMsg.toLowerCase().includes('resource_exhausted')) {
-        const match = errMsg.match(/retry in ([0-9.]+)s/i);
-        const segundos = match ? Math.ceil(parseFloat(match[1])) : 60;
+        const match = errMsg.match(/retry in ([0-9.]+)s/i) || errMsg.match(/([0-9]+)\s*s/i);
+        const segundos = match ? Math.ceil(parseFloat(match[1])) : 35;
         setCountdownSeconds(segundos);
-        setErrorMessage(`Limite de requisições temporariamente atingido. Aguarde ${segundos} segundos para tentar novamente ou utilize uma chave com faturação ativada.`);
+        setErrorMessage(`Limite de requisições por minuto atingido (429). Aguarde a liberação da quota em ${segundos}s para tentar novamente.`);
       } else {
         setErrorMessage(`Falha ao processar folha: ${errMsg}`);
       }
@@ -690,18 +702,18 @@ export default function ImportarCaixaRetroativoModal({
                 <button
                   type="button"
                   onClick={handleProcessarComIA}
-                  disabled={!selectedFile || isProcessing || countdownSeconds > 0}
+                  disabled={!selectedFile || (isProcessing && countdownSeconds === 0)}
                   className="bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] hover:from-[#5A0896] hover:to-[#7822C8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold px-8 py-3 rounded-xl text-sm shadow-xl shadow-purple-950/40 transition-all flex items-center gap-2.5 cursor-pointer"
                 >
-                  {isProcessing ? (
+                  {countdownSeconds > 0 ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin text-amber-400" />
+                      <span>Aguardando liberação da quota em {countdownSeconds}s...</span>
+                    </>
+                  ) : isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin text-yellow-300" />
                       <span>Analisando documento com IA (gemini-3.6-flash)...</span>
-                    </>
-                  ) : countdownSeconds > 0 ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin text-amber-400" />
-                      <span>Aguarde {countdownSeconds}s para tentar novamente</span>
                     </>
                   ) : (
                     <>
