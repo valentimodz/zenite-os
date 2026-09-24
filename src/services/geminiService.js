@@ -9,13 +9,13 @@ export const GEMINI_MODEL =
   'gemini-3.6-flash';
 
 /**
- * Validação de Formato da Chave Google Gemini:
- * As chaves oficiais do Google AI Studio começam pelo prefixo 'AIzaSy' e têm pelo menos 35 caracteres
+ * Validação flexível da Chave Google Gemini:
+ * Aceita qualquer string não vazia com tamanho suficiente (>= 20 caracteres),
+ * suportando prefixos tradicionais (AIzaSy...) e novos formatos do Google AI Studio (AQ....).
  */
 export const validarChaveGemini = (chave) => {
-  if (!chave || typeof chave !== 'string') return false;
-  const limpa = chave.trim();
-  return limpa.startsWith('AIzaSy') && limpa.length >= 35;
+  const limpa = (chave || '').trim();
+  return limpa.length >= 20; // Validação flexível que aceita AIzaSy..., AQ..., etc.
 };
 
 // Instância ativa do GoogleGenAI em memória
@@ -225,7 +225,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   }
 
   if (!validarChaveGemini(effectiveApiKey)) {
-    throw new Error("Chave inválida. A chave da API do Google Gemini deve começar por 'AIzaSy'. Obtenha uma chave em aistudio.google.com/apikey");
+    throw new Error('Chave da API Gemini inválida ou incompleta. Forneça uma chave de API válida com pelo menos 20 caracteres.');
   }
 
   // Garantir que a instância esteja sincronizada com a credencial válida
