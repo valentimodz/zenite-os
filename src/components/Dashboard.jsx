@@ -10336,144 +10336,174 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   };
 
-  // 1. Fetch de Produtos Mestres da categoria 'Celulares':
+  // 1. Fetch de Produtos Mestres do Catálogo Geral (sem restrições fixas a celulares):
   useEffect(() => {
     let isMounted = true;
     const fetchProdutosMestres = async () => {
       try {
-        const { data: prodsMestres, error } = await supabase
+        let query = supabase
           .from('produtos')
-          .select('id, nome, categoria')
-          .ilike('categoria', '%celula%')
-          .order('nome', { ascending: true });
+          .select('id, nome, categoria, tipo, codigo_barras, sku, preco, preco_custo');
 
-        if (!error && prodsMestres && isMounted) {
+        const empresaAlvo = profile?.empresa_id || session?.user?.user_metadata?.empresa_id;
+        if (empresaAlvo) {
+          query = query.eq('empresa_id', empresaAlvo);
+        }
+
+        let { data: prodsMestres, error } = await query.order('nome', { ascending: true });
+
+        // Fallback resiliente caso não encontre com empresa_id ou se a tabela exigir colunas básicas
+        if (error || !prodsMestres || prodsMestres.length === 0) {
+          const fb = await supabase
+            .from('produtos')
+            .select('id, nome, categoria, codigo_barras, sku')
+            .order('nome', { ascending: true });
+          if (fb.data && fb.data.length > 0) {
+            prodsMestres = fb.data;
+          }
+        }
+
+        if (prodsMestres && isMounted) {
           setProdutosMestres(prodsMestres);
+          console.log('Catalogo completo carregado:', (prodsMestres || []).map(p => ({ nome: p.nome, tipo: p.tipo, categoria: p.categoria })));
         }
       } catch (err) {
-        console.warn('Erro ao buscar produtos mestres da categoria celulares:', err);
+        console.warn('Erro ao buscar produtos mestres do catálogo geral:', err);
       }
     };
 
     fetchProdutosMestres();
     return () => { isMounted = false; };
-  }, [profile?.empresa_id]);
+  }, [profile?.empresa_id, session?.user?.user_metadata?.empresa_id]);
 
-  // 2. Tratamento Adicional com Normalização (Garantia Dupla):
-  // Caso existam variações na escrita da categoria no banco ('Celulares', 'CELULARES', 'Celular', 'Smartphones'):
+  // Catálogo completo consolidado e unificado sem perda de categorias
+  const catalogoCompleto = React.useMemo(() => {
+    const mapaUnico = new Map();
+    [...(produtosMestres || []), ...(catalogoProdutos || []), ...(produtos || [])].forEach(p => {
+      if (!p || (!p.id && !p.nome)) return;
+      const chave = String(p.id || p.nome).trim();
+      if (!mapaUnico.has(chave)) {
+        mapaUnico.set(chave, p);
+      } else {
+        const anterior = mapaUnico.get(chave);
+        mapaUnico.set(chave, {
+          ...anterior,
+          ...p,
+          categoria: anterior.categoria || p.categoria,
+          tipo: anterior.tipo || p.tipo
+        });
+      }
+    });
+    return Array.from(mapaUnico.values());
+  }, [produtosMestres, catalogoProdutos, produtos]);
+
+  // 2. Tratamento Adicional com Normalização (Garantia Dupla para Celulares quando necessário):
   const listaCelulares = React.useMemo(() => {
-    let base = (produtosMestres && produtosMestres.length > 0)
-      ? produtosMestres
-      : ((catalogoProdutos && catalogoProdutos.length > 0) ? catalogoProdutos : (produtos || []));
-
-    return (base || []).filter(item => {
+    return (catalogoCompleto || []).filter(item => {
       const cat = (item.categoria || item.tipo || '').trim().toLowerCase();
       return cat.includes('celul') || cat.includes('smart');
     });
-  }, [produtosMestres, catalogoProdutos, produtos]);
+  }, [catalogoCompleto]);
 
   // Filtro derivado de modelos para o dropdown de Entrada de Estoque (Pipeline: Dados Brutos -> Filtro por Categoria -> Select)
   const produtosMestreFiltrados = React.useMemo(() => {
-    const rawList = (produtosMestres && produtosMestres.length > 0)
-      ? produtosMestres
-      : ((catalogoProdutos && catalogoProdutos.length > 0) ? catalogoProdutos : (produtos || []));
-
-    // Desduplicação inicial por ID / Nome
-    const listaBase = [];
-    const seenIds = new Set();
-    (rawList || []).forEach(p => {
-      if (!p) return;
-      const key = String(p.id || p.nome || '').trim();
-      if (key && !seenIds.has(key)) {
-        seenIds.add(key);
-        listaBase.push(p);
-      }
-    });
+    console.log('Filtro ativo no momento:', entradaFiltroCategoria);
 
     // 1. Se nenhuma categoria estiver selecionada ou se for 'todas', não filtra por categoria
-    let filtrados = listaBase;
-    if (entradaFiltroCategoria && entradaFiltroCategoria !== 'todas' && entradaFiltroCategoria !== 'all') {
-      const catFiltroNormalizada = String(entradaFiltroCategoria).toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-      // Mapeamento caso a categoria selecionada seja um ID ou nome em `categorias`
-      const catObj = (categorias || []).find(c =>
-        String(c.id).toLowerCase() === catFiltroNormalizada ||
-        String(c.nome || '').trim().toLowerCase() === catFiltroNormalizada
-      );
-      const catObjNorm = catObj ? String(catObj.nome || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
-
-      filtrados = listaBase.filter((produto) => {
-        if (!produto) return false;
-        const catProd = String(produto.categoria || produto.categoria_nome || produto.category || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        const tipoProd = String(produto.tipo || produto.tipo_produto || produto.type || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        const nomeProd = String(produto.nome || produto.name || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-        // Caso especial: CELULAR / SMARTPHONE
-        if (catFiltroNormalizada === 'celular' || catFiltroNormalizada.includes('celul') || catFiltroNormalizada.includes('smart') || catObjNorm.includes('celul')) {
-          return (
-            catProd.includes('celul') ||
-            catProd.includes('smart') ||
-            tipoProd.includes('celul') ||
-            tipoProd.includes('smart') ||
-            catProd === 'ios' ||
-            catProd === 'android' ||
-            produto.exige_imei === true ||
-            produto.is_celular === true
-          );
-        }
-
-        // Caso especial: IOS
-        if (catFiltroNormalizada === 'ios') {
-          return (
-            catProd.includes('ios') ||
-            catProd.includes('iphone') ||
-            catProd.includes('apple') ||
-            nomeProd.includes('iphone') ||
-            tipoProd.includes('ios')
-          );
-        }
-
-        // Caso especial: ANDROID
-        if (catFiltroNormalizada === 'android') {
-          const isIphone = catProd.includes('ios') || catProd.includes('iphone') || catProd.includes('apple') || nomeProd.includes('iphone');
-          const isCelular = catProd.includes('celul') || catProd.includes('smart') || tipoProd.includes('celul') || tipoProd.includes('smart') || produto.exige_imei === true;
-          return isCelular && !isIphone;
-        }
-
-        // Caso especial: ACESSORIO
-        if (catFiltroNormalizada === 'acessorio' || catFiltroNormalizada.includes('acess')) {
-          return catProd.includes('acess') || tipoProd.includes('acess');
-        }
-
-        // Caso especial: APPLE_JBL_CONSOLE
-        if (catFiltroNormalizada === 'apple_jbl_console') {
-          return (
-            catProd.includes('apple') || catProd.includes('jbl') || catProd.includes('console') || catProd.includes('game') ||
-            nomeProd.includes('jbl') || nomeProd.includes('playstation') || nomeProd.includes('xbox') || nomeProd.includes('nintendo')
-          );
-        }
-
-        // Caso especial: SERVICO
-        if (catFiltroNormalizada === 'servico' || catFiltroNormalizada.includes('servic')) {
-          return catProd.includes('servic') || tipoProd.includes('servic');
-        }
-
-        // Correspondência genérica e flexível para qualquer categoria cadastrada (ex.: "RELOGIO DIGITAL")
-        const catBase = catFiltroNormalizada.endsWith('s') ? catFiltroNormalizada.slice(0, -1) : catFiltroNormalizada;
-        const prodCatBase = catProd.endsWith('s') ? catProd.slice(0, -1) : catProd;
-        const prodTipoBase = tipoProd.endsWith('s') ? tipoProd.slice(0, -1) : tipoProd;
-
-        return (
-          catProd.includes(catFiltroNormalizada) ||
-          catFiltroNormalizada.includes(catProd) ||
-          tipoProd.includes(catFiltroNormalizada) ||
-          catFiltroNormalizada.includes(tipoProd) ||
-          prodCatBase === catBase ||
-          prodTipoBase === catBase ||
-          (catObjNorm && (catProd.includes(catObjNorm) || catObjNorm.includes(catProd) || tipoProd.includes(catObjNorm)))
+    if (!entradaFiltroCategoria || entradaFiltroCategoria === '' || entradaFiltroCategoria === 'todas' || entradaFiltroCategoria === 'all' || entradaFiltroCategoria === 'TODAS') {
+      let filtrados = catalogoCompleto;
+      if (entradaBuscaMestre && entradaBuscaMestre.trim()) {
+        const q = entradaBuscaMestre.trim().toLowerCase();
+        filtrados = filtrados.filter(p =>
+          (p.nome && String(p.nome).toLowerCase().includes(q)) ||
+          (p.sku && String(p.sku).toLowerCase().includes(q)) ||
+          (p.codigo_barras && String(p.codigo_barras).toLowerCase().includes(q))
         );
-      });
+      }
+      return filtrados;
     }
+
+    const filtroNorm = String(entradaFiltroCategoria).toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // Mapeamento caso a categoria selecionada seja um ID ou nome em `categorias`
+    const catObj = (categorias || []).find(c =>
+      String(c.id).toLowerCase() === filtroNorm ||
+      String(c.nome || '').trim().toLowerCase() === filtroNorm
+    );
+    const catObjNorm = catObj ? String(catObj.nome || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+
+    let filtrados = catalogoCompleto.filter((produto) => {
+      if (!produto) return false;
+      const catProd = String(produto.categoria || produto.categoria_nome || produto.category || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const tipoProd = String(produto.tipo || produto.tipo_produto || produto.type || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const nomeProd = String(produto.nome || produto.name || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      // Caso especial: CELULAR / SMARTPHONE
+      if (filtroNorm === 'celular' || filtroNorm.includes('celul') || filtroNorm.includes('smart') || catObjNorm.includes('celul')) {
+        return (
+          catProd.includes('celul') ||
+          catProd.includes('smart') ||
+          tipoProd.includes('celul') ||
+          tipoProd.includes('smart') ||
+          catProd === 'ios' ||
+          catProd === 'android' ||
+          produto.exige_imei === true ||
+          produto.is_celular === true
+        );
+      }
+
+      // Caso especial: IOS
+      if (filtroNorm === 'ios') {
+        return (
+          catProd.includes('ios') ||
+          catProd.includes('iphone') ||
+          catProd.includes('apple') ||
+          nomeProd.includes('iphone') ||
+          tipoProd.includes('ios')
+        );
+      }
+
+      // Caso especial: ANDROID
+      if (filtroNorm === 'android') {
+        const isIphone = catProd.includes('ios') || catProd.includes('iphone') || catProd.includes('apple') || nomeProd.includes('iphone');
+        const isCelular = catProd.includes('celul') || catProd.includes('smart') || tipoProd.includes('celul') || tipoProd.includes('smart') || produto.exige_imei === true;
+        return isCelular && !isIphone;
+      }
+
+      // Caso especial: ACESSORIO
+      if (filtroNorm === 'acessorio' || filtroNorm.includes('acess')) {
+        return catProd.includes('acess') || tipoProd.includes('acess');
+      }
+
+      // Caso especial: APPLE_JBL_CONSOLE
+      if (filtroNorm === 'apple_jbl_console') {
+        return (
+          catProd.includes('apple') || catProd.includes('jbl') || catProd.includes('console') || catProd.includes('game') ||
+          nomeProd.includes('jbl') || nomeProd.includes('playstation') || nomeProd.includes('xbox') || nomeProd.includes('nintendo')
+        );
+      }
+
+      // Caso especial: SERVICO
+      if (filtroNorm === 'servico' || filtroNorm.includes('servic')) {
+        return catProd.includes('servic') || tipoProd.includes('servic');
+      }
+
+      // Correspondência genérica e flexível para qualquer categoria cadastrada (ex.: "RELOGIO DIGITAL")
+      const catBase = filtroNorm.endsWith('s') ? filtroNorm.slice(0, -1) : filtroNorm;
+      const prodCatBase = catProd.endsWith('s') ? catProd.slice(0, -1) : catProd;
+      const prodTipoBase = tipoProd.endsWith('s') ? tipoProd.slice(0, -1) : tipoProd;
+
+      return (
+        catProd.includes(filtroNorm) ||
+        filtroNorm.includes(catProd) ||
+        tipoProd.includes(filtroNorm) ||
+        filtroNorm.includes(tipoProd) ||
+        nomeProd.includes(filtroNorm) ||
+        prodCatBase === catBase ||
+        prodTipoBase === catBase ||
+        (catObjNorm && (catProd.includes(catObjNorm) || catObjNorm.includes(catProd) || tipoProd.includes(catObjNorm)))
+      );
+    });
 
     // 2. Se houver termo de busca/bipagem por texto ou barcode
     if (entradaBuscaMestre && entradaBuscaMestre.trim()) {
@@ -10486,7 +10516,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     return filtrados;
-  }, [produtosMestres, catalogoProdutos, produtos, categorias, entradaFiltroCategoria, entradaBuscaMestre]);
+  }, [catalogoCompleto, categorias, entradaFiltroCategoria, entradaBuscaMestre]);
 
   const produtosMestreOptions = produtosMestreFiltrados;
 
@@ -10505,7 +10535,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setEntradaBuscaMestre(termoLimpo);
     if (!termoLimpo.trim()) return;
     const cleanVal = termoLimpo.trim().toLowerCase();
-    const exactMatch = catalogoProdutos.find(p =>
+    const exactMatch = (catalogoCompleto || []).find(p =>
       (p.codigo_barras && p.codigo_barras.toLowerCase() === cleanVal) ||
       (p.sku && p.sku.toLowerCase() === cleanVal)
     );
@@ -10523,7 +10553,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const val = entradaBuscaMestre.replace(/[\r\n]/g, '').trim();
       if (!val) return;
       const cleanVal = val.toLowerCase();
-      const exactMatch = catalogoProdutos.find(p =>
+      const exactMatch = (catalogoCompleto || []).find(p =>
         (p.codigo_barras && p.codigo_barras.toLowerCase() === cleanVal) ||
         (p.sku && p.sku.toLowerCase() === cleanVal) ||
         (p.nome && p.nome.toLowerCase() === cleanVal)
@@ -20121,9 +20151,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       onChange={(e) => {
                         const prodId = String(e.target.value || '');
                         const prod = produtosMestreFiltrados.find(p => String(p.id) === prodId) ||
-                                     (catalogoProdutos || []).find(p => String(p.id) === prodId) ||
-                                     (produtosMestres || []).find(p => String(p.id) === prodId) ||
-                                     (produtos || []).find(p => String(p.id) === prodId);
+                                     (catalogoCompleto || []).find(p => String(p.id) === prodId);
                         setSelectedProdutoMestre(prod || null);
                         if (prod) {
                           setEntradaCodigoBarras(prod.codigo_barras || prod.barcode || prod.ean || '');
