@@ -24828,7 +24828,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     Importação Inteligente de Caixa Diário via IA (PDF / Foto)
                                   </h4>
                                   <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-[#6A0DAD]/30 text-purple-200 border border-[#6A0DAD]/50">
-                                    Gemini 2.0 Flash
+                                    Gemini 3.6 Flash
                                   </span>
                                 </div>
                                 <p className="text-xs text-gray-400 max-w-xl">

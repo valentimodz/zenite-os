@@ -16,7 +16,7 @@ import {
   ArrowRight,
   Share2
 } from 'lucide-react';
-import { gerarEstrategiaGiroProduto } from '../services/geminiService';
+import { gerarEstrategiaGiroProduto, GEMINI_MODEL } from '../services/geminiService';
 
 export default function EstrategiaProdutoModal({
   isOpen,
@@ -90,7 +90,7 @@ Seja direto e comercial.`;
         const response = await fetch('/api/feijao-ia/estrategia', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, modelo: 'gemini-1.5-flash' }),
+          body: JSON.stringify({ prompt, modelo: GEMINI_MODEL }),
           signal: controller.signal
         });
 

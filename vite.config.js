@@ -133,7 +133,8 @@ export default defineConfig({
             req.on('end', async () => {
               try {
                 const payload = body ? JSON.parse(body) : {};
-                const { prompt, modelo = 'gemini-1.5-flash', apiKey } = payload;
+                const defaultModelo = getEnvVar('VITE_GEMINI_MODEL') || process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+                const { prompt, modelo = defaultModelo, apiKey } = payload;
                 const effectiveApiKey =
                   apiKey ||
                   getEnvVar('VITE_GEMINI_API_KEY') ||

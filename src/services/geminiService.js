@@ -1,8 +1,13 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
 /**
- * Schema estrito para estruturação de dados de fechamento de caixa diário via Gemini 2.0 Flash
+ * Schema estrito para estruturação de dados de fechamento de caixa diário via Gemini
  */
+export const GEMINI_MODEL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_MODEL) ||
+  (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_MODEL || process.env?.GEMINI_MODEL)) ||
+  'gemini-3.6-flash';
+
 export const CAIXA_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -167,7 +172,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   }
 
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  const modelosTentativa = ['gemini-1.5-flash', 'gemini-2.0-flash'];
+  const modelosTentativa = Array.from(new Set([GEMINI_MODEL, 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']));
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
@@ -294,7 +299,7 @@ Seja direto e comercial.`;
     const apiBackendResponse = await fetch('/api/feijao-ia/estrategia', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, modelo: 'gemini-1.5-flash', apiKey: effectiveApiKey }),
+      body: JSON.stringify({ prompt, modelo: GEMINI_MODEL, apiKey: effectiveApiKey }),
       signal
     });
 
@@ -317,7 +322,7 @@ Seja direto e comercial.`;
   }
 
   // 3. Chamada direta ao Google Gen AI REST API com modelo ultrarrápido Flash e maxOutputTokens 500
-  const modelosTentativa = ['gemini-1.5-flash', 'gemini-2.0-flash'];
+  const modelosTentativa = Array.from(new Set([GEMINI_MODEL, 'gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']));
   let lastError = null;
 
   for (const modelo of modelosTentativa) {

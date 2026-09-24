@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
-import { parseCaixaComGeminiClient } from '../services/geminiService';
+import { parseCaixaComGeminiClient, GEMINI_MODEL } from '../services/geminiService';
 import {
   X,
   Upload,
@@ -455,7 +455,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 flex items-center gap-1">
-                  ⚡ Gemini 2.5 Flash
+                  ⚡ {GEMINI_MODEL.replace('models/', '')}
                 </span>
               </div>
               <p className="text-xs text-gray-400">
@@ -579,7 +579,7 @@ export default function ImportarCaixaRetroativoModal({
                   {isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin text-yellow-300" />
-                      <span>Analisando documento com Gemini 2.5 Flash...</span>
+                      <span>Analisando documento com IA ({GEMINI_MODEL.replace('models/', '')})...</span>
                     </>
                   ) : (
                     <>
