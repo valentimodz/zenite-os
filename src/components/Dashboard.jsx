@@ -2675,7 +2675,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     if ((podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) && isAbaGestao) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
-      fetchGerenteData(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
+      fetchGerenteData(targetEmpresaId, filtroMes, true).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
+      fetchCatalogoProdutos(targetEmpresaId).catch(e => console.warn('Aviso ao carregar catálogo de produtos:', e));
     }
 
     if (activeTab === 'auditoria' || currentView === 'auditoria') {
@@ -3829,19 +3830,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   // Buscar dados consolidados do Gerente (Estoque, Vendas Globais, Fechamentos) com cache de 5 minutos
-  const fetchGerenteData = async (empresaId, mesAnoFiltro) => {
+  const fetchGerenteData = async (empresaId, mesAnoFiltro, forceRefresh = false) => {
     const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
     const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
     const cacheKey = `gerente_data_${targetEmpresaId || 'global'}_${selectedMonth}`;
-    const cached = getCache(cacheKey);
-    if (cached) {
-      setProdutos(cached.prodsMapeados || []);
-      setVendas(cached.salesData || []);
-      setFechamentos(cached.fechamentos || []);
-      setUltimosRecebidos(cached.ultimosRecebidos || []);
-      setDisponiveisImeis(cached.baseImeis || []);
-      setLoadingDados(false);
-      return cached;
+    if (!forceRefresh) {
+      const cached = getCache(cacheKey);
+      if (cached && Array.isArray(cached.salesData) && (cached.salesData.length === 0 || cached.salesData.some(s => Array.isArray(s.itens_venda) && s.itens_venda.length > 0))) {
+        setProdutos(cached.prodsMapeados || []);
+        setVendas(cached.salesData || []);
+        setFechamentos(cached.fechamentos || []);
+        setUltimosRecebidos(cached.ultimosRecebidos || []);
+        setDisponiveisImeis(cached.baseImeis || []);
+        setLoadingDados(false);
+        return cached;
+      }
     }
 
     setLoadingDados(true);
@@ -4027,6 +4030,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         prodsRes = res || { data: [], error: null };
       } catch (err) {
         console.warn('[Dashboard] Falha na query de produtos:', err);
+      }
+
+      // Buscar catálogo consolidado da empresa para mapeamento de custos de produtos
+      try {
+        const catQ = await supabase
+          .from('produtos_catalogo')
+          .select('id, nome, preco_custo, preco_venda, categoria')
+          .eq('empresa_id', targetEmpresaId);
+        if (!catQ.error && Array.isArray(catQ.data) && catQ.data.length > 0) {
+          setCatalogoProdutos(catQ.data);
+        }
+      } catch (errCat) {
+        console.warn('[Dashboard] Aviso ao buscar produtos_catalogo:', errCat);
       }
 
       let salesData = [];
@@ -4886,10 +4902,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           vendas_pagamentos (*),
           itens_venda (
             id,
+            produto_id,
             produto_nome,
             quantidade,
             preco_unitario,
-            valor_total
+            valor_total,
+            preco_base,
+            desconto,
+            valor_desconto,
+            produtos ( id, nome, preco_custo )
           )
         `)
         .gte('created_at', dataInicio)
@@ -4958,12 +4979,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const qtd = dataNormalizada.length;
       const media = qtd > 0 ? total / qtd : 0;
 
-      // Atualizar os estados da UI
+      // Atualizar os estados da UI do vendedor
       setTotalVendas(total);
       setQtdVendas(qtd);
       setTicketMedio(media);
-      setVendas(dataNormalizada);
       setVendasVendedor(dataNormalizada);
+
+      // Só sobrescreve as vendas globais se NÃO for perfil administrativo/gerencial (para não substituir as vendas de toda a loja pelas individuais)
+      const roleUpper = String(profile?.role || profile?.cargo || '').toUpperCase();
+      const isRoleGerencial = ['DONO', 'OWNER', 'ADMIN', 'SUPER_ADMIN', 'GERENTE'].includes(roleUpper);
+      if (!isRoleGerencial) {
+        setVendas(dataNormalizada);
+      }
 
       return dataNormalizada;
     } catch (err) {
@@ -21928,7 +21955,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   setFiltroMes(novoMes);
                                   const tenantId = profile?.empresa_id || company?.id || activeEmpresaId;
                                   if (tenantId) {
-                                    fetchGerenteData(tenantId, novoMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas no seletor de mês:', err));
+                                    fetchGerenteData(tenantId, novoMes, true).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas no seletor de mês:', err));
+                                    fetchCatalogoProdutos(tenantId).catch(err => console.warn('[Dashboard] Aviso ao atualizar catálogo:', err));
                                     fetchAuditoriaDescontos(tenantId, novoMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar descontos no seletor de mês:', err));
                                   }
                                 }}
@@ -21940,7 +21968,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               onClick={() => {
                                 const tenantId = profile?.empresa_id || company?.id || activeEmpresaId;
                                 if (tenantId) {
-                                  fetchGerenteData(tenantId, filtroMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas:', err));
+                                  fetchGerenteData(tenantId, filtroMes, true).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas:', err));
+                                  fetchCatalogoProdutos(tenantId).catch(err => console.warn('[Dashboard] Aviso ao atualizar catálogo:', err));
                                   fetchAuditoriaDescontos(tenantId, filtroMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar descontos:', err));
                                 }
                               }}
@@ -22127,15 +22156,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             }, 0);
                           };
 
-                          const custoTotal = calcularCmvTotal(vendasMes);
+                          const cmvTotal = calcularCmvTotal(vendasMes);
+                          const custoTotal = cmvTotal;
 
                           // 3. Faturamento Líquido, Lucro Real, Margem e ROI
-                          const faturamentoBrutoNum = Number(faturamentoBruto || 0);
+                          const faturamentoBrutoApurado = Number(faturamentoBruto || 0);
                           const descontosTotais = Number(totalDescontosConcedidos || 0);
-                          const faturamentoLiquido = Math.max(0, faturamentoBrutoNum - descontosTotais);
+                          const faturamentoLiquido = Math.max(0, faturamentoBrutoApurado - descontosTotais);
 
                           // Lucro Real Bruto da Operação
-                          const lucroReal = faturamentoLiquido - custoTotal;
+                          const lucroReal = faturamentoLiquido - cmvTotal;
 
                           // Margem de Lucro Real (%) sobre o faturamento
                           const margemLucro = faturamentoLiquido > 0
@@ -22143,9 +22173,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             : 0;
 
                           // ROI (Retorno sobre o Investimento em Estoque Vendido)
-                          const roiCalculado = custoTotal > 0
-                            ? (lucroReal / custoTotal) * 100
+                          const roiEstimado = cmvTotal > 0
+                            ? (lucroReal / cmvTotal) * 100
                             : 0;
+                          const roiCalculado = roiEstimado;
 
                           // Descontos do mês: alinhado rigorosamente com as vendas do período
                           const vendasComDesconto = vendasMes.filter(s => {
