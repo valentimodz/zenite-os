@@ -9811,17 +9811,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const precoUnitario = novaQtd > 0 ? (novoValor / novaQtd) : novoValor;
 
     try {
-      // 1. UPDATE direto na tabela 'vendas' garantindo sincronização total
+      // 1. UPDATE direto na tabela 'vendas' garantindo sincronização total com colunas reais
       const updatePayload = {
         valor_total: novoValor,
         preco_unitario_vendido: precoUnitario,
         quantidade: novaQtd,
         comissao: novaComissao,
         metodo_pagamento: novoMetodo,
-        forma_pagamento: novoMetodo,
         financeira: resolvedFinanceira,
         financeira_parceira: resolvedFinanceira,
-        metodo_detalhe: resolvedFinanceira,
         produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
         categoria: novaCategoria,
         vendedor_id: novoVendedorId,
@@ -9838,20 +9836,24 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         .select();
 
       if (updateError) {
-        // Se alguma coluna nova não existir na tabela vendas, tenta salvar sem as variantes redundantes
-        if (updateError.message?.includes('financeira') || updateError.message?.includes('metodo_detalhe')) {
-          const fallbackPayload = { ...updatePayload };
-          delete fallbackPayload.financeira;
-          delete fallbackPayload.financeira_parceira;
-          delete fallbackPayload.metodo_detalhe;
-          const { error: fallbackErr } = await supabase
-            .from('vendas')
-            .update(fallbackPayload)
-            .eq('id', vendaId);
-          if (fallbackErr) throw fallbackErr;
-        } else {
-          throw updateError;
-        }
+        console.warn('[handleSaveEditVenda] Erro no update completo de vendas, tentando payload essencial:', updateError);
+        // Se alguma coluna opcional falhar, salva com as colunas essenciais garantidas
+        const essentialPayload = {
+          valor_total: novoValor,
+          quantidade: novaQtd,
+          comissao: novaComissao,
+          metodo_pagamento: novoMetodo,
+          produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
+          categoria: novaCategoria,
+          vendedor_id: novoVendedorId,
+          vendedor_nome: novoVendedorNome,
+          filial_id: novaFilialId
+        };
+        const { error: fallbackErr } = await supabase
+          .from('vendas')
+          .update(essentialPayload)
+          .eq('id', vendaId);
+        if (fallbackErr) throw fallbackErr;
       }
 
       // 1.1 Atualizar também na tabela vendas_pagamentos vinculada
@@ -9863,9 +9865,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           financeira: isBoletoMetodo ? resolvedFinanceira : null,
           status_repasse: isBoletoMetodo ? 'PENDENTE' : null
         };
-        if (resolvedFinanceira) {
-          pagUpdatePayload.metodo_detalhe = resolvedFinanceira;
-        }
         const { error: vpUpdateErr } = await supabase
           .from('vendas_pagamentos')
           .update(pagUpdatePayload)
@@ -9873,10 +9872,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         if (vpUpdateErr) {
           console.warn('Tentando fallback de update em vendas_pagamentos:', vpUpdateErr);
-          const fallbackPagPayload = { ...pagUpdatePayload };
-          if (vpUpdateErr.message?.includes('metodo_detalhe')) delete fallbackPagPayload.metodo_detalhe;
-          if (vpUpdateErr.message?.includes('financeira')) delete fallbackPagPayload.financeira;
-          if (vpUpdateErr.message?.includes('status_repasse')) delete fallbackPagPayload.status_repasse;
+          const fallbackPagPayload = {
+            metodo_pagamento: pagUpdatePayload.metodo_pagamento,
+            valor_pago: novoValor
+          };
           await supabase
             .from('vendas_pagamentos')
             .update(fallbackPagPayload)
