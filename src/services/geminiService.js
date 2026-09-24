@@ -27,13 +27,37 @@ export function limparApiKey(chave) {
  * Obtém a chave da IA de forma robusta e limpa das fontes disponíveis
  */
 export function getEffectiveApiKey(customApiKey = '') {
-  return (
-    limparApiKey(customApiKey) ||
-    (typeof window !== 'undefined' ? (limparApiKey(localStorage.getItem('gemini_api_key')) || limparApiKey(localStorage.getItem('@zenite_gemini_api_key'))) : '') ||
-    (typeof import.meta !== 'undefined' ? (limparApiKey(import.meta.env?.VITE_GEMINI_API_KEY) || limparApiKey(import.meta.env?.VITE_GOOGLE_GENAI_API_KEY) || limparApiKey(import.meta.env?.VITE_OPENROUTER_API_KEY)) : '') ||
-    (typeof process !== 'undefined' ? (limparApiKey(process.env?.VITE_GEMINI_API_KEY) || limparApiKey(process.env?.GEMINI_API_KEY) || limparApiKey(process.env?.OPENROUTER_API_KEY)) : '') ||
-    DEFAULT_OPENROUTER_API_KEY
-  );
+  const localCustom = limparApiKey(customApiKey);
+  if (localCustom) return localCustom;
+
+  // 1. Chaves salvas explicitamente pelo usuário no navegador
+  if (typeof window !== 'undefined') {
+    const k1 = limparApiKey(localStorage.getItem('gemini_api_key'));
+    if (k1) return k1;
+    const k2 = limparApiKey(localStorage.getItem('ia_api_key'));
+    if (k2) return k2;
+    const k3 = limparApiKey(localStorage.getItem('@zenite_gemini_api_key'));
+    if (k3) return k3;
+  }
+
+  // 2. Variáveis de ambiente com prioridade para OpenRouter se disponível
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) {
+    const kEnvOr = limparApiKey(import.meta.env.VITE_OPENROUTER_API_KEY);
+    if (kEnvOr) return kEnvOr;
+  }
+
+  // 3. Fallback principal OpenRouter
+  if (DEFAULT_OPENROUTER_API_KEY) {
+    return DEFAULT_OPENROUTER_API_KEY;
+  }
+
+  // 4. Outras chaves de ambiente
+  if (typeof import.meta !== 'undefined') {
+    const kEnv = limparApiKey(import.meta.env?.VITE_GEMINI_API_KEY) || limparApiKey(import.meta.env?.VITE_GOOGLE_GENAI_API_KEY);
+    if (kEnv) return kEnv;
+  }
+
+  return '';
 }
 
 /**
@@ -42,7 +66,7 @@ export function getEffectiveApiKey(customApiKey = '') {
 export function getActiveModelName(apiKey = '') {
   const chave = limparApiKey(apiKey) || getEffectiveApiKey();
   if (chave.startsWith('sk-or-')) {
-    return 'Qwen 2.5 VL (OpenRouter)';
+    return 'OpenRouter (Qwen-VL)';
   }
   return 'gemini-3.6-flash';
 }
@@ -214,26 +238,42 @@ export function fileToBase64(file) {
 /**
  * Executa o parse com IA através da API /api/ai/parse-caixa ou diretamente via SDK no cliente
  */
-export async function parseCaixaComGeminiClient({ file, customApiKey = '', onRetryCountdown = null, max429Retries = 2 }) {
-  const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
-  const base64Data = await fileToBase64(file);
+/**
+ * Processamento direto com OpenRouter
+ */
+export async function processarComOpenRouter(arquivo, apiKey, { onRetryCountdown = null, max429Retries = 2 } = {}) {
+  console.log('Utilizando provedor OpenRouter com chave sk-or-...');
+  const mimeType = arquivo.type || (arquivo.name?.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+  const base64Data = await fileToBase64(arquivo);
 
-  const effectiveApiKey = getEffectiveApiKey(customApiKey);
+  // Normalizar mimeType para o padrão data URL
+  const imageMime = mimeType === 'application/pdf' ? 'application/pdf' : (mimeType || 'image/jpeg');
+  const dataUrl = base64Data.startsWith('data:') ? base64Data : `data:${imageMime};base64,${base64Data}`;
 
-  if (!effectiveApiKey) {
-    throw new Error("Chave da API Gemini não configurada. Por favor, clique no botão 'Chave Gemini' no topo do modal para informar sua chave de API.");
-  }
+  const promptText = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop). Analise detalhadamente esta folha de caixa física e extraia estritamente em formato JSON válido com a seguinte estrutura: {"data": "DD/MM/AAAA", "data_caixa": "YYYY-MM-DD", "filial_identificada": "", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": "", "categoria": "Celulares", "tipo_item": "APARELHO", "cor": "", "quantidade": 1}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}. Não inclua crases de markdown além do JSON puro.`;
 
-  if (!validarChaveGemini(effectiveApiKey)) {
-    throw new Error('Chave da API Gemini inválida ou incompleta. Forneça uma chave de API válida com pelo menos 20 caracteres.');
-  }
+  const openRouterPayload = {
+    model: OPENROUTER_MODEL,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: promptText
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: dataUrl
+            }
+          }
+        ]
+      }
+    ],
+    temperature: 0.1
+  };
 
-  // Garantir que a instância esteja sincronizada com a credencial válida
-  if (!geminiClientInstance || activeApiKey !== effectiveApiKey) {
-    redefinirInstanciaGemini(effectiveApiKey);
-  }
-
-  // Helper de extração de segundos de espera para rate limit 429
   const extrairSegundosEspera = (textoErro) => {
     if (!textoErro) return 30;
     const match = String(textoErro).match(/retry in ([0-9.]+)s/i) ||
@@ -247,142 +287,131 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '', onRet
     return 35;
   };
 
-  // SE A CHAVE FOR DA OPENROUTER (sk-or-...), PROCESSAR DIRETAMENTE VIA OPENROUTER API
-  if (effectiveApiKey.startsWith('sk-or-')) {
-    console.log('[OpenRouter] Chamando API OpenRouter com modelo:', OPENROUTER_MODEL);
-    
-    // Normalizar mimeType para o padrão data:image/...
-    const imageMime = mimeType === 'application/pdf' ? 'application/pdf' : (mimeType || 'image/jpeg');
-    const dataUrl = `data:${imageMime};base64,${base64Data}`;
+  let retentativasOR = 0;
+  while (retentativasOR <= max429Retries) {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey.trim()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+          'X-Title': 'PDV Celulares - Fechamento de Caixa',
+        },
+        body: JSON.stringify(openRouterPayload)
+      });
 
-    const promptText = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop). Analise detalhadamente esta folha de caixa física e extraia estritamente em formato JSON válido contendo:
-- "data_caixa": data da folha em formato YYYY-MM-DD
-- "filial_identificada": nome da filial ou loja constante na folha
-- "total_geral": valor numérico total de faturamento informado
-- "totais": objeto com { "dinheiro": number, "pix": number, "cartao": number, "boleto": number, "total_geral": number }
-- "vendas": array de itens vendidos, onde cada item contém:
-  {
-    "produto_nome": string,
-    "vendedor_nome": string,
-    "categoria": "Celulares" | "Acessórios" | "Serviços",
-    "tipo_item": "APARELHO" | "ACESSORIO",
-    "cor": string,
-    "quantidade": number,
-    "valor_total": number,
-    "forma_pagamento_principal": string,
-    "imei": string
-  }
-- "sangrias_despesas": array de objetos com { "descricao": string, "valor": number }
-
-REGRAS:
-1. Retorne APENAS o JSON puro, sem blocos markdown ou explicações.
-2. Identifique aparelhos celulares/smartphones (Redmi, Realme, iPhone, Samsung, Motorola, etc.) com tipo_item = "APARELHO" e categoria = "Celulares".
-3. Identifique capas, cabos, películas e fones com tipo_item = "ACESSORIO" e categoria = "Acessórios".`;
-
-    const openRouterPayload = {
-      model: OPENROUTER_MODEL,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: promptText
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: dataUrl
-              }
-            }
-          ]
-        }
-      ],
-      temperature: 0.1
-    };
-
-    let retentativasOR = 0;
-    while (retentativasOR <= max429Retries) {
-      try {
-        const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${effectiveApiKey.trim()}`,
-            'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
-            'X-Title': 'PDV Sistema Caixa'
-          },
-          body: JSON.stringify(openRouterPayload)
-        });
-
-        if (orRes.status === 429) {
-          const orErrData = await orRes.json().catch(() => ({}));
-          const errMsg = orErrData?.error?.message || 'Rate limit 429 na OpenRouter';
-          const segundosEspera = extrairSegundosEspera(errMsg);
-          if (retentativasOR < max429Retries) {
-            console.warn(`[OpenRouter] Rate limit 429. Aguardando ${segundosEspera}s antes do auto-retry...`);
-            if (typeof onRetryCountdown === 'function') {
-              await onRetryCountdown(segundosEspera, retentativasOR + 1, max429Retries);
-            } else {
-              await sleep(segundosEspera * 1000);
-            }
-            retentativasOR++;
-            continue;
+      if (response.status === 429) {
+        const orErrData = await response.json().catch(() => ({}));
+        const errMsg = orErrData?.error?.message || 'Rate limit 429 na OpenRouter';
+        const segundosEspera = extrairSegundosEspera(errMsg);
+        if (retentativasOR < max429Retries) {
+          console.warn(`[OpenRouter] Rate limit 429. Aguardando ${segundosEspera}s antes do auto-retry...`);
+          if (typeof onRetryCountdown === 'function') {
+            await onRetryCountdown(segundosEspera, retentativasOR + 1, max429Retries);
+          } else {
+            await sleep(segundosEspera * 1000);
           }
-          throw new Error(`[429 Quota Exceeded OpenRouter] ${errMsg}`);
-        }
-
-        const orData = await orRes.json();
-
-        if (!orRes.ok) {
-          throw new Error(orData?.error?.message || `Erro HTTP ${orRes.status} na OpenRouter`);
-        }
-
-        const contentRaw = orData?.choices?.[0]?.message?.content;
-        if (!contentRaw) {
-          throw new Error('A OpenRouter não retornou conteúdo na resposta.');
-        }
-
-        // Limpar eventuais blocos de código markdown (```json ... ```)
-        const jsonLimpo = contentRaw.trim()
-          .replace(/^```json\s*/i, '')
-          .replace(/^```\s*/i, '')
-          .replace(/\s*```$/i, '')
-          .trim();
-
-        const parsedJson = JSON.parse(jsonLimpo);
-
-        // Garantir campos padrão esperados pelo componente
-        const resultadoNormalizado = {
-          data_caixa: parsedJson.data_caixa || parsedJson.data || new Date().toISOString().split('T')[0],
-          filial_identificada: parsedJson.filial_identificada || parsedJson.filial || '',
-          total_geral: Number(parsedJson.total_geral || parsedJson.totais?.total_geral || 0),
-          vendas: Array.isArray(parsedJson.vendas) ? parsedJson.vendas.map(v => ({
-            produto_nome: v.produto_nome || v.produto || 'Produto Sem Nome',
-            vendedor_nome: v.vendedor_nome || v.vendedor || 'Vendedor',
-            categoria: v.categoria || (v.tipo_item === 'APARELHO' ? 'Celulares' : 'Acessórios'),
-            tipo_item: v.tipo_item || (v.categoria === 'Celulares' ? 'APARELHO' : 'ACESSORIO'),
-            cor: v.cor || '',
-            quantidade: Number(v.quantidade || 1),
-            valor_total: Number(v.valor_total || v.valor || 0),
-            forma_pagamento_principal: v.forma_pagamento_principal || v.forma_pagamento || 'PIX',
-            imei: v.imei || v.imei_serial || ''
-          })) : [],
-          totais: parsedJson.totais || null,
-          sangrias_despesas: parsedJson.sangrias_despesas || [],
-          _modelo_utilizado: OPENROUTER_MODEL
-        };
-
-        return resultadoNormalizado;
-      } catch (errOR) {
-        if (errOR?.message?.includes('429') && retentativasOR < max429Retries) {
           retentativasOR++;
           continue;
         }
-        console.error('[OpenRouter] Falha ao processar folha de caixa:', errOR);
-        throw errOR;
+        throw new Error(`Erro OpenRouter (429): ${errMsg}`);
       }
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(`Erro OpenRouter: ${errData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const textoResposta = data?.choices?.[0]?.message?.content;
+      if (!textoResposta) {
+        throw new Error('A OpenRouter não retornou conteúdo na resposta.');
+      }
+
+      // Limpar crases de markdown (```json ... ```) se houver:
+      const jsonLimpo = textoResposta.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsedJson = JSON.parse(jsonLimpo);
+
+      // Normalizar chaves para o componente
+      let dataFinal = parsedJson.data_caixa || '';
+      if (!dataFinal && parsedJson.data) {
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(parsedJson.data)) {
+          const [d, m, a] = parsedJson.data.split('/');
+          dataFinal = `${a}-${m}-${d}`;
+        } else {
+          dataFinal = parsedJson.data;
+        }
+      }
+      if (!dataFinal) {
+        dataFinal = new Date().toISOString().split('T')[0];
+      }
+
+      const totalGeral = Number(parsedJson.total_geral || parsedJson.totais?.total_geral || 0);
+
+      const listaVendas = Array.isArray(parsedJson.vendas) ? parsedJson.vendas.map(v => {
+        const prod = v.produto_nome || v.produto || 'Produto Sem Nome';
+        const isAp = /redmi|realme|itel|infinix|samsung|iphone|xiaomi|motorola|poco|tecno|\b(64|128|256|512)gb\b/i.test(prod);
+        return {
+          produto_nome: prod,
+          vendedor_nome: v.vendedor_nome || v.vendedor || 'Vendedor',
+          categoria: v.categoria || (isAp ? 'Celulares' : 'Acessórios'),
+          tipo_item: v.tipo_item || (isAp ? 'APARELHO' : 'ACESSORIO'),
+          cor: v.cor || '',
+          quantidade: Math.max(1, Number(v.quantidade || 1)),
+          valor_total: Number(v.valor_total || v.valor || 0),
+          forma_pagamento_principal: v.forma_pagamento_principal || v.forma_pagamento || 'PIX',
+          imei: v.imei || v.imei_serial || ''
+        };
+      }) : [];
+
+      return {
+        data_caixa: dataFinal,
+        filial_identificada: parsedJson.filial_identificada || '',
+        total_geral: totalGeral,
+        vendas: listaVendas,
+        totais: parsedJson.totais || null,
+        sangrias_despesas: parsedJson.sangrias_despesas || [],
+        _modelo_utilizado: OPENROUTER_MODEL
+      };
+    } catch (errOR) {
+      if (errOR?.message?.includes('429') && retentativasOR < max429Retries) {
+        retentativasOR++;
+        continue;
+      }
+      console.error('[OpenRouter] Falha ao processar folha de caixa:', errOR);
+      throw errOR;
     }
+  }
+}
+
+/**
+ * Executa o parse com IA através da API /api/ai/parse-caixa ou diretamente via SDK no cliente
+ */
+export async function parseCaixaComGeminiClient({ file, customApiKey = '', onRetryCountdown = null, max429Retries = 2 }) {
+  const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+  const base64Data = await fileToBase64(file);
+
+  const effectiveApiKey = getEffectiveApiKey(customApiKey);
+
+  if (!effectiveApiKey) {
+    throw new Error("Chave da API não configurada. Por favor, clique no botão 'Chave IA' no topo do modal para informar sua chave de API.");
+  }
+
+  // BIFURCAÇÃO OBRIGATÓRIA DE ROTA:
+  // Se a chave for OpenRouter (sk-or-...), NUNCA chamar o Gemini nem o backend Gemini
+  if (effectiveApiKey.startsWith('sk-or-')) {
+    console.log('Utilizando provedor OpenRouter com chave sk-or-...');
+    return await processarComOpenRouter(file, effectiveApiKey, { onRetryCountdown, max429Retries });
+  }
+
+  if (!validarChaveGemini(effectiveApiKey)) {
+    throw new Error('Chave da API Gemini inválida ou incompleta. Forneça uma chave de API válida com pelo menos 20 caracteres.');
+  }
+
+  // Garantir que a instância esteja sincronizada com a credencial válida
+  if (!geminiClientInstance || activeApiKey !== effectiveApiKey) {
+    redefinirInstanciaGemini(effectiveApiKey);
   }
 
   // 1. Tentar primeiro o backend Vite (/api/ai/parse-caixa) passando a chave limpa (se for Gemini)

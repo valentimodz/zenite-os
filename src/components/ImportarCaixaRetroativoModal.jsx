@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   parseCaixaComGeminiClient,
+  processarComOpenRouter,
   GEMINI_MODEL,
   validarChaveGemini,
   redefinirInstanciaGemini,
@@ -62,12 +63,20 @@ export default function ImportarCaixaRetroativoModal({
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [customApiKey, setCustomApiKey] = useState(() => 
-    localStorage.getItem('gemini_api_key') ||
-    localStorage.getItem('@zenite_gemini_api_key') ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
-    DEFAULT_OPENROUTER_API_KEY
-  );
+  const [customApiKey, setCustomApiKey] = useState(() => {
+    // 1. Chave explícita do usuário
+    const kLocal = localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key') || localStorage.getItem('@zenite_gemini_api_key');
+    if (kLocal && kLocal.trim()) {
+      return kLocal.trim().replace(/^["']|["']$/g, '');
+    }
+    // 2. Fallback principal OpenRouter
+    return (
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
+      DEFAULT_OPENROUTER_API_KEY ||
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+      ''
+    );
+  });
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [keyValidationError, setKeyValidationError] = useState('');
 
@@ -143,17 +152,18 @@ export default function ImportarCaixaRetroativoModal({
 
     // Salvar no localStorage conforme padrão do app
     localStorage.setItem('gemini_api_key', keyToSave);
+    localStorage.setItem('ia_api_key', keyToSave);
     localStorage.setItem('@zenite_gemini_api_key', keyToSave);
     setCustomApiKey(keyToSave);
 
-    // Forçar a redefinição imediata da instância do serviço Gemini com a nova credencial
+    // Forçar a redefinição imediata da instância do serviço se for Gemini
     redefinirInstanciaGemini(keyToSave);
 
     // Limpar estados anteriores de contagem decrescente ou erro 429
     setCountdownSeconds(0);
     setErrorMessage('');
     setKeyValidationError('');
-    setSuccessMessage('Chave Google Gemini configurada e instância redefinida com sucesso!');
+    setSuccessMessage(`Chave (${getActiveModelName(keyToSave)}) configurada com sucesso!`);
     setShowKeyInput(false);
   };
 
@@ -168,24 +178,27 @@ export default function ImportarCaixaRetroativoModal({
     setSuccessMessage('');
 
     try {
-      const effectiveKey = (
+      const apiKey = (
         (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
         (localStorage.getItem('gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
+        (localStorage.getItem('ia_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
         (localStorage.getItem('@zenite_gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
+        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY ? String(import.meta.env.VITE_OPENROUTER_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
+        DEFAULT_OPENROUTER_API_KEY ||
         (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
         ''
       ).trim();
 
-      if (!effectiveKey) {
-        const msgErro = "Chave da API Gemini não configurada. Por favor, clique no botão 'Chave Gemini' no topo do modal para informar sua chave de API.";
+      if (!apiKey) {
+        const msgErro = "Chave da API não configurada. Por favor, clique no botão 'Chave IA' no topo do modal para informar sua chave de API.";
         setErrorMessage(msgErro);
         setShowKeyInput(true);
         setIsProcessing(false);
         return;
       }
 
-      if (!validarChaveGemini(effectiveKey)) {
-        const msgErro = "Chave da API Gemini inválida ou muito curta. Por favor, configure uma chave válida no botão 'Chave Gemini'.";
+      if (!validarChaveGemini(apiKey)) {
+        const msgErro = "Chave da API inválida ou muito curta. Por favor, configure uma chave válida no botão 'Chave IA'.";
         setKeyValidationError(msgErro);
         setErrorMessage(msgErro);
         setShowKeyInput(true);
@@ -193,28 +206,52 @@ export default function ImportarCaixaRetroativoModal({
         return;
       }
 
-      if (customApiKey.trim()) {
-        localStorage.setItem('gemini_api_key', effectiveKey);
-        localStorage.setItem('@zenite_gemini_api_key', effectiveKey);
-        redefinirInstanciaGemini(effectiveKey);
-      }
+      // Persistir chave válida
+      localStorage.setItem('gemini_api_key', apiKey);
+      localStorage.setItem('ia_api_key', apiKey);
+      localStorage.setItem('@zenite_gemini_api_key', apiKey);
 
-      const result = await parseCaixaComGeminiClient({
-        file: selectedFile,
-        customApiKey: effectiveKey,
-        onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
-          setCountdownSeconds(segundos);
-          setErrorMessage(`Limite de requisições por minuto atingido (429). Aguardando liberação da quota em ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
-          
-          for (let s = segundos; s > 0; s--) {
-            setCountdownSeconds(s);
-            await new Promise(r => setTimeout(r, 1000));
-          }
-          setCountdownSeconds(0);
-          setErrorMessage('');
-        },
-        max429Retries: 2
-      });
+      // Limpar qualquer estado de contagem regressiva remanescente
+      setCountdownSeconds(0);
+
+      let result;
+
+      // BIFURCAÇÃO OBRIGATÓRIA DE ROTA:
+      if (apiKey.startsWith('sk-or-')) {
+        // CHAMADA OBRIGATÓRIA PARA A OPENROUTER
+        console.log('Utilizando provedor OpenRouter com chave sk-or-...');
+        result = await processarComOpenRouter(selectedFile, apiKey, {
+          onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
+            setCountdownSeconds(segundos);
+            setErrorMessage(`Limite de requisições atingido na OpenRouter. Aguardando ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
+            for (let s = segundos; s > 0; s--) {
+              setCountdownSeconds(s);
+              await new Promise(r => setTimeout(r, 1000));
+            }
+            setCountdownSeconds(0);
+            setErrorMessage('');
+          },
+          max429Retries: 2
+        });
+      } else {
+        // Fluxo Google Gemini
+        redefinirInstanciaGemini(apiKey);
+        result = await parseCaixaComGeminiClient({
+          file: selectedFile,
+          customApiKey: apiKey,
+          onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
+            setCountdownSeconds(segundos);
+            setErrorMessage(`Limite de requisições por minuto atingido (429). Aguardando liberação da quota em ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
+            for (let s = segundos; s > 0; s--) {
+              setCountdownSeconds(s);
+              await new Promise(r => setTimeout(r, 1000));
+            }
+            setCountdownSeconds(0);
+            setErrorMessage('');
+          },
+          max429Retries: 2
+        });
+      }
 
       if (!result || !result.vendas) {
         throw new Error('A resposta da IA não contém uma lista válida de vendas.');
