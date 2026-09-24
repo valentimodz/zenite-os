@@ -981,6 +981,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [vendaNewFinanceira, setVendaNewFinanceira] = useState('PayJoy');
   const [vendaNewOutraFinanceiraNome, setVendaNewOutraFinanceiraNome] = useState('');
   const [vendaNewVendedorId, setVendaNewVendedorId] = useState('');
+  const [vendaNewVendedorNome, setVendaNewVendedorNome] = useState('');
   const [vendaNewFilialId, setVendaNewFilialId] = useState('');
   const [vendaJustificativa, setVendaJustificativa] = useState('');
   const [isVendaEditModalOpen, setIsVendaEditModalOpen] = useState(false);
@@ -9709,9 +9710,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     // Identificar Vendedor inicial
-    const vendedorIdInicial = venda.vendedor_id || (
-      (vendedores || []).find(v => (v.nome || v.name) === venda.vendedor_nome)?.id ||
-      (teamMembers || []).find(m => (m.nome || m.name || m.email) === venda.vendedor_nome)?.id ||
+    const vendedorNomeInicial = venda.vendedor_nome || venda.vendedor?.nome || venda.usuario?.nome || '';
+    setVendaNewVendedorNome(vendedorNomeInicial);
+
+    const vendedorIdInicial = venda.vendedor_id || venda.usuario_id || (
+      (vendedores || []).find(v => (v.nome || v.name) === vendedorNomeInicial)?.id ||
+      (teamMembers || []).find(m => (m.nome || m.name || m.email) === vendedorNomeInicial)?.id ||
       ''
     );
     setVendaNewVendedorId(vendedorIdInicial ? String(vendedorIdInicial) : '');
@@ -9801,11 +9805,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const justificativaTexto = vendaJustificativa.trim();
 
     // Obter Vendedor e Filial selecionados
-    const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(vendaNewVendedorId)) ||
-      (teamMembers || []).find(m => String(m.id) === String(vendaNewVendedorId));
+    const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(vendaNewVendedorId) || (v.nome && v.nome === vendaNewVendedorNome)) ||
+      (teamMembers || []).find(m => String(m.id) === String(vendaNewVendedorId) || (m.nome && m.nome === vendaNewVendedorNome));
     
-    const novoVendedorId = vendaNewVendedorId ? vendaNewVendedorId : (editingVenda.vendedor_id || null);
-    const novoVendedorNome = vendedorEncontrado ? (vendedorEncontrado.nome || vendedorEncontrado.name || vendedorEncontrado.email) : (editingVenda.vendedor_nome || 'Vendedor');
+    const novoVendedorId = vendaNewVendedorId || vendedorEncontrado?.id || editingVenda.vendedor_id || editingVenda.usuario_id || null;
+    const novoVendedorNome = vendaNewVendedorNome || vendedorEncontrado?.nome || vendedorEncontrado?.name || vendedorEncontrado?.email || editingVenda.vendedor_nome || 'Vendedor';
 
     const novaFilialId = vendaNewFilialId ? vendaNewFilialId : (editingVenda.filial_id || null);
     const precoUnitario = novaQtd > 0 ? (novoValor / novaQtd) : novoValor;
@@ -9823,17 +9827,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
         categoria: novaCategoria,
         vendedor_id: novoVendedorId,
+        usuario_id: novoVendedorId,
         vendedor_nome: novoVendedorNome,
         filial_id: novaFilialId,
         justificativa_correcao: justificativaTexto,
         atualizado_em: new Date().toISOString()
       };
 
+      console.log('Payload enviado para atualizar vendedor:', updatePayload);
       const { data: updatedData, error: updateError } = await supabase
         .from('vendas')
         .update(updatePayload)
         .eq('id', vendaId)
         .select();
+      console.log('Resposta do Supabase update:', { data: updatedData, error: updateError });
 
       if (updateError) {
         console.warn('[handleSaveEditVenda] Erro no update completo de vendas, tentando payload essencial:', updateError);
@@ -9846,13 +9853,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
           categoria: novaCategoria,
           vendedor_id: novoVendedorId,
+          usuario_id: novoVendedorId,
           vendedor_nome: novoVendedorNome,
           filial_id: novaFilialId
         };
-        const { error: fallbackErr } = await supabase
+        console.log('Tentando update com payload essencial:', essentialPayload);
+        const { data: fbData, error: fallbackErr } = await supabase
           .from('vendas')
           .update(essentialPayload)
-          .eq('id', vendaId);
+          .eq('id', vendaId)
+          .select();
+        console.log('Resposta do fallback update:', { data: fbData, error: fallbackErr });
         if (fallbackErr) throw fallbackErr;
       }
 
@@ -9947,15 +9958,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       setIsVendaEditModalOpen(false);
       setEditingVenda(null);
 
-      // 4. Atualização reativa imediata na listagem de vendas
+      // 4. Atualização reativa imediata na listagem de vendas (Optimistic Update completo)
       setVendas(prev => prev.map(v => {
         if (v.id === vendaId) {
           return {
             ...v,
             ...updatePayload,
+            vendedor_id: novoVendedorId,
+            usuario_id: novoVendedorId,
+            vendedor_nome: novoVendedorNome,
+            vendedor: { ...(v.vendedor || {}), id: novoVendedorId, nome: novoVendedorNome },
+            usuario: { ...(v.usuario || {}), id: novoVendedorId, nome: novoVendedorNome },
+            usuarios: { ...(v.usuarios || {}), id: novoVendedorId, nome: novoVendedorNome },
+            profiles: { ...(v.profiles || {}), id: novoVendedorId, nome: novoVendedorNome },
             produto_nome: novoNome || v.produto_nome,
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
-              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome } : it)
+              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome, valor_total: novoValor } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
@@ -9974,9 +9992,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           return {
             ...v,
             ...updatePayload,
+            vendedor_id: novoVendedorId,
+            usuario_id: novoVendedorId,
+            vendedor_nome: novoVendedorNome,
+            vendedor: { ...(v.vendedor || {}), id: novoVendedorId, nome: novoVendedorNome },
+            usuario: { ...(v.usuario || {}), id: novoVendedorId, nome: novoVendedorNome },
+            usuarios: { ...(v.usuarios || {}), id: novoVendedorId, nome: novoVendedorNome },
+            profiles: { ...(v.profiles || {}), id: novoVendedorId, nome: novoVendedorNome },
             produto_nome: novoNome || v.produto_nome,
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
-              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome } : it)
+              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome, valor_total: novoValor } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
@@ -9995,10 +10020,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         window.dispatchEvent(new Event('estoque_updated'));
       } catch (_) {}
 
-      // 7. Recarregar dados do gerente/dashboard para recalcular totais e métricas
+      // 7. Recarregar dados do gerente/dashboard com forceRefresh = true para recalcular totais e métricas imediatamente
       const targetEmpresaId = company?.id || profile?.empresa_id;
       if (targetEmpresaId && typeof fetchGerenteData === 'function') {
-        fetchGerenteData(targetEmpresaId, filtroMes);
+        fetchGerenteData(targetEmpresaId, filtroMes, true).catch(e => console.warn('Aviso ao recarregar dados do gerente:', e));
       }
     } catch (err) {
       console.error('Erro ao corrigir venda:', err);
@@ -30395,7 +30420,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       </label>
                       <select
                         value={vendaNewVendedorId}
-                        onChange={(e) => setVendaNewVendedorId(e.target.value)}
+                        onChange={(e) => {
+                          const chosenId = e.target.value;
+                          setVendaNewVendedorId(chosenId);
+                          const item = (vendedores || []).find(v => String(v.id) === String(chosenId)) ||
+                                       (teamMembers || []).find(m => String(m.id) === String(chosenId));
+                          if (item) {
+                            const n = item.nome || item.name || item.email || '';
+                            setVendaNewVendedorNome(n);
+                          }
+                        }}
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2.5 text-sm outline-none font-medium cursor-pointer transition-all"
                       >
                         <option value="" className="bg-[#111] text-gray-500">
@@ -30412,6 +30446,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               mapa.set(String(m.id), m.nome || m.name || m.email || 'Colaborador');
                             }
                           });
+                          if (editingVenda?.vendedor_id && editingVenda?.vendedor_nome && !mapa.has(String(editingVenda.vendedor_id))) {
+                            mapa.set(String(editingVenda.vendedor_id), editingVenda.vendedor_nome);
+                          }
                           return Array.from(mapa.entries()).map(([id, nome]) => (
                             <option key={id} value={id} className="bg-[#111] text-white">
                               {nome}
