@@ -243,10 +243,12 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
     console.warn('[GeminiService] Backend /api/ai/parse-caixa indisponível, usando fallback direto via SDK no navegador:', err);
   }
 
+  console.log('Chamando Gemini com chave prefixo:', effectiveApiKey.substring(0, 6) + '...');
+
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const modelosTentativa = Array.from(new Set([
-    GEMINI_MODEL,
     'gemini-3.6-flash',
+    GEMINI_MODEL,
     'gemini-flash-latest'
   ])).filter(m => m && !m.includes('1.5') && !m.includes('2.5'));
   let lastError = null;

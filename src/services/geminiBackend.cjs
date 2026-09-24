@@ -110,11 +110,13 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
     throw new Error('Chave da API Gemini não configurada. Por favor, informe sua chave de API no modal.');
   }
 
+  console.log('Chamando Gemini com chave prefixo:', effectiveKey.substring(0, 6) + '...');
+
   // Modelos para chamada direta REST ultrarrápidos
   const GEMINI_MODEL = process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
   const modelosTentativa = Array.from(new Set([
-    GEMINI_MODEL,
     'gemini-3.6-flash',
+    GEMINI_MODEL,
     'gemini-flash-latest'
   ])).filter(m => m && !m.includes('1.5') && !m.includes('2.5'));
   let lastError = null;
