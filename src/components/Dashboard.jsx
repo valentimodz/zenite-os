@@ -375,18 +375,19 @@ function ProductTableRow({
 
   return (
     <React.Fragment>
-      <tr className="hover:bg-[#6A0DAD]/5 transition-colors">
-        <td className="py-2.5 font-semibold text-white">
+      <tr className="hover:bg-[#6A0DAD]/5 border-b border-[#1A1A1A] transition-colors">
+        {/* 1. PRODUTO */}
+        <td className="w-[32%] min-w-[220px] px-3 py-3 font-semibold text-white align-middle">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-1.5">
-              {isCelular ? <Smartphone size={13} className="text-[#6A0DAD] shrink-0" /> : <Tag size={12} className="text-pink-400 shrink-0" />}
-              <span className="truncate max-w-[150px]" title={p.nome}>{p.nome}</span>
+              {isCelular ? <Smartphone size={14} className="text-[#6A0DAD] shrink-0" /> : <Tag size={13} className="text-pink-400 shrink-0" />}
+              <span className="truncate max-w-[220px] font-bold text-white text-xs sm:text-sm" title={p.nome}>{p.nome}</span>
             </div>
             {isCelular && (
               <div className="flex items-center">
                 {listaImeisExtraidos.length === 1 ? (
                   /* 1 IMEI: exibe a badge com botão de copiar */
-                  <span className="inline-flex items-center gap-1.5 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-2 py-0.5 rounded">
+                  <span className="text-xs font-mono bg-zinc-900 border border-zinc-800 rounded px-1.5 py-0.5 inline-flex items-center gap-1 mt-1 text-purple-300">
                     <span>IMEI: {listaImeisExtraidos[0].imei}</span>
                     <button
                       type="button"
@@ -402,18 +403,18 @@ function ProductTableRow({
                     </button>
                   </span>
                 ) : listaImeisExtraidos.length > 1 ? (
-                  /* Múltiplos IMEIs: exibe a quantidade e botões de cópia */
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="inline-flex items-center gap-1 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-2 py-0.5 rounded font-bold">
-                      {listaImeisExtraidos.length} unid. (Serial)
+                  /* Múltiplos IMEIs: exibe a quantidade e botões compactos de cópia */
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                    <span className="inline-flex items-center gap-1 bg-purple-950/40 border border-purple-800/40 text-purple-300 font-mono text-[10px] px-1.5 py-0.5 rounded font-bold whitespace-nowrap">
+                      {listaImeisExtraidos.length} unids
                     </span>
-                    <div className="flex flex-wrap items-center gap-1 max-w-[240px]">
+                    <div className="flex flex-wrap items-center gap-1 max-w-[220px]">
                       {listaImeisExtraidos.slice(0, 2).map((imObj) => (
                         <span
                           key={imObj.imei}
-                          className="inline-flex items-center gap-1 bg-zinc-900 border border-zinc-800 text-zinc-300 font-mono text-[10px] px-1.5 py-0.5 rounded"
+                          className="text-xs font-mono bg-zinc-900 border border-zinc-800 text-zinc-300 rounded px-1.5 py-0.5 inline-flex items-center gap-1 whitespace-nowrap"
                         >
-                          <span className="truncate max-w-[90px]" title={imObj.imei}>{imObj.imei}</span>
+                          <span className="truncate max-w-[85px]" title={imObj.imei}>{imObj.imei}</span>
                           <button
                             type="button"
                             onClick={(e) => copiarImeiParaClipboard(e, imObj.imei)}
@@ -435,7 +436,7 @@ function ProductTableRow({
                             e.stopPropagation();
                             if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id);
                           }}
-                          className="text-[9px] bg-purple-900/50 hover:bg-purple-800/70 text-purple-200 px-1.5 py-0.5 rounded font-mono font-bold cursor-pointer transition-colors"
+                          className="text-[9px] bg-purple-900/50 hover:bg-purple-800/70 text-purple-200 px-1.5 py-0.5 rounded font-mono font-bold cursor-pointer transition-colors whitespace-nowrap"
                           title="Ver todos os seriais"
                         >
                           +{listaImeisExtraidos.length - 2} mais
@@ -444,8 +445,8 @@ function ProductTableRow({
                     </div>
                   </div>
                 ) : (
-                  /* Sem IMEI vinculado apenas se a lista/campo realmente retornar vazia */
-                  <span className="inline-flex items-center bg-amber-950/40 border border-amber-800/40 text-amber-400 text-[10px] px-2 py-0.5 rounded italic">
+                  /* Sem IMEI vinculado */
+                  <span className="text-[10px] italic text-amber-500/80 mt-1 inline-flex items-center">
                     Sem IMEI vinculado
                   </span>
                 )}
@@ -453,26 +454,61 @@ function ProductTableRow({
             )}
           </div>
         </td>
-        <td className="py-2.5 text-gray-500 truncate max-w-[80px]">{filiais.find(f => f.id === p.filial_id)?.nome || '-'}</td>
-        <td className="py-2.5">
-          <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold ${p.categoria === 'IOS' ? 'bg-blue-950/20 text-blue-400 border border-blue-800/20' : 'bg-purple-950/20 text-purple-400 border border-purple-800/20'}`}>{p.categoria || 'GERAL'}</span>
+
+        {/* 2. FILIAL */}
+        <td className="w-[14%] min-w-[110px] px-3 py-3 whitespace-nowrap text-zinc-400 text-xs font-medium align-middle">
+          <span className="truncate block max-w-[130px]" title={filiais.find(f => f.id === p.filial_id)?.nome || '-'}>
+            {filiais.find(f => f.id === p.filial_id)?.nome || '-'}
+          </span>
         </td>
-        <td className="py-2.5">
+
+        {/* 3. CATEGORIA */}
+        <td className="w-[12%] min-w-[100px] px-3 py-3 whitespace-nowrap align-middle">
+          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${
+            p.categoria === 'IOS'
+              ? 'bg-blue-950/30 text-blue-300 border border-blue-800/30'
+              : 'bg-purple-950/30 text-purple-300 border border-purple-800/30'
+          }`}>
+            {p.categoria || p.tipo || 'GERAL'}
+          </span>
+        </td>
+
+        {/* 4. COR */}
+        <td className="w-[12%] min-w-[100px] px-3 py-3 whitespace-nowrap align-middle">
           {editingField === 'cor' ? (
-            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-              <input type="text" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown} disabled={isSaving} className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-medium" />
-              <button type="button" onClick={saveEdit} disabled={isSaving} className="text-emerald-400"><Check size={12} /></button>
+            <div className="inline-flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+              <input
+                type="text"
+                autoFocus
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isSaving}
+                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-xs text-white outline-none font-medium"
+              />
+              <button type="button" onClick={saveEdit} disabled={isSaving} className="text-emerald-400 hover:text-emerald-300">
+                <Check size={13} />
+              </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5">
+            <div className="inline-flex items-center gap-1.5">
               <ColorBadge cor={p.cor} />
-              <button onClick={e => startEdit(e, 'cor', p.cor)} className="text-gray-500 hover:text-[#6A0DAD]"><Edit2 size={11} /></button>
+              <button
+                type="button"
+                onClick={e => startEdit(e, 'cor', p.cor)}
+                className="text-gray-500 hover:text-[#6A0DAD] p-0.5 transition-colors cursor-pointer"
+                title="Editar Cor"
+              >
+                <Edit2 size={12} />
+              </button>
             </div>
           )}
         </td>
-        <td className="py-2.5 font-mono font-bold text-white text-[11px]">
+
+        {/* 5. PREÇO */}
+        <td className="w-[12%] min-w-[110px] px-3 py-3 whitespace-nowrap font-medium text-right pr-4 align-middle">
           {editingField === 'preco' ? (
-            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+            <div className="inline-flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
               <input
                 type="text"
                 autoFocus
@@ -480,7 +516,7 @@ function ProductTableRow({
                 onChange={e => setEditValue(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="0,00"
-                className="w-24 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none font-mono"
+                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-xs text-white outline-none font-mono text-right"
               />
               <button
                 type="button"
@@ -489,7 +525,7 @@ function ProductTableRow({
                 className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors cursor-pointer"
                 title="Confirmar novo preço"
               >
-                <Check size={12} />
+                <Check size={13} />
               </button>
               <button
                 type="button"
@@ -498,16 +534,16 @@ function ProductTableRow({
                 className="text-gray-500 hover:text-gray-400 p-0.5 transition-colors cursor-pointer"
                 title="Cancelar"
               >
-                <X size={12} />
+                <X size={13} />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="inline-flex items-center justify-end gap-1.5 text-white font-mono font-bold text-xs sm:text-sm">
               <span>R$ {parseFloat(p.preco || p.preco_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
               <button
                 type="button"
                 onClick={e => startEdit(e, 'preco', p.preco ?? p.preco_venda)}
-                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer"
+                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer p-0.5"
                 title="Editar Preço"
               >
                 <Edit2 size={12} />
@@ -515,14 +551,26 @@ function ProductTableRow({
             </div>
           )}
         </td>
-        <td className="py-2.5 font-mono text-[11px]">
+
+        {/* 6. QTD */}
+        <td className="w-[10%] min-w-[90px] px-3 py-3 whitespace-nowrap text-center align-middle">
           {editingField === 'quantidade' && !isCelular ? (
-            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-              <input type="number" step="1" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={handleKeyDown} className="w-16 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-[10px] text-white outline-none" />
-              <button type="button" onClick={saveEdit} className="text-emerald-400"><Check size={12} /></button>
+            <div className="inline-flex items-center justify-center gap-1" onClick={e => e.stopPropagation()}>
+              <input
+                type="number"
+                step="1"
+                autoFocus
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="w-14 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-xs text-white outline-none text-center"
+              />
+              <button type="button" onClick={saveEdit} className="text-emerald-400 hover:text-emerald-300">
+                <Check size={13} />
+              </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-col items-center justify-center leading-tight">
               {isCelular ? (() => {
                 const totalExibido = listaImeisExtraidos.length > 0
                   ? listaImeisExtraidos.length
@@ -533,34 +581,50 @@ function ProductTableRow({
                     <button
                       type="button"
                       onClick={e => { e.stopPropagation(); if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id); }}
-                      className="text-[#6A0DAD] hover:text-purple-400 font-bold underline cursor-pointer flex items-center gap-1"
+                      className="text-[#6A0DAD] hover:text-purple-300 font-bold underline cursor-pointer inline-flex items-center gap-1 text-xs"
                       title="Ver todos os seriais/IMEIs deste aparelho"
                     >
-                      <span>{totalExibido} unids (Seriais)</span>
-                      <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180' : ''} />
+                      <span>{totalExibido} unids</span>
+                      <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180 transition-transform' : 'transition-transform'} />
                     </button>
                   );
                 }
 
                 return (
                   <span className="font-bold text-purple-300 font-mono bg-purple-950/30 border border-purple-800/30 px-2 py-0.5 rounded text-[10px]">
-                    1 unid (Serial)
+                    1 unid
                   </span>
                 );
               })() : (
-                <span className="font-bold text-gray-300">{p.quantidade || 0} unids</span>
-              )}
-              {!isCelular && (
-                <button onClick={e => startEdit(e, 'quantidade', p.quantidade)} className="text-gray-500 hover:text-[#6A0DAD]" title="Editar Quantidade">
-                  <Edit2 size={11} />
-                </button>
+                <div className="inline-flex items-center justify-center gap-1.5">
+                  <span className="font-bold text-gray-300 text-xs sm:text-sm">{p.quantidade || 0} unids</span>
+                  {!isCelular && (
+                    <button
+                      type="button"
+                      onClick={e => startEdit(e, 'quantidade', p.quantidade)}
+                      className="text-gray-500 hover:text-[#6A0DAD] p-0.5 transition-colors cursor-pointer"
+                      title="Editar Quantidade"
+                    >
+                      <Edit2 size={11} />
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
         </td>
-        <td className="py-2.5 text-right">
+
+        {/* 7. AÇÕES */}
+        <td className="w-[8%] min-w-[70px] px-3 py-3 whitespace-nowrap text-right pr-2 align-middle">
           {['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO'].includes((userRole || '').toUpperCase()) && (
-            <button type="button" onClick={async (e) => { e.stopPropagation(); await onDeleteProduto(p); }} className="text-gray-600 hover:text-red-400"><Trash2 size={14} /></button>
+            <button
+              type="button"
+              onClick={async (e) => { e.stopPropagation(); await onDeleteProduto(p); }}
+              className="text-gray-600 hover:text-red-400 p-1 rounded hover:bg-red-950/20 transition-colors cursor-pointer"
+              title="Excluir Produto"
+            >
+              <Trash2 size={14} />
+            </button>
           )}
         </td>
       </tr>
@@ -20560,17 +20624,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     }
 
                     return (
-                      <div className="overflow-x-auto max-h-96">
-                        <table className="w-full text-left text-xs border-collapse">
+                      <div className="w-full overflow-x-auto max-h-96 custom-scrollbar">
+                        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                           <thead>
-                            <tr className="border-b border-[#222222] text-gray-600 font-bold uppercase tracking-wider">
-                              <th className="pb-2">Produto</th>
-                              <th className="pb-2">Filial</th>
-                              <th className="pb-2">Categoria</th>
-                              <th className="pb-2">Cor</th>
-                              <th className="pb-2">Preço</th>
-                              <th className="pb-2">Qtd</th>
-                              <th className="pb-2 text-right">Ações</th>
+                            <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase text-[11px] tracking-wider bg-black/40">
+                              <th className="w-[32%] min-w-[220px] px-3 py-3">PRODUTO</th>
+                              <th className="w-[14%] min-w-[110px] whitespace-nowrap px-3 py-3">FILIAL</th>
+                              <th className="w-[12%] min-w-[100px] whitespace-nowrap px-3 py-3">CATEGORIA</th>
+                              <th className="w-[12%] min-w-[100px] whitespace-nowrap px-3 py-3">COR</th>
+                              <th className="w-[12%] min-w-[110px] whitespace-nowrap text-right pr-4 px-3 py-3">PREÇO</th>
+                              <th className="w-[10%] min-w-[90px] whitespace-nowrap text-center px-3 py-3">QTD</th>
+                              <th className="w-[8%] min-w-[70px] whitespace-nowrap text-right pr-2 px-3 py-3">AÇÕES</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#111111]">
