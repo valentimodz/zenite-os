@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
-import { parseCaixaComGeminiClient, GEMINI_MODEL } from '../services/geminiService';
+import {
+  parseCaixaComGeminiClient,
+  GEMINI_MODEL,
+  validarChaveGemini,
+  redefinirInstanciaGemini
+} from '../services/geminiService';
 import {
   X,
   Upload,
@@ -62,6 +67,7 @@ export default function ImportarCaixaRetroativoModal({
     ''
   );
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [keyValidationError, setKeyValidationError] = useState('');
 
   // Dados extraídos pela IA
   const [parsedData, setParsedData] = useState(null);
@@ -123,6 +129,32 @@ export default function ImportarCaixaRetroativoModal({
     }
   };
 
+  const handleSalvarChaveGemini = () => {
+    const keyToSave = (customApiKey || '').trim();
+
+    if (!validarChaveGemini(keyToSave)) {
+      const msgErro = "Chave inválida. A chave da API do Google Gemini deve começar por 'AIzaSy'. Obtenha uma chave em aistudio.google.com/apikey";
+      setKeyValidationError(msgErro);
+      setErrorMessage(msgErro);
+      return;
+    }
+
+    // Salvar no localStorage conforme padrão do app
+    localStorage.setItem('gemini_api_key', keyToSave);
+    localStorage.setItem('@zenite_gemini_api_key', keyToSave);
+    setCustomApiKey(keyToSave);
+
+    // Forçar a redefinição imediata da instância do serviço Gemini com a nova credencial
+    redefinirInstanciaGemini(keyToSave);
+
+    // Limpar estados anteriores de contagem decrescente ou erro 429
+    setCountdownSeconds(0);
+    setErrorMessage('');
+    setKeyValidationError('');
+    setSuccessMessage('Chave Google Gemini configurada e instância redefinida com sucesso!');
+    setShowKeyInput(false);
+  };
+
   const handleProcessarComIA = async () => {
     if (!selectedFile) {
       setErrorMessage('Por favor, selecione um arquivo (PDF ou imagem) do fechamento de caixa.');
@@ -134,15 +166,25 @@ export default function ImportarCaixaRetroativoModal({
     setSuccessMessage('');
 
     try {
-      const effectiveKey = customApiKey.trim() ||
+      const effectiveKey = (customApiKey || '').trim() ||
         localStorage.getItem('gemini_api_key') ||
         localStorage.getItem('@zenite_gemini_api_key') ||
         (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
         '';
 
+      if (effectiveKey && !validarChaveGemini(effectiveKey)) {
+        const msgErro = "Chave inválida. A chave da API do Google Gemini deve começar por 'AIzaSy'. Obtenha uma chave em aistudio.google.com/apikey";
+        setKeyValidationError(msgErro);
+        setErrorMessage(msgErro);
+        setShowKeyInput(true);
+        setIsProcessing(false);
+        return;
+      }
+
       if (customApiKey.trim()) {
         localStorage.setItem('gemini_api_key', customApiKey.trim());
         localStorage.setItem('@zenite_gemini_api_key', customApiKey.trim());
+        redefinirInstanciaGemini(customApiKey.trim());
       }
 
       const result = await parseCaixaComGeminiClient({
@@ -503,8 +545,14 @@ export default function ImportarCaixaRetroativoModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setShowKeyInput(prev => !prev)}
-              className="px-2.5 py-1.5 rounded-lg border border-[#333] hover:border-[#6A0DAD] bg-black text-gray-400 hover:text-white text-xs flex items-center gap-1.5 transition-colors"
+              onClick={() => {
+                setShowKeyInput(prev => {
+                  const next = !prev;
+                  if (!next) setKeyValidationError('');
+                  return next;
+                });
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-[#333] hover:border-[#6A0DAD] bg-black text-gray-400 hover:text-white text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
               title="Configurar chave de API do Gemini"
             >
               <Key size={13} className="text-yellow-400" />
@@ -522,36 +570,57 @@ export default function ImportarCaixaRetroativoModal({
 
         {/* PAINEL OPCIONAL: CONFIGURAR CHAVE GEMINI */}
         {showKeyInput && (
-          <div className="bg-[#111] px-6 py-3 border-b border-[#222] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-gray-300 w-full sm:w-auto">
-              <Key size={14} className="text-yellow-400 shrink-0" />
-              <span className="font-semibold">Chave da API Google GenAI (VITE_GEMINI_API_KEY):</span>
+          <div className="bg-[#111] px-6 py-3.5 border-b border-[#222] flex flex-col gap-2.5 text-xs animate-in fade-in duration-150">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-gray-300 w-full sm:w-auto">
+                <Key size={14} className="text-yellow-400 shrink-0" />
+                <span className="font-semibold">Chave da API Google GenAI (VITE_GEMINI_API_KEY):</span>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <input
+                  type="password"
+                  value={customApiKey}
+                  onChange={(e) => {
+                    setCustomApiKey(e.target.value);
+                    if (keyValidationError) setKeyValidationError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSalvarChaveGemini();
+                    }
+                  }}
+                  placeholder="Insira sua chave AIzaSy..."
+                  className={`bg-black border ${
+                    keyValidationError ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30' : 'border-[#333] focus:border-[#6A0DAD]'
+                  } text-white px-3 py-1.5 rounded-md outline-none text-xs w-full sm:w-64 font-mono transition-all`}
+                />
+                <button
+                  type="button"
+                  onClick={handleSalvarChaveGemini}
+                  className="bg-[#6A0DAD] hover:bg-[#520885] text-white px-3.5 py-1.5 rounded-md font-bold text-xs shrink-0 cursor-pointer transition-colors shadow-sm"
+                >
+                  Salvar
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <input
-                type="password"
-                value={customApiKey}
-                onChange={(e) => setCustomApiKey(e.target.value)}
-                placeholder="Insira sua chave AIzaSy..."
-                className="bg-black border border-[#333] focus:border-[#6A0DAD] text-white px-3 py-1.5 rounded-md outline-none text-xs w-full sm:w-64 font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const keyToSave = customApiKey.trim();
-                  if (keyToSave) {
-                    localStorage.setItem('gemini_api_key', keyToSave);
-                    localStorage.setItem('@zenite_gemini_api_key', keyToSave);
-                  }
-                  setCountdownSeconds(0);
-                  setErrorMessage('');
-                  setShowKeyInput(false);
-                }}
-                className="bg-[#6A0DAD] hover:bg-[#520885] text-white px-3 py-1.5 rounded-md font-bold text-xs shrink-0 cursor-pointer"
-              >
-                Salvar
-              </button>
-            </div>
+
+            {keyValidationError && (
+              <div className="p-2.5 rounded-lg bg-rose-950/60 border border-rose-800/80 text-rose-300 text-xs flex items-center gap-2">
+                <AlertTriangle size={15} className="text-rose-400 shrink-0" />
+                <span>
+                  Chave inválida. A chave da API do Google Gemini deve começar por 'AIzaSy'. Obtenha uma chave em{' '}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline font-bold text-rose-200 hover:text-white transition-colors"
+                  >
+                    aistudio.google.com/apikey
+                  </a>
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -559,7 +628,23 @@ export default function ImportarCaixaRetroativoModal({
         {errorMessage && (
           <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-2.5">
             <AlertTriangle size={16} className="text-rose-400 shrink-0" />
-            <span>{errorMessage}</span>
+            <span className="flex-1">
+              {errorMessage.includes('aistudio.google.com/apikey') ? (
+                <>
+                  Chave inválida. A chave da API do Google Gemini deve começar por 'AIzaSy'. Obtenha uma chave em{' '}
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline font-bold text-rose-200 hover:text-white transition-colors"
+                  >
+                    aistudio.google.com/apikey
+                  </a>
+                </>
+              ) : (
+                errorMessage
+              )}
+            </span>
           </div>
         )}
 

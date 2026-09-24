@@ -8,6 +8,59 @@ export const GEMINI_MODEL =
   (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_MODEL || process.env?.GEMINI_MODEL)) ||
   'gemini-3.6-flash';
 
+/**
+ * Validação de Formato da Chave Google Gemini:
+ * As chaves oficiais do Google AI Studio começam pelo prefixo 'AIzaSy' e têm pelo menos 35 caracteres
+ */
+export const validarChaveGemini = (chave) => {
+  if (!chave || typeof chave !== 'string') return false;
+  const limpa = chave.trim();
+  return limpa.startsWith('AIzaSy') && limpa.length >= 35;
+};
+
+// Instância ativa do GoogleGenAI em memória
+let geminiClientInstance = null;
+let activeApiKey = null;
+
+/**
+ * Força a redefinição imediata da instância do serviço Gemini com a nova credencial
+ */
+export function redefinirInstanciaGemini(novaChave = '') {
+  const chaveLimpa = (novaChave || '').trim() ||
+    (typeof window !== 'undefined' && (localStorage.getItem('gemini_api_key') || localStorage.getItem('@zenite_gemini_api_key'))) ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_GENAI_API_KEY) ||
+    '';
+
+  activeApiKey = chaveLimpa;
+
+  if (chaveLimpa && validarChaveGemini(chaveLimpa)) {
+    try {
+      geminiClientInstance = new GoogleGenAI({ apiKey: chaveLimpa });
+      console.log('[GeminiService] Instância do GoogleGenAI redefinida com nova credencial válida.');
+    } catch (err) {
+      console.warn('[GeminiService] Erro ao instanciar GoogleGenAI:', err);
+      geminiClientInstance = null;
+    }
+  } else {
+    geminiClientInstance = null;
+  }
+
+  return geminiClientInstance;
+}
+
+/**
+ * Retorna a instância atual do Gemini SDK ou inicializa se necessário
+ */
+export function getGeminiInstance(chave = '') {
+  const targetKey = (chave || '').trim() ||
+    (typeof window !== 'undefined' ? (localStorage.getItem('gemini_api_key') || localStorage.getItem('@zenite_gemini_api_key')) : '');
+  if (!geminiClientInstance || (targetKey && targetKey !== activeApiKey)) {
+    return redefinirInstanciaGemini(targetKey);
+  }
+  return geminiClientInstance;
+}
+
 export const CAIXA_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -169,6 +222,15 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
 
   if (!effectiveApiKey) {
     throw new Error('Chave da API Gemini não localizada. Por favor, adicione VITE_GEMINI_API_KEY no .env ou informe sua chave no campo.');
+  }
+
+  if (!validarChaveGemini(effectiveApiKey)) {
+    throw new Error("Chave inválida. A chave da API do Google Gemini deve começar por 'AIzaSy'. Obtenha uma chave em aistudio.google.com/apikey");
+  }
+
+  // Garantir que a instância esteja sincronizada com a credencial válida
+  if (!geminiClientInstance || activeApiKey !== effectiveApiKey) {
+    redefinirInstanciaGemini(effectiveApiKey);
   }
 
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
