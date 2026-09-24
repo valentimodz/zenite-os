@@ -9627,18 +9627,72 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   // Prepara modal de edição de venda corrigida
   const handleOpenEditVenda = (venda) => {
     setEditingVenda(venda);
-    const prodNomeInicial = venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || '';
+
+    // 1. Extração segura e completa do nome do produto com todos os fallbacks
+    const primeiroItem = Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0
+      ? venda.itens_venda[0]
+      : (Array.isArray(venda.itens) && venda.itens.length > 0 ? venda.itens[0] : null);
+
+    const prodCatalog = (produtos || []).find(p => String(p.id) === String(venda.produto_id)) ||
+                        (catalogoProdutos || []).find(cp => String(cp.id) === String(venda.produto_id));
+
+    const extrairNomeProdutoVenda = (v) => {
+      if (!v) return '';
+      return (
+        v.produto_nome ||
+        v.nome_produto ||
+        v.produto ||
+        v.descricao ||
+        primeiroItem?.produto_nome ||
+        primeiroItem?.nome ||
+        v.produtos?.nome ||
+        v.produtos_descricao ||
+        v.itens_resumo ||
+        prodCatalog?.nome ||
+        ''
+      );
+    };
+
+    const prodNomeInicial = extrairNomeProdutoVenda(venda);
     setVendaNewNomeProduto(prodNomeInicial);
-    const categoriaInicial = venda.categoria || venda.produtos?.categoria || 'Celulares';
+
+    const categoriaInicial = venda.categoria || venda.produtos?.categoria || primeiroItem?.categoria || 'Celulares';
     setVendaNewCategoria(categoriaInicial);
-    setVendaNewQty(venda.quantidade);
-    setVendaNewValor(venda.valor_total);
-    setVendaNewComissao(venda.comissao);
-    const metodoInicial = venda.metodo_pagamento || venda.forma_pagamento || 'PIX';
+    setVendaNewQty(venda.quantidade || primeiroItem?.quantidade || 1);
+    setVendaNewValor(venda.valor_total || 0);
+    setVendaNewComissao(venda.comissao || 0);
+
+    // 2. Normalização e espelhamento fiel do Método de Pagamento da venda
+    const rawMetodo = String(venda.forma_pagamento || venda.metodo_pagamento || venda.vendas_pagamentos?.[0]?.metodo_pagamento || '').trim();
+    const rawMetodoUpper = rawMetodo.toUpperCase();
+    let metodoInicial = 'PIX';
+
+    if (rawMetodoUpper.includes('BOLETO') || rawMetodoUpper.includes('FINAN') || rawMetodoUpper.includes('CREDI') || rawMetodoUpper.includes('PROMIS') || rawMetodoUpper.includes('PAYJOY') || rawMetodoUpper.includes('WATU') || rawMetodoUpper.includes('UME') || rawMetodoUpper.includes('AIVA')) {
+      metodoInicial = 'Boleto';
+    } else if (rawMetodoUpper.includes('CRED') || rawMetodoUpper === 'CARTAO_CREDITO' || rawMetodoUpper === 'CARTAO') {
+      metodoInicial = 'Cartão de Crédito';
+    } else if (rawMetodoUpper.includes('DEB') || rawMetodoUpper === 'CARTAO_DEBITO') {
+      metodoInicial = 'Cartão de Débito';
+    } else if (rawMetodoUpper.includes('DINHEIRO') || rawMetodoUpper.includes('ESPECIE') || rawMetodoUpper.includes('GAVETA') || rawMetodoUpper === 'DINHEIRO') {
+      metodoInicial = 'Dinheiro';
+    } else if (rawMetodoUpper.includes('PIX')) {
+      metodoInicial = 'PIX';
+    } else if (rawMetodo) {
+      metodoInicial = rawMetodo;
+    }
     setVendaNewMetodoPagamento(metodoInicial);
 
-    // Identificar Financeira inicial
-    const finInicial = (venda.financeira || venda.metodo_detalhe || venda.financeira_parceira || '').trim();
+    // 3. Identificar Financeira inicial
+    const finInicial = (
+      venda.financeira ||
+      venda.financeira_parceira ||
+      venda.metodo_detalhe ||
+      venda.vendas_pagamentos?.[0]?.financeira ||
+      venda.vendas_pagamentos?.[0]?.metodo_detalhe ||
+      venda.pagamentos?.[0]?.financeira ||
+      venda.pagamentos?.[0]?.metodo_detalhe ||
+      ''
+    ).trim();
     const financeirasPadrao = ['PayJoy', 'Watu', 'Ume', 'Aiva'];
     if (finInicial) {
       const matchPadrao = financeirasPadrao.find(f => f.toLowerCase() === finInicial.toLowerCase());
@@ -9650,7 +9704,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         setVendaNewOutraFinanceiraNome(finInicial);
       }
     } else {
-      setVendaNewFinanceira('PayJoy');
+      setVendaNewFinanceira(metodoInicial === 'Boleto' ? 'PayJoy' : '');
       setVendaNewOutraFinanceiraNome('');
     }
 
@@ -9722,7 +9776,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const novoValor = parseValorNumerico(vendaNewValor);
     const novaComissao = parseValorNumerico(vendaNewComissao);
     const novoMetodo = vendaNewMetodoPagamento || 'PIX';
-    const isBoleto = novoMetodo?.toLowerCase() === 'boleto';
+    const isBoleto = novoMetodo?.toLowerCase() === 'boleto' ||
+                     novoMetodo?.toLowerCase() === 'financiadora' ||
+                     novoMetodo?.toLowerCase().includes('boleto') ||
+                     novoMetodo?.toLowerCase().includes('finan');
 
     let resolvedFinanceira = null;
     if (isBoleto) {
@@ -9875,6 +9932,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         console.warn('Registro em sales_audit_logs ignorado ou não disponível:', auditErr);
       }
 
+      // 3.1 Atualizar também a descrição no itens_venda caso haja registros vinculados
+      if (novoNome) {
+        try {
+          await supabase
+            .from('itens_venda')
+            .update({ produto_nome: novoNome })
+            .eq('venda_id', vendaId);
+        } catch (itemErr) {
+          console.warn('Aviso ao sincronizar produto_nome em itens_venda:', itemErr);
+        }
+      }
+
       showToast('Venda e vínculos atualizados com sucesso!', 'success');
       setIsVendaEditModalOpen(false);
       setEditingVenda(null);
@@ -9885,6 +9954,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           return {
             ...v,
             ...updatePayload,
+            produto_nome: novoNome || v.produto_nome,
+            itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
+              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome } : it)
+              : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
               ...(v.produtos || {}),
@@ -9902,6 +9975,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           return {
             ...v,
             ...updatePayload,
+            produto_nome: novoNome || v.produto_nome,
+            itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
+              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome } : it)
+              : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
               ...(v.produtos || {}),
@@ -30407,16 +30484,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         <option value="Cartão de Crédito" className="bg-[#111] text-white">Cartão de Crédito</option>
                         <option value="Cartão de Débito" className="bg-[#111] text-white">Cartão de Débito</option>
                         <option value="Dinheiro" className="bg-[#111] text-white">Dinheiro</option>
-                        <option value="Boleto" className="bg-[#111] text-white">Boleto</option>
+                        <option value="Boleto" className="bg-[#111] text-white">Boleto / Financiadora</option>
                       </select>
                     </div>
                   </div>
 
-                  {/* CONDICIONAL DA FINANCEIRA DO BOLETO */}
-                  {vendaNewMetodoPagamento?.toLowerCase() === 'boleto' && (
+                  {/* CONDICIONAL DA FINANCEIRA DO BOLETO / FINANCIADORA */}
+                  {(vendaNewMetodoPagamento?.toLowerCase() === 'boleto' ||
+                    vendaNewMetodoPagamento?.toLowerCase() === 'financiadora' ||
+                    vendaNewMetodoPagamento?.toLowerCase().includes('boleto') ||
+                    vendaNewMetodoPagamento?.toLowerCase().includes('finan')) && (
                     <div className="space-y-1 col-span-2 animate-fadeIn">
                       <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider block">
-                        Financeira do Boleto *
+                        Financeira do Boleto / Carnê *
                       </label>
                       <select
                         value={vendaNewFinanceira || ''}
