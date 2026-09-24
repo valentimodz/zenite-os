@@ -20566,6 +20566,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <tr className="border-b border-[#222222] text-gray-600 font-bold uppercase tracking-wider">
                               <th className="pb-2">Produto</th>
                               <th className="pb-2">Filial</th>
+                              <th className="pb-2">Categoria</th>
                               <th className="pb-2">Cor</th>
                               <th className="pb-2">Preço</th>
                               <th className="pb-2">Qtd</th>
