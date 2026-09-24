@@ -4,7 +4,9 @@ import {
   parseCaixaComGeminiClient,
   GEMINI_MODEL,
   validarChaveGemini,
-  redefinirInstanciaGemini
+  redefinirInstanciaGemini,
+  getActiveModelName,
+  DEFAULT_OPENROUTER_API_KEY
 } from '../services/geminiService';
 import {
   X,
@@ -64,7 +66,7 @@ export default function ImportarCaixaRetroativoModal({
     localStorage.getItem('gemini_api_key') ||
     localStorage.getItem('@zenite_gemini_api_key') ||
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
-    ''
+    DEFAULT_OPENROUTER_API_KEY
   );
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [keyValidationError, setKeyValidationError] = useState('');
@@ -563,7 +565,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 flex items-center gap-1">
-                  ⚡ gemini-3.6-flash
+                  ⚡ {getActiveModelName(customApiKey)}
                 </span>
               </div>
               <p className="text-xs text-gray-400">
@@ -583,10 +585,10 @@ export default function ImportarCaixaRetroativoModal({
                 });
               }}
               className="px-2.5 py-1.5 rounded-lg border border-[#333] hover:border-[#6A0DAD] bg-black text-gray-400 hover:text-white text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Configurar chave de API do Gemini"
+              title="Configurar chave de API (OpenRouter ou Gemini)"
             >
               <Key size={13} className="text-yellow-400" />
-              <span className="hidden sm:inline">Chave Gemini</span>
+              <span className="hidden sm:inline">Chave IA</span>
             </button>
             <button
               type="button"
@@ -598,13 +600,13 @@ export default function ImportarCaixaRetroativoModal({
           </div>
         </div>
 
-        {/* PAINEL OPCIONAL: CONFIGURAR CHAVE GEMINI */}
+        {/* PAINEL OPCIONAL: CONFIGURAR CHAVE IA */}
         {showKeyInput && (
           <div className="bg-[#111] px-6 py-3.5 border-b border-[#222] flex flex-col gap-2.5 text-xs animate-in fade-in duration-150">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-gray-300 w-full sm:w-auto">
                 <Key size={14} className="text-yellow-400 shrink-0" />
-                <span className="font-semibold">Chave da API Google GenAI (VITE_GEMINI_API_KEY):</span>
+                <span className="font-semibold">Chave da API (OpenRouter / Gemini):</span>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <input
@@ -620,10 +622,10 @@ export default function ImportarCaixaRetroativoModal({
                       handleSalvarChaveGemini();
                     }
                   }}
-                  placeholder="Insira sua chave de API (AIzaSy..., AQ...)..."
+                  placeholder="sk-or-... ou AIzaSy... / AQ..."
                   className={`bg-black border ${
                     keyValidationError ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30' : 'border-[#333] focus:border-[#6A0DAD]'
-                  } text-white px-3 py-1.5 rounded-md outline-none text-xs w-full sm:w-64 font-mono transition-all`}
+                  } text-white px-3 py-1.5 rounded-md outline-none text-xs w-full sm:w-72 font-mono transition-all`}
                 />
                 <button
                   type="button"
@@ -713,7 +715,7 @@ export default function ImportarCaixaRetroativoModal({
                   ) : isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin text-yellow-300" />
-                      <span>Analisando documento com IA (gemini-3.6-flash)...</span>
+                      <span>Analisando documento com IA ({getActiveModelName(customApiKey)})...</span>
                     </>
                   ) : (
                     <>
