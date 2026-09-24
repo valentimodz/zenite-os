@@ -13835,16 +13835,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         } catch (e) { }
       }
 
-      // 3. Persistência de Seminovo no Estoque para pagamentos via "📱 APARELHO NA TROCA"
+      // 3. Persistência de Entrada de Aparelho no Estoque para pagamentos via "📱 ENTRADA DE APARELHO"
       if (pdvListaPagamentos && pdvListaPagamentos.length > 0) {
         for (const pag of pdvListaPagamentos) {
           if (pag.metodo === 'troca' && pag.troca_dados && pag.troca_dados.dar_entrada_estoque) {
             try {
-              const valorAvaliado = parseFloat(pag.troca_dados.valor) || parseFloat(pag.valor) || 0;
+              const valorAvaliado = Number(parseFloat(pag.troca_dados.valor) || parseFloat(pag.valor) || 0);
               const modeloNome = (pag.troca_dados.modelo || 'Aparelho Seminovo').trim();
               const corSeminovo = (pag.troca_dados.cor || 'Padrão').trim();
               const capacidadeSeminovo = (pag.troca_dados.capacidade || '').trim();
-              const imeiSeminovo = (pag.troca_dados.imei || '').trim();
+              const imeiSeminovo = (pag.troca_dados.imei || '').replace(/\D/g, '').trim();
 
               const nomeCompletoProduto = [modeloNome, capacidadeSeminovo].filter(Boolean).join(' ');
 
@@ -17988,7 +17988,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   const handleAdicionarPagamentoPdv = () => {
                     let valNum = 0;
                     if (pdvNovoMetodo === 'troca') {
-                      valNum = parseFloat(pdvTrocaValor) || 0;
+                      valNum = typeof pdvTrocaValor === 'number'
+                        ? pdvTrocaValor
+                        : parseFloat(String(pdvTrocaValor || '').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
                     } else {
                       valNum = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
                     }
@@ -18023,14 +18025,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       }
                     }
 
-                    // Validação de Aparelho na Troca
+                    // Validação de Entrada de Aparelho (Todos os 5 campos obrigatórios)
                     if (pdvNovoMetodo === 'troca') {
                       if (!pdvTrocaModelo.trim()) {
-                        showToast('Por favor, informe o Modelo do aparelho dado na troca.', 'error');
+                        showToast('Por favor, informe o MODELO do aparelho.', 'error');
                         return;
                       }
-                      if (pdvTrocaImei.trim() && !/^\d{15}$/.test(pdvTrocaImei.trim())) {
-                        showToast('O IMEI do aparelho dado na troca deve conter 15 dígitos numéricos.', 'error');
+                      if (!pdvTrocaCapacidade.trim()) {
+                        showToast('Por favor, informe a CAPACIDADE / ARMAZENAMENTO do aparelho (ex: 64GB, 128GB, 256GB).', 'error');
+                        return;
+                      }
+                      if (!pdvTrocaCor.trim()) {
+                        showToast('Por favor, informe a COR DO APARELHO.', 'error');
+                        return;
+                      }
+                      const imeiLimpo = (pdvTrocaImei || '').replace(/\D/g, '');
+                      if (imeiLimpo.length !== 14 && imeiLimpo.length !== 15) {
+                        showToast('O IMEI do aparelho deve conter exatamente 14 ou 15 dígitos numéricos.', 'error');
+                        return;
+                      }
+                      if (valNum <= 0) {
+                        showToast('Por favor, informe um VALOR AVALIADO (R$) maior que R$ 0,00.', 'error');
                         return;
                       }
                     }
@@ -18051,24 +18066,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       labelMetodo = `📄 Boleto (${financeiraFinal})`;
                     } else if (pdvNovoMetodo === 'troca') {
                       const descAparelho = [pdvTrocaModelo.trim(), pdvTrocaCapacidade.trim(), pdvTrocaCor.trim()].filter(Boolean).join(' ');
-                      labelMetodo = `📱 Aparelho na Troca (${descAparelho || 'Seminovo'})`;
+                      labelMetodo = `📱 Entrada de Aparelho (${descAparelho || 'Seminovo'})`;
                     }
+
+                    const imeiSanitizado = (pdvTrocaImei || '').replace(/\D/g, '');
+                    const valorSanitizado = Number(valNum.toFixed(2));
 
                     const novoItem = {
                       id: Date.now().toString() + Math.random().toString(36).substring(2, 5),
                       metodo: pdvNovoMetodo,
                       label: labelMetodo,
-                      valor: valNum,
+                      valor: valorSanitizado,
                       parcelas: (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') ? pdvNovoParcelas : 1,
                       financeira: financeiraFinal,
                       metodo_detalhe: financeiraFinal || (pdvNovoMetodo === 'troca' ? pdvTrocaModelo.trim() : null),
-                      // Dados adicionais caso seja troca
+                      // Dados adicionais caso seja entrada de aparelho
                       troca_dados: pdvNovoMetodo === 'troca' ? {
                         modelo: pdvTrocaModelo.trim(),
                         capacidade: pdvTrocaCapacidade.trim(),
                         cor: pdvTrocaCor.trim(),
-                        imei: pdvTrocaImei.trim(),
-                        valor: valNum,
+                        imei: imeiSanitizado,
+                        valor: valorSanitizado,
                         dar_entrada_estoque: pdvTrocaEntradaEstoque
                       } : null
                     };
@@ -18076,7 +18094,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     const novaLista = [...pdvListaPagamentos, novoItem];
                     setPdvListaPagamentos(novaLista);
 
-                    // Limpar formulário de troca caso tenha sido adicionado
+                    // Limpar formulário de entrada de aparelho caso tenha sido adicionado
                     if (pdvNovoMetodo === 'troca') {
                       setPdvTrocaModelo('');
                       setPdvTrocaCapacidade('');
@@ -18167,7 +18185,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               { value: 'cartao_debito', label: '💳 Débito' },
                               { value: 'dinheiro', label: '💵 Dinheiro' },
                               ...(eElegivelBoleto ? [{ value: 'boleto', label: '📄 Boleto' }] : []),
-                              { value: 'troca', label: '📱 APARELHO NA TROCA' }
+                              { value: 'troca', label: '📱 ENTRADA DE APARELHO' }
                             ];
 
                             return (
@@ -18185,6 +18203,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       }
                                       if (m.value === 'cartao_credito' || m.value === 'cartao') {
                                         setPdvCartaoParcelas(pdvNovoParcelas || 1);
+                                      }
+                                      if (m.value === 'troca' && (!pdvTrocaValor || parseFloat(pdvTrocaValor) === 0) && faltaPagar > 0) {
+                                        setPdvTrocaValor(faltaPagar.toFixed(2));
                                       }
                                     }}
                                     className={`py-2 px-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
@@ -18292,124 +18313,154 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </div>
                           )}
 
-                          {/* Se for "📱 APARELHO NA TROCA": Exibir campos específicos */}
-                          {pdvNovoMetodo === 'troca' && (
-                            <div className="p-3 bg-purple-950/20 border border-purple-800/40 rounded-xl space-y-2.5 animate-fadeIn">
-                              <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300 border-b border-purple-800/30 pb-1.5">
-                                <Smartphone size={14} className="text-purple-400" />
-                                <span>Dados do Aparelho Usado na Troca</span>
-                              </div>
+                          {/* Se for "📱 ENTRADA DE APARELHO": Exibir campos específicos */}
+                          {pdvNovoMetodo === 'troca' && (() => {
+                            const imeiLimpo = (pdvTrocaImei || '').replace(/\D/g, '');
+                            const valorAparelhoNumerico = typeof pdvTrocaValor === 'number'
+                              ? pdvTrocaValor
+                              : parseFloat(String(pdvTrocaValor || '').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
 
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                {/* Modelo (Obrigatório) */}
+                            const isFormularioAparelhoValido = Boolean(
+                              pdvTrocaModelo.trim() &&
+                              pdvTrocaCapacidade.trim() &&
+                              pdvTrocaCor.trim() &&
+                              (imeiLimpo.length === 14 || imeiLimpo.length === 15) &&
+                              valorAparelhoNumerico > 0
+                            );
+
+                            return (
+                              <div className="p-3 bg-purple-950/20 border border-purple-800/40 rounded-xl space-y-2.5 animate-fadeIn">
+                                <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300 border-b border-purple-800/30 pb-1.5">
+                                  <Smartphone size={14} className="text-purple-400" />
+                                  <span>Dados do Aparelho (Entrada / Pagamento)</span>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {/* Modelo (Obrigatório) */}
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                      MODELO <span className="text-destructive">*</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      placeholder="Ex: iPhone 12, Moto G22"
+                                      value={pdvTrocaModelo}
+                                      onChange={(e) => setPdvTrocaModelo(e.target.value)}
+                                      required
+                                      className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                                    />
+                                  </div>
+
+                                  {/* Armazenamento / Capacidade (Obrigatório) */}
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                      CAPACIDADE / ARMAZENAMENTO <span className="text-destructive">*</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      placeholder="Ex: 64GB, 128GB, 256GB"
+                                      value={pdvTrocaCapacidade}
+                                      onChange={(e) => setPdvTrocaCapacidade(e.target.value)}
+                                      required
+                                      className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {/* Cor do Aparelho (Obrigatório) */}
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                      COR DO APARELHO <span className="text-destructive">*</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      placeholder="Ex: Preto, Azul, Branco"
+                                      value={pdvTrocaCor}
+                                      onChange={(e) => setPdvTrocaCor(e.target.value)}
+                                      required
+                                      className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                                    />
+                                  </div>
+
+                                  {/* IMEI (14 ou 15 dígitos) (Obrigatório) */}
+                                  <div>
+                                    <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
+                                      IMEI (14 OU 15 DÍGITOS) <span className="text-destructive">*</span>
+                                    </label>
+                                    <input
+                                      type="text"
+                                      maxLength={15}
+                                      placeholder="Digite 14 ou 15 dígitos numéricos"
+                                      value={pdvTrocaImei}
+                                      onChange={(e) => setPdvTrocaImei(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                                      required
+                                      className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none"
+                                    />
+                                    {pdvTrocaImei && imeiLimpo.length !== 14 && imeiLimpo.length !== 15 && (
+                                      <span className="text-[9px] text-amber-400 block mt-0.5 font-mono">
+                                        {imeiLimpo.length} dígitos informados (necessário 14 ou 15)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Valor Pago / Avaliado (R$) (Obrigatório) */}
                                 <div>
-                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
-                                    Modelo <span className="text-destructive">*</span>
+                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5 flex justify-between">
+                                    <span>VALOR AVALIADO (R$) <span className="text-destructive">*</span></span>
+                                    <span className="text-[9px] text-emerald-400 font-semibold">Abaterá o total da venda</span>
                                   </label>
-                                  <input
-                                    type="text"
-                                    placeholder="Ex: iPhone 12, Moto G22"
-                                    value={pdvTrocaModelo}
-                                    onChange={(e) => setPdvTrocaModelo(e.target.value)}
-                                    required
-                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-                                  />
+                                  <div className="relative">
+                                    <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono font-bold">R$</span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      required
+                                      value={pdvTrocaValor}
+                                      onChange={(e) => {
+                                        const val = e.target.value.replace(/[^\d.,]/g, '');
+                                        setPdvTrocaValor(val);
+                                      }}
+                                      placeholder={faltaPagar.toFixed(2)}
+                                      className="w-full bg-black border border-purple-800/50 focus:border-emerald-500 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white font-mono font-bold outline-none"
+                                    />
+                                  </div>
                                 </div>
 
-                                {/* Armazenamento / Capacidade */}
-                                <div>
-                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
-                                    Capacidade / Armazenamento
+                                {/* Checkbox: Entrada no Estoque */}
+                                <div className="flex items-center gap-2 pt-1">
+                                  <input
+                                    type="checkbox"
+                                    id="pdvTrocaEntradaEstoqueCheck"
+                                    checked={pdvTrocaEntradaEstoque}
+                                    onChange={(e) => setPdvTrocaEntradaEstoque(e.target.checked)}
+                                    className="w-4 h-4 rounded border-purple-800 text-purple-600 focus:ring-purple-500 bg-black cursor-pointer"
+                                  />
+                                  <label htmlFor="pdvTrocaEntradaEstoqueCheck" className="text-xs text-gray-300 select-none cursor-pointer font-medium">
+                                    Dar entrada deste aparelho no estoque da filial
                                   </label>
-                                  <input
-                                    type="text"
-                                    placeholder="Ex: 64GB, 128GB, 256GB"
-                                    value={pdvTrocaCapacidade}
-                                    onChange={(e) => setPdvTrocaCapacidade(e.target.value)}
-                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                {/* Cor do Aparelho */}
-                                <div>
-                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
-                                    Cor do Aparelho
-                                  </label>
-                                  <input
-                                    type="text"
-                                    placeholder="Ex: Preto, Azul, Branco"
-                                    value={pdvTrocaCor}
-                                    onChange={(e) => setPdvTrocaCor(e.target.value)}
-                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-                                  />
                                 </div>
 
-                                {/* IMEI (15 dígitos) */}
-                                <div>
-                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5">
-                                    IMEI (15 dígitos)
-                                  </label>
-                                  <input
-                                    type="text"
-                                    maxLength={15}
-                                    placeholder="Opcional (15 dígitos numéricos)"
-                                    value={pdvTrocaImei}
-                                    onChange={(e) => setPdvTrocaImei(e.target.value.replace(/\D/g, ''))}
-                                    className="w-full bg-black border border-purple-800/50 focus:border-purple-400 rounded-lg px-3 py-1.5 text-xs text-white font-mono outline-none"
-                                  />
+                                {/* Botão Adicionar Entrada */}
+                                <div className="pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={handleAdicionarPagamentoPdv}
+                                    disabled={!isFormularioAparelhoValido}
+                                    className={`w-full py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                      isFormularioAparelhoValido
+                                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-95'
+                                        : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed opacity-60'
+                                    }`}
+                                  >
+                                    <Plus size={14} />
+                                    <span>+ Adicionar Aparelho como Entrada ({valorAparelhoNumerico.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})</span>
+                                  </button>
                                 </div>
                               </div>
-
-                              {/* Valor Pago / Avaliado (R$) */}
-                              <div>
-                                <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5 flex justify-between">
-                                  <span>Valor Pago / Avaliado (R$) <span className="text-destructive">*</span></span>
-                                  <span className="text-[9px] text-emerald-400 font-semibold">Abaterá o total da venda</span>
-                                </label>
-                                <div className="relative">
-                                  <span className="absolute left-3 top-2 text-xs text-muted-foreground font-mono font-bold">R$</span>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0.01"
-                                    required
-                                    value={pdvTrocaValor}
-                                    onChange={(e) => setPdvTrocaValor(e.target.value)}
-                                    placeholder={faltaPagar.toFixed(2)}
-                                    className="w-full bg-black border border-purple-800/50 focus:border-emerald-500 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white font-mono font-bold outline-none"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Checkbox: Entrada no Estoque */}
-                              <div className="flex items-center gap-2 pt-1">
-                                <input
-                                  type="checkbox"
-                                  id="pdvTrocaEntradaEstoqueCheck"
-                                  checked={pdvTrocaEntradaEstoque}
-                                  onChange={(e) => setPdvTrocaEntradaEstoque(e.target.checked)}
-                                  className="w-4 h-4 rounded border-purple-800 text-purple-600 focus:ring-purple-500 bg-black cursor-pointer"
-                                />
-                                <label htmlFor="pdvTrocaEntradaEstoqueCheck" className="text-xs text-gray-300 select-none cursor-pointer font-medium">
-                                  Dar entrada deste seminovo no estoque da filial
-                                </label>
-                              </div>
-
-                              {/* Botão Adicionar Troca */}
-                              <div className="pt-1">
-                                <button
-                                  type="button"
-                                  onClick={handleAdicionarPagamentoPdv}
-                                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
-                                >
-                                  <Plus size={14} />
-                                  <span>Adicionar Aparelho na Troca (R$ {parseFloat(pdvTrocaValor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})</span>
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           {/* Campo de Valor e Botão Adicionar (para métodos tradicionais exceto troca) */}
                           {pdvNovoMetodo !== 'troca' && (
