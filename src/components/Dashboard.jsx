@@ -10373,139 +10373,132 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   }, [produtosMestres, catalogoProdutos, produtos]);
 
   // Filtro derivado de modelos para o dropdown de Entrada de Estoque (Pipeline: Dados Brutos -> Filtro por Categoria -> Select)
-  const produtosMestreOptions = React.useMemo(() => {
-    const rawList = catalogoProdutos || [];
+  const produtosMestreFiltrados = React.useMemo(() => {
+    const rawList = (produtosMestres && produtosMestres.length > 0)
+      ? produtosMestres
+      : ((catalogoProdutos && catalogoProdutos.length > 0) ? catalogoProdutos : (produtos || []));
 
-    // 1. Se nenhuma categoria estiver selecionada ou se for 'todas', retorna o catálogo completo
-    if (!entradaFiltroCategoria || entradaFiltroCategoria === 'todas' || entradaFiltroCategoria === 'all') {
-      let filtered = rawList;
-      if (entradaBuscaMestre && entradaBuscaMestre.trim()) {
-        const q = entradaBuscaMestre.trim().toLowerCase();
-        filtered = filtered.filter(p =>
-          (p.nome && String(p.nome).toLowerCase().includes(q)) ||
-          (p.sku && String(p.sku).toLowerCase().includes(q)) ||
-          (p.codigo_barras && String(p.codigo_barras).toLowerCase().includes(q))
-        );
+    // Desduplicação inicial por ID / Nome
+    const listaBase = [];
+    const seenIds = new Set();
+    (rawList || []).forEach(p => {
+      if (!p) return;
+      const key = String(p.id || p.nome || '').trim();
+      if (key && !seenIds.has(key)) {
+        seenIds.add(key);
+        listaBase.push(p);
       }
-      const unique = [];
-      const seen = new Set();
-      filtered.forEach(p => {
-        const key = String(p.nome || p.name || p.id).trim().toLowerCase();
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push(p);
-        }
-      });
-      return unique;
-    }
-
-    const catTarget = String(entradaFiltroCategoria || '').trim().toLowerCase();
-
-    // Mapeamento de ID de categoria para nome em categorias cadastradas
-    const catObj = (categorias || []).find(c =>
-      String(c.id).toLowerCase() === catTarget ||
-      String(c.nome || '').trim().toLowerCase() === catTarget
-    );
-    const catObjName = catObj ? String(catObj.nome || '').trim().toLowerCase() : '';
-
-    // 2. Filtrar estritamente pela categoria selecionada
-    const list = rawList.filter(p => {
-      if (!p) return false;
-
-      const pCat = String(
-        p.categoria ||
-        p.categoria_nome ||
-        p.categoria_id ||
-        p.categories?.nome ||
-        p.categorias?.nome ||
-        p.category ||
-        ''
-      ).trim().toLowerCase();
-
-      const pTipo = String(
-        p.tipo ||
-        p.tipo_produto ||
-        p.type ||
-        ''
-      ).trim().toLowerCase();
-
-      // Resolvendo nome da categoria via ID cadastrado em `categorias`
-      const matchedCategoryObj = (categorias || []).find(c =>
-        String(c.id).toLowerCase() === pCat ||
-        String(c.id).toLowerCase() === String(p.categoria_id || '').toLowerCase()
-      );
-      const resolvedCatName = matchedCategoryObj ? String(matchedCategoryObj.nome || '').trim().toLowerCase() : '';
-
-      const isTargetCelular =
-        catTarget.includes('celular') ||
-        catTarget.includes('smartphone') ||
-        catTarget === 'ios' ||
-        catTarget === 'android' ||
-        catObjName.includes('celular') ||
-        catObjName.includes('smartphone');
-
-      if (isTargetCelular) {
-        const isProdCelular =
-          pTipo.includes('celular') ||
-          pTipo.includes('smartphone') ||
-          pCat.includes('celular') ||
-          pCat.includes('smartphone') ||
-          pCat.includes('ios') ||
-          pCat.includes('android') ||
-          pCat.includes('iphone') ||
-          pCat.includes('aparelho') ||
-          resolvedCatName.includes('celular') ||
-          resolvedCatName.includes('smartphone') ||
-          resolvedCatName.includes('ios') ||
-          resolvedCatName.includes('android') ||
-          resolvedCatName.includes('iphone') ||
-          resolvedCatName.includes('aparelho') ||
-          p.exige_imei === true ||
-          p.is_celular === true ||
-          p.is_imei === true;
-
-        return isProdCelular;
-      }
-
-      // Para outras categorias específicas (ex: "Tablets", "Acessórios", "Serviços", etc.)
-      const targetBase = catTarget.endsWith('s') ? catTarget.slice(0, -1) : catTarget;
-      const catBase = pCat.endsWith('s') ? pCat.slice(0, -1) : pCat;
-      const tipoBase = pTipo.endsWith('s') ? pTipo.slice(0, -1) : pTipo;
-      const resolvedBase = resolvedCatName.endsWith('s') ? resolvedCatName.slice(0, -1) : resolvedCatName;
-
-      return (
-        catBase === targetBase ||
-        tipoBase === targetBase ||
-        resolvedBase === targetBase ||
-        (catObjName && (pCat.includes(catObjName) || catObjName.includes(pCat))) ||
-        (pCat && pCat.includes(targetBase)) ||
-        (pTipo && pTipo.includes(targetBase)) ||
-        (resolvedCatName && resolvedCatName.includes(targetBase))
-      );
     });
 
-    let filtered = list;
+    // 1. Se nenhuma categoria estiver selecionada ou se for 'todas', não filtra por categoria
+    let filtrados = listaBase;
+    if (entradaFiltroCategoria && entradaFiltroCategoria !== 'todas' && entradaFiltroCategoria !== 'all') {
+      const catFiltroNormalizada = String(entradaFiltroCategoria).toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      // Mapeamento caso a categoria selecionada seja um ID ou nome em `categorias`
+      const catObj = (categorias || []).find(c =>
+        String(c.id).toLowerCase() === catFiltroNormalizada ||
+        String(c.nome || '').trim().toLowerCase() === catFiltroNormalizada
+      );
+      const catObjNorm = catObj ? String(catObj.nome || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+
+      filtrados = listaBase.filter((produto) => {
+        if (!produto) return false;
+        const catProd = String(produto.categoria || produto.categoria_nome || produto.category || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const tipoProd = String(produto.tipo || produto.tipo_produto || produto.type || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const nomeProd = String(produto.nome || produto.name || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+        // Caso especial: CELULAR / SMARTPHONE
+        if (catFiltroNormalizada === 'celular' || catFiltroNormalizada.includes('celul') || catFiltroNormalizada.includes('smart') || catObjNorm.includes('celul')) {
+          return (
+            catProd.includes('celul') ||
+            catProd.includes('smart') ||
+            tipoProd.includes('celul') ||
+            tipoProd.includes('smart') ||
+            catProd === 'ios' ||
+            catProd === 'android' ||
+            produto.exige_imei === true ||
+            produto.is_celular === true
+          );
+        }
+
+        // Caso especial: IOS
+        if (catFiltroNormalizada === 'ios') {
+          return (
+            catProd.includes('ios') ||
+            catProd.includes('iphone') ||
+            catProd.includes('apple') ||
+            nomeProd.includes('iphone') ||
+            tipoProd.includes('ios')
+          );
+        }
+
+        // Caso especial: ANDROID
+        if (catFiltroNormalizada === 'android') {
+          const isIphone = catProd.includes('ios') || catProd.includes('iphone') || catProd.includes('apple') || nomeProd.includes('iphone');
+          const isCelular = catProd.includes('celul') || catProd.includes('smart') || tipoProd.includes('celul') || tipoProd.includes('smart') || produto.exige_imei === true;
+          return isCelular && !isIphone;
+        }
+
+        // Caso especial: ACESSORIO
+        if (catFiltroNormalizada === 'acessorio' || catFiltroNormalizada.includes('acess')) {
+          return catProd.includes('acess') || tipoProd.includes('acess');
+        }
+
+        // Caso especial: APPLE_JBL_CONSOLE
+        if (catFiltroNormalizada === 'apple_jbl_console') {
+          return (
+            catProd.includes('apple') || catProd.includes('jbl') || catProd.includes('console') || catProd.includes('game') ||
+            nomeProd.includes('jbl') || nomeProd.includes('playstation') || nomeProd.includes('xbox') || nomeProd.includes('nintendo')
+          );
+        }
+
+        // Caso especial: SERVICO
+        if (catFiltroNormalizada === 'servico' || catFiltroNormalizada.includes('servic')) {
+          return catProd.includes('servic') || tipoProd.includes('servic');
+        }
+
+        // Correspondência genérica e flexível para qualquer categoria cadastrada (ex.: "RELOGIO DIGITAL")
+        const catBase = catFiltroNormalizada.endsWith('s') ? catFiltroNormalizada.slice(0, -1) : catFiltroNormalizada;
+        const prodCatBase = catProd.endsWith('s') ? catProd.slice(0, -1) : catProd;
+        const prodTipoBase = tipoProd.endsWith('s') ? tipoProd.slice(0, -1) : tipoProd;
+
+        return (
+          catProd.includes(catFiltroNormalizada) ||
+          catFiltroNormalizada.includes(catProd) ||
+          tipoProd.includes(catFiltroNormalizada) ||
+          catFiltroNormalizada.includes(tipoProd) ||
+          prodCatBase === catBase ||
+          prodTipoBase === catBase ||
+          (catObjNorm && (catProd.includes(catObjNorm) || catObjNorm.includes(catProd) || tipoProd.includes(catObjNorm)))
+        );
+      });
+    }
+
+    // 2. Se houver termo de busca/bipagem por texto ou barcode
     if (entradaBuscaMestre && entradaBuscaMestre.trim()) {
       const q = entradaBuscaMestre.trim().toLowerCase();
-      filtered = filtered.filter(p =>
+      filtrados = filtrados.filter(p =>
         (p.nome && String(p.nome).toLowerCase().includes(q)) ||
         (p.sku && String(p.sku).toLowerCase().includes(q)) ||
         (p.codigo_barras && String(p.codigo_barras).toLowerCase().includes(q))
       );
     }
 
-    const unique = [];
-    const seen = new Set();
-    filtered.forEach(p => {
-      const key = String(p.nome || p.name || p.id).trim().toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(p);
-      }
-    });
+    return filtrados;
+  }, [produtosMestres, catalogoProdutos, produtos, categorias, entradaFiltroCategoria, entradaBuscaMestre]);
 
-    return unique;
-  }, [catalogoProdutos, categorias, entradaFiltroCategoria, entradaBuscaMestre]);
+  const produtosMestreOptions = produtosMestreFiltrados;
+
+  // 3. Resetar seleção do produto mestre ao mudar a categoria caso o produto selecionado não pertença à categoria filtrada
+  useEffect(() => {
+    if (selectedProdutoMestre && entradaFiltroCategoria && entradaFiltroCategoria !== 'todas') {
+      const pertence = produtosMestreFiltrados.some(p => String(p.id) === String(selectedProdutoMestre.id));
+      if (!pertence) {
+        setSelectedProdutoMestre(null);
+      }
+    }
+  }, [entradaFiltroCategoria, produtosMestreFiltrados, selectedProdutoMestre]);
 
   const handleBuscaMestreChange = (val) => {
     const termoLimpo = (val || '').replace(/[\r\n]/g, '');
@@ -20127,7 +20120,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       value={selectedProdutoMestre ? String(selectedProdutoMestre.id) : ''}
                       onChange={(e) => {
                         const prodId = String(e.target.value || '');
-                        const prod = (listaCelulares || []).find(p => String(p.id) === prodId) || (catalogoProdutos || []).find(p => String(p.id) === prodId);
+                        const prod = produtosMestreFiltrados.find(p => String(p.id) === prodId) ||
+                                     (catalogoProdutos || []).find(p => String(p.id) === prodId) ||
+                                     (produtosMestres || []).find(p => String(p.id) === prodId) ||
+                                     (produtos || []).find(p => String(p.id) === prodId);
                         setSelectedProdutoMestre(prod || null);
                         if (prod) {
                           setEntradaCodigoBarras(prod.codigo_barras || prod.barcode || prod.ean || '');
@@ -20136,11 +20132,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
                     >
                       <option value="">Selecione o Produto Mestre...</option>
-                      {listaCelulares.map(produto => (
-                        <option key={produto.id} value={produto.id}>
-                          {produto.nome} ({produto.categoria})
-                        </option>
-                      ))}
+                      {produtosMestreFiltrados.length === 0 ? (
+                        <option disabled value="">Nenhum produto cadastrado para esta categoria</option>
+                      ) : (
+                        produtosMestreFiltrados.map((prod) => (
+                          <option key={prod.id} value={prod.id}>
+                            {prod.nome} {prod.categoria ? `(${prod.categoria})` : ''}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
 
