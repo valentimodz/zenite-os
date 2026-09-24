@@ -121,7 +121,7 @@ export default defineConfig({
             return;
           }
 
-          // ROUTE: AI Feijão IA Estratégia de Giro (Gemini 2.5 Flash)
+          // ROUTE: AI Feijão IA Estratégia de Giro (Gemini 3.6 Flash)
           if (pathname === '/api/feijao-ia/estrategia') {
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Access-Control-Allow-Origin', '*');
@@ -133,7 +133,7 @@ export default defineConfig({
             req.on('end', async () => {
               try {
                 const payload = body ? JSON.parse(body) : {};
-                const defaultModelo = getEnvVar('VITE_GEMINI_MODEL') || process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+                const defaultModelo = getEnvVar('VITE_GEMINI_MODEL') || process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
                 const { prompt, modelo = defaultModelo, apiKey } = payload;
                 const effectiveApiKey =
                   apiKey ||

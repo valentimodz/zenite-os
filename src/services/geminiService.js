@@ -6,7 +6,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 export const GEMINI_MODEL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_MODEL) ||
   (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_MODEL || process.env?.GEMINI_MODEL)) ||
-  'gemini-2.5-flash';
+  'gemini-3.6-flash';
 
 export const CAIXA_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -174,10 +174,9 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const modelosTentativa = Array.from(new Set([
     GEMINI_MODEL,
-    'gemini-2.5-flash',
     'gemini-3.6-flash',
     'gemini-flash-latest'
-  ])).filter(m => m && !m.includes('1.5'));
+  ])).filter(m => m && !m.includes('1.5') && !m.includes('2.5'));
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
@@ -329,10 +328,9 @@ Seja direto e comercial.`;
   // 3. Chamada direta ao Google Gen AI REST API com modelo ultrarrápido Flash e maxOutputTokens 500
   const modelosTentativa = Array.from(new Set([
     GEMINI_MODEL,
-    'gemini-2.5-flash',
     'gemini-3.6-flash',
     'gemini-flash-latest'
-  ])).filter(m => m && !m.includes('1.5'));
+  ])).filter(m => m && !m.includes('1.5') && !m.includes('2.5'));
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
