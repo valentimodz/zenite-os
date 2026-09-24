@@ -99,7 +99,13 @@ REGRAS RÍGIDAS DE RECONHECIMENTO:
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
-  if (!apiKey) {
+  const effectiveKey =
+    apiKey ||
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    '';
+
+  if (!effectiveKey) {
     throw new Error('Chave da API Gemini não fornecida. Configure VITE_GEMINI_API_KEY no arquivo .env ou informe-a no modal.');
   }
 
@@ -113,7 +119,7 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveKey}`;
 
     for (let tentativa = 1; tentativa <= 3; tentativa++) {
       try {

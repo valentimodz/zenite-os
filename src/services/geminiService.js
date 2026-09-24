@@ -159,12 +159,12 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
     console.warn('[GeminiService] Backend /api/ai/parse-caixa indisponível, usando fallback direto via SDK no navegador:', err);
   }
 
-  // 2. Fallback resiliente: execução direta no navegador usando fetch nativo na API REST do Gemini
   const effectiveApiKey =
     customApiKey?.trim() ||
+    localStorage.getItem('gemini_api_key') ||
     localStorage.getItem('@zenite_gemini_api_key') ||
-    import.meta.env.VITE_GEMINI_API_KEY ||
-    import.meta.env.VITE_GOOGLE_GENAI_API_KEY ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_GENAI_API_KEY) ||
     '';
 
   if (!effectiveApiKey) {
@@ -276,9 +276,10 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
 export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja', customApiKey = '', promptPersonalizado = '', signal }) {
   const effectiveApiKey =
     customApiKey?.trim() ||
+    localStorage.getItem('gemini_api_key') ||
     localStorage.getItem('@zenite_gemini_api_key') ||
-    import.meta.env.VITE_GEMINI_API_KEY ||
-    import.meta.env.VITE_GOOGLE_GENAI_API_KEY ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_GENAI_API_KEY) ||
     '';
 
   const valorUnitario = Number(produto.preco_venda || produto.preco || produto.preco_custo || 0);

@@ -55,7 +55,12 @@ export default function ImportarCaixaRetroativoModal({
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('@zenite_gemini_api_key') || '');
+  const [customApiKey, setCustomApiKey] = useState(() => 
+    localStorage.getItem('gemini_api_key') ||
+    localStorage.getItem('@zenite_gemini_api_key') ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+    ''
+  );
   const [showKeyInput, setShowKeyInput] = useState(false);
 
   // Dados extraídos pela IA
@@ -129,13 +134,20 @@ export default function ImportarCaixaRetroativoModal({
     setSuccessMessage('');
 
     try {
+      const effectiveKey = customApiKey.trim() ||
+        localStorage.getItem('gemini_api_key') ||
+        localStorage.getItem('@zenite_gemini_api_key') ||
+        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+        '';
+
       if (customApiKey.trim()) {
+        localStorage.setItem('gemini_api_key', customApiKey.trim());
         localStorage.setItem('@zenite_gemini_api_key', customApiKey.trim());
       }
 
       const result = await parseCaixaComGeminiClient({
         file: selectedFile,
-        customApiKey: customApiKey.trim()
+        customApiKey: effectiveKey
       });
 
       if (!result || !result.vendas) {
@@ -526,12 +538,16 @@ export default function ImportarCaixaRetroativoModal({
               <button
                 type="button"
                 onClick={() => {
-                  if (customApiKey.trim()) {
-                    localStorage.setItem('@zenite_gemini_api_key', customApiKey.trim());
+                  const keyToSave = customApiKey.trim();
+                  if (keyToSave) {
+                    localStorage.setItem('gemini_api_key', keyToSave);
+                    localStorage.setItem('@zenite_gemini_api_key', keyToSave);
                   }
+                  setCountdownSeconds(0);
+                  setErrorMessage('');
                   setShowKeyInput(false);
                 }}
-                className="bg-[#6A0DAD] hover:bg-[#520885] text-white px-3 py-1.5 rounded-md font-bold text-xs shrink-0"
+                className="bg-[#6A0DAD] hover:bg-[#520885] text-white px-3 py-1.5 rounded-md font-bold text-xs shrink-0 cursor-pointer"
               >
                 Salvar
               </button>
