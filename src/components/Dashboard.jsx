@@ -2684,6 +2684,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria, filtroMes]);
 
+  // Log de inspeção de vendas no relatório solicitado para auditoria de vendedor e comissões
+  useEffect(() => {
+    if (Array.isArray(vendas) && vendas.length > 0) {
+      console.log('Amostra de vendas no relatório:', vendas.slice(0, 3).map(v => ({
+        id: v.id,
+        vendedor_nome: v.vendedor_nome,
+        vendedor_id: v.vendedor_id,
+        comissao: v.comissao,
+        objeto_completo: v
+      })));
+    }
+  }, [vendas]);
+
   // Recarregar catálogo de produtos (invalidação de cache / stale data) ao alternar para 'estoque' ou 'catalogo_mestre'
   useEffect(() => {
     const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
@@ -3872,6 +3885,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             created_at,
             vendedor_nome,
             vendedor_id,
+            usuario_id,
             valor_total,
             desconto,
             valor_desconto,
@@ -3886,6 +3900,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             produto_nome,
             cliente_nome,
             filiais ( nome ),
+            usuarios:vendedor_id ( id, nome ),
             itens_venda (
               id,
               produto_id,
@@ -3905,6 +3920,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             created_at,
             vendedor_nome,
             vendedor_id,
+            usuario_id,
             valor_total,
             desconto,
             valor_desconto,
@@ -3919,6 +3935,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             produto_nome,
             cliente_nome,
             filiais ( nome ),
+            usuarios:vendedor_id ( id, nome ),
             itens_venda ( * )
           `;
 
@@ -4895,6 +4912,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           treener_id,
           vendedor_id,
           vendedor_nome,
+          usuario_id,
+          usuarios:vendedor_id ( id, nome ),
           produto_nome,
           quantidade,
           imei,
@@ -25560,9 +25579,62 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 );
                               }
 
+                              // Mapeamento e Fallback Seguro do Nome do Vendedor
+                              const mapaFuncionarios = {};
+                              (vendedores || []).forEach(v => {
+                                if (v && v.id) mapaFuncionarios[String(v.id)] = v;
+                              });
+                              (teamMembers || []).forEach(m => {
+                                if (m && m.id && !mapaFuncionarios[String(m.id)]) mapaFuncionarios[String(m.id)] = m;
+                              });
+
+                              const extrairNomeVendedor = (venda) => {
+                                if (!venda) return 'Venda Balcão';
+
+                                const nome =
+                                  venda.vendedor_nome ||
+                                  venda.nome_vendedor ||
+                                  venda.vendedor?.nome ||
+                                  venda.usuario?.nome ||
+                                  venda.usuarios?.nome ||
+                                  venda.funcionario?.nome ||
+                                  venda.funcionarios?.nome ||
+                                  venda.operador_nome ||
+                                  venda.usuario_nome ||
+                                  venda.profiles?.nome ||
+                                  venda.profile?.nome;
+
+                                if (nome && String(nome).trim() !== '' && String(nome).trim().toLowerCase() !== 'undefined' && String(nome).trim().toLowerCase() !== 'null') {
+                                  return String(nome).trim();
+                                }
+
+                                // Se tiver apenas vendedor_id ou usuario_id, verificar mapa/lista de funcionários em cache
+                                const idAlvo = venda.vendedor_id || venda.usuario_id || venda.funcionario_id;
+                                if (idAlvo && mapaFuncionarios[String(idAlvo)]) {
+                                  const fNome = mapaFuncionarios[String(idAlvo)].nome;
+                                  if (fNome && String(fNome).trim() !== '') return String(fNome).trim();
+                                }
+
+                                // Se houver id no profile conectado
+                                if (idAlvo && profile && String(profile.id) === String(idAlvo) && profile.nome) {
+                                  return String(profile.nome).trim();
+                                }
+
+                                // Se houver nos itens_venda
+                                if (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0) {
+                                  const itVId = venda.itens_venda[0]?.vendedor_id;
+                                  if (itVId && mapaFuncionarios[String(itVId)]) {
+                                    const itNome = mapaFuncionarios[String(itVId)].nome;
+                                    if (itNome && String(itNome).trim() !== '') return String(itNome).trim();
+                                  }
+                                }
+
+                                return 'Venda Balcão';
+                              };
+
                               return vendasFiltradasMes.map(sale => {
-                                // 1. Coluna VENDEDOR: exibir venda.vendedor_nome || 'Venda Balcão'
-                                const vendedorNome = sale.vendedor_nome || sale.vendedor?.nome || sale.profiles?.nome || 'Venda Balcão';
+                                // 1. Coluna VENDEDOR com fallback abrangente e mapa de funcionários
+                                const vendedorNome = extrairNomeVendedor(sale);
 
                                 // 2. Coluna PRODUTO: exibir o nome do primeiro item de itens_venda ou, caso o array esteja vazio, exibir 'Venda Direta / Aparelho'
                                 const primeiroItemNome = Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0
@@ -25575,7 +25647,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 const filialNome = sale.filiais?.nome || filiais.find(f => f.id === sale.filial_id)?.nome || 'Monkey Shop';
 
                                 const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
-                                const comissaoFinal = calcularComissaoItem(sale);
+                                const comissaoRegistrada = Number(sale.comissao ?? 0);
+                                const comissaoFinal = comissaoRegistrada > 0 ? comissaoRegistrada : calcularComissaoItem(sale);
 
                                 return (
                                   <tr key={sale.id} className="hover:bg-purple-950/5 print:hover:bg-transparent transition-colors">

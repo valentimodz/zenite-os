@@ -249,7 +249,7 @@ export default function ModalDetalheRelatorio({
       }
 
       // Por vendedor
-      const vendedor = v.vendedor_nome || 'Vendedor Padrão';
+      const vendedor = v.vendedor_nome || v.nome_vendedor || v.vendedor?.nome || v.usuarios?.nome || v.usuario?.nome || v.operador_nome || 'Vendedor Padrão';
       if (!porVendedor[vendedor]) porVendedor[vendedor] = { valor: 0, count: 0, comissao: 0 };
       porVendedor[vendedor].valor += valor;
       porVendedor[vendedor].count += 1;
