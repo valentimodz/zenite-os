@@ -99,14 +99,15 @@ REGRAS RÍGIDAS DE RECONHECIMENTO:
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
-  const effectiveKey =
+  const effectiveKey = (
     apiKey ||
     process.env.VITE_GEMINI_API_KEY ||
     process.env.GEMINI_API_KEY ||
-    '';
+    ''
+  ).trim().replace(/^["']|["']$/g, '').trim();
 
   if (!effectiveKey) {
-    throw new Error('Chave da API Gemini não fornecida. Configure VITE_GEMINI_API_KEY no arquivo .env ou informe-a no modal.');
+    throw new Error('Chave da API Gemini não configurada. Por favor, informe sua chave de API no modal.');
   }
 
   // Modelos para chamada direta REST ultrarrápidos
@@ -119,7 +120,7 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(effectiveKey)}`;
 
     for (let tentativa = 1; tentativa <= 3; tentativa++) {
       try {
@@ -155,7 +156,8 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
         const res = await fetch(url, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-goog-api-key': effectiveKey
           },
           body: JSON.stringify(requestBody)
         });
@@ -170,6 +172,13 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
 
         if (!res.ok) {
           const errMessage = data?.error?.message || `Erro HTTP ${res.status}`;
+          if (
+            res.status === 401 ||
+            errMessage.toLowerCase().includes('invalid authentication credentials') ||
+            errMessage.toLowerCase().includes('unauthenticated')
+          ) {
+            throw new Error('Erro de autenticação da chave Gemini: Credenciais inválidas ou não autorizadas pelo Google AI Studio. Verifique sua chave em aistudio.google.com/apikey.');
+          }
           // Se for 404 de descontinuação de modelo para nova chave, tenta o modelo alternativo imediatamente
           if (res.status === 404 || errMessage.includes('no longer available')) {
             console.warn(`[GeminiBackend] Modelo ${modelo} retornou 404: ${errMessage}`);
@@ -195,6 +204,9 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
       } catch (err) {
         lastError = err;
         const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('401') || msg.includes('autenticação') || msg.includes('authentication')) {
+          throw err;
+        }
         if (msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
           throw err;
         }

@@ -94,14 +94,15 @@ export default defineConfig({
                   return;
                 }
 
-                const effectiveApiKey =
+                const effectiveApiKey = (
                   apiKey ||
                   getEnvVar('VITE_GEMINI_API_KEY') ||
                   getEnvVar('VITE_GOOGLE_GENAI_API_KEY') ||
                   getEnvVar('GEMINI_API_KEY') ||
                   process.env.VITE_GEMINI_API_KEY ||
                   process.env.GEMINI_API_KEY ||
-                  '';
+                  ''
+                ).trim().replace(/^["']|["']$/g, '').trim();
 
                 const { parseCaixaComGemini } = await import('./src/services/geminiBackend.cjs');
                 const result = await parseCaixaComGemini({
@@ -135,14 +136,15 @@ export default defineConfig({
                 const payload = body ? JSON.parse(body) : {};
                 const defaultModelo = getEnvVar('VITE_GEMINI_MODEL') || process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
                 const { prompt, modelo = defaultModelo, apiKey } = payload;
-                const effectiveApiKey =
+                const effectiveApiKey = (
                   apiKey ||
                   getEnvVar('VITE_GEMINI_API_KEY') ||
                   getEnvVar('VITE_GOOGLE_GENAI_API_KEY') ||
                   getEnvVar('GEMINI_API_KEY') ||
                   process.env.VITE_GEMINI_API_KEY ||
                   process.env.GEMINI_API_KEY ||
-                  '';
+                  ''
+                ).trim().replace(/^["']|["']$/g, '').trim();
 
                 if (!effectiveApiKey) {
                   res.statusCode = 200;
@@ -152,10 +154,13 @@ export default defineConfig({
                   return;
                 }
 
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveApiKey}`;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(effectiveApiKey)}`;
                 const apiRes = await fetch(url, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': effectiveApiKey
+                  },
                   body: JSON.stringify({
                     contents: [{ role: 'user', parts: [{ text: prompt }] }],
                     generationConfig: {

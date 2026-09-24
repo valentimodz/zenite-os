@@ -130,7 +130,7 @@ export default function ImportarCaixaRetroativoModal({
   };
 
   const handleSalvarChaveGemini = () => {
-    const keyToSave = (customApiKey || '').trim();
+    const keyToSave = (customApiKey || '').trim().replace(/^["']|["']$/g, '').trim();
 
     if (!validarChaveGemini(keyToSave)) {
       const msgErro = 'Por favor, insira uma chave de API válida com pelo menos 20 caracteres.';
@@ -166,14 +166,24 @@ export default function ImportarCaixaRetroativoModal({
     setSuccessMessage('');
 
     try {
-      const effectiveKey = (customApiKey || '').trim() ||
-        localStorage.getItem('gemini_api_key') ||
-        localStorage.getItem('@zenite_gemini_api_key') ||
-        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
-        '';
+      const effectiveKey = (
+        (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
+        (localStorage.getItem('gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
+        (localStorage.getItem('@zenite_gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
+        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
+        ''
+      ).trim();
 
-      if (effectiveKey && !validarChaveGemini(effectiveKey)) {
-        const msgErro = 'Chave da API do Gemini inválida ou incompleta. Verifique a chave configurada.';
+      if (!effectiveKey) {
+        const msgErro = "Chave da API Gemini não configurada. Por favor, clique no botão 'Chave Gemini' no topo do modal para informar sua chave de API.";
+        setErrorMessage(msgErro);
+        setShowKeyInput(true);
+        setIsProcessing(false);
+        return;
+      }
+
+      if (!validarChaveGemini(effectiveKey)) {
+        const msgErro = "Chave da API Gemini inválida ou muito curta. Por favor, configure uma chave válida no botão 'Chave Gemini'.";
         setKeyValidationError(msgErro);
         setErrorMessage(msgErro);
         setShowKeyInput(true);
@@ -182,9 +192,9 @@ export default function ImportarCaixaRetroativoModal({
       }
 
       if (customApiKey.trim()) {
-        localStorage.setItem('gemini_api_key', customApiKey.trim());
-        localStorage.setItem('@zenite_gemini_api_key', customApiKey.trim());
-        redefinirInstanciaGemini(customApiKey.trim());
+        localStorage.setItem('gemini_api_key', effectiveKey);
+        localStorage.setItem('@zenite_gemini_api_key', effectiveKey);
+        redefinirInstanciaGemini(effectiveKey);
       }
 
       const result = await parseCaixaComGeminiClient({
@@ -233,7 +243,15 @@ export default function ImportarCaixaRetroativoModal({
     } catch (err) {
       console.error('Erro no processamento da IA:', err);
       const errMsg = err?.message || String(err || '');
-      if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota exceeded') || errMsg.toLowerCase().includes('resource_exhausted')) {
+      if (
+        errMsg.includes('401') ||
+        errMsg.toLowerCase().includes('invalid authentication credentials') ||
+        errMsg.toLowerCase().includes('unauthenticated') ||
+        errMsg.toLowerCase().includes('erro de autenticação')
+      ) {
+        setErrorMessage("Erro de autenticação da chave Gemini: Credenciais inválidas ou não autorizadas pelo Google AI Studio. Verifique sua chave em aistudio.google.com/apikey e atualize-a no botão 'Chave Gemini' acima.");
+        setShowKeyInput(true);
+      } else if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota exceeded') || errMsg.toLowerCase().includes('resource_exhausted')) {
         const match = errMsg.match(/retry in ([0-9.]+)s/i);
         const segundos = match ? Math.ceil(parseFloat(match[1])) : 60;
         setCountdownSeconds(segundos);

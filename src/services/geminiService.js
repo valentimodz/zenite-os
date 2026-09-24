@@ -9,12 +9,33 @@ export const GEMINI_MODEL =
   'gemini-3.6-flash';
 
 /**
+ * Remove espaços, quebras de linha e aspas acidentais da chave de API
+ */
+export function limparApiKey(chave) {
+  if (!chave || typeof chave !== 'string') return '';
+  return chave.trim().replace(/^["']|["']$/g, '').trim();
+}
+
+/**
+ * Obtém a chave Gemini de forma robusta e limpa das fontes disponíveis
+ */
+export function getEffectiveApiKey(customApiKey = '') {
+  return (
+    limparApiKey(customApiKey) ||
+    (typeof window !== 'undefined' ? (limparApiKey(localStorage.getItem('gemini_api_key')) || limparApiKey(localStorage.getItem('@zenite_gemini_api_key'))) : '') ||
+    (typeof import.meta !== 'undefined' ? (limparApiKey(import.meta.env?.VITE_GEMINI_API_KEY) || limparApiKey(import.meta.env?.VITE_GOOGLE_GENAI_API_KEY)) : '') ||
+    (typeof process !== 'undefined' ? (limparApiKey(process.env?.VITE_GEMINI_API_KEY) || limparApiKey(process.env?.GEMINI_API_KEY)) : '') ||
+    ''
+  );
+}
+
+/**
  * Validação flexível da Chave Google Gemini:
  * Aceita qualquer string não vazia com tamanho suficiente (>= 20 caracteres),
  * suportando prefixos tradicionais (AIzaSy...) e novos formatos do Google AI Studio (AQ....).
  */
 export const validarChaveGemini = (chave) => {
-  const limpa = (chave || '').trim();
+  const limpa = limparApiKey(chave);
   return limpa.length >= 20; // Validação flexível que aceita AIzaSy..., AQ..., etc.
 };
 
@@ -23,14 +44,10 @@ let geminiClientInstance = null;
 let activeApiKey = null;
 
 /**
- * Força a redefinição imediata da instância do serviço Gemini com a nova credencial
+ * Força a redefinição imediata da instância do serviço Gemini com a nova credencial limpa
  */
 export function redefinirInstanciaGemini(novaChave = '') {
-  const chaveLimpa = (novaChave || '').trim() ||
-    (typeof window !== 'undefined' && (localStorage.getItem('gemini_api_key') || localStorage.getItem('@zenite_gemini_api_key'))) ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_GENAI_API_KEY) ||
-    '';
+  const chaveLimpa = limparApiKey(novaChave) || getEffectiveApiKey();
 
   activeApiKey = chaveLimpa;
 
@@ -53,8 +70,7 @@ export function redefinirInstanciaGemini(novaChave = '') {
  * Retorna a instância atual do Gemini SDK ou inicializa se necessário
  */
 export function getGeminiInstance(chave = '') {
-  const targetKey = (chave || '').trim() ||
-    (typeof window !== 'undefined' ? (localStorage.getItem('gemini_api_key') || localStorage.getItem('@zenite_gemini_api_key')) : '');
+  const targetKey = limparApiKey(chave) || getEffectiveApiKey();
   if (!geminiClientInstance || (targetKey && targetKey !== activeApiKey)) {
     return redefinirInstanciaGemini(targetKey);
   }
@@ -185,7 +201,22 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
   const base64Data = await fileToBase64(file);
 
-  // 1. Tentar primeiro o backend Vite (/api/ai/parse-caixa)
+  const effectiveApiKey = getEffectiveApiKey(customApiKey);
+
+  if (!effectiveApiKey) {
+    throw new Error("Chave da API Gemini não configurada. Por favor, clique no botão 'Chave Gemini' no topo do modal para informar sua chave de API.");
+  }
+
+  if (!validarChaveGemini(effectiveApiKey)) {
+    throw new Error('Chave da API Gemini inválida ou incompleta. Forneça uma chave de API válida com pelo menos 20 caracteres.');
+  }
+
+  // Garantir que a instância esteja sincronizada com a credencial válida
+  if (!geminiClientInstance || activeApiKey !== effectiveApiKey) {
+    redefinirInstanciaGemini(effectiveApiKey);
+  }
+
+  // 1. Tentar primeiro o backend Vite (/api/ai/parse-caixa) passando a chave limpa
   try {
     const response = await fetch('/api/ai/parse-caixa', {
       method: 'POST',
@@ -195,7 +226,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
       body: JSON.stringify({
         fileBase64: base64Data,
         mimeType: mimeType,
-        apiKey: customApiKey
+        apiKey: effectiveApiKey
       })
     });
 
@@ -212,27 +243,6 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
     console.warn('[GeminiService] Backend /api/ai/parse-caixa indisponível, usando fallback direto via SDK no navegador:', err);
   }
 
-  const effectiveApiKey =
-    customApiKey?.trim() ||
-    localStorage.getItem('gemini_api_key') ||
-    localStorage.getItem('@zenite_gemini_api_key') ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_GENAI_API_KEY) ||
-    '';
-
-  if (!effectiveApiKey) {
-    throw new Error('Chave da API Gemini não localizada. Por favor, adicione VITE_GEMINI_API_KEY no .env ou informe sua chave no campo.');
-  }
-
-  if (!validarChaveGemini(effectiveApiKey)) {
-    throw new Error('Chave da API Gemini inválida ou incompleta. Forneça uma chave de API válida com pelo menos 20 caracteres.');
-  }
-
-  // Garantir que a instância esteja sincronizada com a credencial válida
-  if (!geminiClientInstance || activeApiKey !== effectiveApiKey) {
-    redefinirInstanciaGemini(effectiveApiKey);
-  }
-
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const modelosTentativa = Array.from(new Set([
     GEMINI_MODEL,
@@ -242,7 +252,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveApiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(effectiveApiKey)}`;
 
     for (let tentativa = 1; tentativa <= 3; tentativa++) {
       try {
@@ -278,7 +288,8 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
         const res = await fetch(url, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'x-goog-api-key': effectiveApiKey
           },
           body: JSON.stringify(requestBody)
         });
@@ -293,6 +304,13 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
 
         if (!res.ok) {
           const errMessage = data?.error?.message || `Erro HTTP ${res.status}`;
+          if (
+            res.status === 401 ||
+            errMessage.toLowerCase().includes('invalid authentication credentials') ||
+            errMessage.toLowerCase().includes('unauthenticated')
+          ) {
+            throw new Error("Erro de autenticação da chave Gemini: Credenciais inválidas ou não autorizadas pelo Google AI Studio. Verifique sua chave em aistudio.google.com/apikey e reconfigure-a no botão 'Chave Gemini'.");
+          }
           if (res.status === 404 || errMessage.includes('no longer available')) {
             console.warn(`[GeminiClient] Modelo ${modelo} retornou 404: ${errMessage}`);
             lastError = new Error(errMessage);
@@ -316,6 +334,9 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
       } catch (err) {
         lastError = err;
         const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('401') || msg.includes('autenticação') || msg.includes('authentication')) {
+          throw err;
+        }
         if (msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
           throw err;
         }
@@ -336,13 +357,7 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '' }) {
  * Gera uma estratégia de giro acelerado para um produto parado no estoque via Gemini 1.5 Flash (Ultrarrápido)
  */
 export async function gerarEstrategiaGiroProduto({ produto, filialNome = 'Loja', customApiKey = '', promptPersonalizado = '', signal }) {
-  const effectiveApiKey =
-    customApiKey?.trim() ||
-    localStorage.getItem('gemini_api_key') ||
-    localStorage.getItem('@zenite_gemini_api_key') ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_GENAI_API_KEY) ||
-    '';
+  const effectiveApiKey = getEffectiveApiKey(customApiKey);
 
   const valorUnitario = Number(produto.preco_venda || produto.preco || produto.preco_custo || 0);
   const diasSemGiro = Number(
@@ -404,10 +419,13 @@ Seja direto e comercial.`;
 
   for (const modelo of modelosTentativa) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${effectiveApiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(effectiveApiKey)}`;
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': effectiveApiKey
+        },
         signal,
         body: JSON.stringify({
           contents: [{
