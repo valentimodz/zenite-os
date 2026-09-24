@@ -166,10 +166,21 @@ export default function ModalDetalheRelatorio({
           return acc;
         }, {});
 
-        const vendasFormatadas = (resVendas.data || []).map(v => ({
-          ...v,
-          vendedor_nome: v.vendedor_nome || profilesMap[v.vendedor_id] || 'Vendedor'
-        }));
+        const vistosModal = new Set();
+        const vendasFormatadas = (resVendas.data || [])
+          .filter(v => {
+            const chave = v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`;
+            if (!chave || vistosModal.has(chave)) return false;
+            vistosModal.add(chave);
+            return true;
+          })
+          .map(v => ({
+            ...v,
+            vendedor_nome: v.vendedor_nome || profilesMap[v.vendedor_id] || 'Vendedor'
+          }));
+
+        console.log('[ModalDetalheRelatorio] Total de registros recebidos:', vendasFormatadas.length);
+        console.log('[ModalDetalheRelatorio] IDs das vendas listadas:', vendasFormatadas.map(v => v.id));
 
         setVendas(vendasFormatadas);
         setRegrasComissoes(resRegras.data || []);

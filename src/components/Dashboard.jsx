@@ -4094,7 +4094,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             }
           }
 
-          return data || [];
+          // Deduplicação no carregamento por ID da venda (ou chave composta única)
+          const vistosFetch = new Set();
+          const vendasUnicas = (data || []).filter(venda => {
+            const chave = venda?.id || `${venda?.created_at}_${venda?.valor_total}_${venda?.vendedor_nome || venda?.vendedor_id}`;
+            if (!chave || vistosFetch.has(chave)) return false;
+            vistosFetch.add(chave);
+            return true;
+          });
+
+          console.log('[Dashboard] Total de registros recebidos:', vendasUnicas.length);
+          console.log('[Dashboard] IDs das vendas listadas:', vendasUnicas.map(v => v.id));
+
+          return vendasUnicas;
         } catch (err) {
           console.error("[Dashboard] Erro ao buscar vendas no Supabase:", err);
           return [];
@@ -25748,20 +25760,28 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </thead>
                           <tbody className="divide-y divide-[#222222]/50">
                             {(() => {
-                              const vendasFiltradasMes = (vendas || []).filter(sale => {
-                                if (!filtroMes) return true;
-                                const raw = String(sale.created_at || sale.data || '');
-                                if (raw.startsWith(filtroMes)) return true;
-                                if (!raw) return true;
-                                const d = new Date(raw);
-                                if (isNaN(d.getTime())) return false;
-                                const [yearStr, monthStr] = filtroMes.split('-');
-                                const y = parseInt(yearStr, 10);
-                                const m = parseInt(monthStr, 10);
-                                // Abrange todo o mês de setembro de 2026 em UTC e horário local
-                                return (d.getUTCFullYear() === y && (d.getUTCMonth() + 1) === m) ||
-                                       (d.getFullYear() === y && (d.getMonth() + 1) === m);
-                              });
+                              const vistosRelatorio = new Set();
+                              const vendasFiltradasMes = (vendas || [])
+                                .filter(sale => {
+                                  if (!filtroMes) return true;
+                                  const raw = String(sale.created_at || sale.data || '');
+                                  if (raw.startsWith(filtroMes)) return true;
+                                  if (!raw) return true;
+                                  const d = new Date(raw);
+                                  if (isNaN(d.getTime())) return false;
+                                  const [yearStr, monthStr] = filtroMes.split('-');
+                                  const y = parseInt(yearStr, 10);
+                                  const m = parseInt(monthStr, 10);
+                                  // Abrange todo o mês selecionado em UTC e horário local
+                                  return (d.getUTCFullYear() === y && (d.getUTCMonth() + 1) === m) ||
+                                         (d.getFullYear() === y && (d.getMonth() + 1) === m);
+                                })
+                                .filter(sale => {
+                                  const chave = sale?.id || `${sale?.created_at}_${sale?.valor_total}_${sale?.vendedor_nome || sale?.vendedor_id}`;
+                                  if (!chave || vistosRelatorio.has(chave)) return false;
+                                  vistosRelatorio.add(chave);
+                                  return true;
+                                });
 
                               if (vendasFiltradasMes.length === 0) {
                                 return (

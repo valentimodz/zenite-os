@@ -182,15 +182,23 @@ export default function RankingVendedores({
           data = fallbackQ.data || [];
         } else {
           // Fallback para filtrar initialVendas em memória com timezone safety
-          data = (initialVendas || []).filter(v => {
-            const d = v.created_at || v.data || v.date;
-            if (!d) return false;
-            return String(d).startsWith(filtroMes);
-          });
+            data = (initialVendas || []).filter(v => {
+              const d = v.created_at || v.data || v.date;
+              if (!d) return false;
+              return String(d).startsWith(filtroMes);
+            });
+          }
         }
-      }
 
-      setVendasPeriodo(data || []);
+        const vistosRanking = new Set();
+        const vendasUnicas = (data || []).filter(v => {
+          const chave = v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`;
+          if (!chave || vistosRanking.has(chave)) return false;
+          vistosRanking.add(chave);
+          return true;
+        });
+
+        setVendasPeriodo(vendasUnicas);
     } catch (err) {
       console.error('[RankingVendedores] Exceção ao consultar vendas:', err);
     } finally {
