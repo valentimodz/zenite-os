@@ -38,6 +38,12 @@ import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
 import { parseMonetaryValue, formatCurrency, getFundoSessao, obterUuidPuro } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
+
+const extrairNumero = (valor) => {
+  if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
+  if (!valor) return 0;
+  return parseMonetaryValue(valor);
+};
 const FISCAL_MAP = {
   'Celulares': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
   'Tablets': { ncm: '85171300', cest: '2105300', cfop: '5405', origem: '0' },
@@ -1054,6 +1060,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     estoqueMinimo: '',
     preco: '',
     precoCusto: '',
+    preco_custo: 0,
+    custo: 0,
+    valor_custo: 0,
     ncm: '',
     cest: '',
     cfop: '5102',
@@ -1437,7 +1446,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
     const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
 
-    const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
+    const dbClient = supabase;
     const corTrimmed = novaCor ? String(novaCor).trim() : null;
     const targetStr = String(imeiIdOrNumber).trim();
     const imeiStr = numeroImeiFallback ? String(numeroImeiFallback).trim() : null;
@@ -6382,8 +6391,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
     const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
 
-    // Cliente com permissão estendida (Super Admin / Admin bypass RLS cross-branch)
-    const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
+    // Cliente autenticado com sessão
+    const dbClient = supabase;
     const resolvedFilialId = itemFilialId || activeFilialId || filiais[0]?.id;
 
     // Helper de correspondência resiliente (ID numérico/string, catalogo_id e Nome normalizado)
@@ -7189,26 +7198,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       (catData || []).forEach(c => {
         if (c && (c.nome || c.id)) {
           const key = String(c.nome || c.id).trim().toLowerCase();
-          mapModelos.set(key, { ...c });
+          const cCusto = extrairNumero(c.preco_custo ?? c.custo ?? c.valor_custo ?? c.preco_compra ?? 0);
+          mapModelos.set(key, {
+            ...c,
+            catalogo_id: c.id,
+            preco_custo: cCusto,
+            custo: cCusto,
+            valor_custo: cCusto
+          });
         }
       });
       (prodData || []).forEach(p => {
         if (p && (p.nome || p.id)) {
           const key = String(p.nome || p.id).trim().toLowerCase();
           const master = mapModelos.get(key) || {};
+          const cMaster = extrairNumero(master.preco_custo ?? master.custo ?? master.valor_custo ?? master.preco_compra ?? 0);
+          const cProd = extrairNumero(p.preco_custo ?? p.custo ?? p.valor_custo ?? p.preco_compra ?? 0);
+          const precoCustoConsolidado = cProd > 0 ? cProd : (cMaster > 0 ? cMaster : (cProd || cMaster || 0));
+
           mapModelos.set(key, {
             ...master,
             ...p,
             id: p.id || master.id,
             produto_id: p.id,
-            catalogo_id: master.id || null,
+            catalogo_id: master.id || master.catalogo_id || null,
             nome: master.nome || p.nome,
             codigo_barras: master.codigo_barras || p.codigo_barras,
             sku: master.sku || p.sku,
             categoria: master.categoria || p.categoria,
             tipo: master.tipo || p.tipo,
             preco: master.preco !== undefined && master.preco !== null ? master.preco : p.preco,
-            preco_custo: master.preco_custo !== undefined && master.preco_custo !== null ? master.preco_custo : p.preco_custo
+            preco_custo: precoCustoConsolidado,
+            custo: precoCustoConsolidado,
+            valor_custo: precoCustoConsolidado
           });
         }
       });
@@ -7309,9 +7331,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     if (!p) return;
     console.log('[DEBUG EDIÇÃO] Produto Selecionado:', p.produto_id || p.id, p.nome);
 
+    const custoDetectado = p.preco_custo ?? p.custo ?? p.valor_custo ?? p.preco_compra ?? 0;
+    const custoNumerico = extrairNumero(custoDetectado);
+    const precoDetectado = p.preco ?? p.preco_venda ?? p.valor ?? 0;
+    const precoNumerico = extrairNumero(precoDetectado);
+
     const realId = p.produto_id || p.id || null;
     const mapped = {
       id: realId,
+      catalogo_id: p.catalogo_id || (p.produto_id ? null : p.id) || null,
       nome: p.nome || '',
       tipo: p.tipo || 'ACESSORIO',
       categoria: p.categoria || '',
@@ -7321,8 +7349,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       numeroSerie: p.numero_serie || p.numeroSerie || '',
       cor: p.cor || '',
       estoqueMinimo: p.estoque_minimo !== undefined && p.estoque_minimo !== null ? String(p.estoque_minimo) : '',
-      preco: p.preco !== undefined && p.preco !== null ? String(p.preco) : '',
-      precoCusto: p.preco_custo !== undefined && p.preco_custo !== null ? String(p.preco_custo) : '',
+      preco: precoDetectado !== undefined && precoDetectado !== null ? String(precoDetectado) : '',
+      precoCusto: custoDetectado !== undefined && custoDetectado !== null && custoDetectado !== '' ? String(custoDetectado) : '',
+      preco_custo: custoNumerico,
+      custo: custoNumerico,
+      valor_custo: custoNumerico,
       ncm: p.ncm || '',
       cest: p.cest || '',
       cfop: p.cfop || '5102',
@@ -7419,7 +7450,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         if (matchedProd.tipo) setTipoProduto(matchedProd.tipo);
         if (matchedProd.categoria) setCategoriaProduto(matchedProd.categoria);
         if (matchedProd.preco !== undefined && matchedProd.preco !== null) setPrecoProduto(String(matchedProd.preco));
-        if (matchedProd.preco_custo !== undefined && matchedProd.preco_custo !== null) setPrecoCustoProduto(String(matchedProd.preco_custo));
+        const custoMatched = matchedProd.preco_custo ?? matchedProd.custo ?? matchedProd.valor_custo ?? matchedProd.preco_compra ?? 0;
+        if (custoMatched !== undefined && custoMatched !== null) setPrecoCustoProduto(String(custoMatched));
         if (matchedProd.sku) setSkuProduto(matchedProd.sku);
         if (matchedProd.ncm) setNcmProduto(matchedProd.ncm || '');
         if (matchedProd.cest) setCestProduto(matchedProd.cest || '');
@@ -7776,12 +7808,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return;
       }
 
+      const custoNumerico = extrairNumero(precoCustoProduto);
+      const precoNumerico = extrairNumero(precoProduto);
+
       const payload = {
         empresa_id: targetEmpresaId,
         nome: nomeProduto.trim(),
         tipo: tipoProduto,
         categoria: categoriaProduto,
-        preco: parseFloat(precoProduto || 0),
+        preco: precoNumerico,
+        preco_custo: custoNumerico,
         sku: skuProduto.trim() || null,
         codigo_barras: codigoBarrasFinal,
         numero_serie: numeroSerie.trim() || null,
@@ -7795,32 +7831,32 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       };
 
       if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role)) {
-        payload.preco_custo = parseFloat(precoCustoProduto || 0);
+        payload.preco_custo = custoNumerico;
       }
 
-      console.log("🔥 [AUDITORIA PAYLOAD PRODUTO] Enviando ao Supabase:", payload);
+      console.log('Payload enviado no UPDATE do produto:', payload);
 
       const targetId = formData.id || editingCatalogoProduto?.id;
       const isEditMode = Boolean(targetId);
 
-      const userRoleUpper = String(profile?.role || profile?.cargo || profileDataProps?.role || '').toUpperCase();
-      const isSuperAdminOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MASTER', 'DONO', 'OWNER'].includes(userRoleUpper);
-      const dbClient = (isSuperAdminOrAdmin && supabaseAdmin) ? supabaseAdmin : supabase;
+      // Usar cliente autenticado (supabase) para preservar JWT de sessão e permissões
+      const dbClient = supabase;
 
       if (isProdutoExistenteCatalogo && produtoExistenteMaster) {
         // Se o produto já existia no catálogo mestre, reaproveitamos o registro e apenas atualizamos o preço/custo se alterado
         let { error: updateExistingErr } = await dbClient
           .from('produtos_catalogo')
           .update({
-            preco: parseFloat(precoProduto || produtoExistenteMaster.preco || 0),
-            preco_custo: parseFloat(precoCustoProduto || produtoExistenteMaster.preco_custo || 0)
+            preco: precoNumerico || produtoExistenteMaster.preco || 0,
+            preco_custo: custoNumerico || produtoExistenteMaster.preco_custo || 0
           })
           .eq('id', produtoExistenteMaster.id);
 
         if (updateExistingErr) {
+          console.error('Erro ao atualizar produto no Supabase:', updateExistingErr);
           console.warn("Aviso ao atualizar preço do produto existente no catálogo:", updateExistingErr);
         }
-        var data = { ...produtoExistenteMaster, preco: parseFloat(precoProduto || produtoExistenteMaster.preco || 0) };
+        var data = { ...produtoExistenteMaster, preco: precoNumerico || produtoExistenteMaster.preco || 0, preco_custo: custoNumerico || produtoExistenteMaster.preco_custo || 0 };
         showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
       } else if (isEditMode && targetId) {
         // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE E PRODUTOS FÍSICOS
@@ -7836,7 +7872,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           categoria: categoriaProduto,
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
-          preco: Number(parseFloat(precoProduto || 0))
+          preco: precoNumerico,
+          preco_custo: custoNumerico
         };
         if (codigoBarrasFinal) payloadProdutosFisico.codigo_barras = codigoBarrasFinal;
         if (corCatalogoProduto && corCatalogoProduto.trim()) payloadProdutosFisico.cor = corCatalogoProduto.trim();
@@ -7851,7 +7888,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           .select();
 
         if (errorUpdated) {
-          console.error('[ERRO SUPABASE]', errorUpdated);
+          console.error('Erro ao atualizar produto no Supabase:', errorUpdated);
         }
 
         if (dataUpdated && dataUpdated.length === 0) {
@@ -7873,7 +7910,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 .eq('codigo_barras', String(codigoParaSincronizar).trim())
                 .select();
 
-              if (!syncBarErr && syncBarData && syncBarData.length > 0) {
+              if (syncBarErr) {
+                console.error('Erro ao atualizar produto no Supabase:', syncBarErr);
+              } else if (syncBarData && syncBarData.length > 0) {
                 updateSuccess = true;
               }
             } catch (errBar) {
@@ -7885,13 +7924,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           const nomesParaSincronizar = Array.from(new Set([nomeOriginal?.trim(), nomeProduto?.trim()].filter(Boolean)));
           for (const n of nomesParaSincronizar) {
             try {
-              const { error: syncNomeErr } = await dbClient
+              const { data: syncNomeData, error: syncNomeErr } = await dbClient
                 .from('produtos')
                 .update(payloadProdutosFisico)
                 .eq('empresa_id', targetEmpresaId)
-                .ilike('nome', n);
+                .ilike('nome', n)
+                .select();
 
-              if (!syncNomeErr) {
+              if (syncNomeErr) {
+                console.error('Erro ao atualizar produto no Supabase:', syncNomeErr);
+              } else if (syncNomeData && syncNomeData.length > 0) {
                 updateSuccess = true;
               }
             } catch (errSync) {
@@ -7906,19 +7948,46 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             nome: String(nomeProduto || '').trim(),
             tipo: tipoProduto,
             categoria: categoriaProduto,
-            preco: Number(parseFloat(precoProduto || 0))
+            preco: precoNumerico,
+            preco_custo: custoNumerico
           };
           if (targetEmpresaId) payloadCatalogoSanitizado.empresa_id = targetEmpresaId;
+          if (skuProduto?.trim()) payloadCatalogoSanitizado.sku = skuProduto.trim();
+          if (codigoBarrasFinal) payloadCatalogoSanitizado.codigo_barras = codigoBarrasFinal;
+          if (corCatalogoProduto?.trim()) payloadCatalogoSanitizado.cor = corCatalogoProduto.trim();
+          if (ncmProduto) payloadCatalogoSanitizado.ncm = ncmProduto;
+          if (cestProduto) payloadCatalogoSanitizado.cest = cestProduto;
+          if (cfopProduto) payloadCatalogoSanitizado.cfop = cfopProduto;
+          if (origemProduto) payloadCatalogoSanitizado.origem = origemProduto;
 
-          const { error: catErr } = await dbClient
+          const catalogoIdAlvo = editingCatalogoProduto?.catalogo_id || targetId;
+          const { data: catUpdated, error: catErr } = await dbClient
             .from('produtos_catalogo')
             .update(payloadCatalogoSanitizado)
-            .eq('id', targetId);
+            .eq('id', catalogoIdAlvo)
+            .select();
 
-          if (!catErr) {
+          if (catErr) {
+            console.error('Erro ao atualizar produto no Supabase:', catErr);
+            if (!lastError) lastError = catErr;
+          } else if (catUpdated && catUpdated.length > 0) {
             updateSuccess = true;
-          } else {
-            console.warn('[Catálogo] Aviso ao sincronizar produtos_catalogo (registro pode ser exclusivo de produtos):', catErr.message || catErr);
+          }
+
+          // Se não encontrou pelo ID em produtos_catalogo, tenta atualizar pelo nome e empresa
+          if (!updateSuccess && targetEmpresaId) {
+            const { data: catByName, error: catNameErr } = await dbClient
+              .from('produtos_catalogo')
+              .update(payloadCatalogoSanitizado)
+              .eq('empresa_id', targetEmpresaId)
+              .ilike('nome', nomeProduto.trim())
+              .select();
+
+            if (catNameErr) {
+              console.error('Erro ao atualizar produto no Supabase:', catNameErr);
+            } else if (catByName && catByName.length > 0) {
+              updateSuccess = true;
+            }
           }
         } catch (eCat) {
           console.warn('[Catálogo] Exceção ignorada ao sincronizar produtos_catalogo:', eCat);
@@ -7941,12 +8010,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
           categoria: categoriaProduto,
-          preco: parseFloat(precoProduto || 0),
+          preco: precoNumerico,
           codigo_barras: codigoBarrasFinal,
           sku: skuProduto?.trim() || null,
           cor: corCatalogoProduto?.trim() || null,
           condicao: condicaoProduto,
-          ...(precoCustoProduto !== '' ? { preco_custo: parseFloat(precoCustoProduto || 0) } : {})
+          preco_custo: custoNumerico,
+          custo: custoNumerico,
+          valor_custo: custoNumerico
         };
 
         const targetIdStr = String(targetId || '').trim();
@@ -7991,6 +8062,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           return isMatch ? { ...e, ...payloadUpdate } : e;
         }));
 
+        // Manter formulário preenchido com os dados atualizados para feedback visual instantâneo
+        const updatedProdObj = {
+          ...(editingCatalogoProduto || {}),
+          ...payloadUpdate,
+          id: targetId
+        };
+        setEditingCatalogoProduto(updatedProdObj);
+        setFormData(prev => ({
+          ...prev,
+          ...payloadUpdate,
+          precoCusto: String(custoNumerico),
+          preco_custo: custoNumerico,
+          preco: String(precoNumerico)
+        }));
+        setPrecoCustoProduto(String(custoNumerico));
+        setPrecoProduto(String(precoNumerico));
+
         // 5. Re-fetch completo no banco de dados para garantir sincronização total sem F5
         if (targetEmpresaId) {
           await fetchCatalogoProdutos(targetEmpresaId);
@@ -8005,11 +8093,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
 
         window.dispatchEvent(new Event('catalogo_updated'));
-        handleResetForm();
         return;
       } else {
         // BIFURCAÇÃO 2: INSERT DE NOVO MODELO
-        payload.preco_custo = parseFloat(precoCustoProduto || 0);
+        payload.preco_custo = custoNumerico;
 
         let data = null;
         const { data: insertedData, error } = await dbClient
@@ -8019,6 +8106,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           .single();
 
         if (error) {
+          console.error('Erro ao atualizar produto no Supabase:', error);
           if (error.code === '23505' || error.message?.includes('duplicate key')) {
             // Se o banco contiver a constraint UNIQUE(empresa_id, nome), tentar reinserir diferenciando com o sufixo de cor ou código de barras
             const corSuffix = corCatalogoProduto.trim() ? ` (${corCatalogoProduto.trim()})` : (codigoBarrasFinal ? ` - ${codigoBarrasFinal}` : ` [${Date.now().toString().slice(-4)}]`);
@@ -8142,8 +8230,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 categoria: data.categoria,
                 cor: data.cor || null,
                 codigo_barras: (eanFisicoLimpo === "" || !eanFisicoLimpo) ? null : eanFisicoLimpo,
-                preco: data.preco,
-                preco_custo: data.preco_custo || 0,
+                preco: extrairNumero(data.preco),
+                preco_custo: extrairNumero(data.preco_custo) || custoNumerico || 0,
                 quantidade: initialQty
               };
 
@@ -23173,9 +23261,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       <div className="relative">
                                         <span className="absolute left-3 top-2.5 text-xs text-emerald-500 font-bold">R$</span>
                                         <input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
+                                          type="text"
+                                          inputMode="decimal"
                                           value={precoProduto}
                                           onChange={(e) => setPrecoProduto(e.target.value)}
                                           className="w-full bg-black border border-emerald-900/40 focus:border-emerald-500 rounded-md text-emerald-300 font-mono font-bold pl-9 pr-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
@@ -23190,9 +23277,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                         <div className="relative">
                                           <span className="absolute left-3 top-2.5 text-xs text-amber-500/70 font-bold">R$</span>
                                           <input
-                                            type="number"
-                                            min="0"
-                                            step="0.01"
+                                            type="text"
+                                            inputMode="decimal"
                                             value={precoCustoProduto}
                                             onChange={(e) => setPrecoCustoProduto(e.target.value)}
                                             className="w-full bg-black border border-amber-900/40 focus:border-amber-500 rounded-md text-amber-300 font-mono font-bold pl-9 pr-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
@@ -23205,8 +23291,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                                   {/* Calculadora de Lucro Bruto Estimado por Unidade */}
                                   {(() => {
-                                    const vVenda = parseFloat(precoProduto || 0);
-                                    const vCusto = parseFloat(precoCustoProduto || 0);
+                                    const vVenda = extrairNumero(precoProduto);
+                                    const vCusto = extrairNumero(precoCustoProduto);
                                     if (vVenda > 0 || vCusto > 0) {
                                       const lucro = vVenda - vCusto;
                                       const margem = vVenda > 0 ? (lucro / vVenda) * 100 : 0;
