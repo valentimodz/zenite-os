@@ -663,8 +663,10 @@ export default function ImportarCaixaRetroativoModal({
                 <h2 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
-                <span className="badge px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 flex items-center gap-1">
-                  {ehOpenRouter ? '⚡ OpenRouter (Qwen-VL)' : '⚡ gemini-3.6-flash'}
+                <span className="text-xs bg-purple-900/60 text-purple-300 px-2 py-0.5 rounded border border-purple-700/50">
+                  {(localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key') || '').startsWith('sk-or-')
+                    ? '⚡ OpenRouter (Qwen 2.5 VL)'
+                    : '⚡ gemini-3.6-flash'}
                 </span>
               </div>
               <p className="text-xs text-gray-400">
