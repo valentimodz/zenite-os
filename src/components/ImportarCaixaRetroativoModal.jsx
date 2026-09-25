@@ -3,6 +3,7 @@ import { supabase } from '../supabaseClient';
 import {
   parseCaixaComGeminiClient,
   processarComOpenRouter,
+  processarFolhaComOpenRouter,
   GEMINI_MODEL,
   validarChaveGemini,
   redefinirInstanciaGemini,
@@ -159,12 +160,86 @@ export default function ImportarCaixaRetroativoModal({
     // Forçar a redefinição imediata da instância do serviço se for Gemini
     redefinirInstanciaGemini(keyToSave);
 
-    // Limpar estados anteriores de contagem decrescente ou erro 429
+    // Limpar mensagens de erro antigas e estados de contagem decrescente
     setCountdownSeconds(0);
     setErrorMessage('');
     setKeyValidationError('');
-    setSuccessMessage(`Chave (${getActiveModelName(keyToSave)}) configurada com sucesso!`);
+    const ehOR = keyToSave.startsWith('sk-or-');
+    setSuccessMessage(`Chave (${ehOR ? '⚡ OpenRouter (Qwen-VL)' : '⚡ gemini-3.6-flash'}) configurada com sucesso!`);
     setShowKeyInput(false);
+  };
+
+  // Helper para normalizar o resultado vindo do OpenRouter ou do Gemini
+  const aplicarDadosFechamento = (resultado) => {
+    if (!resultado) {
+      throw new Error('A IA não retornou nenhum dado válido.');
+    }
+
+    // Normalizar data (YYYY-MM-DD)
+    let dataFinal = resultado.data_caixa || '';
+    if (!dataFinal && resultado.data) {
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(resultado.data)) {
+        const [d, m, a] = resultado.data.split('/');
+        dataFinal = `${a}-${m}-${d}`;
+      } else {
+        dataFinal = resultado.data;
+      }
+    }
+    if (!dataFinal) {
+      dataFinal = new Date().toISOString().split('T')[0];
+    }
+
+    // Normalizar lista de vendas
+    const vendasBrutas = Array.isArray(resultado.vendas) ? resultado.vendas : [];
+    if (vendasBrutas.length === 0 && !resultado.totais) {
+      throw new Error('A resposta da IA não contém uma lista válida de vendas.');
+    }
+
+    const normalizedResult = {
+      ...resultado,
+      data_caixa: dataFinal,
+      total_geral: Number(resultado.total_geral || resultado.totais?.total_geral || 0),
+      vendas: vendasBrutas
+    };
+
+    setParsedData(normalizedResult);
+    setDataCaixa(dataFinal);
+
+    // Tentar associar filial pelo nome se a IA identificou algo
+    if (resultado.filial_identificada && filiais.length > 0) {
+      const filialLower = String(resultado.filial_identificada).toLowerCase();
+      const matched = filiais.find(f => f.nome && filialLower.includes(f.nome.toLowerCase()));
+      if (matched) {
+        setSelectedFilialId(matched.id);
+      }
+    }
+
+    // Mapear itens da venda com parsing de vendedor e trainee
+    const mapped = vendasBrutas.map((item, idx) => {
+      const rawVend = item.vendedor || item.vendedor_nome || '';
+      const parsedVend = parsearVendedores(rawVend);
+      const prod = item.produto || item.produto_nome || 'Produto Sem Nome';
+      const isAp = item.tipo_item === 'APARELHO' || /redmi|realme|itel|infinix|samsung|iphone|xiaomi|motorola|poco|tecno|\b(64|128|256|512)gb\b/i.test(prod);
+
+      return {
+        id: `item-${idx}-${Date.now()}`,
+        produto_nome: prod,
+        vendedor_nome: parsedVend.vendedorNome || 'Vendedor Padrão',
+        is_trainee: parsedVend.isTrainee,
+        trainee_nome: parsedVend.traineeNome,
+        raw_vendedor: rawVend,
+        categoria: item.categoria || (isAp ? 'Celulares' : 'Acessórios'),
+        tipo_item: isAp ? 'APARELHO' : 'ACESSORIO',
+        cor: item.cor || '',
+        quantidade: Math.max(1, Number(item.quantidade) || 1),
+        valor_total: Number(item.valor || item.valor_total) || 0,
+        forma_pagamento: item.forma_pagamento || item.forma_pagamento_principal || 'PIX',
+        imei: item.imei || item.imei_serial || ''
+      };
+    });
+
+    setItensVenda(mapped);
+    setSuccessMessage(`IA processou a folha com sucesso! ${mapped.length} itens extraídos.`);
   };
 
   const handleProcessarComIA = async () => {
@@ -173,12 +248,15 @@ export default function ImportarCaixaRetroativoModal({
       return;
     }
 
+    // 4. Limpar Mensagens de Erro Antigas
     setIsProcessing(true);
     setErrorMessage('');
+    setKeyValidationError('');
     setSuccessMessage('');
 
     try {
-      const apiKey = (
+      // Obter chave ativa
+      const chaveAtiva = (
         (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
         (localStorage.getItem('gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
         (localStorage.getItem('ia_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
@@ -189,7 +267,9 @@ export default function ImportarCaixaRetroativoModal({
         ''
       ).trim();
 
-      if (!apiKey) {
+      const ehOpenRouter = chaveAtiva.startsWith('sk-or-');
+
+      if (!chaveAtiva) {
         const msgErro = "Chave da API não configurada. Por favor, clique no botão 'Chave IA' no topo do modal para informar sua chave de API.";
         setErrorMessage(msgErro);
         setShowKeyInput(true);
@@ -197,7 +277,7 @@ export default function ImportarCaixaRetroativoModal({
         return;
       }
 
-      if (!validarChaveGemini(apiKey)) {
+      if (!validarChaveGemini(chaveAtiva)) {
         const msgErro = "Chave da API inválida ou muito curta. Por favor, configure uma chave válida no botão 'Chave IA'.";
         setKeyValidationError(msgErro);
         setErrorMessage(msgErro);
@@ -207,90 +287,40 @@ export default function ImportarCaixaRetroativoModal({
       }
 
       // Persistir chave válida
-      localStorage.setItem('gemini_api_key', apiKey);
-      localStorage.setItem('ia_api_key', apiKey);
-      localStorage.setItem('@zenite_gemini_api_key', apiKey);
+      localStorage.setItem('gemini_api_key', chaveAtiva);
+      localStorage.setItem('ia_api_key', chaveAtiva);
+      localStorage.setItem('@zenite_gemini_api_key', chaveAtiva);
 
       // Limpar qualquer estado de contagem regressiva remanescente
       setCountdownSeconds(0);
 
-      let result;
-
-      // BIFURCAÇÃO OBRIGATÓRIA DE ROTA:
-      if (apiKey.startsWith('sk-or-')) {
-        // CHAMADA OBRIGATÓRIA PARA A OPENROUTER
-        console.log('Utilizando provedor OpenRouter com chave sk-or-...');
-        result = await processarComOpenRouter(selectedFile, apiKey, {
-          onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
-            setCountdownSeconds(segundos);
-            setErrorMessage(`Limite de requisições atingido na OpenRouter. Aguardando ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
-            for (let s = segundos; s > 0; s--) {
-              setCountdownSeconds(s);
-              await new Promise(r => setTimeout(r, 1000));
-            }
-            setCountdownSeconds(0);
-            setErrorMessage('');
-          },
-          max429Retries: 2
-        });
-      } else {
-        // Fluxo Google Gemini
-        redefinirInstanciaGemini(apiKey);
-        result = await parseCaixaComGeminiClient({
-          file: selectedFile,
-          customApiKey: apiKey,
-          onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
-            setCountdownSeconds(segundos);
-            setErrorMessage(`Limite de requisições por minuto atingido (429). Aguardando liberação da quota em ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
-            for (let s = segundos; s > 0; s--) {
-              setCountdownSeconds(s);
-              await new Promise(r => setTimeout(r, 1000));
-            }
-            setCountdownSeconds(0);
-            setErrorMessage('');
-          },
-          max429Retries: 2
-        });
+      // 2. Desviar a Chamada para a OpenRouter diretamente:
+      if (ehOpenRouter) {
+        console.log('[IA Caixa] Executando diretamente via OpenRouter sem passar pelo Google SDK...');
+        const resultado = await processarFolhaComOpenRouter(selectedFile, chaveAtiva);
+        aplicarDadosFechamento(resultado);
+        return;
       }
 
-      if (!result || !result.vendas) {
-        throw new Error('A resposta da IA não contém uma lista válida de vendas.');
-      }
-
-      setParsedData(result);
-      setDataCaixa(result.data_caixa || new Date().toISOString().split('T')[0]);
-
-      // Tentar associar filial pelo nome se a IA identificou algo
-      if (result.filial_identificada && filiais.length > 0) {
-        const filialLower = result.filial_identificada.toLowerCase();
-        const matched = filiais.find(f => f.nome && filialLower.includes(f.nome.toLowerCase()));
-        if (matched) {
-          setSelectedFilialId(matched.id);
-        }
-      }
-
-      // Mapear itens da venda com parsing de vendedor e trainee
-      const mapped = (result.vendas || []).map((item, idx) => {
-        const parsedVend = parsearVendedores(item.vendedor_nome);
-        return {
-          id: `item-${idx}-${Date.now()}`,
-          produto_nome: item.produto_nome || 'Produto Sem Nome',
-          vendedor_nome: parsedVend.vendedorNome || 'Vendedor Padrão',
-          is_trainee: parsedVend.isTrainee,
-          trainee_nome: parsedVend.traineeNome,
-          raw_vendedor: item.vendedor_nome || '',
-          categoria: item.categoria || (item.tipo_item === 'APARELHO' ? 'Celulares' : 'Acessórios'),
-          tipo_item: item.tipo_item === 'APARELHO' ? 'APARELHO' : 'ACESSORIO',
-          cor: item.cor || '',
-          quantidade: Math.max(1, Number(item.quantidade) || 1),
-          valor_total: Number(item.valor_total) || 0,
-          forma_pagamento: item.forma_pagamento_principal || 'PIX',
-          imei: '' // preenchido pelo usuário para aparelhos
-        };
+      // Fluxo Google Gemini SDK
+      redefinirInstanciaGemini(chaveAtiva);
+      const result = await parseCaixaComGeminiClient({
+        file: selectedFile,
+        customApiKey: chaveAtiva,
+        onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
+          setCountdownSeconds(segundos);
+          setErrorMessage(`Limite de requisições por minuto atingido (429). Aguardando liberação da quota em ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
+          for (let s = segundos; s > 0; s--) {
+            setCountdownSeconds(s);
+            await new Promise(r => setTimeout(r, 1000));
+          }
+          setCountdownSeconds(0);
+          setErrorMessage('');
+        },
+        max429Retries: 2
       });
 
-      setItensVenda(mapped);
-      setSuccessMessage(`IA processou a folha com sucesso! ${mapped.length} itens extraídos.`);
+      aplicarDadosFechamento(result);
     } catch (err) {
       console.error('Erro no processamento da IA:', err);
       const errMsg = err?.message || String(err || '');
@@ -586,6 +616,19 @@ export default function ImportarCaixaRetroativoModal({
     onClose();
   };
 
+  // Obter chave ativa atual e identificar se é OpenRouter
+  const chaveAtiva = (
+    (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
+    (localStorage.getItem('gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
+    (localStorage.getItem('ia_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
+    (localStorage.getItem('@zenite_gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY ? String(import.meta.env.VITE_OPENROUTER_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
+    DEFAULT_OPENROUTER_API_KEY ||
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
+    ''
+  ).trim();
+  const ehOpenRouter = chaveAtiva.startsWith('sk-or-');
+
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fadeIn">
       <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden font-sans">
@@ -601,8 +644,8 @@ export default function ImportarCaixaRetroativoModal({
                 <h2 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 flex items-center gap-1">
-                  ⚡ {getActiveModelName(customApiKey)}
+                <span className="badge px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40 flex items-center gap-1">
+                  {ehOpenRouter ? '⚡ OpenRouter (Qwen-VL)' : '⚡ gemini-3.6-flash'}
                 </span>
               </div>
               <p className="text-xs text-gray-400">

@@ -239,6 +239,57 @@ export function fileToBase64(file) {
  * Executa o parse com IA através da API /api/ai/parse-caixa ou diretamente via SDK no cliente
  */
 /**
+ * Implementação direta solicitada da função processarFolhaComOpenRouter:
+ * Converte arquivo para Base64 e executa pedido HTTP direto para OpenRouter.
+ */
+export async function processarFolhaComOpenRouter(file, key) {
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key.trim()}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+      'X-Title': 'PDV Sistema de Caixa',
+    },
+    body: JSON.stringify({
+      model: 'qwen/qwen-2.5-vl-72b-instruct:free',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Extraia os dados desta folha de caixa estritamente em JSON puro com a seguinte estrutura: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}. Não use blocos de código markdown adicionais.'
+            },
+            {
+              type: 'image_url',
+              image_url: { url: base64 }
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const erroApi = await response.json().catch(() => ({}));
+    throw new Error(erroApi.error?.message || erroApi.message || 'Falha na resposta da OpenRouter');
+  }
+
+  const respostaJson = await response.json();
+  const textoCru = respostaJson.choices?.[0]?.message?.content || '';
+  const jsonLimpo = textoCru.replace(/```json/gi, '').replace(/```/g, '').trim();
+  return JSON.parse(jsonLimpo);
+}
+
+/**
  * Processamento direto com OpenRouter
  */
 export async function processarComOpenRouter(arquivo, apiKey, { onRetryCountdown = null, max429Retries = 2 } = {}) {
