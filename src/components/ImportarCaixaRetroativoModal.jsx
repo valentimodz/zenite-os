@@ -249,26 +249,45 @@ export default function ImportarCaixaRetroativoModal({
       return;
     }
 
-    // 4. Limpar Mensagens de Erro Antigas
+    const chaveSalva = (
+      (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
+      localStorage.getItem('gemini_api_key') ||
+      localStorage.getItem('ia_api_key') ||
+      localStorage.getItem('@zenite_gemini_api_key') ||
+      ''
+    ).trim();
+
+    // VERIFICAÇÃO OBRIGATÓRIA:
+    if (chaveSalva.startsWith('sk-or-')) {
+      console.log('>>> EXECUTANDO VIA OPENROUTER <<<');
+      setIsProcessing(true);
+      setErrorMessage('');
+      setKeyValidationError('');
+      setCountdownSeconds(0);
+      try {
+        const dadosExtraidos = await processarComOpenRouter(selectedFile, chaveSalva);
+        aplicarDadosFechamento(dadosExtraidos);
+        return;
+      } catch (err) {
+        console.error('Erro OpenRouter:', err);
+        setErrorMessage('Erro OpenRouter: ' + (err?.message || 'Falha na leitura'));
+        return;
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+
+    // Apenas se NÃO começar com sk-or-, executa o fluxo do Gemini...
     setIsProcessing(true);
     setErrorMessage('');
     setKeyValidationError('');
     setSuccessMessage('');
 
     try {
-      // Obter chave ativa
-      const chaveAtiva = (
-        (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
-        (localStorage.getItem('gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
-        (localStorage.getItem('ia_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
-        (localStorage.getItem('@zenite_gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
-        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY ? String(import.meta.env.VITE_OPENROUTER_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
-        DEFAULT_OPENROUTER_API_KEY ||
+      const chaveAtiva = chaveSalva || (
         (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
         ''
       ).trim();
-
-      const ehOpenRouter = chaveAtiva.startsWith('sk-or-');
 
       if (!chaveAtiva) {
         const msgErro = "Chave da API não configurada. Por favor, clique no botão 'Chave IA' no topo do modal para informar sua chave de API.";
@@ -294,14 +313,6 @@ export default function ImportarCaixaRetroativoModal({
 
       // Limpar qualquer estado de contagem regressiva remanescente
       setCountdownSeconds(0);
-
-      // 2. Desviar a Chamada para a OpenRouter diretamente:
-      if (ehOpenRouter) {
-        console.log('[IA Caixa] Executando diretamente via OpenRouter sem passar pelo Google SDK...');
-        const resultado = await processarFolhaComOpenRouter(selectedFile, chaveAtiva);
-        aplicarDadosFechamento(resultado);
-        return;
-      }
 
       // Fluxo Google Gemini SDK
       redefinirInstanciaGemini(chaveAtiva);
