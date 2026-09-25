@@ -54,6 +54,8 @@ export function getEffectiveApiKey(customApiKey = '') {
 
   // 1. Chaves salvas explicitamente pelo usuário no navegador
   if (typeof window !== 'undefined') {
+    const k0 = limparApiKey(localStorage.getItem('openrouter_api_key'));
+    if (k0) return k0;
     const k1 = limparApiKey(localStorage.getItem('gemini_api_key'));
     if (k1) return k1;
     const k2 = limparApiKey(localStorage.getItem('ia_api_key'));
@@ -265,7 +267,7 @@ export async function processarFolhaComIA(arquivo, chaveInformada = '') {
   // 1. Resgatar a chave prioritária
   const chave = (
     chaveInformada ||
-    (typeof window !== 'undefined' ? (localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key') || localStorage.getItem('@zenite_gemini_api_key')) : '') ||
+    (typeof window !== 'undefined' ? (localStorage.getItem('openrouter_api_key') || localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key') || localStorage.getItem('@zenite_gemini_api_key')) : '') ||
     (typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_OPENROUTER_API_KEY || import.meta.env?.VITE_GEMINI_API_KEY) : '') ||
     DEFAULT_OPENROUTER_API_KEY ||
     ''
@@ -343,12 +345,18 @@ export async function processarFolhaComOpenRouter(file, key) {
     reader.readAsDataURL(file);
   });
 
+  const activeKey = (
+    key ||
+    (typeof window !== 'undefined' ? (localStorage.getItem('openrouter_api_key') || localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key')) : '') ||
+    DEFAULT_OPENROUTER_API_KEY
+  ).trim();
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${key.trim()}`,
+      'Authorization': `Bearer ${activeKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+      'HTTP-Referer': typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://zenite-os.vercel.app',
       'X-Title': 'PDV Sistema de Caixa',
     },
     body: JSON.stringify({
@@ -419,14 +427,20 @@ export async function processarComOpenRouter(arquivo, apiKey, { onRetryCountdown
   };
 
   let retentativasOR = 0;
+  const activeApiKey = (
+    apiKey ||
+    (typeof window !== 'undefined' ? (localStorage.getItem('openrouter_api_key') || localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key')) : '') ||
+    DEFAULT_OPENROUTER_API_KEY
+  ).trim();
+
   while (retentativasOR <= max429Retries) {
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`,
+          'Authorization': `Bearer ${activeApiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+          'HTTP-Referer': typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://zenite-os.vercel.app',
           'X-Title': 'PDV Celulares - Fechamento de Caixa',
         },
         body: JSON.stringify(openRouterPayload)
