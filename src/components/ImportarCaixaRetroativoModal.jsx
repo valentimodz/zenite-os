@@ -4,6 +4,7 @@ import {
   parseCaixaComGeminiClient,
   processarComOpenRouter,
   processarFolhaComOpenRouter,
+  extrairSegundosEspera,
   GEMINI_MODEL,
   validarChaveGemini,
   redefinirInstanciaGemini,
@@ -333,10 +334,9 @@ export default function ImportarCaixaRetroativoModal({
         setErrorMessage("Erro de autenticação da chave Gemini: Credenciais inválidas ou não autorizadas pelo Google AI Studio. Verifique sua chave em aistudio.google.com/apikey e atualize-a no botão 'Chave Gemini' acima.");
         setShowKeyInput(true);
       } else if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota exceeded') || errMsg.toLowerCase().includes('resource_exhausted')) {
-        const match = errMsg.match(/retry in ([0-9.]+)s/i) || errMsg.match(/([0-9]+)\s*s/i);
-        const segundos = match ? Math.ceil(parseFloat(match[1])) : 35;
+        const segundos = extrairSegundosEspera(errMsg);
         setCountdownSeconds(segundos);
-        setErrorMessage(`Limite de requisições por minuto atingido (429). Aguarde a liberação da quota em ${segundos}s para tentar novamente.`);
+        setErrorMessage(`Limite de requisições atingido (429). Aguarde a liberação em ${segundos}s para tentar novamente.`);
       } else {
         setErrorMessage(`Falha ao processar folha: ${errMsg}`);
       }

@@ -16,6 +16,26 @@ export const DEFAULT_OPENROUTER_API_KEY =
 export const OPENROUTER_MODEL = 'qwen/qwen-2.5-vl-72b-instruct:free';
 
 /**
+ * Extrai os segundos de espera de uma mensagem de erro de quota/rate limit (429)
+ */
+export function extrairSegundosEspera(mensagemErro) {
+  try {
+    const texto = typeof mensagemErro === 'string' ? mensagemErro : JSON.stringify(mensagemErro || '');
+    // Procura padrões como "42s", "42 segundos", "retry after 42"
+    const match = texto.match(/(\d+)\s*(?:s|segundos|seconds)/i) ||
+                  texto.match(/retry in ([0-9.]+)s/i) ||
+                  texto.match(/retry after ([0-9.]+)s/i) ||
+                  texto.match(/wait ([0-9.]+)s/i);
+    if (match && match[1]) {
+      return Math.max(5, parseInt(match[1], 10));
+    }
+  } catch {
+    // Fallback padrão se não conseguir extrair
+  }
+  return 45; // Tempo padrão seguro de 45 segundos
+}
+
+/**
  * Remove espaços, quebras de linha e aspas acidentais da chave de API
  */
 export function limparApiKey(chave) {
@@ -323,19 +343,6 @@ export async function processarComOpenRouter(arquivo, apiKey, { onRetryCountdown
       }
     ],
     temperature: 0.1
-  };
-
-  const extrairSegundosEspera = (textoErro) => {
-    if (!textoErro) return 30;
-    const match = String(textoErro).match(/retry in ([0-9.]+)s/i) ||
-                  String(textoErro).match(/retry after ([0-9.]+)s/i) ||
-                  String(textoErro).match(/wait ([0-9.]+)s/i) ||
-                  String(textoErro).match(/([0-9]+)\s*seconds/i);
-    if (match && match[1]) {
-      const seg = Math.ceil(parseFloat(match[1]));
-      return seg > 0 && seg <= 120 ? seg : 35;
-    }
-    return 35;
   };
 
   let retentativasOR = 0;

@@ -1,6 +1,25 @@
 const { GoogleGenAI, Type } = require('@google/genai');
 
 /**
+ * Extrai os segundos de espera de uma mensagem de erro de quota/rate limit (429)
+ */
+function extrairSegundosEspera(mensagemErro) {
+  try {
+    const texto = typeof mensagemErro === 'string' ? mensagemErro : JSON.stringify(mensagemErro || '');
+    const match = texto.match(/(\d+)\s*(?:s|segundos|seconds)/i) ||
+                  texto.match(/retry in ([0-9.]+)s/i) ||
+                  texto.match(/retry after ([0-9.]+)s/i) ||
+                  texto.match(/wait ([0-9.]+)s/i);
+    if (match && match[1]) {
+      return Math.max(5, parseInt(match[1], 10));
+    }
+  } catch {
+    // Fallback padrão se não conseguir extrair
+  }
+  return 45; // Tempo padrão seguro de 45 segundos
+}
+
+/**
  * Esquema estrito para extração de caixa com Gemini
  */
 const CAIXA_RESPONSE_SCHEMA = {
@@ -175,21 +194,6 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
     'gemini-flash-latest'
   ])).filter(m => m && !m.includes('1.5') && !m.includes('2.5'));
   let lastError = null;
-
-  // Helper de extração de segundos de espera para rate limit 429
-  const extrairSegundosEspera = (textoErro) => {
-    if (!textoErro) return 30;
-    const match = String(textoErro).match(/retry in ([0-9.]+)s/i) ||
-                  String(textoErro).match(/retry after ([0-9.]+)s/i) ||
-                  String(textoErro).match(/wait ([0-9.]+)s/i) ||
-                  String(textoErro).match(/([0-9]+)\s*seconds/i);
-    if (match && match[1]) {
-      const seg = Math.ceil(parseFloat(match[1]));
-      return seg > 0 && seg <= 120 ? seg : 35;
-    }
-    return 35;
-  };
-
   const MAX_429_RETRIES = 2;
 
   for (const modelo of modelosTentativa) {
