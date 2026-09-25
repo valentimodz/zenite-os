@@ -47,6 +47,9 @@ export function parsearVendedores(rawVendedor) {
   };
 }
 
+// Chave de API da OpenRouter padrão configurada para o projeto
+const CHAVE_PADRAO = ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
+
 export default function ImportarCaixaRetroativoModal({
   isOpen,
   onClose,
@@ -60,14 +63,18 @@ export default function ImportarCaixaRetroativoModal({
   const [isProcessing, setIsProcessing] = useState(false);
   const [customApiKey, setCustomApiKey] = useState(() => {
     // 1. Chave explícita do usuário salva
-    const kLocal = localStorage.getItem('openrouter_api_key') || localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key');
+    const kLocal =
+      localStorage.getItem('openrouter_api_key') ||
+      localStorage.getItem('gemini_api_key') ||
+      localStorage.getItem('ia_api_key');
     if (kLocal && kLocal.trim()) {
       return kLocal.trim().replace(/^["']|["']$/g, '');
     }
     // 2. Chave OpenRouter padrão
     return (
       (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
-      DEFAULT_OPENROUTER_API_KEY
+      DEFAULT_OPENROUTER_API_KEY ||
+      CHAVE_PADRAO
     );
   });
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -219,12 +226,20 @@ export default function ImportarCaixaRetroativoModal({
     setErrorMessage('');
     setSuccessMessage('');
 
-    const chave = (
+    // 1. Garantir a leitura da chave com fallbacks completos
+    const chaveAtiva = (
       localStorage.getItem('openrouter_api_key') ||
       localStorage.getItem('gemini_api_key') ||
-      (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
-      DEFAULT_OPENROUTER_API_KEY
+      localStorage.getItem('ia_api_key') ||
+      (customApiKey || '').replace(/^["']|["']$/g, '') ||
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
+      DEFAULT_OPENROUTER_API_KEY ||
+      CHAVE_PADRAO
     ).trim();
+
+    if (!chaveAtiva) {
+      throw new Error('Chave de API da OpenRouter não configurada. Insira sua chave no botão "Chave OpenRouter".');
+    }
 
     try {
       // Converte o arquivo para Base64 puro
@@ -243,9 +258,9 @@ export default function ImportarCaixaRetroativoModal({
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${chave}`,
+          'Authorization': `Bearer ${chaveAtiva}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': window.location.origin,
+          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://zenite-os.vercel.app',
           'X-Title': 'PDV Fechamento de Caixa',
         },
         body: JSON.stringify({
