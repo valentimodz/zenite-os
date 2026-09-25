@@ -11,7 +11,8 @@ function extrairSegundosEspera(mensagemErro) {
                   texto.match(/retry after ([0-9.]+)s/i) ||
                   texto.match(/wait ([0-9.]+)s/i);
     if (match && match[1]) {
-      return Math.max(5, parseInt(match[1], 10));
+      const seg = parseInt(match[1], 10);
+      return seg > 0 && seg <= 60 ? seg : 45;
     }
   } catch {
     // Fallback padrão se não conseguir extrair

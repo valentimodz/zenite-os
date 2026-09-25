@@ -95,12 +95,19 @@ export default function ImportarCaixaRetroativoModal({
   const [successMessage, setSuccessMessage] = useState('');
   const [countdownSeconds, setCountdownSeconds] = useState(0);
 
+  // Limpeza de bloqueio de contagem regressiva caso superior a 60 segundos
+  useEffect(() => {
+    if (countdownSeconds > 60) {
+      setCountdownSeconds(0);
+    }
+  }, [countdownSeconds]);
+
   // Timer de contagem regressiva para Rate Limit (429)
   useEffect(() => {
     if (countdownSeconds <= 0) return;
     const interval = setInterval(() => {
       setCountdownSeconds(prev => {
-        if (prev <= 1) {
+        if (prev <= 1 || prev > 60) {
           clearInterval(interval);
           return 0;
         }
