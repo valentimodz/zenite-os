@@ -1,16 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
-  processarFolhaComIA,
-  parseCaixaComGeminiClient,
-  processarComOpenRouter,
-  processarFolhaComOpenRouter,
-  extrairSegundosEspera,
-  GEMINI_MODEL,
-  validarChaveGemini,
-  redefinirInstanciaGemini,
-  getActiveModelName,
-  DEFAULT_OPENROUTER_API_KEY
+  DEFAULT_OPENROUTER_API_KEY,
+  OPENROUTER_MODEL
 } from '../services/geminiService';
 import {
   X,
@@ -67,17 +59,15 @@ export default function ImportarCaixaRetroativoModal({
   const [filePreviewUrl, setFilePreviewUrl] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [customApiKey, setCustomApiKey] = useState(() => {
-    // 1. Chave explícita do usuário
-    const kLocal = localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key') || localStorage.getItem('@zenite_gemini_api_key');
+    // 1. Chave explícita do usuário salva
+    const kLocal = localStorage.getItem('openrouter_api_key') || localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key');
     if (kLocal && kLocal.trim()) {
       return kLocal.trim().replace(/^["']|["']$/g, '');
     }
-    // 2. Fallback principal OpenRouter
+    // 2. Chave OpenRouter padrão
     return (
       (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
-      DEFAULT_OPENROUTER_API_KEY ||
-      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
-      ''
+      DEFAULT_OPENROUTER_API_KEY
     );
   });
   const [showKeyInput, setShowKeyInput] = useState(false);
@@ -94,29 +84,6 @@ export default function ImportarCaixaRetroativoModal({
   const [progressMsg, setProgressMsg] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [countdownSeconds, setCountdownSeconds] = useState(0);
-
-  // Limpeza de bloqueio de contagem regressiva caso superior a 60 segundos
-  useEffect(() => {
-    if (countdownSeconds > 60) {
-      setCountdownSeconds(0);
-    }
-  }, [countdownSeconds]);
-
-  // Timer de contagem regressiva para Rate Limit (429)
-  useEffect(() => {
-    if (countdownSeconds <= 0) return;
-    const interval = setInterval(() => {
-      setCountdownSeconds(prev => {
-        if (prev <= 1 || prev > 60) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [countdownSeconds]);
 
   const fileInputRef = useRef(null);
 
@@ -150,31 +117,25 @@ export default function ImportarCaixaRetroativoModal({
     }
   };
 
-  const handleSalvarChaveGemini = () => {
+  const handleSalvarChaveOpenRouter = () => {
     const keyToSave = (customApiKey || '').trim().replace(/^["']|["']$/g, '').trim();
 
-    if (!validarChaveGemini(keyToSave)) {
-      const msgErro = 'Por favor, insira uma chave de API válida com pelo menos 20 caracteres.';
+    if (!keyToSave || keyToSave.length < 15) {
+      const msgErro = 'Por favor, insira uma chave de API OpenRouter válida.';
       setKeyValidationError(msgErro);
       setErrorMessage(msgErro);
       return;
     }
 
-    // Salvar no localStorage conforme padrão do app
+    // Salvar no localStorage
+    localStorage.setItem('openrouter_api_key', keyToSave);
     localStorage.setItem('gemini_api_key', keyToSave);
     localStorage.setItem('ia_api_key', keyToSave);
-    localStorage.setItem('@zenite_gemini_api_key', keyToSave);
     setCustomApiKey(keyToSave);
 
-    // Forçar a redefinição imediata da instância do serviço se for Gemini
-    redefinirInstanciaGemini(keyToSave);
-
-    // Limpar mensagens de erro antigas e estados de contagem decrescente
-    setCountdownSeconds(0);
     setErrorMessage('');
     setKeyValidationError('');
-    const ehOR = keyToSave.startsWith('sk-or-');
-    setSuccessMessage(`Chave (${ehOR ? '⚡ OpenRouter (Qwen-VL)' : '⚡ gemini-3.6-flash'}) configurada com sucesso!`);
+    setSuccessMessage('Chave OpenRouter configurada com sucesso!');
     setShowKeyInput(false);
   };
 
@@ -252,113 +213,77 @@ export default function ImportarCaixaRetroativoModal({
   };
 
   const handleProcessarComIA = async () => {
-    if (!selectedFile) {
-      setErrorMessage('Por favor, selecione um arquivo (PDF ou imagem) do fechamento de caixa.');
-      return;
-    }
+    if (!selectedFile) return;
 
-    const chaveSalva = (
-      (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
-      localStorage.getItem('gemini_api_key') ||
-      localStorage.getItem('ia_api_key') ||
-      localStorage.getItem('@zenite_gemini_api_key') ||
-      ''
-    ).trim();
-
-    // 2. Se a chave for da OPENROUTER (sk-or-...), NUNCA chamar o SDK da Google:
-    if (chaveSalva.startsWith('sk-or-')) {
-      console.log('[IA CAIXA] Executando chamada via OpenRouter (Bifurcação Obrigatória)...');
-      setIsProcessing(true);
-      setErrorMessage('');
-      setKeyValidationError('');
-      setCountdownSeconds(0);
-      try {
-        const dadosExtraidos = await processarFolhaComIA(selectedFile, chaveSalva);
-        aplicarDadosFechamento(dadosExtraidos);
-        return;
-      } catch (err) {
-        console.error('Erro OpenRouter:', err);
-        setErrorMessage('Erro OpenRouter: ' + (err?.message || 'Falha na leitura'));
-        return;
-      } finally {
-        setIsProcessing(false);
-      }
-    }
-
-    // Apenas se NÃO começar com sk-or-, executa o fluxo do Gemini...
     setIsProcessing(true);
     setErrorMessage('');
-    setKeyValidationError('');
     setSuccessMessage('');
 
+    const chave = (
+      localStorage.getItem('openrouter_api_key') ||
+      localStorage.getItem('gemini_api_key') ||
+      (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
+      DEFAULT_OPENROUTER_API_KEY
+    ).trim();
+
     try {
-      const chaveAtiva = chaveSalva || (
-        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
-        ''
-      ).trim();
-
-      if (!chaveAtiva) {
-        const msgErro = "Chave da API não configurada. Por favor, clique no botão 'Chave IA' no topo do modal para informar sua chave de API.";
-        setErrorMessage(msgErro);
-        setShowKeyInput(true);
-        setIsProcessing(false);
-        return;
-      }
-
-      if (!validarChaveGemini(chaveAtiva)) {
-        const msgErro = "Chave da API inválida ou muito curta. Por favor, configure uma chave válida no botão 'Chave IA'.";
-        setKeyValidationError(msgErro);
-        setErrorMessage(msgErro);
-        setShowKeyInput(true);
-        setIsProcessing(false);
-        return;
-      }
-
-      // Persistir chave válida
-      localStorage.setItem('gemini_api_key', chaveAtiva);
-      localStorage.setItem('ia_api_key', chaveAtiva);
-      localStorage.setItem('@zenite_gemini_api_key', chaveAtiva);
-
-      // Limpar qualquer estado de contagem regressiva remanescente
-      setCountdownSeconds(0);
-
-      // Fluxo Google Gemini SDK
-      redefinirInstanciaGemini(chaveAtiva);
-      const result = await parseCaixaComGeminiClient({
-        file: selectedFile,
-        customApiKey: chaveAtiva,
-        onRetryCountdown: async (segundos, tentativaAtual, totalTentativas) => {
-          setCountdownSeconds(segundos);
-          setErrorMessage(`Limite de requisições por minuto atingido (429). Aguardando liberação da quota em ${segundos}s para reprocessar automaticamente (${tentativaAtual}/${totalTentativas})...`);
-          for (let s = segundos; s > 0; s--) {
-            setCountdownSeconds(s);
-            await new Promise(r => setTimeout(r, 1000));
-          }
-          setCountdownSeconds(0);
-          setErrorMessage('');
-        },
-        max429Retries: 2
+      // Converte o arquivo para Base64 puro
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result;
+          resolve(res.includes(',') ? res.split(',')[1] : res);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
       });
 
-      aplicarDadosFechamento(result);
-    } catch (err) {
-      console.error('Erro no processamento da IA:', err);
-      const errMsg = err?.message || String(err || '');
-      if (
-        errMsg.includes('401') ||
-        errMsg.toLowerCase().includes('invalid authentication credentials') ||
-        errMsg.toLowerCase().includes('unauthenticated') ||
-        errMsg.toLowerCase().includes('erro de autenticação')
-      ) {
-        setErrorMessage("Erro de autenticação da chave Gemini: Credenciais inválidas ou não autorizadas pelo Google AI Studio. Verifique sua chave em aistudio.google.com/apikey e atualize-a no botão 'Chave Gemini' acima.");
-        setShowKeyInput(true);
-      } else if (errMsg.includes('429') || errMsg.toLowerCase().includes('quota exceeded') || errMsg.toLowerCase().includes('resource_exhausted')) {
-        const segundos = extrairSegundosEspera(errMsg);
-        setCountdownSeconds(segundos);
-        setErrorMessage(`Limite de requisições atingido (429). Aguarde a liberação em ${segundos}s para tentar novamente.`);
-      } else {
-        setErrorMessage(`Falha ao processar folha: ${errMsg}`);
+      const mimeType = selectedFile.type || 'application/pdf';
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${chave}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'PDV Fechamento de Caixa',
+        },
+        body: JSON.stringify({
+          model: 'qwen/qwen-2.5-vl-72b-instruct:free',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Extraia os dados desta folha de caixa física/relatório e responda ESTRITAMENTE com um objeto JSON válido, sem texto antes ou depois e sem crases de markdown. Estrutura obrigatória: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}'
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:${mimeType};base64,${base64Data}`
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const erroData = await response.json().catch(() => ({}));
+        throw new Error(erroData.error?.message || `Erro HTTP ${response.status}`);
       }
+
+      const respostaJson = await response.json();
+      const textoResposta = respostaJson.choices?.[0]?.message?.content || '{}';
+      const jsonLimpo = textoResposta.replace(/```json/g, '').replace(/```/g, '').trim();
+      const dadosProcessados = JSON.parse(jsonLimpo);
+
+      aplicarDadosFechamento(dadosProcessados);
+    } catch (erro) {
+      console.error('Falha no processamento:', erro);
+      setErrorMessage(`Erro ao processar folha: ${erro?.message || 'Falha na leitura da IA'}`);
     } finally {
       setIsProcessing(false);
     }
@@ -635,19 +560,6 @@ export default function ImportarCaixaRetroativoModal({
     onClose();
   };
 
-  // Obter chave ativa atual e identificar se é OpenRouter
-  const chaveAtiva = (
-    (customApiKey || '').trim().replace(/^["']|["']$/g, '') ||
-    (localStorage.getItem('gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
-    (localStorage.getItem('ia_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
-    (localStorage.getItem('@zenite_gemini_api_key') || '').trim().replace(/^["']|["']$/g, '') ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY ? String(import.meta.env.VITE_OPENROUTER_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
-    DEFAULT_OPENROUTER_API_KEY ||
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim().replace(/^["']|["']$/g, '') : '') ||
-    ''
-  ).trim();
-  const ehOpenRouter = chaveAtiva.startsWith('sk-or-');
-
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fadeIn">
       <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden font-sans">
@@ -663,10 +575,8 @@ export default function ImportarCaixaRetroativoModal({
                 <h2 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
-                <span className="text-xs bg-purple-900/60 text-purple-300 px-2 py-0.5 rounded border border-purple-700/50">
-                  {(localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key') || '').startsWith('sk-or-')
-                    ? '⚡ OpenRouter (Qwen 2.5 VL)'
-                    : '⚡ gemini-3.6-flash'}
+                <span className="text-xs bg-purple-900/60 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-700/50 font-bold">
+                  ⚡ OpenRouter (Qwen 2.5 VL)
                 </span>
               </div>
               <p className="text-xs text-gray-400">
@@ -686,10 +596,10 @@ export default function ImportarCaixaRetroativoModal({
                 });
               }}
               className="px-2.5 py-1.5 rounded-lg border border-[#333] hover:border-[#6A0DAD] bg-black text-gray-400 hover:text-white text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Configurar chave de API (OpenRouter ou Gemini)"
+              title="Configurar chave de API da OpenRouter"
             >
               <Key size={13} className="text-yellow-400" />
-              <span className="hidden sm:inline">Chave IA</span>
+              <span className="hidden sm:inline">Chave OpenRouter</span>
             </button>
             <button
               type="button"
@@ -701,13 +611,13 @@ export default function ImportarCaixaRetroativoModal({
           </div>
         </div>
 
-        {/* PAINEL OPCIONAL: CONFIGURAR CHAVE IA */}
+        {/* PAINEL OPCIONAL: CONFIGURAR CHAVE OPENROUTER */}
         {showKeyInput && (
           <div className="bg-[#111] px-6 py-3.5 border-b border-[#222] flex flex-col gap-2.5 text-xs animate-in fade-in duration-150">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-gray-300 w-full sm:w-auto">
                 <Key size={14} className="text-yellow-400 shrink-0" />
-                <span className="font-semibold">Chave da API (OpenRouter / Gemini):</span>
+                <span className="font-semibold">Chave OpenRouter:</span>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <input
@@ -720,17 +630,17 @@ export default function ImportarCaixaRetroativoModal({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      handleSalvarChaveGemini();
+                      handleSalvarChaveOpenRouter();
                     }
                   }}
-                  placeholder="sk-or-... ou AIzaSy... / AQ..."
+                  placeholder="sk-or-v1-..."
                   className={`bg-black border ${
                     keyValidationError ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30' : 'border-[#333] focus:border-[#6A0DAD]'
                   } text-white px-3 py-1.5 rounded-md outline-none text-xs w-full sm:w-72 font-mono transition-all`}
                 />
                 <button
                   type="button"
-                  onClick={handleSalvarChaveGemini}
+                  onClick={handleSalvarChaveOpenRouter}
                   className="bg-[#6A0DAD] hover:bg-[#520885] text-white px-3.5 py-1.5 rounded-md font-bold text-xs shrink-0 cursor-pointer transition-colors shadow-sm"
                 >
                   Salvar
@@ -805,18 +715,13 @@ export default function ImportarCaixaRetroativoModal({
                 <button
                   type="button"
                   onClick={handleProcessarComIA}
-                  disabled={!selectedFile || (isProcessing && countdownSeconds === 0)}
+                  disabled={!selectedFile || isProcessing}
                   className="bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] hover:from-[#5A0896] hover:to-[#7822C8] disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold px-8 py-3 rounded-xl text-sm shadow-xl shadow-purple-950/40 transition-all flex items-center gap-2.5 cursor-pointer"
                 >
-                  {countdownSeconds > 0 ? (
-                    <>
-                      <Loader2 size={18} className="animate-spin text-amber-400" />
-                      <span>Aguardando liberação da quota em {countdownSeconds}s...</span>
-                    </>
-                  ) : isProcessing ? (
+                  {isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin text-yellow-300" />
-                      <span>Analisando documento com IA ({getActiveModelName(customApiKey)})...</span>
+                      <span>Processando folha com OpenRouter (Qwen 2.5 VL)...</span>
                     </>
                   ) : (
                     <>
