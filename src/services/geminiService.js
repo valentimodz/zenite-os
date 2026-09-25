@@ -13,7 +13,7 @@ export const DEFAULT_OPENROUTER_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
   (typeof process !== 'undefined' && (process.env?.VITE_OPENROUTER_API_KEY || process.env?.OPENROUTER_API_KEY)) ||
   ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
-export const OPENROUTER_MODEL = 'openrouter/free';
+export const OPENROUTER_MODEL = 'google/gemini-2.0-flash-lite-preview:free';
 
 /**
  * Extrai os segundos de espera de uma mensagem de erro de quota/rate limit (429)
@@ -320,6 +320,7 @@ export async function processarFolhaComIA(arquivo, chaveInformada = '') {
       },
       body: JSON.stringify({
         model: OPENROUTER_MODEL,
+        response_format: { type: 'json_object' },
         messages: [
           {
             role: 'user',
@@ -382,6 +383,7 @@ export async function processarFolhaComOpenRouter(file, key) {
     },
     body: JSON.stringify({
       model: OPENROUTER_MODEL,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'user',

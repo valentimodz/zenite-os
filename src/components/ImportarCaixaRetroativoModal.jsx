@@ -357,14 +357,15 @@ export default function ImportarCaixaRetroativoModal({
         method: 'POST',
         headers,
         body: JSON.stringify({
-          model: 'openrouter/free',
+          model: 'google/gemini-2.0-flash-lite-preview:free',
+          response_format: { type: 'json_object' },
           messages: [
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Extraia os dados desta folha de caixa física/relatório e responda ESTRITAMENTE com um objeto JSON válido, sem texto antes ou depois e sem crases de markdown. Estrutura obrigatória: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}'
+                  text: 'Extraia todos os dados desta folha de caixa física/relatório e responda ESTRITAMENTE com um objeto JSON válido, sem texto explicativo, sem recusas e sem crases de markdown. Estrutura JSON obrigatória: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}'
                 },
                 {
                   type: 'image_url',
@@ -683,7 +684,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="text-xs bg-purple-900/60 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-700/50 font-bold">
-                  ⚡ OpenRouter (Free Router)
+                  ⚡ OpenRouter (Gemini 2.0 Flash Lite)
                 </span>
               </div>
               <p className="text-xs text-gray-400">
