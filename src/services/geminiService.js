@@ -258,8 +258,79 @@ export function fileToBase64(file) {
 }
 
 /**
- * Executa o parse com IA através da API /api/ai/parse-caixa ou diretamente via SDK no cliente
+ * Função de processamento de folha com IA com bifurcação obrigatória para OpenRouter:
+ * Se a chave começar com sk-or-, executa diretamente via OpenRouter sem passar pelo Google SDK.
  */
+export async function processarFolhaComIA(arquivo, chaveInformada = '') {
+  // 1. Resgatar a chave prioritária
+  const chave = (
+    chaveInformada ||
+    (typeof window !== 'undefined' ? (localStorage.getItem('gemini_api_key') || localStorage.getItem('ia_api_key') || localStorage.getItem('@zenite_gemini_api_key')) : '') ||
+    (typeof import.meta !== 'undefined' ? (import.meta.env?.VITE_OPENROUTER_API_KEY || import.meta.env?.VITE_GEMINI_API_KEY) : '') ||
+    DEFAULT_OPENROUTER_API_KEY ||
+    ''
+  ).trim().replace(/^["']|["']$/g, '').trim();
+
+  // 2. Se a chave for da OPENROUTER (sk-or-...), NUNCA chamar o SDK da Google:
+  if (chave.startsWith('sk-or-')) {
+    console.log('[IA CAIXA] Executando chamada via OpenRouter...');
+
+    // Converter arquivo para Base64
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = reader.result;
+        resolve(res.includes(',') ? res.split(',')[1] : res);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(arquivo);
+    });
+
+    const resposta = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${chave}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+        'X-Title': 'PDV Fechamento de Caixa',
+      },
+      body: JSON.stringify({
+        model: 'qwen/qwen-2.5-vl-72b-instruct:free',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Extraia os dados desta folha de caixa estritamente em JSON puro com as seguintes chaves: "data", "totais" (dinheiro, pix, cartao, boleto, total_geral), "vendas" (vendedor, produto, imei_serial, valor, forma_pagamento) e "sangrias_despesas" (descricao, valor). Não coloque blocos de texto ou formatação fora do JSON.'
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64Data}`
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!resposta.ok) {
+      const err = await resposta.json().catch(() => ({}));
+      throw new Error(`OpenRouter (${resposta.status}): ${err.error?.message || resposta.statusText}`);
+    }
+
+    const jsonResp = await resposta.json();
+    const conteudoTexto = jsonResp.choices?.[0]?.message?.content || '';
+    const limpo = conteudoTexto.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(limpo);
+  }
+
+  // 3. Caso NÃO seja OpenRouter, segue o fluxo do Gemini...
+  return await parseCaixaComGeminiClient({ file: arquivo, customApiKey: chave });
+}
+
 /**
  * Implementação direta solicitada da função processarFolhaComOpenRouter:
  * Converte arquivo para Base64 e executa pedido HTTP direto para OpenRouter.

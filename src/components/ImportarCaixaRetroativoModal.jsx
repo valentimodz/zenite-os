@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
+  processarFolhaComIA,
   parseCaixaComGeminiClient,
   processarComOpenRouter,
   processarFolhaComOpenRouter,
@@ -264,15 +265,15 @@ export default function ImportarCaixaRetroativoModal({
       ''
     ).trim();
 
-    // VERIFICAÇÃO OBRIGATÓRIA:
+    // 2. Se a chave for da OPENROUTER (sk-or-...), NUNCA chamar o SDK da Google:
     if (chaveSalva.startsWith('sk-or-')) {
-      console.log('>>> EXECUTANDO VIA OPENROUTER <<<');
+      console.log('[IA CAIXA] Executando chamada via OpenRouter (Bifurcação Obrigatória)...');
       setIsProcessing(true);
       setErrorMessage('');
       setKeyValidationError('');
       setCountdownSeconds(0);
       try {
-        const dadosExtraidos = await processarComOpenRouter(selectedFile, chaveSalva);
+        const dadosExtraidos = await processarFolhaComIA(selectedFile, chaveSalva);
         aplicarDadosFechamento(dadosExtraidos);
         return;
       } catch (err) {
