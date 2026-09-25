@@ -268,20 +268,14 @@ export default function ImportarCaixaRetroativoModal({
         method: 'POST',
         headers,
         body: JSON.stringify({
-          model: 'openrouter/free',
-          models: [
-            'openrouter/free',
-            'meta-llama/llama-3.2-11b-vision-instruct:free',
-            'google/gemma-3-27b-it:free',
-            'qwen/qwen-2.5-vl-72b-instruct:free'
-          ],
+          model: 'meta-llama/llama-3.2-11b-vision-instruct:free',
           messages: [
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Analise esta folha de caixa física/relatório e extraia os dados estritamente em formato JSON puro com: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}. Sem markdown, apenas o JSON.'
+                  text: 'Extraia os dados desta folha de caixa física/relatório e responda ESTRITAMENTE com um objeto JSON válido, sem texto antes ou depois e sem crases de markdown. Estrutura obrigatória: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}'
                 },
                 {
                   type: 'image_url',
@@ -601,7 +595,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="text-xs bg-purple-900/60 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-700/50 font-bold">
-                  ⚡ OpenRouter (Auto Free Router)
+                  ⚡ OpenRouter (Llama 3.2 Vision)
                 </span>
               </div>
               <p className="text-xs text-gray-400">

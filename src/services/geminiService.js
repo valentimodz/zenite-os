@@ -13,12 +13,10 @@ export const DEFAULT_OPENROUTER_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
   (typeof process !== 'undefined' && (process.env?.VITE_OPENROUTER_API_KEY || process.env?.OPENROUTER_API_KEY)) ||
   ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
-export const OPENROUTER_MODEL = 'openrouter/free';
+export const OPENROUTER_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct:free';
 export const OPENROUTER_FALLBACK_MODELS = [
-  'openrouter/free',
   'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'google/gemma-3-27b-it:free',
-  'qwen/qwen-2.5-vl-72b-instruct:free'
+  'google/gemma-3-27b-it:free'
 ];
 
 /**
@@ -303,8 +301,7 @@ export async function processarFolhaComIA(arquivo, chaveInformada = '') {
         'X-Title': 'PDV Fechamento de Caixa',
       },
       body: JSON.stringify({
-        model: 'openrouter/free',
-        models: OPENROUTER_FALLBACK_MODELS,
+        model: OPENROUTER_MODEL,
         messages: [
           {
             role: 'user',
@@ -367,8 +364,7 @@ export async function processarFolhaComOpenRouter(file, key) {
       'X-Title': 'PDV Sistema de Caixa',
     },
     body: JSON.stringify({
-      model: 'openrouter/free',
-      models: OPENROUTER_FALLBACK_MODELS,
+      model: OPENROUTER_MODEL,
       messages: [
         {
           role: 'user',
@@ -414,7 +410,6 @@ export async function processarComOpenRouter(arquivo, apiKey, { onRetryCountdown
 
   const openRouterPayload = {
     model: OPENROUTER_MODEL,
-    models: OPENROUTER_FALLBACK_MODELS,
     messages: [
       {
         role: "user",
