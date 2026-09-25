@@ -355,17 +355,21 @@ export default function ImportarCaixaRetroativoModal({
       setProgressMsg('Analisando folha de caixa com IA...');
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers,
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+          'X-Title': 'PDV Fechamento de Caixa',
+        },
         body: JSON.stringify({
-          model: 'google/gemini-2.0-flash-lite-preview:free',
-          response_format: { type: 'json_object' },
+          model: 'openrouter/free',
           messages: [
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Extraia todos os dados desta folha de caixa física/relatório e responda ESTRITAMENTE com um objeto JSON válido, sem texto explicativo, sem recusas e sem crases de markdown. Estrutura JSON obrigatória: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}'
+                  text: 'Você é um assistente de OCR. Extraia os dados desta folha de caixa física e retorne APENAS um bloco JSON válido sem explicações: {"data": "DD/MM/AAAA", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": ""}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}'
                 },
                 {
                   type: 'image_url',
@@ -380,15 +384,23 @@ export default function ImportarCaixaRetroativoModal({
       });
 
       if (!response.ok) {
-        const erroData = await response.json().catch(() => ({}));
-        throw new Error(erroData.error?.message || `Erro HTTP ${response.status}`);
+        const errPayload = await response.json().catch(() => ({}));
+        throw new Error(errPayload.error?.message || `Erro HTTP ${response.status}`);
       }
 
-      const respostaJson = await response.json();
-      const textoResposta = respostaJson.choices?.[0]?.message?.content || '{}';
-      const dadosProcessados = extrairJsonPuro(textoResposta);
+      const data = await response.json();
+      const textoCru = data.choices?.[0]?.message?.content || '';
 
-      aplicarDadosFechamento(dadosProcessados);
+      // Extrator robusto que encontra o primeiro '{' e o último '}' ignorando qualquer texto antes ou depois
+      const inicio = textoCru.indexOf('{');
+      const fim = textoCru.lastIndexOf('}');
+
+      if (inicio === -1 || fim === -1) {
+        throw new Error('A IA não gerou uma estrutura JSON válida. Resposta: ' + textoCru.slice(0, 100));
+      }
+
+      const jsonExtraido = JSON.parse(textoCru.substring(inicio, fim + 1));
+      aplicarDadosFechamento(jsonExtraido);
     } catch (erro) {
       console.error('Falha no processamento:', erro);
       setErrorMessage(`Erro ao processar folha: ${erro?.message || 'Falha na leitura da IA'}`);
@@ -684,7 +696,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="text-xs bg-purple-900/60 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-700/50 font-bold">
-                  ⚡ OpenRouter (Gemini 2.0 Flash Lite)
+                  ⚡ OpenRouter (Free Router)
                 </span>
               </div>
               <p className="text-xs text-gray-400">
