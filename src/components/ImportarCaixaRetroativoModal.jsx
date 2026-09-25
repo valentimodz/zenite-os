@@ -268,7 +268,7 @@ export default function ImportarCaixaRetroativoModal({
         method: 'POST',
         headers,
         body: JSON.stringify({
-          model: 'meta-llama/llama-3.2-11b-vision-instruct:free',
+          model: 'openrouter/free',
           messages: [
             {
               role: 'user',
@@ -595,7 +595,7 @@ export default function ImportarCaixaRetroativoModal({
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="text-xs bg-purple-900/60 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-700/50 font-bold">
-                  ⚡ OpenRouter (Llama 3.2 Vision)
+                  ⚡ OpenRouter (Free Router)
                 </span>
               </div>
               <p className="text-xs text-gray-400">

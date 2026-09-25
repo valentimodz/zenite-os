@@ -138,7 +138,7 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
 
   // Se a chave for OpenRouter, processa via OpenRouter chat completions
   if (effectiveKey.startsWith('sk-or-')) {
-    const OPENROUTER_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct:free';
+    const OPENROUTER_MODEL = 'openrouter/free';
     const imageMime = mimeType === 'application/pdf' ? 'application/pdf' : (mimeType || 'image/jpeg');
     const dataUrl = `data:${imageMime};base64,${fileBase64}`;
 

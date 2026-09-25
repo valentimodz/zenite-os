@@ -13,11 +13,7 @@ export const DEFAULT_OPENROUTER_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
   (typeof process !== 'undefined' && (process.env?.VITE_OPENROUTER_API_KEY || process.env?.OPENROUTER_API_KEY)) ||
   ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
-export const OPENROUTER_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct:free';
-export const OPENROUTER_FALLBACK_MODELS = [
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'google/gemma-3-27b-it:free'
-];
+export const OPENROUTER_MODEL = 'openrouter/free';
 
 /**
  * Extrai os segundos de espera de uma mensagem de erro de quota/rate limit (429)
