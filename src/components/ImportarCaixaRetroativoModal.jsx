@@ -47,6 +47,81 @@ export function parsearVendedores(rawVendedor) {
   };
 }
 
+// Converte o arquivo (imagem ou PDF via renderização de Canvas) em uma data URL de imagem válida (JPEG/PNG)
+export async function prepararArquivoParaVisao(file) {
+  if (!file) return '';
+
+  // 1. Se já for imagem, lê direto como data URL
+  if (file.type && file.type.startsWith('image/')) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // 2. Se for PDF, renderiza a 1ª página usando PDF.js no Canvas e exporta como JPEG
+  try {
+    let pdfjsLib = window['pdfjs-dist/build/pdf'] || window['pdfjsLib'];
+
+    if (!pdfjsLib) {
+      // Carregar PDF.js dinamicamente via CDN caso não esteja presente no bundle
+      await new Promise((resolve, reject) => {
+        if (document.getElementById('pdfjs-script')) {
+          const check = setInterval(() => {
+            if (window['pdfjsLib']) {
+              clearInterval(check);
+              resolve();
+            }
+          }, 50);
+          setTimeout(() => { clearInterval(check); resolve(); }, 3000);
+          return;
+        }
+        const script = document.createElement('script');
+        script.id = 'pdfjs-script';
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        script.onload = () => {
+          if (window['pdfjsLib']) {
+            window['pdfjsLib'].GlobalWorkerOptions.workerSrc =
+              'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          }
+          resolve();
+        };
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+      pdfjsLib = window['pdfjsLib'];
+    }
+
+    if (pdfjsLib) {
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      const page = await pdf.getPage(1);
+
+      const viewport = page.getViewport({ scale: 2.0 }); // alta resolução para OCR
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      await page.render({ canvasContext: context, viewport }).promise;
+      return canvas.toDataURL('image/jpeg', 0.92);
+    }
+  } catch (pdfErr) {
+    console.warn('Conversão PDF para Canvas falhou, utilizando fallback direto:', pdfErr);
+  }
+
+  // Fallback padrão se PDF.js falhar
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 // Chave de API da OpenRouter padrão configurada para o projeto
 const CHAVE_PADRAO = ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
 
@@ -244,18 +319,9 @@ export default function ImportarCaixaRetroativoModal({
     }
 
     try {
-      // Converte o arquivo para Base64 puro
-      const base64Data = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const res = reader.result;
-          resolve(res.includes(',') ? res.split(',')[1] : res);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(selectedFile);
-      });
-
-      const mimeType = selectedFile.type || 'application/pdf';
+      // Converte o arquivo (PDF renderizado em Canvas ou Imagem) para data URL compatível com visão (image/jpeg)
+      setProgressMsg('Processando imagem do documento...');
+      const imageUrl = await prepararArquivoParaVisao(selectedFile);
 
       const headers = {
         'Authorization': `Bearer ${apiKey}`,
@@ -264,6 +330,7 @@ export default function ImportarCaixaRetroativoModal({
         'X-Title': 'PDV Fechamento de Caixa',
       };
 
+      setProgressMsg('Analisando folha de caixa com IA...');
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers,
@@ -280,7 +347,7 @@ export default function ImportarCaixaRetroativoModal({
                 {
                   type: 'image_url',
                   image_url: {
-                    url: `data:${mimeType};base64,${base64Data}`
+                    url: imageUrl
                   }
                 }
               ]
