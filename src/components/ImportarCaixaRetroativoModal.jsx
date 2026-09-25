@@ -122,6 +122,28 @@ export async function prepararArquivoParaVisao(file) {
   });
 }
 
+// Função para extrair JSON mesmo se houver texto, crases ou cabeçalhos antes/depois
+export function extrairJsonPuro(textoCru) {
+  if (!textoCru) throw new Error("A IA retornou uma resposta vazia.");
+
+  // 1. Procura o primeiro '{' e o último '}'
+  const inicio = textoCru.indexOf('{');
+  const fim = textoCru.lastIndexOf('}');
+
+  if (inicio === -1 || fim === -1 || fim <= inicio) {
+    // Se o retorno for um array '[' e ']'
+    const inicioArr = textoCru.indexOf('[');
+    const fimArr = textoCru.lastIndexOf(']');
+    if (inicioArr !== -1 && fimArr !== -1 && fimArr > inicioArr) {
+      return JSON.parse(textoCru.substring(inicioArr, fimArr + 1));
+    }
+    throw new Error("Não foi possível encontrar a estrutura JSON na resposta da IA.");
+  }
+
+  const jsonSubstring = textoCru.substring(inicio, fim + 1);
+  return JSON.parse(jsonSubstring);
+}
+
 // Chave de API da OpenRouter padrão configurada para o projeto
 const CHAVE_PADRAO = ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
 
@@ -363,8 +385,7 @@ export default function ImportarCaixaRetroativoModal({
 
       const respostaJson = await response.json();
       const textoResposta = respostaJson.choices?.[0]?.message?.content || '{}';
-      const jsonLimpo = textoResposta.replace(/```json/g, '').replace(/```/g, '').trim();
-      const dadosProcessados = JSON.parse(jsonLimpo);
+      const dadosProcessados = extrairJsonPuro(textoResposta);
 
       aplicarDadosFechamento(dadosProcessados);
     } catch (erro) {

@@ -176,11 +176,20 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
 
     const orData = await orRes.json();
     const contentRaw = orData?.choices?.[0]?.message?.content || '';
-    const jsonLimpo = contentRaw.trim()
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
+    
+    // Extrai o bloco JSON puro delimitado por chaves
+    const inicio = contentRaw.indexOf('{');
+    const fim = contentRaw.lastIndexOf('}');
+    let jsonLimpo = contentRaw;
+    if (inicio !== -1 && fim !== -1 && fim > inicio) {
+      jsonLimpo = contentRaw.substring(inicio, fim + 1);
+    } else {
+      jsonLimpo = contentRaw.trim()
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+    }
 
     const parsedJson = JSON.parse(jsonLimpo);
     parsedJson._modelo_utilizado = OPENROUTER_MODEL;

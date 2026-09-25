@@ -46,6 +46,28 @@ export function limparApiKey(chave) {
 }
 
 /**
+ * Função para extrair JSON mesmo se houver texto, crases ou cabeçalhos antes/depois
+ */
+export function extrairJsonPuro(textoCru) {
+  if (!textoCru) throw new Error("A IA retornou uma resposta vazia.");
+
+  const inicio = textoCru.indexOf('{');
+  const fim = textoCru.lastIndexOf('}');
+
+  if (inicio === -1 || fim === -1 || fim <= inicio) {
+    const inicioArr = textoCru.indexOf('[');
+    const fimArr = textoCru.lastIndexOf(']');
+    if (inicioArr !== -1 && fimArr !== -1 && fimArr > inicioArr) {
+      return JSON.parse(textoCru.substring(inicioArr, fimArr + 1));
+    }
+    throw new Error("Não foi possível encontrar a estrutura JSON na resposta da IA.");
+  }
+
+  const jsonSubstring = textoCru.substring(inicio, fim + 1);
+  return JSON.parse(jsonSubstring);
+}
+
+/**
  * Obtém a chave da IA de forma robusta e limpa das fontes disponíveis
  */
 export function getEffectiveApiKey(customApiKey = '') {
@@ -325,8 +347,7 @@ export async function processarFolhaComIA(arquivo, chaveInformada = '') {
 
     const jsonResp = await resposta.json();
     const conteudoTexto = jsonResp.choices?.[0]?.message?.content || '';
-    const limpo = conteudoTexto.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(limpo);
+    return extrairJsonPuro(conteudoTexto);
   }
 
   // 3. Caso NÃO seja OpenRouter, segue o fluxo do Gemini...
@@ -386,8 +407,7 @@ export async function processarFolhaComOpenRouter(file, key) {
 
   const respostaJson = await response.json();
   const textoCru = respostaJson.choices?.[0]?.message?.content || '';
-  const jsonLimpo = textoCru.replace(/```json/gi, '').replace(/```/g, '').trim();
-  return JSON.parse(jsonLimpo);
+  return extrairJsonPuro(textoCru);
 }
 
 /**
