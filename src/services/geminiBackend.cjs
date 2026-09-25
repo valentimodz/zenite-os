@@ -142,7 +142,7 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
     const imageMime = mimeType === 'application/pdf' ? 'application/pdf' : (mimeType || 'image/jpeg');
     const dataUrl = `data:${imageMime};base64,${fileBase64}`;
 
-    const promptText = `Você é um assistente especialista em OCR e auditoria de caixa de loja. Analise esta folha de caixa e extraia estritamente em formato JSON válido com as chaves: "data_caixa" (YYYY-MM-DD), "filial_identificada", "total_geral", "totais" (dinheiro, pix, cartao, boleto, total_geral), "vendas" (lista com produto_nome, vendedor_nome, categoria, tipo_item, cor, quantidade, valor_total, forma_pagamento_principal, imei) e "sangrias_despesas" (descricao, valor). Não inclua crases de markdown além do JSON puro.`;
+    const promptText = `Você é um leitor de dados contábeis para auditoria de software ERP interno. Este documento é uma folha física de fechamento de caixa operacional contendo apenas dados cadastrais de controle de estoque e totais de recebimento da loja. Extraia os dados estritamente no seguinte formato JSON puro, omitindo dados pessoais de terceiros: {"data_caixa": "YYYY-MM-DD", "filial_identificada": "", "total_geral": 0, "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 }, "vendas": [ { "produto_nome": "", "vendedor_nome": "", "categoria": "", "tipo_item": "", "cor": "", "quantidade": 1, "valor_total": 0, "forma_pagamento_principal": "", "imei": "" } ], "sangrias_despesas": [ { "descricao": "", "valor": 0 } ]}. Responda exclusivamente com o objeto JSON.`;
 
     const openRouterPayload = {
       model: OPENROUTER_MODEL,
