@@ -273,6 +273,9 @@ function ProductTableRow({
     setIsSaving(true);
     try {
       await onUpdateProdutoField(p.id, p.nome, editingField, editValue, p.filial_id);
+      if (editingField === 'cor') {
+        p.cor = editValue;
+      }
       setEditingField(null);
     } catch (err) {
       console.error(err);
@@ -6594,6 +6597,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const dbClient = supabase;
     const resolvedFilialId = itemFilialId || activeFilialId || filiais[0]?.id;
 
+    console.log('[SUPABASE UPDATE PRODUTO] Payload:', {
+      produtoId,
+      nome,
+      field,
+      newValue,
+      itemFilialId,
+      resolvedFilialId,
+      targetEmpresaId
+    });
+
     // Helper de correspondência resiliente (ID numérico/string, catalogo_id e Nome normalizado)
     const isTargetItem = (item) => {
       if (!item) return false;
@@ -6622,19 +6635,36 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (itemFilialId) {
             q = q.eq('filial_id', itemFilialId);
           }
-          const { error } = await q;
-          if (error) throw error;
+          const { data: updateData, error: updateError } = await q.select();
+          console.log('[SUPABASE UPDATE PRODUTO - COR] Resposta produtos:', { data: updateData, error: updateError });
+          if (updateError) {
+            console.error('[SUPABASE UPDATE PRODUTO - COR] Erro:', updateError);
+            throw updateError;
+          }
         }
 
         if (nome) {
-          await dbClient.from('produtos_catalogo').update({ cor: corTrimmed }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
+          const { data: catData, error: catError } = await dbClient
+            .from('produtos_catalogo')
+            .update({ cor: corTrimmed })
+            .eq('empresa_id', targetEmpresaId)
+            .ilike('nome', nome.trim())
+            .select();
+          console.log('[SUPABASE UPDATE PRODUTO - COR] Resposta produtos_catalogo:', { data: catData, error: catError });
+          if (catError) {
+            console.warn('[SUPABASE UPDATE PRODUTO - COR] Aviso catálogo:', catError);
+          }
         }
 
-        // Imutabilidade estrita (Deep object copy com spread operator)
-        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, cor: corTrimmed } : p));
-        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, cor: corTrimmed } : p));
-        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, cor: corTrimmed } : c));
-        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, cor: corTrimmed } : e));
+        // Atualização otimista imediata do estado React
+        setProdutos(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, cor: corTrimmed } : p) : []));
+        setProdutosFilial(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, cor: corTrimmed } : p) : []));
+        setCatalogoProdutos(prev => (Array.isArray(prev) ? prev.map(c => isTargetItem(c) ? { ...c, cor: corTrimmed } : c) : []));
+        setEstoqueConsolidadoLista(prev => (Array.isArray(prev) ? prev.map(e => isTargetItem(e) ? { ...e, cor: corTrimmed } : e) : []));
+
+        // Invalidar cache de estoque consolidado para que o refetch não recupere dados antigos
+        invalidateCache('estoque_consolidado_');
+
         showToast(`Cor de "${nome}" alterada para "${corTrimmed || 'Sem cor'}" com sucesso!`, 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
@@ -6643,7 +6673,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
       } catch (err) {
         console.error('Erro ao atualizar cor:', err);
-        showToast('Erro ao atualizar cor: ' + err.message, 'error');
+        showToast('Erro ao atualizar cor: ' + (err.message || 'Falha na conexão.'), 'error');
       }
     } else if (field === 'preco' || field === 'preco_venda') {
       const novoValor = typeof newValue === 'number'
@@ -6669,14 +6699,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (itemFilialId) {
             q = q.eq('filial_id', itemFilialId);
           }
-          let { error } = await q;
+          let { data: updateData, error } = await q.select();
 
           // Se a coluna preco_venda não existir em alguma migration antiga, tenta apenas com preco
           if (error && (error.message?.includes('preco_venda') || error.details?.includes('preco_venda'))) {
             console.warn('Aviso: coluna preco_venda ausente em produtos, tentando update apenas com preco:', error);
-            const retryRes = await dbClient.from('produtos').update({ preco: novoValor }).eq('id', produtoId);
+            const retryRes = await dbClient.from('produtos').update({ preco: novoValor }).eq('id', produtoId).select();
             error = retryRes.error;
+            updateData = retryRes.data;
           }
+
+          console.log('[SUPABASE UPDATE PRODUTO - PRECO] Resposta produtos:', { data: updateData, error });
 
           if (error) {
             console.error('Erro ao atualizar preço:', error);
@@ -6687,27 +6720,35 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         if (nome) {
           try {
-            await dbClient
+            const { data: catData, error: catErr } = await dbClient
               .from('produtos_catalogo')
               .update({ preco: novoValor, preco_venda: novoValor })
               .eq('empresa_id', targetEmpresaId)
-              .ilike('nome', nome.trim());
+              .ilike('nome', nome.trim())
+              .select();
+            console.log('[SUPABASE UPDATE PRODUTO - PRECO] Resposta produtos_catalogo:', { data: catData, error: catErr });
+            if (catErr) throw catErr;
           } catch (catErr) {
             // Fallback caso a tabela produtos_catalogo use apenas preco
-            await dbClient
+            const { data: catRetryData, error: retryErr } = await dbClient
               .from('produtos_catalogo')
               .update({ preco: novoValor })
               .eq('empresa_id', targetEmpresaId)
-              .ilike('nome', nome.trim());
+              .ilike('nome', nome.trim())
+              .select();
+            console.log('[SUPABASE UPDATE PRODUTO - PRECO] Resposta produtos_catalogo (fallback):', { data: catRetryData, error: retryErr });
           }
         }
 
         // Atualização imediata do estado local: produto.preco = novoValor e produto.preco_venda = novoValor
         const updatedItemProps = { preco: novoValor, preco_venda: novoValor };
-        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p));
-        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p));
-        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, ...updatedItemProps } : c));
-        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, ...updatedItemProps } : e));
+        setProdutos(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p) : []));
+        setProdutosFilial(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, ...updatedItemProps } : p) : []));
+        setCatalogoProdutos(prev => (Array.isArray(prev) ? prev.map(c => isTargetItem(c) ? { ...c, ...updatedItemProps } : c) : []));
+        setEstoqueConsolidadoLista(prev => (Array.isArray(prev) ? prev.map(e => isTargetItem(e) ? { ...e, ...updatedItemProps } : e) : []));
+
+        // Invalidar cache de estoque consolidado para que refetchs subsequentes tragam o valor atualizado
+        invalidateCache('estoque_consolidado_');
 
         showToast('Preço atualizado com sucesso!', 'success');
 
@@ -6732,7 +6773,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (itemFilialId) {
             q = q.eq('filial_id', itemFilialId);
           }
-          const { error } = await q;
+          const { data: updateData, error } = await q.select();
+          console.log('[SUPABASE UPDATE PRODUTO - QTD] Resposta produtos:', { data: updateData, error });
           if (error) throw error;
         } else if (nome && resolvedFilialId) {
           const { data: prodsBanco } = await dbClient
@@ -6743,14 +6785,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             .ilike('nome', nome);
 
           if (prodsBanco && prodsBanco.length > 0) {
-            const { error: updErr } = await dbClient
+            const { data: updData, error: updErr } = await dbClient
               .from('produtos')
               .update({ quantidade: novaQtd })
-              .eq('id', prodsBanco[0].id);
+              .eq('id', prodsBanco[0].id)
+              .select();
+            console.log('[SUPABASE UPDATE PRODUTO - QTD] Resposta produtos exist:', { data: updData, error: updErr });
             if (updErr) throw updErr;
           } else {
             const catMatch = (catalogoProdutos || []).find(c => c.nome?.toLowerCase() === nome.toLowerCase()) || {};
-            const { error: insErr } = await dbClient
+            const { data: insData, error: insErr } = await dbClient
               .from('produtos')
               .insert({
                 empresa_id: targetEmpresaId,
@@ -6762,14 +6806,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 quantidade: novaQtd,
                 sku: catMatch.sku || null,
                 codigo_barras: catMatch.codigo_barras || null
-              });
+              })
+              .select();
+            console.log('[SUPABASE UPDATE PRODUTO - QTD] Resposta produtos insert:', { data: insData, error: insErr });
             if (insErr) throw insErr;
           }
         }
 
-        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, quantidade: novaQtd } : p));
-        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, quantidade: novaQtd } : p));
-        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, quantidade: novaQtd } : e));
+        setProdutos(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, quantidade: novaQtd } : p) : []));
+        setProdutosFilial(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, quantidade: novaQtd } : p) : []));
+        setEstoqueConsolidadoLista(prev => (Array.isArray(prev) ? prev.map(e => isTargetItem(e) ? { ...e, quantidade: novaQtd } : e) : []));
+
+        invalidateCache('estoque_consolidado_');
 
         showToast(`Estoque de "${nome}" alterado para ${novaQtd} un. com sucesso!`, 'success');
 
@@ -6789,7 +6837,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (itemFilialId) {
             q = q.eq('filial_id', itemFilialId);
           }
-          const { error } = await q;
+          const { data: updateData, error } = await q.select();
+          console.log(`[SUPABASE UPDATE PRODUTO - ${field.toUpperCase()}] Resposta produtos:`, { data: updateData, error });
           if (error) throw error;
         }
 
@@ -6798,10 +6847,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           await dbClient.from('produtos').update({ [field]: valorLimpo }).eq('empresa_id', targetEmpresaId).ilike('nome', nome.trim());
         }
 
-        setProdutos(prev => prev.map(p => isTargetItem(p) ? { ...p, [field]: valorLimpo } : p));
-        setProdutosFilial(prev => prev.map(p => isTargetItem(p) ? { ...p, [field]: valorLimpo } : p));
-        setCatalogoProdutos(prev => prev.map(c => isTargetItem(c) ? { ...c, [field]: valorLimpo } : c));
-        setEstoqueConsolidadoLista(prev => prev.map(e => isTargetItem(e) ? { ...e, [field]: valorLimpo } : e));
+        setProdutos(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, [field]: valorLimpo } : p) : []));
+        setProdutosFilial(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, [field]: valorLimpo } : p) : []));
+        setCatalogoProdutos(prev => (Array.isArray(prev) ? prev.map(c => isTargetItem(c) ? { ...c, [field]: valorLimpo } : c) : []));
+        setEstoqueConsolidadoLista(prev => (Array.isArray(prev) ? prev.map(e => isTargetItem(e) ? { ...e, [field]: valorLimpo } : e) : []));
+
+        invalidateCache('estoque_consolidado_');
+
         showToast(`${field === 'categoria' ? 'Categoria' : 'Tipo'} de "${nome}" alterado para "${valorLimpo}" com sucesso!`, 'success');
 
         const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
@@ -11958,24 +12010,36 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     try {
       const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
 
+      console.log('[SUPABASE DELETE PRODUTO] Payload:', {
+        targetId,
+        targetCatalogoId,
+        targetNome,
+        targetEmpresaId,
+        item: targetItem
+      });
+
       // 1. Exclusão em Cascata (Front-end): Deletar IMEIs vinculados antes para permitir apagar o produto sem travas
       if (targetId) {
-        const { error: imeiDelErr } = await supabase
+        const { data: imeiDelData, error: imeiDelErr } = await supabase
           .from('imeis')
           .delete()
-          .eq('produto_id', targetId);
+          .eq('produto_id', targetId)
+          .select();
 
+        console.log('[SUPABASE DELETE PRODUTO - IMEIS] Resposta:', { data: imeiDelData, error: imeiDelErr });
         if (imeiDelErr) {
           console.warn("Aviso ao deletar IMEIs vinculados em cascata:", imeiDelErr.message);
         }
       }
 
       if (targetCatalogoId) {
-        const { error: imeiCatDelErr } = await supabase
+        const { data: imeiCatDelData, error: imeiCatDelErr } = await supabase
           .from('imeis')
           .delete()
-          .eq('produto_catalogo_id', targetCatalogoId);
+          .eq('produto_catalogo_id', targetCatalogoId)
+          .select();
 
+        console.log('[SUPABASE DELETE PRODUTO - IMEIS CATALOGO] Resposta:', { data: imeiCatDelData, error: imeiCatDelErr });
         if (imeiCatDelErr) {
           console.warn("Aviso ao deletar IMEIs por catálogo vinculados em cascata:", imeiCatDelErr.message);
         }
@@ -11983,12 +12047,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // 2. Deletar da tabela produtos (estoque físico)
       if (targetId) {
-        const { error: prodErr } = await supabase
+        const { data: prodDelData, error: prodErr } = await supabase
           .from('produtos')
           .delete()
-          .eq('id', targetId);
+          .eq('id', targetId)
+          .select();
+
+        console.log('[SUPABASE DELETE PRODUTO - PRODUTOS] Resposta:', { data: prodDelData, error: prodErr });
 
         if (prodErr) {
+          console.error('[SUPABASE DELETE PRODUTO - PRODUTOS] Erro retornado:', prodErr);
           const isFk = prodErr.code === '23503' || (prodErr.message && prodErr.message.includes('foreign key'));
           if (isFk) {
             showToast('Não é possível excluir este produto pois ele possui movimentações ou vendas registradas.', 'error');
@@ -12001,12 +12069,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // 3. Deletar da tabela produtos_catalogo se aplicável
       if (targetCatalogoId) {
-        const { error: catErr } = await supabase
+        const { data: catDelData, error: catErr } = await supabase
           .from('produtos_catalogo')
           .delete()
-          .eq('id', targetCatalogoId);
+          .eq('id', targetCatalogoId)
+          .select();
+
+        console.log('[SUPABASE DELETE PRODUTO - CATALOGO] Resposta:', { data: catDelData, error: catErr });
 
         if (catErr) {
+          console.error('[SUPABASE DELETE PRODUTO - CATALOGO] Erro retornado:', catErr);
           const isFk = catErr.code === '23503' || (catErr.message && catErr.message.includes('foreign key'));
           if (isFk) {
             showToast('Não é possível excluir do catálogo pois há registros vinculados.', 'error');
@@ -12042,6 +12114,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const prodId = String(im.produto_id || '');
         return prodId !== targetIdStr && (!catIdStr || prodId !== catIdStr);
       }) : []));
+
+      // Limpar cache de memória para evitar que o refetch reintroduza dados em cache
+      invalidateCache('estoque_consolidado_');
+      invalidateCache('catalogo_produtos_');
+      invalidateCache('pdv_produtos_');
 
       // 5. Toast de sucesso confirmado no banco
       showToast(`Produto "${targetNome || 'Item'}" excluído com sucesso!`, 'success');
