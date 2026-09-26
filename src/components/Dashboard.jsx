@@ -10588,20 +10588,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return catProd.includes('servic') || tipoProd.includes('servic');
       }
 
-      // Correspondência genérica e flexível para qualquer categoria cadastrada (ex.: "RELOGIO DIGITAL")
-      const catBase = filtroNorm.endsWith('s') ? filtroNorm.slice(0, -1) : filtroNorm;
-      const prodCatBase = catProd.endsWith('s') ? catProd.slice(0, -1) : catProd;
-      const prodTipoBase = tipoProd.endsWith('s') ? tipoProd.slice(0, -1) : tipoProd;
+      // Correspondência estrita para a categoria cadastrada selecionada
+      const catObjNomeNorm = catObj ? String(catObj.nome || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+      const catObjIdNorm = catObj ? String(catObj.id || '').toLowerCase().trim() : '';
+      const prodCatId = String(produto.categoria_id || '').toLowerCase().trim();
 
       return (
-        catProd.includes(filtroNorm) ||
-        filtroNorm.includes(catProd) ||
-        tipoProd.includes(filtroNorm) ||
-        filtroNorm.includes(tipoProd) ||
-        nomeProd.includes(filtroNorm) ||
-        prodCatBase === catBase ||
-        prodTipoBase === catBase ||
-        (catObjNorm && (catProd.includes(catObjNorm) || catObjNorm.includes(catProd) || tipoProd.includes(catObjNorm)))
+        catProd === filtroNorm ||
+        tipoProd === filtroNorm ||
+        (catObjNomeNorm && (catProd === catObjNomeNorm || tipoProd === catObjNomeNorm)) ||
+        (catObjIdNorm && (prodCatId === catObjIdNorm || catProd === catObjIdNorm))
       );
     });
 
