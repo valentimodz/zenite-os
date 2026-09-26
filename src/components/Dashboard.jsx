@@ -10615,7 +10615,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       );
     }
 
-    return filtrados;
+    // Garantir unicidade das opções pelo texto exibido (nome + categoria)
+    const conjuntoNomes = new Set();
+    return filtrados.filter((item) => {
+      const chave = `${item.nome || item.produto_nome || ''} - ${item.categoria || ''}`.trim().toLowerCase();
+      if (!chave || conjuntoNomes.has(chave)) {
+        return false;
+      }
+      conjuntoNomes.add(chave);
+      return true;
+    });
   }, [catalogoCompleto, categorias, entradaFiltroCategoria, entradaBuscaMestre]);
 
   const produtosMestreOptions = produtosMestreFiltrados;
