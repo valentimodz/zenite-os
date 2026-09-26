@@ -310,21 +310,52 @@ export default function RankingVendedores({
       }
     });
 
+    // Helper de conferência estrita de filial para o colaborador
+    const isColaboradorDaFilialSelecionada = (colab) => {
+      if (!filtroFilial || filtroFilial === 'TODAS') return true;
+      if (!colab) return false;
+
+      const filialFiltroStr = String(filtroFilial).trim().toLowerCase();
+      const colabFilialIdStr = String(colab.filial_id || '').trim().toLowerCase();
+      const colabFiliaisObjIdStr = String(colab.filiais?.id || '').trim().toLowerCase();
+
+      // Comparação direta de IDs
+      if (colabFilialIdStr && colabFilialIdStr === filialFiltroStr) return true;
+      if (colabFiliaisObjIdStr && colabFiliaisObjIdStr === filialFiltroStr) return true;
+
+      // Comparação por nome de filial selecionada
+      const objFilialSelecionada = filiais?.find(f => String(f.id).trim().toLowerCase() === filialFiltroStr || String(f.nome || '').trim().toLowerCase() === filialFiltroStr);
+      const nomeFilialFiltro = String(objFilialSelecionada?.nome || filtroFilial).trim().toLowerCase();
+
+      const nomeFilialColab = String(colab.filiais?.nome || '').trim().toLowerCase();
+      if (nomeFilialColab && (nomeFilialColab === nomeFilialFiltro || nomeFilialColab === filialFiltroStr)) {
+        return true;
+      }
+
+      // Comparar por nome encontrado na lista geral de filiais pelo colab.filial_id
+      const objFilialDoColab = filiais?.find(f => String(f.id).trim().toLowerCase() === colabFilialIdStr);
+      if (objFilialDoColab && String(objFilialDoColab.nome || '').trim().toLowerCase() === nomeFilialFiltro) {
+        return true;
+      }
+
+      return false;
+    };
+
     // 3. Resolução Segura do Nome da Filial (sem fallback fixo)
     const resolverNomeFilial = (colab) => {
       if (!colab) return 'Sem Filial';
-      const nomeLimpo = (colab.nome || '').trim().toUpperCase();
       const filialRelacao = colab.filiais?.nome;
-      const filialPorId = filiais?.find(f => String(f.id) === String(colab.filial_id))?.nome;
+      const filialPorId = filiais?.find(f => String(f.id).trim().toLowerCase() === String(colab.filial_id || '').trim().toLowerCase())?.nome;
+      const nomeLimpo = (colab.nome || '').trim().toUpperCase();
       const filialPorVenda = mapaFilialVendedor[nomeLimpo];
 
       return filialRelacao || filialPorId || filialPorVenda || 'Sem Filial';
     };
 
-    // 1. Inicializar o mapa exclusivamente com os colaboradores cadastrados (profiles)
+    // 1. Inicializar o mapa exclusivamente com os colaboradores cadastrados da filial selecionada (profiles)
     const rankingMap = {};
     listaColaboradores.forEach(colab => {
-      if (filtroFilial && filtroFilial !== 'TODAS' && String(colab.filial_id) !== String(filtroFilial)) {
+      if (filtroFilial && filtroFilial !== 'TODAS' && !isColaboradorDaFilialSelecionada(colab)) {
         return;
       }
       const colabKey = String(colab.id);
@@ -346,7 +377,16 @@ export default function RankingVendedores({
     // Filtrar vendas pela filial selecionada, se houver filtro ativo
     const vendasFiltradas = (vendasPeriodo || []).filter(v => {
       if (!filtroFilial || filtroFilial === 'TODAS') return true;
-      return String(v.filial_id) === String(filtroFilial);
+      const fFiltro = String(filtroFilial).trim().toLowerCase();
+      const vFilialId = String(v.filial_id || '').trim().toLowerCase();
+      const vFiliaisObjId = String(v.filiais?.id || '').trim().toLowerCase();
+      const vFilialNome = String(v.filiais?.nome || '').trim().toLowerCase();
+      const filialObj = filiais?.find(f => String(f.id).trim().toLowerCase() === fFiltro);
+      const filialNomeEsperado = String(filialObj?.nome || '').trim().toLowerCase();
+
+      return vFilialId === fFiltro || 
+             vFiliaisObjId === fFiltro || 
+             (filialNomeEsperado && vFilialNome === filialNomeEsperado);
     });
 
     // 2. Processar vendas com normalização de nomes compostos com barra ("AMANDA/PAULA", "SENA/PAULA")
@@ -414,8 +454,8 @@ export default function RankingVendedores({
       const comissaoTrainee = isTraineeVenda ? calcularComissaoTraineeItem(v) : 0;
       const comissaoTotalVenda = (Number(v.comissao) || 0) > 0 ? Number(v.comissao) : (comissaoTitular + comissaoTrainee);
 
-      // Atribuição ao Titular
-      if (titularProfile) {
+      // Atribuição ao Titular (somente se pertencer à filial caso haja filtro selecionado)
+      if (titularProfile && isColaboradorDaFilialSelecionada(titularProfile)) {
         const key = String(titularProfile.id);
         if (!rankingMap[key]) {
           rankingMap[key] = {
@@ -435,7 +475,7 @@ export default function RankingVendedores({
         rankingMap[key].transacoes += 1;
         rankingMap[key].volume += safeVal;
         rankingMap[key].comissaoAcumulada += comissaoTitular;
-      } else if (!isTraineeVenda && !rawNome) {
+      } else if (!titularProfile && !isTraineeVenda && !rawNome) {
         // Venda Balcão sem nenhum vendedor identificado
         const key = 'sem_vendedor';
         if (!rankingMap[key]) {
@@ -458,8 +498,8 @@ export default function RankingVendedores({
         rankingMap[key].comissaoAcumulada += comissaoTotalVenda;
       }
 
-      // Atribuição à Trainee participante (Paula Thaynara)
-      if (isTraineeVenda && traineeProfile) {
+      // Atribuição à Trainee participante (somente se pertencer à filial caso haja filtro ativo)
+      if (isTraineeVenda && traineeProfile && isColaboradorDaFilialSelecionada(traineeProfile)) {
         const tKey = String(traineeProfile.id);
         if (!rankingMap[tKey]) {
           rankingMap[tKey] = {
@@ -482,10 +522,18 @@ export default function RankingVendedores({
       }
     });
 
-    const data = Object.values(rankingMap).map(item => ({
+    let data = Object.values(rankingMap).map(item => ({
       ...item,
       ticketMedio: item.transacoes > 0 ? item.volume / item.transacoes : 0
     }));
+
+    // Filtro de segurança final garantindo que somente colaboradores da filial selecionada permaneçam
+    if (filtroFilial && filtroFilial !== 'TODAS') {
+      data = data.filter(item => {
+        if (item.isSemVendedor) return true;
+        return isColaboradorDaFilialSelecionada(item);
+      });
+    }
 
     // Ordenação estrita por Volume decrescente (b.volume - a.volume)
     return data.sort((a, b) => b.volume - a.volume);
