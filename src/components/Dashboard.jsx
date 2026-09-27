@@ -2639,11 +2639,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           }
         }
 
-        // Para DONO, OWNER e SUPER_ADMIN, a filial padrão é "[ Todas as Filiais ]" ("") - Rede Consolidada
+        // Para DONO, OWNER, SUPER_ADMIN, ADMIN e GERENTE, a filial padrão é "[ Todas as Filiais ]" ("") - Rede Consolidada
+        const isGestorGeral = ['DONO', 'OWNER', 'SUPER_ADMIN', 'ADMIN', 'GERENTE'].includes(profileData.role);
         if (filiaisData && filiaisData.length > 0) {
-          if (['DONO', 'OWNER', 'SUPER_ADMIN'].includes(profileData.role)) {
-            // Se for DONO, forçar a visão REDE CONSOLIDADA ("") inicialmente para abranger todas as filiais
-            if (profileData.role === 'DONO' || activeFilialId === undefined || activeFilialId === null) {
+          if (isGestorGeral) {
+            // Se for Gestor/Gerente/Admin, forçar a visão REDE CONSOLIDADA ("") inicialmente para abranger todas as filiais
+            if (['DONO', 'ADMIN', 'GERENTE'].includes(profileData.role) || activeFilialId === undefined || activeFilialId === null) {
               setActiveFilialId('');
               setActiveFilialNome('Todas as Filiais');
               localStorage.setItem('zenite_active_filial_id', '');
@@ -2672,11 +2673,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           fetchTeamMembers(activeEmpresaId).catch(e => console.warn('Aviso team:', e));
         }
 
-        const userEmailInit = (profileData.email || session?.user?.email || '').toLowerCase().trim();
-        const isGerenteInit = profileData.role === 'GERENTE' || userEmailInit === 'rodrigo.gerenciamonkeyshop@gmail.com';
-
-        // Se for GERENTE, VENDEDOR ou ESTOQUISTA e possuir filial vinculada, forçar o login na filial dele
-        if ((isGerenteInit || ['VENDEDOR', 'ESTOQUISTA'].includes(profileData.role)) && profileData.filial_id) {
+        // Apenas VENDEDOR e ESTOQUISTA devem ser vinculados forçadamente à sua filial
+        if (['VENDEDOR', 'ESTOQUISTA'].includes(profileData.role) && profileData.filial_id) {
           const userFilial = filiaisData?.find(f => f.id === profileData.filial_id);
           if (userFilial) {
             setActiveFilialId(userFilial.id);
@@ -4015,12 +4013,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (dtInicio) q = q.gte('created_at', dtInicio);
           if (dtFim) q = q.lte('created_at', dtFim);
 
-          // Apenas aplica o filtro de filial única quando o usuário explicitamente escolher uma filial específica no dropdown do menu lateral
-          const filialSelecionadaFiltro = (activeFilialId && activeFilialId !== 'TODAS' && activeFilialId !== 'todas' && activeFilialId !== 'all') ? activeFilialId : null;
-
-          if (filialSelecionadaFiltro) {
-            q = q.eq('filial_id', filialSelecionadaFiltro);
-          } else if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+          // A busca consolidada do Dashboard Executivo não deve ter filtro de filial:
+          // traz a totalidade das vendas do mês da empresa para agrupar todas as filiais e vendedores
+          if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
             q = q.eq('empresa_id', empresaId);
           }
 
@@ -4035,9 +4030,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               .order('created_at', { ascending: false });
             if (dtInicio) qFb = qFb.gte('created_at', dtInicio);
             if (dtFim) qFb = qFb.lte('created_at', dtFim);
-            if (filialSelecionadaFiltro) {
-              qFb = qFb.eq('filial_id', filialSelecionadaFiltro);
-            } else if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+            if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
               qFb = qFb.eq('empresa_id', empresaId);
             }
             const resFb = await qFb;
@@ -4055,9 +4048,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               .order('created_at', { ascending: false })
               .limit(100);
 
-            if (filialSelecionadaFiltro) {
-              fallbackQ = fallbackQ.eq('filial_id', filialSelecionadaFiltro);
-            } else if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
+            if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
               fallbackQ = fallbackQ.eq('empresa_id', empresaId);
             }
 
@@ -4068,11 +4059,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 .select(vendasSelectFallbackStr)
                 .order('created_at', { ascending: false })
                 .limit(100);
-              if (filialSelecionadaFiltro) {
-                fallbackSales = (resRecentFb.data || []).filter(v => String(v.filial_id) === String(filialSelecionadaFiltro));
-              } else {
-                fallbackSales = resRecentFb.data;
-              }
+              fallbackSales = resRecentFb.data;
             }
             if (fallbackSales && fallbackSales.length > 0) {
               data = fallbackSales;
@@ -22672,21 +22659,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           });
 
                           vendasMes.forEach(s => {
-                            const rawFilialId = s.filial_id ? String(s.filial_id) : 'sem_filial';
-                            if (!filialMap[rawFilialId]) {
-                              const fObj = (filiais || []).find(f => String(f.id) === String(rawFilialId));
-                              filialMap[rawFilialId] = {
-                                id: rawFilialId,
-                                nome: fObj ? fObj.nome : (s.filial?.nome || s.filial_nome || 'Matriz / Loja'),
-                                totalVendido: 0,
-                                qtdVendas: 0,
-                                estoqueParadoQtd: 0,
-                                estoqueParadoValor: 0
-                              };
+                            const rawFilialId = s.filial_id ? String(s.filial_id) : '';
+                            const nomeFilialVenda = (s.filiais?.nome || s.filial_nome || s.filial?.nome || '').trim().toLowerCase();
+                            
+                            // 1. Tentar encontrar a filial no mapa por ID exato
+                            let targetKey = rawFilialId && filialMap[rawFilialId] ? rawFilialId : null;
+
+                            // 2. Se não achou por ID, tentar por correspondência de nome entre as filiais cadastradas
+                            if (!targetKey && nomeFilialVenda) {
+                              const foundByNome = (filiais || []).find(f => (f.nome || '').trim().toLowerCase() === nomeFilialVenda);
+                              if (foundByNome && filialMap[String(foundByNome.id)]) {
+                                targetKey = String(foundByNome.id);
+                              }
                             }
+
+                            // 3. Se ainda não achou, criar chave dinâmica com nome legível
+                            if (!targetKey) {
+                              targetKey = rawFilialId || (nomeFilialVenda ? `nome_${nomeFilialVenda}` : 'sem_filial');
+                              if (!filialMap[targetKey]) {
+                                const fObj = (filiais || []).find(f => String(f.id) === String(rawFilialId));
+                                filialMap[targetKey] = {
+                                  id: targetKey,
+                                  nome: fObj ? fObj.nome : (s.filiais?.nome || s.filial_nome || s.filial?.nome || 'Matriz / Loja'),
+                                  totalVendido: 0,
+                                  qtdVendas: 0,
+                                  estoqueParadoQtd: 0,
+                                  estoqueParadoValor: 0
+                                };
+                              }
+                            }
+
                             const val = parseFloat(s.valor_total || s.total || s.valor_vendido || 0);
-                            filialMap[rawFilialId].totalVendido += val;
-                            filialMap[rawFilialId].qtdVendas += 1;
+                            filialMap[targetKey].totalVendido += (isNaN(val) ? 0 : val);
+                            filialMap[targetKey].qtdVendas += 1;
                           });
 
                           (produtos || []).forEach(p => {
