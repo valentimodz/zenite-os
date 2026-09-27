@@ -1299,6 +1299,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const mes = String(dataAtual.getMonth() + 1).padStart(2, '0');
     return `${ano}-${mes}`;
   }); // YYYY-MM
+  // Estados para Filtros Avançados do Relatório Detalhado de Vendas e Comissões
+  const [filtroVendedor, setFiltroVendedor] = useState('TODOS');
+  const [filtroFilial, setFiltroFilial] = useState('TODAS');
+  const [filtroDataInicio, setFiltroDataInicio] = useState('');
+  const [filtroDataFim, setFiltroDataFim] = useState('');
+  const [filtroPagamento, setFiltroPagamento] = useState('TODOS');
+  const [buscaTermo, setBuscaTermo] = useState('');
+
   const [metaVendedorLogado, setMetaVendedorLogado] = useState(null);
   const [loadingMetaVendedor, setLoadingMetaVendedor] = useState(false);
   const [modalMetasVendedorOpen, setModalMetasVendedorOpen] = useState(false);
@@ -25874,11 +25882,155 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     </div>
 
                     {/* 2. SEÇÃO DE RELATÓRIO GERAL DE VENDAS */}
+                    {/* 2. SEÇÃO DE RELATÓRIO GERAL DE VENDAS */}
                     <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 print:border-none print:bg-white print:text-black">
-                      <h3 className="text-base font-bold text-white print:text-black flex items-center gap-2 mb-4">
-                        <FileText size={16} className="text-[#6A0DAD] print:hidden" />
-                        Relatório Detalhado de Vendas e Comissões
-                      </h3>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+                        <h3 className="text-base font-bold text-white print:text-black flex items-center gap-2">
+                          <FileText size={16} className="text-[#6A0DAD] print:hidden" />
+                          Relatório Detalhado de Vendas e Comissões
+                        </h3>
+                        <span className="text-xs text-gray-500 font-medium print:hidden">
+                          Filtre e audite as movimentações em tempo real
+                        </span>
+                      </div>
+
+                      {/* PAINEL DE FILTROS AVANÇADOS */}
+                      <div className="mb-6 p-4 bg-black/60 border border-[#222222] rounded-xl space-y-4 print:hidden">
+                        <div className="flex items-center justify-between gap-2 border-b border-[#1c1c1c] pb-3">
+                          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <SlidersHorizontal size={14} className="text-[#6A0DAD]" />
+                            Filtros Avançados
+                          </span>
+                          {(filtroVendedor !== 'TODOS' || filtroFilial !== 'TODAS' || filtroDataInicio || filtroDataFim || filtroPagamento !== 'TODOS' || buscaTermo) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFiltroVendedor('TODOS');
+                                setFiltroFilial('TODAS');
+                                setFiltroDataInicio('');
+                                setFiltroDataFim('');
+                                setFiltroPagamento('TODOS');
+                                setBuscaTermo('');
+                              }}
+                              className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold cursor-pointer transition-colors"
+                            >
+                              Limpar Filtros
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+                          {/* 1. Busca por Produto / Descrição / Texto */}
+                          <div className="lg:col-span-2 flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                              Buscar Produto / Texto
+                            </label>
+                            <div className="relative">
+                              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                              <input
+                                type="text"
+                                value={buscaTermo}
+                                onChange={(e) => setBuscaTermo(e.target.value)}
+                                placeholder="Nome, produto, IMEI..."
+                                className="w-full bg-[#111111] border border-[#2a2a2a] focus:border-[#6A0DAD] rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-gray-600 outline-none transition-all"
+                              />
+                            </div>
+                          </div>
+
+                          {/* 2. Filtro por Vendedor */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                              Vendedor
+                            </label>
+                            <select
+                              value={filtroVendedor}
+                              onChange={(e) => setFiltroVendedor(e.target.value)}
+                              className="w-full bg-[#111111] border border-[#2a2a2a] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-xs text-white outline-none cursor-pointer transition-all"
+                            >
+                              <option value="TODOS">Todos os Vendedores</option>
+                              {(() => {
+                                const seenVends = new Set();
+                                const optionsList = [];
+                                (vendedores || []).forEach(v => {
+                                  if (v && v.id && !seenVends.has(String(v.id))) {
+                                    seenVends.add(String(v.id));
+                                    optionsList.push({ id: String(v.id), nome: v.nome || v.name });
+                                  }
+                                });
+                                (teamMembers || []).forEach(m => {
+                                  if (m && m.id && !seenVends.has(String(m.id))) {
+                                    seenVends.add(String(m.id));
+                                    optionsList.push({ id: String(m.id), nome: m.nome || m.name || m.email });
+                                  }
+                                });
+                                return optionsList.map(opt => (
+                                  <option key={opt.id} value={opt.id}>{opt.nome}</option>
+                                ));
+                              })()}
+                            </select>
+                          </div>
+
+                          {/* 3. Filtro por Filial */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                              Filial
+                            </label>
+                            <select
+                              value={filtroFilial}
+                              onChange={(e) => setFiltroFilial(e.target.value)}
+                              className="w-full bg-[#111111] border border-[#2a2a2a] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-xs text-white outline-none cursor-pointer transition-all"
+                            >
+                              <option value="TODAS">Todas as Filiais</option>
+                              {(filiais || []).map(f => (
+                                <option key={f.id} value={String(f.id)}>{f.nome || f.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* 4. Forma de Pagamento */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                              Pagamento
+                            </label>
+                            <select
+                              value={filtroPagamento}
+                              onChange={(e) => setFiltroPagamento(e.target.value)}
+                              className="w-full bg-[#111111] border border-[#2a2a2a] focus:border-[#6A0DAD] rounded-lg px-3 py-2 text-xs text-white outline-none cursor-pointer transition-all"
+                            >
+                              <option value="TODOS">Todas as Formas</option>
+                              <option value="PIX">PIX</option>
+                              <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+                              <option value="CARTAO_DEBITO">Cartão de Débito</option>
+                              <option value="DINHEIRO">Dinheiro</option>
+                              <option value="BOLETO">Boleto / Financiadora</option>
+                              <option value="TROCA">Aparelho na Troca</option>
+                            </select>
+                          </div>
+
+                          {/* 5. Período: Início e Fim */}
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                              Período (Início - Fim)
+                            </label>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <input
+                                type="date"
+                                value={filtroDataInicio}
+                                onChange={(e) => setFiltroDataInicio(e.target.value)}
+                                className="w-full bg-[#111111] border border-[#2a2a2a] focus:border-[#6A0DAD] rounded-lg px-2 py-1.5 text-[11px] text-white outline-none transition-all"
+                                title="Data Início"
+                              />
+                              <input
+                                type="date"
+                                value={filtroDataFim}
+                                onChange={(e) => setFiltroDataFim(e.target.value)}
+                                className="w-full bg-[#111111] border border-[#2a2a2a] focus:border-[#6A0DAD] rounded-lg px-2 py-1.5 text-[11px] text-white outline-none transition-all"
+                                title="Data Fim"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
 
                       <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs border-collapse">
@@ -25900,39 +26052,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </thead>
                           <tbody className="divide-y divide-[#222222]/50">
                             {(() => {
-                              const vistosRelatorio = new Set();
-                              const vendasFiltradasMes = (vendas || [])
-                                .filter(sale => {
-                                  if (!filtroMes) return true;
-                                  const raw = String(sale.created_at || sale.data || '');
-                                  if (raw.startsWith(filtroMes)) return true;
-                                  if (!raw) return true;
-                                  const d = new Date(raw);
-                                  if (isNaN(d.getTime())) return false;
-                                  const [yearStr, monthStr] = filtroMes.split('-');
-                                  const y = parseInt(yearStr, 10);
-                                  const m = parseInt(monthStr, 10);
-                                  // Abrange todo o mês selecionado em UTC e horário local
-                                  return (d.getUTCFullYear() === y && (d.getUTCMonth() + 1) === m) ||
-                                         (d.getFullYear() === y && (d.getMonth() + 1) === m);
-                                })
-                                .filter(sale => {
-                                  const chave = sale?.id || `${sale?.created_at}_${sale?.valor_total}_${sale?.vendedor_nome || sale?.vendedor_id}`;
-                                  if (!chave || vistosRelatorio.has(chave)) return false;
-                                  vistosRelatorio.add(chave);
-                                  return true;
-                                });
-
-                              if (vendasFiltradasMes.length === 0) {
-                                return (
-                                  <tr>
-                                    <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 10 : 9} className="py-6 text-center italic text-gray-600">
-                                      Nenhuma venda faturada neste mês.
-                                    </td>
-                                  </tr>
-                                );
-                              }
-
                               // Mapeamento e Fallback Seguro do Nome do Vendedor
                               const mapaFuncionarios = {};
                               (vendedores || []).forEach(v => {
@@ -25962,19 +26081,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   return String(nome).trim();
                                 }
 
-                                // Se tiver apenas vendedor_id ou usuario_id, verificar mapa/lista de funcionários em cache
                                 const idAlvo = venda.vendedor_id || venda.usuario_id || venda.funcionario_id;
                                 if (idAlvo && mapaFuncionarios[String(idAlvo)]) {
                                   const fNome = mapaFuncionarios[String(idAlvo)].nome;
                                   if (fNome && String(fNome).trim() !== '') return String(fNome).trim();
                                 }
 
-                                // Se houver id no profile conectado
                                 if (idAlvo && profile && String(profile.id) === String(idAlvo) && profile.nome) {
                                   return String(profile.nome).trim();
                                 }
 
-                                // Se houver nos itens_venda
                                 if (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0) {
                                   const itVId = venda.itens_venda[0]?.vendedor_id;
                                   if (itVId && mapaFuncionarios[String(itVId)]) {
@@ -25986,7 +26102,97 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 return 'Venda Balcão';
                               };
 
-                              return vendasFiltradasMes.map(sale => {
+                              const vistosRelatorio = new Set();
+                              const vendasFiltradas = (vendas || [])
+                                .filter(sale => {
+                                  // Se houver filtroDataInicio e/ou filtroDataFim explícito, filtra pelo intervalo de datas
+                                  if (filtroDataInicio || filtroDataFim) {
+                                    const raw = String(sale.created_at || sale.data || sale.data_venda || '');
+                                    const saleDateStr = raw ? raw.substring(0, 10) : '';
+                                    if (filtroDataInicio && saleDateStr < filtroDataInicio) return false;
+                                    if (filtroDataFim && saleDateStr > filtroDataFim) return false;
+                                    return true;
+                                  }
+
+                                  // Caso contrário, filtra pelo filtroMes padrão
+                                  if (!filtroMes) return true;
+                                  const raw = String(sale.created_at || sale.data || sale.data_venda || '');
+                                  if (raw.startsWith(filtroMes)) return true;
+                                  if (!raw) return true;
+                                  const d = new Date(raw);
+                                  if (isNaN(d.getTime())) return false;
+                                  const [yearStr, monthStr] = filtroMes.split('-');
+                                  const y = parseInt(yearStr, 10);
+                                  const m = parseInt(monthStr, 10);
+                                  return (d.getUTCFullYear() === y && (d.getUTCMonth() + 1) === m) ||
+                                         (d.getFullYear() === y && (d.getMonth() + 1) === m);
+                                })
+                                .filter(sale => {
+                                  // Filtro por Vendedor
+                                  if (filtroVendedor && filtroVendedor !== 'TODOS') {
+                                    const vId = String(sale.vendedor_id || sale.usuario_id || '');
+                                    const vNome = extrairNomeVendedor(sale).toLowerCase();
+                                    const alvoObj = mapaFuncionarios[String(filtroVendedor)];
+                                    const alvoNome = alvoObj ? (alvoObj.nome || alvoObj.name || '').toLowerCase() : '';
+                                    const matchId = vId && vId === String(filtroVendedor);
+                                    const matchNome = alvoNome && vNome.includes(alvoNome);
+                                    if (!matchId && !matchNome) return false;
+                                  }
+
+                                  // Filtro por Filial
+                                  if (filtroFilial && filtroFilial !== 'TODAS') {
+                                    const fId = String(sale.filial_id || '');
+                                    const fObj = filiais.find(f => String(f.id) === String(filtroFilial));
+                                    const fNomeAlvo = fObj ? (fObj.nome || '').toLowerCase() : '';
+                                    const saleFilialNome = (sale.filiais?.nome || filiais.find(f => String(f.id) === fId)?.nome || '').toLowerCase();
+                                    const matchFilialId = fId && fId === String(filtroFilial);
+                                    const matchFilialNome = fNomeAlvo && saleFilialNome === fNomeAlvo;
+                                    if (!matchFilialId && !matchFilialNome) return false;
+                                  }
+
+                                  // Filtro por Forma de Pagamento
+                                  if (filtroPagamento && filtroPagamento !== 'TODOS') {
+                                    const metodoRaw = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
+                                    if (filtroPagamento === 'PIX' && !metodoRaw.includes('PIX')) return false;
+                                    if (filtroPagamento === 'CARTAO_CREDITO' && (!metodoRaw.includes('CRED') && metodoRaw !== 'CARTAO_CREDITO')) return false;
+                                    if (filtroPagamento === 'CARTAO_DEBITO' && (!metodoRaw.includes('DEB') && metodoRaw !== 'CARTAO_DEBITO')) return false;
+                                    if (filtroPagamento === 'DINHEIRO' && (!metodoRaw.includes('DINHEIRO') && !metodoRaw.includes('ESPECIE'))) return false;
+                                    if (filtroPagamento === 'BOLETO' && (!metodoRaw.includes('BOLETO') && !metodoRaw.includes('FINAN') && !metodoRaw.includes('CARN'))) return false;
+                                    if (filtroPagamento === 'TROCA' && (!metodoRaw.includes('TROCA') && !metodoRaw.includes('USADO'))) return false;
+                                  }
+
+                                  // Busca por Termo (Produto / Texto / IMEI)
+                                  if (buscaTermo && buscaTermo.trim()) {
+                                    const termo = buscaTermo.trim().toLowerCase();
+                                    const primeiroItemNome = Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0
+                                      ? (sale.itens_venda[0]?.produto_nome || sale.itens_venda[0]?.nome || '')
+                                      : '';
+                                    const prodObj = produtos.find(p => String(p.id) === String(sale.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(sale.produto_id));
+                                    const pNome = (primeiroItemNome || sale.produto_nome || prodObj?.nome || '').toLowerCase();
+                                    const imeiStr = String(sale.imei || '').toLowerCase();
+                                    const vNome = extrairNomeVendedor(sale).toLowerCase();
+                                    const clienteNome = String(sale.cliente_nome || sale.cliente?.nome || '').toLowerCase();
+                                    const match = pNome.includes(termo) || imeiStr.includes(termo) || vNome.includes(termo) || clienteNome.includes(termo);
+                                    if (!match) return false;
+                                  }
+
+                                  const chave = sale?.id || `${sale?.created_at}_${sale?.valor_total}_${sale?.vendedor_nome || sale?.vendedor_id}`;
+                                  if (!chave || vistosRelatorio.has(chave)) return false;
+                                  vistosRelatorio.add(chave);
+                                  return true;
+                                });
+
+                              if (vendasFiltradas.length === 0) {
+                                return (
+                                  <tr>
+                                    <td colSpan={['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) ? 10 : 9} className="py-6 text-center italic text-gray-600">
+                                      Nenhuma venda encontrada com os filtros selecionados.
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              return vendasFiltradas.map(sale => {
                                 // 1. Coluna VENDEDOR com fallback abrangente e mapa de funcionários
                                 const vendedorNome = extrairNomeVendedor(sale);
 
