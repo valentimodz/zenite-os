@@ -1041,6 +1041,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [editingVenda, setEditingVenda] = useState(null);
   const [vendaNewNomeProduto, setVendaNewNomeProduto] = useState('');
   const [vendaNewCategoria, setVendaNewCategoria] = useState('Celulares');
+  const [dataVenda, setDataVenda] = useState('');
   const [vendaNewQty, setVendaNewQty] = useState('');
   const [vendaNewValor, setVendaNewValor] = useState('');
   const [vendaNewComissao, setVendaNewComissao] = useState('');
@@ -9837,6 +9838,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const filialIdInicial = venda.filial_id || '';
     setVendaNewFilialId(filialIdInicial ? String(filialIdInicial) : '');
 
+    // Identificar Data da Venda inicial (YYYY-MM-DD)
+    const rawDataVenda = venda.created_at || venda.data_venda || venda.data || venda.date || '';
+    let dataVendaInicial = '';
+    if (rawDataVenda) {
+      try {
+        const d = new Date(rawDataVenda);
+        if (!isNaN(d.getTime())) {
+          dataVendaInicial = d.toISOString().split('T')[0];
+        } else if (typeof rawDataVenda === 'string' && rawDataVenda.includes('T')) {
+          dataVendaInicial = rawDataVenda.split('T')[0];
+        } else if (typeof rawDataVenda === 'string' && rawDataVenda.length >= 10) {
+          dataVendaInicial = rawDataVenda.substring(0, 10);
+        }
+      } catch (_) {
+        dataVendaInicial = '';
+      }
+    }
+    setDataVenda(dataVendaInicial);
+
     setVendaJustificativa('');
     setIsVendaEditModalOpen(true);
   };
@@ -9928,6 +9948,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const precoUnitario = novaQtd > 0 ? (novoValor / novaQtd) : novoValor;
 
     try {
+      // Formatar nova data mantendo o horário original se disponível ou meio-dia UTC
+      let novaDataIso = null;
+      if (dataVenda) {
+        try {
+          const originalDate = new Date(editingVenda.created_at || editingVenda.data_venda || Date.now());
+          const timePart = !isNaN(originalDate.getTime())
+            ? originalDate.toISOString().substring(10)
+            : 'T12:00:00.000Z';
+          novaDataIso = `${dataVenda}${timePart}`;
+        } catch (_) {
+          novaDataIso = `${dataVenda}T12:00:00.000Z`;
+        }
+      }
+
       // 1. UPDATE direto na tabela 'vendas' garantindo sincronização total com colunas reais
       const updatePayload = {
         valor_total: novoValor,
@@ -9944,10 +9978,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         vendedor_nome: novoVendedorNome,
         filial_id: novaFilialId,
         justificativa_correcao: justificativaTexto,
-        atualizado_em: new Date().toISOString()
+        atualizado_em: new Date().toISOString(),
+        ...(novaDataIso ? { created_at: novaDataIso, data_venda: novaDataIso } : {})
       };
 
-      console.log('Payload enviado para atualizar vendedor:', updatePayload);
+      console.log('Payload enviado para atualizar vendedor e data:', updatePayload);
       const { data: updatedData, error: updateError } = await supabase
         .from('vendas')
         .update(updatePayload)
@@ -9968,7 +10003,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           vendedor_id: novoVendedorId,
           usuario_id: novoVendedorId,
           vendedor_nome: novoVendedorNome,
-          filial_id: novaFilialId
+          filial_id: novaFilialId,
+          ...(novaDataIso ? { created_at: novaDataIso } : {})
         };
         console.log('Tentando update com payload essencial:', essentialPayload);
         const { data: fbData, error: fallbackErr } = await supabase
@@ -30582,6 +30618,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-medium transition-all"
                     />
                     <p className="text-[11px] text-gray-500 font-mono pt-0.5">ID da Venda: {editingVenda.id}</p>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold text-gray-300">
+                      DATA DA VENDA <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={dataVenda}
+                      onChange={(e) => setDataVenda(e.target.value)}
+                      className="bg-[#121217] border border-gray-800 rounded-lg p-2.5 text-white focus:outline-none focus:border-purple-500"
+                      required
+                    />
                   </div>
 
                   <div>
