@@ -6676,6 +6676,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         showToast('Erro ao atualizar cor: ' + (err.message || 'Falha na conexão.'), 'error');
       }
     } else if (field === 'preco' || field === 'preco_venda') {
+      const usuario = profile || profileDataProps;
+      const role = (usuario?.role || usuario?.cargo || '').toLowerCase();
+      const isAuthorized = 
+        role.includes('admin') || 
+        role.includes('super') || 
+        role.includes('gerente') || 
+        role.includes('owner') || 
+        role.includes('dono') || 
+        role.includes('master') || 
+        usuario?.is_super_admin === true;
+
+      if (!isAuthorized) {
+        showToast("Não autorizado: Apenas Super Admin e Admin podem alterar preços.", "error");
+        return;
+      }
+
       const novoValor = typeof newValue === 'number'
         ? newValue
         : parseFloat(String(newValue || '').replace('R$', '').replace(/\s/g, '').replace(',', '.'));
