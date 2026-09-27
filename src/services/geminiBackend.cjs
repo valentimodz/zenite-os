@@ -95,7 +95,7 @@ const CAIXA_RESPONSE_SCHEMA = {
 };
 
 const SYSTEM_INSTRUCTION = `Você é um perito em análise e digitação de folhas físicas de fechamento de caixa diário de lojas de varejo e celulares/smartphones (Monkey Shop).
-Sua missão é extrair com precisão matemática absoluta todos os dados de vendas, produtos, valores, vendedores e formas de pagamento contidos na folha de caixa (imagem ou PDF).
+Sua missão é extrair com precisão matemática absoluta todos os dados de vendas, produtos, valores, vendedores, formas de pagamento e comissões contidos na folha de caixa (imagem ou PDF).
 
 REGRAS RÍGIDAS DE RECONHECIMENTO:
 1. IDENTIFICAÇÃO DE APARELHOS (SMARTPHONES):
@@ -104,15 +104,25 @@ REGRAS RÍGIDAS DE RECONHECIMENTO:
      * categoria = 'Celulares'
    - Extraia a cor se estiver indicada no texto ou abreviação (ex: "Titanium", "Preto", "Azul", "Dourado", "Grafite", "Verde", "Branco").
 
-2. IDENTIFICAÇÃO DE ACESSÓRIOS:
+2. IDENTIFICAÇÃO DE ACESSÓRIOS E SERVIÇOS:
    - Itens como cabos, películas (3D, cerâmica, nano), capas, fones de ouvido, fontes, carregadores, caixas de som e chips de operadora DEVEM ser categorizados como:
      * tipo_item = 'ACESSORIO'
      * categoria = 'Acessórios'
 
-3. DATA DO CAIXA:
+3. RECONHECIMENTO DE MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
+   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
+   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações (ex: "Troca IP11 + 900 volta").
+
+4. REGRA ESTRITA DE COMISSÃO:
+   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se quantidade = 1, comissão = 30. Se quantidade = 2, comissão = 60.
+   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado).
+   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som): Comissão de 2,5% sobre o valor vendido.
+   - CHIP: R$ 0,50 fixo por chip vendido.
+
+5. DATA DO CAIXA:
    - Converta sempre a data da folha física para o formato ISO YYYY-MM-DD (ex: se na folha estiver "16/09/2026", "16-09" ou "16 de setembro de 2026", converta para "2026-09-16"). Se o ano não estiver explícito, adote o ano corrente (2026).
 
-4. VALORES E QUANTIDADES:
+6. VALORES E QUANTIDADES:
    - Garanta que valor_total e quantidade sejam numéricos puros (ex: 79.90, e não "R$ 79,90").
    - Trate vírgulas como decimais.`;
 
@@ -142,7 +152,17 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
     const imageMime = mimeType === 'application/pdf' ? 'application/pdf' : (mimeType || 'image/jpeg');
     const dataUrl = `data:${imageMime};base64,${fileBase64}`;
 
-    const promptText = `Você é um leitor de dados contábeis para auditoria de software ERP interno. Este documento é uma folha física de fechamento de caixa operacional contendo apenas dados cadastrais de controle de estoque e totais de recebimento da loja. Extraia os dados estritamente no seguinte formato JSON puro, omitindo dados pessoais de terceiros: {"data_caixa": "YYYY-MM-DD", "filial_identificada": "", "total_geral": 0, "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 }, "vendas": [ { "produto_nome": "", "vendedor_nome": "", "categoria": "", "tipo_item": "", "cor": "", "quantidade": 1, "valor_total": 0, "forma_pagamento_principal": "", "imei": "" } ], "sangrias_despesas": [ { "descricao": "", "valor": 0 } ]}. Responda exclusivamente com o objeto JSON.`;
+    const promptText = `Você é um leitor de dados contábeis para auditoria de software ERP interno da Monkey Shop. Analise detalhadamente esta folha física de fechamento de caixa e extraia estritamente no formato JSON puro:
+{"data_caixa": "YYYY-MM-DD", "filial_identificada": "", "total_geral": 0, "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 }, "vendas": [ { "produto_nome": "", "vendedor_nome": "", "categoria": "", "tipo_item": "", "cor": "", "quantidade": 1, "valor_total": 0, "forma_pagamento_principal": "", "imei": "", "observacoes": "", "comissao": 0 } ], "sangrias_despesas": [ { "descricao": "", "valor": 0 } ]}.
+
+REGRAS OBRIGATÓRIAS:
+1. Múltiplos métodos e Trocas: se envolver troca com volta em dinheiro/pix/cartão, registre todos os métodos combinados separados por vírgula em forma_pagamento_principal (ex: "TROCA, PIX", "TROCA, DINHEIRO") e detalhe a entrada/volta em observacoes (ex: "Troca IP11 + 900 volta").
+2. Regra Estrita de Comissão:
+   - IPHONE (qualquer modelo de iPhone): RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual para iPhone.
+   - DEMAIS CELULARES / ANDROID: 1% a 2% sobre o valor vendido.
+   - ACESSÓRIOS: 2,5% sobre o valor vendido.
+   - CHIP: R$ 0,50 fixo por unidade.
+Responda exclusivamente com o objeto JSON.`;
 
     const openRouterPayload = {
       model: OPENROUTER_MODEL,

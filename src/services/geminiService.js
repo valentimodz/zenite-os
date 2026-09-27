@@ -217,7 +217,15 @@ export const CAIXA_RESPONSE_SCHEMA = {
           },
           forma_pagamento_principal: {
             type: Type.STRING,
-            description: "Forma de pagamento (PIX, Dinheiro, Cartão de Crédito, Cartão de Débito, Boleto, Carnê/PayJoy, etc.)"
+            description: "Forma de pagamento (ex: 'PIX', 'DINHEIRO', 'CARTAO_CREDITO', 'BOLETO', ou múltiplos métodos combinados como 'TROCA, PIX', 'TROCA, DINHEIRO', 'TROCA, CARTAO_CREDITO')"
+          },
+          observacoes: {
+            type: Type.STRING,
+            description: "Observações adicionais da venda, especialmente detalhes de aparelho na troca e valor de volta/entrada (ex: 'Troca IP11 + 900 volta')"
+          },
+          comissao_estimada: {
+            type: Type.NUMBER,
+            description: "Comissão estimada da venda calculada rigorosamente pelas regras da loja"
           }
         },
         required: [
@@ -236,7 +244,7 @@ export const CAIXA_RESPONSE_SCHEMA = {
 };
 
 export const SYSTEM_INSTRUCTION = `Você é um perito em análise e digitação de folhas físicas de fechamento de caixa diário de lojas de varejo e celulares/smartphones (Monkey Shop).
-Sua missão é extrair com precisão matemática absoluta todos os dados de vendas, produtos, valores, vendedores e formas de pagamento contidos na folha de caixa (imagem ou PDF).
+Sua missão é extrair com precisão matemática absoluta todos os dados de vendas, produtos, valores, vendedores, formas de pagamento e comissões contidos na folha de caixa (imagem ou PDF).
 
 REGRAS RÍGIDAS DE RECONHECIMENTO:
 1. IDENTIFICAÇÃO DE APARELHOS (SMARTPHONES):
@@ -245,15 +253,25 @@ REGRAS RÍGIDAS DE RECONHECIMENTO:
      * categoria = 'Celulares'
    - Extraia a cor se estiver indicada no texto ou abreviação (ex: "Titanium", "Preto", "Azul", "Dourado", "Grafite", "Verde", "Branco").
 
-2. IDENTIFICAÇÃO DE ACESSÓRIOS:
+2. IDENTIFICAÇÃO DE ACESSÓRIOS E SERVIÇOS:
    - Itens como cabos, películas (3D, cerâmica, nano), capas, fones de ouvido, fontes, carregadores, caixas de som e chips de operadora DEVEM ser categorizados como:
      * tipo_item = 'ACESSORIO'
      * categoria = 'Acessórios'
 
-3. DATA DO CAIXA:
+3. RECONHECIMENTO DE MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
+   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
+   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações da venda (ex: "Troca iPhone 11 com volta de R$ 900,00").
+
+4. REGRA ESTRITA DE COMISSÃO:
+   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se vender 1 iPhone, comissão = 30.00. Se vender 2, comissão = 60.00.
+   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola, Poco, Tecno): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado em boleto/carnê/PayJoy).
+   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som, Carregadores, Fones): Comissão de 2,5% sobre o valor total vendido.
+   - CHIP: R$ 0,50 fixo por unidade de chip vendido.
+
+5. DATA DO CAIXA:
    - Converta sempre a data da folha física para o formato ISO YYYY-MM-DD (ex: se na folha estiver "16/09/2026", "16-09" ou "16 de setembro de 2026", converta para "2026-09-16"). Se o ano não estiver explícito, adote o ano corrente (2026).
 
-4. VALORES E QUANTIDADES:
+6. VALORES E QUANTIDADES:
    - Garanta que valor_total e quantidade sejam numéricos puros (ex: 79.90, e não "R$ 79,90").
    - Trate vírgulas como decimais.`;
 
@@ -295,6 +313,46 @@ export async function processarFolhaComIA(arquivo, chaveInformada = '') {
     ''
   ).trim().replace(/^["']|["']$/g, '').trim();
 
+  const PROMPT_EXTRAIR_FOLHA_TEXT = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop).
+Analise detalhadamente esta folha física de fechamento de caixa e extraia estritamente em formato JSON válido:
+{
+  "data": "DD/MM/AAAA",
+  "data_caixa": "YYYY-MM-DD",
+  "filial_identificada": "",
+  "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 },
+  "vendas": [
+    {
+      "vendedor": "",
+      "produto": "",
+      "imei_serial": "",
+      "valor": 0,
+      "forma_pagamento": "",
+      "observacoes": "",
+      "comissao": 0,
+      "categoria": "Celulares",
+      "tipo_item": "APARELHO",
+      "cor": "",
+      "quantidade": 1
+    }
+  ],
+  "sangrias_despesas": [
+    { "descricao": "", "valor": 0 }
+  ]
+}
+
+REGRAS OBRIGATÓRIAS:
+1. MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
+   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
+   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações (ex: "Troca IP11 + 900 volta").
+
+2. REGRA ESTRITA DE COMISSÃO:
+   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se quantidade = 1, comissão = 30. Se quantidade = 2, comissão = 60.
+   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado).
+   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som): Comissão de 2,5% sobre o valor vendido.
+   - CHIP: R$ 0,50 fixo por chip vendido.
+
+Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
+
   // 2. Se a chave for da OPENROUTER (sk-or-...), NUNCA chamar o SDK da Google:
   if (chave.startsWith('sk-or-')) {
     console.log('[IA CAIXA] Executando chamada via OpenRouter...');
@@ -327,7 +385,7 @@ export async function processarFolhaComIA(arquivo, chaveInformada = '') {
             content: [
               {
                 type: 'text',
-                text: 'Você é um leitor de dados contábeis para auditoria de software ERP interno. Este documento é uma folha física de fechamento de caixa operacional contendo apenas dados cadastrais de controle de estoque e totais de recebimento da loja. Extraia os dados estritamente no seguinte formato JSON puro, omitindo dados pessoais de terceiros: {"data": "DD/MM/AAAA", "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 }, "vendas": [ { "vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": "" } ], "sangrias_despesas": [ { "descricao": "", "valor": 0 } ]}. Responda exclusivamente com o objeto JSON.'
+                text: PROMPT_EXTRAIR_FOLHA_TEXT
               },
               {
                 type: 'image_url',
@@ -373,6 +431,46 @@ export async function processarFolhaComOpenRouter(file, key) {
     DEFAULT_OPENROUTER_API_KEY
   ).trim();
 
+  const PROMPT_EXTRAIR_FOLHA_TEXT = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop).
+Analise detalhadamente esta folha física de fechamento de caixa e extraia estritamente em formato JSON válido:
+{
+  "data": "DD/MM/AAAA",
+  "data_caixa": "YYYY-MM-DD",
+  "filial_identificada": "",
+  "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 },
+  "vendas": [
+    {
+      "vendedor": "",
+      "produto": "",
+      "imei_serial": "",
+      "valor": 0,
+      "forma_pagamento": "",
+      "observacoes": "",
+      "comissao": 0,
+      "categoria": "Celulares",
+      "tipo_item": "APARELHO",
+      "cor": "",
+      "quantidade": 1
+    }
+  ],
+  "sangrias_despesas": [
+    { "descricao": "", "valor": 0 }
+  ]
+}
+
+REGRAS OBRIGATÓRIAS:
+1. MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
+   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
+   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações (ex: "Troca IP11 + 900 volta").
+
+2. REGRA ESTRITA DE COMISSÃO:
+   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se quantidade = 1, comissão = 30. Se quantidade = 2, comissão = 60.
+   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado).
+   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som): Comissão de 2,5% sobre o valor vendido.
+   - CHIP: R$ 0,50 fixo por chip vendido.
+
+Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -390,7 +488,7 @@ export async function processarFolhaComOpenRouter(file, key) {
           content: [
             {
               type: 'text',
-              text: 'Você é um leitor de dados contábeis para auditoria de software ERP interno. Este documento é uma folha física de fechamento de caixa operacional contendo apenas dados cadastrais de controle de estoque e totais de recebimento da loja. Extraia os dados estritamente no seguinte formato JSON puro, omitindo dados pessoais de terceiros: {"data": "DD/MM/AAAA", "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 }, "vendas": [ { "vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": "" } ], "sangrias_despesas": [ { "descricao": "", "valor": 0 } ]}. Responda exclusivamente com o objeto JSON.'
+              text: PROMPT_EXTRAIR_FOLHA_TEXT
             },
             {
               type: 'image_url',
@@ -424,7 +522,45 @@ export async function processarComOpenRouter(arquivo, apiKey, { onRetryCountdown
   const imageMime = mimeType === 'application/pdf' ? 'application/pdf' : (mimeType || 'image/jpeg');
   const dataUrl = base64Data.startsWith('data:') ? base64Data : `data:${imageMime};base64,${base64Data}`;
 
-  const promptText = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop). Analise detalhadamente esta folha de caixa física e extraia estritamente em formato JSON válido com a seguinte estrutura: {"data": "DD/MM/AAAA", "data_caixa": "YYYY-MM-DD", "filial_identificada": "", "totais": {"dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0}, "vendas": [{"vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": "", "categoria": "Celulares", "tipo_item": "APARELHO", "cor": "", "quantidade": 1}], "sangrias_despesas": [{"descricao": "", "valor": 0}]}. Não inclua crases de markdown além do JSON puro.`;
+  const promptText = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop).
+Analise detalhadamente esta folha de caixa física e extraia estritamente em formato JSON válido:
+{
+  "data": "DD/MM/AAAA",
+  "data_caixa": "YYYY-MM-DD",
+  "filial_identificada": "",
+  "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 },
+  "vendas": [
+    {
+      "vendedor": "",
+      "produto": "",
+      "imei_serial": "",
+      "valor": 0,
+      "forma_pagamento": "",
+      "observacoes": "",
+      "comissao": 0,
+      "categoria": "Celulares",
+      "tipo_item": "APARELHO",
+      "cor": "",
+      "quantidade": 1
+    }
+  ],
+  "sangrias_despesas": [
+    { "descricao": "", "valor": 0 }
+  ]
+}
+
+REGRAS OBRIGATÓRIAS:
+1. MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
+   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
+   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações (ex: "Troca IP11 + 900 volta").
+
+2. REGRA ESTRITA DE COMISSÃO:
+   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se quantidade = 1, comissão = 30. Se quantidade = 2, comissão = 60.
+   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado).
+   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som): Comissão de 2,5% sobre o valor vendido.
+   - CHIP: R$ 0,50 fixo por chip vendido.
+
+Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
 
   const openRouterPayload = {
     model: OPENROUTER_MODEL,
@@ -528,7 +664,10 @@ export async function processarComOpenRouter(arquivo, apiKey, { onRetryCountdown
           quantidade: Math.max(1, Number(v.quantidade || 1)),
           valor_total: Number(v.valor_total || v.valor || 0),
           forma_pagamento_principal: v.forma_pagamento_principal || v.forma_pagamento || 'PIX',
-          imei: v.imei || v.imei_serial || ''
+          forma_pagamento: v.forma_pagamento || v.forma_pagamento_principal || 'PIX',
+          imei: v.imei || v.imei_serial || '',
+          observacoes: v.observacoes || '',
+          comissao: Number(v.comissao || v.comissao_estimada || 0)
         };
       }) : [];
 

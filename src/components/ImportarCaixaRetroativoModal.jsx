@@ -308,6 +308,8 @@ export default function ImportarCaixaRetroativoModal({
         quantidade: Math.max(1, Number(item.quantidade) || 1),
         valor_total: Number(item.valor || item.valor_total) || 0,
         forma_pagamento: item.forma_pagamento || item.forma_pagamento_principal || 'PIX',
+        observacoes: item.observacoes || '',
+        comissao_ia: Number(item.comissao || item.comissao_estimada || 0),
         imei: item.imei || item.imei_serial || ''
       };
     });
@@ -353,6 +355,46 @@ export default function ImportarCaixaRetroativoModal({
       };
 
       setProgressMsg('Analisando folha de caixa com IA...');
+      const promptText = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop).
+Analise detalhadamente esta folha física de fechamento de caixa e extraia estritamente em formato JSON válido:
+{
+  "data": "DD/MM/AAAA",
+  "data_caixa": "YYYY-MM-DD",
+  "filial_identificada": "",
+  "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 },
+  "vendas": [
+    {
+      "vendedor": "",
+      "produto": "",
+      "imei_serial": "",
+      "valor": 0,
+      "forma_pagamento": "",
+      "observacoes": "",
+      "comissao": 0,
+      "categoria": "Celulares",
+      "tipo_item": "APARELHO",
+      "cor": "",
+      "quantidade": 1
+    }
+  ],
+  "sangrias_despesas": [
+    { "descricao": "", "valor": 0 }
+  ]
+}
+
+REGRAS OBRIGATÓRIAS:
+1. MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
+   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
+   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações (ex: "Troca IP11 + 900 volta").
+
+2. REGRA ESTRITA DE COMISSÃO:
+   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se quantidade = 1, comissão = 30. Se quantidade = 2, comissão = 60.
+   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado em carnê/boleto/PayJoy).
+   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som): Comissão de 2,5% sobre o valor vendido.
+   - CHIP: R$ 0,50 fixo por chip vendido.
+
+Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
+
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -369,7 +411,7 @@ export default function ImportarCaixaRetroativoModal({
               content: [
                 {
                   type: 'text',
-                  text: 'Você é um leitor de dados contábeis para auditoria de software ERP interno. Este documento é uma folha física de fechamento de caixa operacional contendo apenas dados cadastrais de controle de estoque e totais de recebimento da loja. Extraia os dados estritamente no seguinte formato JSON puro, omitindo dados pessoais de terceiros: {"data": "DD/MM/AAAA", "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 }, "vendas": [ { "vendedor": "", "produto": "", "imei_serial": "", "valor": 0, "forma_pagamento": "" } ], "sangrias_despesas": [ { "descricao": "", "valor": 0 } ]}. Responda exclusivamente com o objeto JSON.'
+                  text: promptText
                 },
                 {
                   type: 'image_url',
@@ -570,35 +612,57 @@ export default function ImportarCaixaRetroativoModal({
         const titularProfile = encontrarProfile(info.vendedorNome) || (perfilUsuario ? { id: perfilUsuario.id, nome: perfilUsuario.nome } : null);
         const traineeProfile = info.isTrainee ? encontrarProfile(info.traineeNome) : null;
 
-        // Regra de Comissionamento na Importação
+        // Regra Estrita de Comissionamento na Importação
         const valorTotalNum = Number(item.valor_total) || 0;
-        const isAcessorio = (item.tipo_item === 'ACESSORIO' || (item.categoria || '').toUpperCase().includes('ACESS'));
+        const qtdItem = Math.max(1, Number(item.quantidade) || 1);
+        const prodNomeUpper = (item.produto_nome || '').toUpperCase();
+        const categoriaUpper = (item.categoria || '').toUpperCase();
+        const isChip = prodNomeUpper.includes('CHIP');
+        const isIphone = prodNomeUpper.includes('IPHONE') || prodNomeUpper.includes('IP ');
+        const isAcessorio = !isChip && (item.tipo_item === 'ACESSORIO' || categoriaUpper.includes('ACESS') || categoriaUpper.includes('CAPA') || categoriaUpper.includes('PELICULA') || categoriaUpper.includes('CABO') || categoriaUpper.includes('FONTE') || categoriaUpper.includes('CARREGADOR') || categoriaUpper.includes('CAIXA DE SOM'));
         const formaPagtoNorm = (item.forma_pagamento || '').toUpperCase();
         const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => formaPagtoNorm.includes(m));
 
         let comissaoTitular = 0;
         let comissaoTrainee = 0;
 
-        if (!info.isTrainee) {
-          if (isAcessorio) {
-            comissaoTitular = valorTotalNum * 0.025; // 2.5%
-          } else if (isFinanciado) {
-            comissaoTitular = valorTotalNum * 0.020; // 2.0%
+        if (isChip) {
+          // CHIP: R$ 0,50 fixo por chip
+          const totalChipComm = 0.50 * qtdItem;
+          if (!info.isTrainee) {
+            comissaoTitular = totalChipComm;
+            comissaoTrainee = 0;
           } else {
-            comissaoTitular = valorTotalNum * 0.010; // 1.0%
+            comissaoTitular = totalChipComm * 0.5;
+            comissaoTrainee = totalChipComm * 0.5;
           }
-          comissaoTrainee = 0;
-        } else {
-          // Divisão de comissão quando há participação de trainee
-          if (isAcessorio) {
-            comissaoTitular = valorTotalNum * 0.015; // 1.5%
-            comissaoTrainee = valorTotalNum * 0.010; // 1.0%
-          } else if (isFinanciado) {
-            comissaoTitular = valorTotalNum * 0.015; // 1.5%
-            comissaoTrainee = valorTotalNum * 0.010; // 1.0%
+        } else if (isIphone) {
+          // IPHONE: RIGIDAMENTE FIXA em R$ 30,00 por unidade
+          const totalIphoneComm = 30.00 * qtdItem;
+          if (!info.isTrainee) {
+            comissaoTitular = totalIphoneComm;
+            comissaoTrainee = 0;
           } else {
-            comissaoTitular = valorTotalNum * 0.005; // 0.5%
-            comissaoTrainee = valorTotalNum * 0.005; // 0.5%
+            comissaoTitular = totalIphoneComm * 0.5; // R$ 15 titular
+            comissaoTrainee = totalIphoneComm * 0.5; // R$ 15 trainee
+          }
+        } else if (isAcessorio) {
+          // ACESSÓRIOS: 2,5% sobre o valor vendido
+          if (!info.isTrainee) {
+            comissaoTitular = valorTotalNum * 0.025; // 2.5%
+            comissaoTrainee = 0;
+          } else {
+            comissaoTitular = valorTotalNum * 0.015; // 1.5%
+            comissaoTrainee = valorTotalNum * 0.010; // 1.0%
+          }
+        } else {
+          // DEMAIS CELULARES / ANDROID: 1% a 2% sobre o valor da venda
+          if (!info.isTrainee) {
+            comissaoTitular = isFinanciado ? (valorTotalNum * 0.020) : (valorTotalNum * 0.010);
+            comissaoTrainee = 0;
+          } else {
+            comissaoTitular = isFinanciado ? (valorTotalNum * 0.015) : (valorTotalNum * 0.005);
+            comissaoTrainee = isFinanciado ? (valorTotalNum * 0.010) : (valorTotalNum * 0.005);
           }
         }
 
@@ -630,7 +694,8 @@ export default function ImportarCaixaRetroativoModal({
           trainee_id: resolvedTraineeId,
           treener_id: resolvedTraineeId,
           comissao: comissaoTitular,
-          comissao_trainee: comissaoTrainee
+          comissao_trainee: comissaoTrainee,
+          observacoes: item.observacoes || null
         };
 
         const { error: vendaErr } = await supabase
