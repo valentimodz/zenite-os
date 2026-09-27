@@ -4015,10 +4015,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (dtInicio) q = q.gte('created_at', dtInicio);
           if (dtFim) q = q.lte('created_at', dtFim);
 
-          if (isGerente && gerenteFilialId) {
-            // Respeita filial autorizada do perfil GERENTE
-            q = q.eq('filial_id', gerenteFilialId);
-          } else if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+          // Apenas aplica o filtro de filial única quando o usuário explicitamente escolher uma filial específica no dropdown do menu lateral
+          const filialSelecionadaFiltro = (activeFilialId && activeFilialId !== 'TODAS' && activeFilialId !== 'todas' && activeFilialId !== 'all') ? activeFilialId : null;
+
+          if (filialSelecionadaFiltro) {
+            q = q.eq('filial_id', filialSelecionadaFiltro);
+          } else if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
             q = q.eq('empresa_id', empresaId);
           }
 
@@ -4033,40 +4035,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               .order('created_at', { ascending: false });
             if (dtInicio) qFb = qFb.gte('created_at', dtInicio);
             if (dtFim) qFb = qFb.lte('created_at', dtFim);
-            if (isGerente && gerenteFilialId) {
-              qFb = qFb.eq('filial_id', gerenteFilialId);
-            } else if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+            if (filialSelecionadaFiltro) {
+              qFb = qFb.eq('filial_id', filialSelecionadaFiltro);
+            } else if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
               qFb = qFb.eq('empresa_id', empresaId);
             }
             const resFb = await qFb;
             if (!resFb.error && resFb.data) {
               data = resFb.data;
-              error = null;
-            }
-          }
-
-          // Se for GERENTE e a query restrita por filial não retornar dados ou der erro, tentar fallback com empresa_id sem bloquear a visualização
-          if (isGerente && (!data || data.length === 0 || error) && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
-            let fbGerenteQ = supabase
-              .from('vendas')
-              .select(vendasSelectStr)
-              .eq('empresa_id', empresaId)
-              .order('created_at', { ascending: false });
-            if (dtInicio) fbGerenteQ = fbGerenteQ.gte('created_at', dtInicio);
-            if (dtFim) fbGerenteQ = fbGerenteQ.lte('created_at', dtFim);
-
-            let { data: fbData, error: fbErr } = await fbGerenteQ;
-            if (fbErr) {
-              const resFbSimple = await supabase
-                .from('vendas')
-                .select(vendasSelectFallbackStr)
-                .eq('empresa_id', empresaId)
-                .order('created_at', { ascending: false });
-              fbData = resFbSimple.data;
-              fbErr = resFbSimple.error;
-            }
-            if (!fbErr && fbData && fbData.length > 0) {
-              data = fbData;
               error = null;
             }
           }
@@ -4079,7 +4055,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               .order('created_at', { ascending: false })
               .limit(100);
 
-            if (!isDono && empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
+            if (filialSelecionadaFiltro) {
+              fallbackQ = fallbackQ.eq('filial_id', filialSelecionadaFiltro);
+            } else if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined') {
               fallbackQ = fallbackQ.eq('empresa_id', empresaId);
             }
 
@@ -4090,7 +4068,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 .select(vendasSelectFallbackStr)
                 .order('created_at', { ascending: false })
                 .limit(100);
-              fallbackSales = resRecentFb.data;
+              if (filialSelecionadaFiltro) {
+                fallbackSales = (resRecentFb.data || []).filter(v => String(v.filial_id) === String(filialSelecionadaFiltro));
+              } else {
+                fallbackSales = resRecentFb.data;
+              }
             }
             if (fallbackSales && fallbackSales.length > 0) {
               data = fallbackSales;
