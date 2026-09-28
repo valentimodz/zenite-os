@@ -15840,7 +15840,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const userAuthId = session?.user?.id;
     const profileId = profile?.id;
     const currentUserId = userAuthId || profileId;
-    const profileNome = (profile?.nome || session?.user?.user_metadata?.nome || '').trim();
+    const nomeDoUsuario = profile?.nome || profile?.user_metadata?.nome || session?.user?.user_metadata?.nome || session?.user?.nome || 'Sistema';
+    const profileNome = (nomeDoUsuario || '').trim();
+    const userNome = profileNome.toLowerCase();
 
     const mesAlvo = filtroMes || new Date().toISOString().slice(0, 7);
     const [anoAlvoStr, mesAlvoStr] = mesAlvo.split('-');
