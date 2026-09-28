@@ -23,7 +23,8 @@ import {
   ShieldCheck,
   RefreshCw,
   Eye,
-  Trash2
+  Trash2,
+  UserPlus
 } from 'lucide-react';
 
 // Helper de parsing para identificar Vendedor Titular e Trainee (ex: "ISLAYNE COELHO/JARDEL", "AMANDA/PAULA")
@@ -182,6 +183,7 @@ export default function ImportarCaixaRetroativoModal({
   const [dataCaixa, setDataCaixa] = useState('');
   const [selectedFilialId, setSelectedFilialId] = useState('');
   const [itensVenda, setItensVenda] = useState([]);
+  const [colaboradoresList, setColaboradoresList] = useState([]);
 
   // Estados de persistência
   const [isSaving, setIsSaving] = useState(false);
@@ -190,6 +192,25 @@ export default function ImportarCaixaRetroativoModal({
   const [successMessage, setSuccessMessage] = useState('');
 
   const fileInputRef = useRef(null);
+
+  // Carregar lista de perfis/colaboradores para autocompletar e sugestões de vendedor e trainee
+  useEffect(() => {
+    if (!isOpen) return;
+    async function carregarColaboradores() {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, nome, role, is_treinner, filial_id')
+          .order('nome');
+        if (!error && data) {
+          setColaboradoresList(data);
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar colaboradores para o modal:', e);
+      }
+    }
+    carregarColaboradores();
+  }, [isOpen]);
 
   // Inicializar filial default quando as filiais carregarem
   useEffect(() => {
@@ -455,19 +476,56 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
     setItensVenda(prev => prev.map(item => {
       if (item.id === id) {
         if (field === 'vendedor_nome') {
-          const parsed = parsearVendedores(value);
+          // Se o usuário digitou uma barra no vendedor (ex: ISLAYNE/JARDEL), faz o parse
+          if (typeof value === 'string' && value.includes('/')) {
+            const parsed = parsearVendedores(value);
+            return {
+              ...item,
+              vendedor_nome: parsed.vendedorNome,
+              is_trainee: parsed.isTrainee,
+              trainee_nome: parsed.traineeNome,
+              raw_vendedor: value
+            };
+          }
           return {
             ...item,
-            vendedor_nome: parsed.vendedorNome,
-            is_trainee: parsed.isTrainee,
-            trainee_nome: parsed.traineeNome,
+            vendedor_nome: value,
             raw_vendedor: value
           };
         }
+
+        if (field === 'trainee_nome') {
+          const traineeVal = value || '';
+          const hasTrainee = Boolean(traineeVal.trim());
+          return {
+            ...item,
+            trainee_nome: traineeVal,
+            is_trainee: hasTrainee
+          };
+        }
+
+        if (field === 'is_trainee') {
+          const isT = Boolean(value);
+          return {
+            ...item,
+            is_trainee: isT,
+            trainee_nome: isT ? (item.trainee_nome || '') : ''
+          };
+        }
+
         return { ...item, [field]: value };
       }
       return item;
     }));
+  };
+
+  const handleRemoverTrainee = (id) => {
+    handleUpdateItem(id, 'trainee_nome', '');
+    handleUpdateItem(id, 'is_trainee', false);
+  };
+
+  const handleAdicionarTrainee = (id) => {
+    handleUpdateItem(id, 'is_trainee', true);
   };
 
   const handleRemoveItem = (id) => {
@@ -607,10 +665,13 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           }
         }
 
-        // 3. Tratamento e parsing de Vendedor Titular e Trainee
-        const info = parsearVendedores(item.vendedor_nome || item.raw_vendedor);
-        const titularProfile = encontrarProfile(info.vendedorNome) || (perfilUsuario ? { id: perfilUsuario.id, nome: perfilUsuario.nome } : null);
-        const traineeProfile = info.isTrainee ? encontrarProfile(info.traineeNome) : null;
+        // 3. Tratamento e associação de Vendedor Titular e Trainee (respeitando edições manuais do usuário)
+        const titularNomeLimpo = (item.vendedor_nome || '').trim();
+        const temTrainee = Boolean(item.is_trainee && item.trainee_nome && item.trainee_nome.trim());
+        const traineeNomeLimpo = temTrainee ? item.trainee_nome.trim() : null;
+
+        const titularProfile = encontrarProfile(titularNomeLimpo) || (perfilUsuario ? { id: perfilUsuario.id, nome: perfilUsuario.nome } : null);
+        const traineeProfile = temTrainee ? encontrarProfile(traineeNomeLimpo) : null;
 
         // Regra Estrita de Comissionamento na Importação
         const valorTotalNum = Number(item.valor_total) || 0;
@@ -629,7 +690,7 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
         if (isChip) {
           // CHIP: R$ 0,50 fixo por chip
           const totalChipComm = 0.50 * qtdItem;
-          if (!info.isTrainee) {
+          if (!temTrainee) {
             comissaoTitular = totalChipComm;
             comissaoTrainee = 0;
           } else {
@@ -639,7 +700,7 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
         } else if (isIphone) {
           // IPHONE: RIGIDAMENTE FIXA em R$ 30,00 por unidade
           const totalIphoneComm = 30.00 * qtdItem;
-          if (!info.isTrainee) {
+          if (!temTrainee) {
             comissaoTitular = totalIphoneComm;
             comissaoTrainee = 0;
           } else {
@@ -648,7 +709,7 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           }
         } else if (isAcessorio) {
           // ACESSÓRIOS: 2,5% sobre o valor vendido
-          if (!info.isTrainee) {
+          if (!temTrainee) {
             comissaoTitular = valorTotalNum * 0.025; // 2.5%
             comissaoTrainee = 0;
           } else {
@@ -657,7 +718,7 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           }
         } else {
           // DEMAIS CELULARES / ANDROID: 1% a 2% sobre o valor da venda
-          if (!info.isTrainee) {
+          if (!temTrainee) {
             comissaoTitular = isFinanciado ? (valorTotalNum * 0.020) : (valorTotalNum * 0.010);
             comissaoTrainee = 0;
           } else {
@@ -667,7 +728,7 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
         }
 
         const resolvedVendedorId = titularProfile?.id || perfilUsuario?.id || null;
-        const resolvedVendedorNome = titularProfile?.nome || info.vendedorNome || perfilUsuario?.nome || 'Vendedor';
+        const resolvedVendedorNome = titularProfile?.nome || titularNomeLimpo || perfilUsuario?.nome || 'Vendedor';
         const resolvedTraineeId = traineeProfile?.id || null;
         const precoUnitario = item.quantidade > 0 ? (item.valor_total / item.quantidade) : item.valor_total;
 
@@ -689,8 +750,8 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           status_pagamento: 'PAGO',
           imei: item.imei?.trim() || null,
           created_at: dataIsoRetroativa,
-          teve_participacao_trainee: info.isTrainee,
-          trainee_nome: info.traineeNome,
+          teve_participacao_trainee: temTrainee,
+          trainee_nome: traineeNomeLimpo,
           trainee_id: resolvedTraineeId,
           treener_id: resolvedTraineeId,
           comissao: comissaoTitular,
@@ -1067,19 +1128,54 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                               />
                             </td>
 
-                            {/* Vendedor */}
-                            <td className="py-3 px-3">
-                              <input
-                                type="text"
-                                value={item.vendedor_nome}
-                                onChange={(e) => handleUpdateItem(item.id, 'vendedor_nome', e.target.value)}
-                                className="bg-black/40 border border-[#333] focus:border-[#6A0DAD] rounded px-2 py-1 text-xs text-gray-200 w-28 outline-none"
-                              />
-                              {item.is_trainee && (
-                                <span className="block text-[10px] text-purple-400 font-semibold truncate mt-0.5" title={`Trainee: ${item.trainee_nome}`}>
-                                  + {item.trainee_nome} (Trainee)
-                                </span>
-                              )}
+                            {/* Vendedor e Trainee */}
+                            <td className="py-3 px-3 min-w-[170px]">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    list="colaboradores-vendedores"
+                                    value={item.vendedor_nome}
+                                    onChange={(e) => handleUpdateItem(item.id, 'vendedor_nome', e.target.value)}
+                                    placeholder="Vendedor titular"
+                                    className="bg-black/40 border border-[#333] focus:border-[#6A0DAD] rounded px-2 py-1 text-xs text-gray-200 w-full outline-none"
+                                    title="Nome do vendedor titular"
+                                  />
+                                </div>
+
+                                {item.is_trainee ? (
+                                  <div className="flex items-center gap-1 bg-purple-950/40 border border-purple-800/60 rounded px-1.5 py-0.5">
+                                    <span className="text-[10px] text-purple-300 font-medium shrink-0">Trainee:</span>
+                                    <input
+                                      type="text"
+                                      list="colaboradores-vendedores"
+                                      value={item.trainee_nome || ''}
+                                      onChange={(e) => handleUpdateItem(item.id, 'trainee_nome', e.target.value)}
+                                      placeholder="Nome do trainee"
+                                      className="bg-transparent border-0 text-[10px] text-purple-200 font-semibold focus:outline-none w-full min-w-0 p-0"
+                                      title="Nome do vendedor trainee participante"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoverTrainee(item.id)}
+                                      className="text-purple-400 hover:text-rose-400 p-0.5 rounded transition-colors shrink-0"
+                                      title="Remover vendedor trainee desta venda"
+                                    >
+                                      <X size={11} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAdicionarTrainee(item.id)}
+                                    className="inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-purple-300 hover:bg-purple-950/30 px-1.5 py-0.5 rounded border border-dashed border-[#444] hover:border-purple-700/60 w-fit transition-colors mt-0.5"
+                                    title="Adicionar vendedor trainee com divisão de comissão"
+                                  >
+                                    <UserPlus size={10} />
+                                    <span>+ Trainee</span>
+                                  </button>
+                                )}
+                              </div>
                             </td>
 
                             {/* Forma de Pagamento */}
@@ -1204,6 +1300,15 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           )}
 
         </div>
+
+        {/* Datalist com sugestões de colaboradores e trainees cadastrados */}
+        <datalist id="colaboradores-vendedores">
+          {colaboradoresList.map((colab) => (
+            <option key={colab.id} value={colab.nome}>
+              {colab.role ? `${colab.nome} (${colab.role})` : colab.nome}
+            </option>
+          ))}
+        </datalist>
 
       </div>
     </div>
