@@ -16048,12 +16048,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     currentMonthSales.forEach(s => {
       const saleUserId = s.vendedor_id || s.usuario_id || s.criado_por;
       const saleTraineeId = s.trainee_id || s.treener_id;
+      const saleVendedorNome = (s.vendedor_nome || '').toLowerCase().trim();
+      const nomeVendedorLogado = userNome || '';
 
       const isTitular = (
         (userAuthId && String(saleUserId) === String(userAuthId)) ||
         (profileId && String(saleUserId) === String(profileId)) ||
         (currentUserId && String(saleUserId) === String(currentUserId)) ||
-        (userNome && (s.vendedor_nome || '').toLowerCase().includes(userNome))
+        (Boolean(nomeVendedorLogado) && saleVendedorNome.includes(nomeVendedorLogado))
       );
 
       const isTraineePart = (
