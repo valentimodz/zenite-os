@@ -13725,6 +13725,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const createdVendaIds = [];
       const itemsForRecibo = [];
 
+      // Resolução segura do CPF/CNPJ do cliente para uso no payload e no recibo
+      const clienteSelecionadoObj = (clientes || []).find(c => (clienteIdBanco && c.id === clienteIdBanco) || (selectedPdvClienteId && c.id === selectedPdvClienteId));
+      const resolvedClienteCpf = isConsumidorFinal
+        ? null
+        : (
+            clienteSelecionadoObj?.cpf_cnpj ||
+            clienteSelecionadoObj?.cpf ||
+            pdvClienteCpfCnpj?.trim() ||
+            null
+          );
+
       const mapNomeMetodo = {
         'pix': 'PIX',
         'cartao': 'CARTÃO DE CRÉDITO',
