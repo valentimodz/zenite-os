@@ -6154,17 +6154,57 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   };
 
-  const handleEstornarVenda = async (vendaId) => {
-    if (!window.confirm("ATENÇÃO! Tem certeza que deseja estornar (apagar) esta venda do histórico financeiro?")) return;
+  const handleExcluirVenda = async (vendaId) => {
+    if (!vendaId) return;
+    if (!window.confirm("Tem certeza que deseja excluir esta venda do relatório?")) {
+      return;
+    }
+
     try {
-      const { error } = await supabase.from('vendas').delete().eq('id', vendaId);
-      if (error) throw error;
+      // 1. Remove itens vinculados à venda na tabela itens_venda (evita violação de foreign key)
+      const { error: erroItens } = await supabase
+        .from('itens_venda')
+        .delete()
+        .eq('venda_id', vendaId);
+
+      if (erroItens) {
+        console.warn("Aviso ao deletar itens_venda:", erroItens);
+      }
+
+      // 1.1 Remove pagamentos vinculados na tabela vendas_pagamentos se houver
+      try {
+        await supabase
+          .from('vendas_pagamentos')
+          .delete()
+          .eq('venda_id', vendaId);
+      } catch (errPags) {
+        console.warn("Aviso ao deletar vendas_pagamentos:", errPags);
+      }
+
+      // 2. Remove da tabela principal de vendas
+      const { error: erroVenda } = await supabase
+        .from('vendas')
+        .delete()
+        .eq('id', vendaId);
+
+      if (erroVenda) {
+        throw erroVenda;
+      }
+
+      // 3. Atualização otimista imediata na tabela de vendas
       setVendas(prev => prev.filter(v => v.id !== vendaId));
-      alert("Venda estornada com sucesso.");
+      if (typeof setVendasVendedor === 'function') {
+        setVendasVendedor(prev => prev.filter(v => v.id !== vendaId));
+      }
+
+      showToast("Venda excluída com sucesso!", "success");
     } catch (err) {
-      alert("Erro ao estornar venda: " + err.message);
+      console.error("Erro ao excluir venda:", err);
+      showToast(`Falha ao excluir venda: ${err?.message || 'Erro desconhecido'}`, "error");
     }
   };
+
+  const handleEstornarVenda = handleExcluirVenda;
 
   const handleConfirmarBaixaPagamento = async (e) => {
     if (e) e.preventDefault();
@@ -26258,7 +26298,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                         >
                                           <Printer size={14} />
                                         </button>
-                                        {['SUPER_ADMIN', 'ADMIN', 'GERENTE', 'OWNER'].includes(profile?.role) && (
+                                        {['SUPER_ADMIN', 'ADMIN', 'ADM', 'ADMINISTRADOR', 'GERENTE', 'OWNER', 'RH', 'RH_ADMIN'].includes(String(profile?.role || '').toUpperCase()) && (
                                           <>
                                             <button
                                               type="button"
@@ -26270,9 +26310,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                             </button>
                                             <button
                                               type="button"
-                                              onClick={() => handleEstornarVenda(sale.id)}
+                                              onClick={() => handleExcluirVenda(sale.id)}
                                               className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-950/20 rounded transition-colors cursor-pointer"
-                                              title="Estornar Venda"
+                                              title="Excluir Venda"
                                             >
                                               <Trash2 size={14} />
                                             </button>
