@@ -1347,6 +1347,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [pdvClienteSearchLoading, setPdvClienteSearchLoading] = useState(false);
   const [isPdvClienteDropdownOpen, setIsPdvClienteDropdownOpen] = useState(false);
   const [selectedPdvClienteId, setSelectedPdvClienteId] = useState('00000000-0000-0000-0000-000000000000');
+  const [selectedPdvCliente, setSelectedPdvCliente] = useState(null);
   const [isPdvClienteFieldsEditable, setIsPdvClienteFieldsEditable] = useState(false);
   const [pdvCart, setPdvCart] = useState([]);
   const [taxasCartao, setTaxasCartao] = useState([]);
@@ -2155,6 +2156,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         e.preventDefault();
         const temItemCritico = carrinhoPossuiItemCritico(pdvCart);
         if (!temItemCritico && pdvCart.length > 0) {
+          setSelectedPdvCliente(null);
           setSelectedPdvClienteId('00000000-0000-0000-0000-000000000000');
           setPdvClienteNome('Consumidor Final');
           setPdvClienteSearchInput('Consumidor Final');
@@ -2332,13 +2334,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   }, [modalDetalheCaixa?.id, modalDetalheCaixa?.filial_id]);
 
   const handleSelectPdvCliente = (client) => {
-    setSelectedPdvClienteId(client.id);
-    setPdvClienteNome(client.nome);
-    setPdvClienteSearchInput(client.nome);
-    setPdvClienteCpfCnpj(client.cpf_cnpj || '');
-    setPdvClienteEmail(client.email || '');
-    setPdvClienteTelefone(client.telefone || '');
-    setPdvClienteDataNascimento(client.data_nascimento || '');
+    setSelectedPdvCliente(client);
+    setSelectedPdvClienteId(client?.id || null);
+    const resolvedNome = client?.nome || client?.razao_social || '';
+    setPdvClienteNome(resolvedNome);
+    setPdvClienteSearchInput(resolvedNome);
+    setPdvClienteCpfCnpj(client?.cpf || client?.cnpj || client?.cpf_cnpj || '');
+    setPdvClienteEmail(client?.email || '');
+    setPdvClienteTelefone(client?.telefone || '');
+    setPdvClienteDataNascimento(client?.data_nascimento || '');
     setIsPdvClienteFieldsEditable(false);
     setIsPdvClienteDropdownOpen(false);
   };
@@ -12764,6 +12768,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setPdvClienteDataNascimento('');
     setPdvClienteSearchInput('Consumidor Final');
     setPdvClienteSearchResults([]);
+    setSelectedPdvCliente(null);
     setSelectedPdvClienteId('00000000-0000-0000-0000-000000000000');
     setIsPdvClienteFieldsEditable(false);
     setPdvUsadoList([]);
@@ -13765,16 +13770,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const createdVendaIds = [];
       const itemsForRecibo = [];
 
-      // Resolução segura do CPF/CNPJ do cliente para uso no payload e no recibo
-      const clienteSelecionadoObj = (clientes || []).find(c => (clienteIdBanco && c.id === clienteIdBanco) || (selectedPdvClienteId && c.id === selectedPdvClienteId));
-      const resolvedClienteCpf = isConsumidorFinal
-        ? null
-        : (
-            clienteSelecionadoObj?.cpf_cnpj ||
-            clienteSelecionadoObj?.cpf ||
-            pdvClienteCpfCnpj?.trim() ||
-            null
-          );
+      // Resolução segura e abrangente dos dados do cliente selecionado ou cadastrado
+      const clienteResolvido = selectedPdvCliente ||
+        (clientes || []).find(c => (clienteIdBanco && c.id === clienteIdBanco) || (selectedPdvClienteId && c.id === selectedPdvClienteId)) ||
+        ((pdvClienteCpfCnpj && pdvClienteCpfCnpj.trim()) ? (clientes || []).find(c => c.cpf_cnpj === pdvClienteCpfCnpj.trim() || c.cpf === pdvClienteCpfCnpj.trim()) : null) ||
+        null;
+
+      const resolvedClienteNome = clienteResolvido?.nome ||
+        clienteResolvido?.razao_social ||
+        (pdvClienteNome && pdvClienteNome.trim() && pdvClienteNome.trim().toLowerCase() !== 'consumidor final' && pdvClienteNome.trim().toLowerCase() !== 'consumidor balcão' && pdvClienteNome.trim().toLowerCase() !== 'consumidor balcao' ? pdvClienteNome.trim() : null) ||
+        (nomeClienteFinal && nomeClienteFinal.toLowerCase() !== 'consumidor final' && nomeClienteFinal.toLowerCase() !== 'consumidor balcão' && nomeClienteFinal.toLowerCase() !== 'consumidor balcao' ? nomeClienteFinal : null) ||
+        'Consumidor Final';
+
+      const resolvedClienteCpf = clienteResolvido?.cpf ||
+        clienteResolvido?.cnpj ||
+        clienteResolvido?.cpf_cnpj ||
+        (pdvClienteCpfCnpj && pdvClienteCpfCnpj.trim() && pdvClienteCpfCnpj.trim() !== '000.000.000-01' ? pdvClienteCpfCnpj.trim() : null) ||
+        null;
+
+      const resolvedClienteTelefone = clienteResolvido?.telefone ||
+        (pdvClienteTelefone && pdvClienteTelefone.trim() ? pdvClienteTelefone.trim() : null) ||
+        null;
+
+      const resolvedClienteEmail = clienteResolvido?.email ||
+        (pdvClienteEmail && pdvClienteEmail.trim() ? pdvClienteEmail.trim() : null) ||
+        null;
 
       const mapNomeMetodo = {
         'pix': 'PIX',
@@ -13906,10 +13926,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 ? clienteIdBanco
                 : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID) ? selectedPdvClienteId : null));
 
-          const clienteIdFinalValido = candidateIdParaVenda || getClienteIdValido(cliente_id || clienteIdBanco || selectedPdvClienteId);
-
-          const resolvedClienteNome = isConsumidorFinal ? 'Consumidor Final' : (nomeClienteFinal || 'Consumidor Final');
-          const resolvedClienteCpf = isConsumidorFinal ? null : (pdvClienteCpfCnpj.trim() || null);
+          const clienteIdFinalValido = candidateIdParaVenda || getClienteIdValido(clienteResolvido?.id || cliente_id || clienteIdBanco || selectedPdvClienteId);
 
           const actualValorPago = pdvStatusPagamento === 'PAGO'
             ? valorTotalNovo
@@ -13944,8 +13961,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             cliente_cpf_cnpj: resolvedClienteCpf,
             cliente_cpf: resolvedClienteCpf,
             cpf_cliente: resolvedClienteCpf,
-            cliente_email: pdvClienteEmail.trim() || null,
-            cliente_telefone: pdvClienteTelefone.trim() || null,
+            cliente_email: resolvedClienteEmail,
+            cliente_telefone: resolvedClienteTelefone,
             cliente_id: obterUuidPuro(clienteIdFinalValido) || null,
             vendedor_id: obterUuidPuro(vendedor_id),
             usuario_id: obterUuidPuro(vendedor_id),
@@ -14239,9 +14256,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         'Vendedor'
       ).trim();
 
-      const resolvedClienteNomeParaRecibo = isConsumidorFinal
-        ? 'Consumidor Final'
-        : ((nomeClienteFinal && nomeClienteFinal !== 'Consumidor Final') ? nomeClienteFinal : (pdvClienteNome || 'Consumidor Final'));
+      const resolvedClienteNomeParaRecibo = resolvedClienteNome || 'Consumidor Final';
 
       const dadosRecibo = {
         venda_id: createdVendaIds[0],
@@ -14254,14 +14269,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         filial_endereco: realFilialEndereco,
         filial_cnpj: realFilialCnpj,
         filial_telefone: realFilialTelefone,
-        cliente_id: (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID)
+        cliente_id: clienteResolvido?.id || (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID
           ? clienteIdBanco
-          : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID) ? selectedPdvClienteId : null),
+          : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID) ? selectedPdvClienteId : null)),
         cliente_nome: resolvedClienteNomeParaRecibo,
-        cliente_cpf_cnpj: resolvedClienteCpf || pdvClienteCpfCnpj || '',
-        cliente_cpf: resolvedClienteCpf || pdvClienteCpfCnpj || '',
-        cliente_email: pdvClienteEmail || '',
-        cliente_telefone: pdvClienteTelefone || '',
+        cliente_cpf_cnpj: resolvedClienteCpf || '',
+        cliente_cpf: resolvedClienteCpf || '',
+        cliente_email: resolvedClienteEmail || '',
+        cliente_telefone: resolvedClienteTelefone || '',
         obs_garantia: pdvObsGarantia,
         itens: itemsForRecibo,
         valor_total: totalNovoAjustado,
@@ -18175,6 +18190,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               <button
                                 type="button"
                                 onClick={() => {
+                                  setSelectedPdvCliente(null);
                                   setSelectedPdvClienteId('00000000-0000-0000-0000-000000000000');
                                   setPdvClienteNome('Consumidor Final');
                                   setPdvClienteSearchInput('Consumidor Final');
@@ -18201,6 +18217,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               <button
                                 type="button"
                                 onClick={() => {
+                                  setSelectedPdvCliente(null);
                                   setSelectedPdvClienteId(null);
                                   setPdvClienteNome('');
                                   setPdvClienteSearchInput('');
@@ -29055,26 +29072,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   (vendedores || []).find(v => String(v.id) === String(venda.vendedor_id || venda.usuario_id))?.nome ||
                   'Vendedor';
 
-                // Nome e Documento do Cliente com fallback abrangente
+                // Resolução segura e robusta do Cliente para o Recibo
+                const clienteObjRecibo = (clientes || []).find(c => 
+                  (venda.cliente_id && String(c.id) === String(venda.cliente_id)) ||
+                  (venda.cliente_cpf_cnpj && (c.cpf_cnpj === venda.cliente_cpf_cnpj || c.cpf === venda.cliente_cpf_cnpj))
+                );
+
                 const nomeCliente = 
                   (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) || 
                   venda.cliente?.nome || 
+                  venda.cliente?.razao_social || 
                   (typeof venda.cliente === 'string' ? venda.cliente : null) || 
                   venda.nome_cliente || 
                   venda.clientes?.nome || 
+                  venda.clientes?.razao_social || 
+                  clienteObjRecibo?.nome ||
+                  clienteObjRecibo?.razao_social ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.nome ||
                   venda.cliente_nome || 
                   'Consumidor Final';
 
                 const clienteCpfCnpj = 
                   venda.cliente_cpf || 
-                  venda.cliente?.cpf || 
-                  venda.cliente?.cpf_cnpj || 
                   venda.cliente_cpf_cnpj || 
+                  venda.cliente?.cpf || 
+                  venda.cliente?.cnpj || 
+                  venda.cliente?.cpf_cnpj || 
                   venda.cpf || 
                   venda.cpf_cliente || 
                   venda.clientes?.cpf_cnpj || 
                   venda.clientes?.cpf || 
+                  clienteObjRecibo?.cpf_cnpj ||
+                  clienteObjRecibo?.cpf ||
+                  clienteObjRecibo?.cnpj ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf_cnpj ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf || 
                   '';
@@ -29085,6 +29115,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   venda.telefone_cliente || 
                   venda.cliente?.telefone || 
                   venda.clientes?.telefone || 
+                  clienteObjRecibo?.telefone ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.telefone || 
                   '';
 
@@ -29094,6 +29125,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   venda.email_cliente || 
                   venda.cliente?.email || 
                   venda.clientes?.email || 
+                  clienteObjRecibo?.email ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.email || 
                   '';
 
