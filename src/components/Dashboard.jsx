@@ -2374,31 +2374,95 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [pdvReciboAtivo, formatoImpressao]);
 
+  // Base cadastral e fallbacks estruturados para filiais da rede (CRED PHONE, MONKEY SHOP, CRED CELL)
+  const DADOS_FILIAIS_FALLBACK = {
+    'CRED PHONE': {
+      nome: 'CRED PHONE',
+      endereco: 'Endereço da Cred Phone...',
+      cnpj: 'CNPJ da Cred Phone...',
+      telefone: '(94) 99...-....',
+      logo: '/logo-credphone.png'
+    },
+    'MONKEY SHOP': {
+      nome: 'MONKEY SHOP',
+      endereco: 'Shopping Partage Marabá, Quiosque Nº 13, Folha 30, QD 15 Lt 10, Nova Marabá, Marabá - PA, CEP: 68.507-445',
+      cnpj: '51.450.569/0003-71',
+      telefone: '(94) 99221-1212',
+      logo: '/logo-monkeyshop.png'
+    },
+    'CRED CELL': {
+      nome: 'CRED CELL',
+      endereco: 'Endereço da Cred Cell...',
+      cnpj: 'CNPJ da Cred Cell...',
+      telefone: '(94) 99...-....',
+      logo: '/logo-credcell.png'
+    }
+  };
+
+  const resolverDadosFilial = (filialObj, filialNomeHint = '') => {
+    const rawNome = (filialObj?.nome || filialNomeHint || '').trim();
+    const upper = rawNome.toUpperCase();
+
+    let matchedFallback = null;
+    if (upper.includes('CRED PHONE') || upper.includes('PHONE')) {
+      matchedFallback = DADOS_FILIAIS_FALLBACK['CRED PHONE'];
+    } else if (upper.includes('CRED CELL') || upper.includes('CELL')) {
+      matchedFallback = DADOS_FILIAIS_FALLBACK['CRED CELL'];
+    } else if (upper.includes('MONKEY') || upper.includes('PARTAGE') || upper.includes('SHOP')) {
+      matchedFallback = DADOS_FILIAIS_FALLBACK['MONKEY SHOP'];
+    }
+
+    const cleanCnpj = (val) => (!val || ['CNPJ não informado', 'CNPJ não cadastrado'].includes(val)) ? '' : val;
+    const cleanEndereco = (val) => (!val || ['Endereço não informado', 'Endereço não cadastrado'].includes(val)) ? '' : val;
+    const cleanTelefone = (val) => (!val || ['Telefone não cadastrado'].includes(val)) ? '' : val;
+
+    const nomeFinal = filialObj?.nome || matchedFallback?.nome || rawNome || 'MONKEY SHOP';
+    const cnpjFinal = cleanCnpj(filialObj?.cnpj) || matchedFallback?.cnpj || '';
+    const enderecoFinal = cleanEndereco(filialObj?.endereco) || matchedFallback?.endereco || '';
+    const telefoneFinal = cleanTelefone(filialObj?.telefone) || matchedFallback?.telefone || '';
+    const logoFinal = filialObj?.logo_url || filialObj?.logo || matchedFallback?.logo || null;
+
+    return {
+      nome: nomeFinal,
+      cnpj: cnpjFinal,
+      endereco: enderecoFinal,
+      telefone: telefoneFinal,
+      logo: logoFinal
+    };
+  };
+
   // Carregar dados reais da filial para o comprovante
   useEffect(() => {
     if (!pdvReciboAtivo || !pdvReciboDados) return;
-    const targetFilialId = pdvReciboDados.filial_id || activeFilialId;
-    if (!targetFilialId) return;
+    const targetFilialId = pdvReciboDados.filial_id || pdvReciboDados.filiais?.id || activeFilialId;
+    const filialContext = (filiais || []).find(f => String(f.id) === String(targetFilialId)) || pdvReciboDados.filiais || pdvReciboDados.filial || null;
+    const hintNome = pdvReciboDados.filial_nome || filialContext?.nome || '';
 
     let isMounted = true;
     (async () => {
       try {
-        const { data: dadosFilial } = await supabase
-          .from('filiais')
-          .select('nome, cnpj, endereco, telefone, logo_url')
-          .eq('id', targetFilialId)
-          .single();
+        let dbFilial = null;
+        if (targetFilialId) {
+          const { data: dadosFilial } = await supabase
+            .from('filiais')
+            .select('nome, cnpj, endereco, telefone, logo_url')
+            .eq('id', targetFilialId)
+            .maybeSingle();
+          dbFilial = dadosFilial;
+        }
 
-        if (dadosFilial && isMounted) {
+        const merged = resolverDadosFilial(dbFilial || filialContext, hintNome);
+
+        if (isMounted) {
           setPdvReciboDados(prev => {
             if (!prev) return prev;
             return {
               ...prev,
-              filial_nome: dadosFilial.nome || prev.filial_nome || 'MONKEY SHOP',
-              filial_logo: dadosFilial.logo_url || prev.filial_logo || null,
-              filial_cnpj: dadosFilial.cnpj || prev.filial_cnpj || '',
-              filial_endereco: dadosFilial.endereco || prev.filial_endereco || '',
-              filial_telefone: dadosFilial.telefone || prev.filial_telefone || ''
+              filial_nome: merged.nome,
+              filial_logo: merged.logo || prev.filial_logo || null,
+              filial_cnpj: merged.cnpj || prev.filial_cnpj || '',
+              filial_endereco: merged.endereco || prev.filial_endereco || '',
+              filial_telefone: merged.telefone || prev.filial_telefone || ''
             };
           });
         }
@@ -14213,13 +14277,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         });
       }
 
-      // Preparar Recibo
+      // Preparar Recibo com dados dinâmicos da Filial
       const filialDados = filiais.find(f => String(f.id) === String(activeFilialId)) || {};
-      let realFilialNome = filialDados.nome || activeFilialNome || 'MONKEY SHOP';
-      let realFilialLogo = filialDados.logo_url || null;
-      let realFilialEndereco = filialDados.endereco || '';
-      let realFilialCnpj = filialDados.cnpj || '';
-      let realFilialTelefone = filialDados.telefone || '';
+      let dbFilialParaRecibo = null;
 
       try {
         if (activeFilialId) {
@@ -14227,18 +14287,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             .from('filiais')
             .select('nome, cnpj, endereco, telefone, logo_url')
             .eq('id', activeFilialId)
-            .single();
+            .maybeSingle();
           if (df) {
-            realFilialNome = df.nome || realFilialNome;
-            realFilialLogo = df.logo_url || realFilialLogo;
-            realFilialEndereco = df.endereco || realFilialEndereco;
-            realFilialCnpj = df.cnpj || realFilialCnpj;
-            realFilialTelefone = df.telefone || realFilialTelefone;
+            dbFilialParaRecibo = df;
           }
         }
       } catch (e) {
         console.warn("Aviso ao buscar filial ativa para recibo:", e);
       }
+
+      const filialInfoResolvida = resolverDadosFilial(dbFilialParaRecibo || filialDados, activeFilialNome);
+      const realFilialNome = filialInfoResolvida.nome;
+      const realFilialLogo = filialInfoResolvida.logo;
+      const realFilialEndereco = filialInfoResolvida.endereco;
+      const realFilialCnpj = filialInfoResolvida.cnpj;
+      const realFilialTelefone = filialInfoResolvida.telefone;
 
       const totalNovoAjustado = subtotalCart * feeFactor;
       const finalSaldoPagar = Math.max(0, totalNovoAjustado - valorUsadoTotal);
@@ -15576,34 +15639,33 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(venda.produto_id));
     const produtoNome = venda.produto_nome || venda.produtos?.nome || venda.produtos_descricao || venda.itens_resumo || prodObj?.nome || 'Produto';
 
-    const filialObj = filiais.find(f => String(f.id) === String(venda.filial_id || activeFilialId));
-    let filialNome = filialObj?.nome || venda.filial_nome || 'MONKEY SHOP';
-    let filialLogo = filialObj?.logo_url || null;
-    let filialEndereco = filialObj?.endereco || '';
-    let filialCnpj = filialObj?.cnpj || '';
-    let filialTelefone = filialObj?.telefone || '';
+    const filialObj = filiais.find(f => String(f.id) === String(venda.filial_id || venda.filiais?.id || activeFilialId)) || venda.filiais || venda.filial || null;
+    let dbFilialImpressao = null;
 
     // Carregar dados reais diretamente da tabela 'filiais'
     try {
-      const targetFilialId = venda.filial_id || activeFilialId;
+      const targetFilialId = venda.filial_id || venda.filiais?.id || activeFilialId;
       if (targetFilialId) {
         const { data: dadosFilial } = await supabase
           .from('filiais')
           .select('nome, cnpj, endereco, telefone, logo_url')
           .eq('id', targetFilialId)
-          .single();
+          .maybeSingle();
 
         if (dadosFilial) {
-          filialNome = dadosFilial.nome || filialNome || 'MONKEY SHOP';
-          filialLogo = dadosFilial.logo_url || filialLogo || null;
-          filialCnpj = dadosFilial.cnpj || filialCnpj || '';
-          filialEndereco = dadosFilial.endereco || filialEndereco || '';
-          filialTelefone = dadosFilial.telefone || filialTelefone || '';
+          dbFilialImpressao = dadosFilial;
         }
       }
     } catch (e) {
       console.warn('Aviso ao consultar filial:', e);
     }
+
+    const filialResolvidaImp = resolverDadosFilial(dbFilialImpressao || filialObj, venda.filial_nome || filialObj?.nome || '');
+    const filialNome = filialResolvidaImp.nome;
+    const filialLogo = filialResolvidaImp.logo;
+    const filialEndereco = filialResolvidaImp.endereco;
+    const filialCnpj = filialResolvidaImp.cnpj;
+    const filialTelefone = filialResolvidaImp.telefone;
 
     const metodoPag = venda.metodo_pagamento || venda.forma_pagamento || 'N/A';
 
@@ -29029,20 +29091,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   }
                 };
 
-                const filialCadastrada = filiais.find(f => String(f.id) === String(pdvReciboDados.filial_id || activeFilialId));
-                const logoLoja = pdvReciboDados.filial_logo || filialCadastrada?.logo_url || null;
-                const nomeLoja = (pdvReciboDados.filial_nome && pdvReciboDados.filial_nome !== 'Filial')
-                  ? pdvReciboDados.filial_nome
-                  : (filialCadastrada?.nome || 'MONKEY SHOP');
-                const cnpjLoja = (pdvReciboDados.filial_cnpj && !['CNPJ não informado', 'CNPJ não cadastrado'].includes(pdvReciboDados.filial_cnpj))
-                  ? pdvReciboDados.filial_cnpj
-                  : (filialCadastrada?.cnpj || '');
-                const enderecoLoja = (pdvReciboDados.filial_endereco && !['Endereço não informado', 'Endereço não cadastrado'].includes(pdvReciboDados.filial_endereco))
-                  ? pdvReciboDados.filial_endereco
-                  : (filialCadastrada?.endereco || '');
-                const telefoneLoja = (pdvReciboDados.filial_telefone && !['Telefone não cadastrado'].includes(pdvReciboDados.filial_telefone))
-                  ? pdvReciboDados.filial_telefone
-                  : (filialCadastrada?.telefone || '');
+                const filialCadastrada = (filiais || []).find(f => String(f.id) === String(pdvReciboDados.filial_id || pdvReciboDados.filiais?.id || activeFilialId)) || pdvReciboDados.filiais || pdvReciboDados.filial || null;
+                const filialDadosResolvidos = resolverDadosFilial({
+                  ...filialCadastrada,
+                  nome: pdvReciboDados.filial_nome || filialCadastrada?.nome,
+                  logo_url: pdvReciboDados.filial_logo || filialCadastrada?.logo_url,
+                  cnpj: pdvReciboDados.filial_cnpj || filialCadastrada?.cnpj,
+                  endereco: pdvReciboDados.filial_endereco || filialCadastrada?.endereco,
+                  telefone: pdvReciboDados.filial_telefone || filialCadastrada?.telefone
+                }, pdvReciboDados.filial_nome || filialCadastrada?.nome || '');
+
+                const logoLoja = filialDadosResolvidos.logo;
+                const nomeLoja = filialDadosResolvidos.nome;
+                const cnpjLoja = filialDadosResolvidos.cnpj;
+                const enderecoLoja = filialDadosResolvidos.endereco;
+                const telefoneLoja = filialDadosResolvidos.telefone;
 
                 const idVendaFormatado = pdvReciboDados.venda_id
                   ? String(pdvReciboDados.venda_id).slice(0, 8).toUpperCase()
