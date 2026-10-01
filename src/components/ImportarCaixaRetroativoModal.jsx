@@ -513,6 +513,25 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           };
         }
 
+        if (field === 'tipo_item') {
+          const novoTipo = value;
+          const categoriaSugerida = novoTipo === 'APARELHO'
+            ? 'Celulares'
+            : novoTipo === 'CHIP'
+              ? 'Chips'
+              : novoTipo === 'SERVICO'
+                ? 'Serviços'
+                : 'Acessórios';
+
+          return {
+            ...item,
+            tipo_item: novoTipo,
+            categoria: categoriaSugerida,
+            // Se mudou para algo que não seja APARELHO, limpa o IMEI e qualquer obrigatoriedade
+            imei: novoTipo === 'APARELHO' ? item.imei : ''
+          };
+        }
+
         return { ...item, [field]: value };
       }
       return item;
@@ -678,9 +697,10 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
         const qtdItem = Math.max(1, Number(item.quantidade) || 1);
         const prodNomeUpper = (item.produto_nome || '').toUpperCase();
         const categoriaUpper = (item.categoria || '').toUpperCase();
-        const isChip = prodNomeUpper.includes('CHIP');
-        const isIphone = prodNomeUpper.includes('IPHONE') || prodNomeUpper.includes('IP ');
-        const isAcessorio = !isChip && (item.tipo_item === 'ACESSORIO' || categoriaUpper.includes('ACESS') || categoriaUpper.includes('CAPA') || categoriaUpper.includes('PELICULA') || categoriaUpper.includes('CABO') || categoriaUpper.includes('FONTE') || categoriaUpper.includes('CARREGADOR') || categoriaUpper.includes('CAIXA DE SOM'));
+        const isChip = item.tipo_item === 'CHIP' || prodNomeUpper.includes('CHIP');
+        const isServico = item.tipo_item === 'SERVICO' || categoriaUpper.includes('SERVI');
+        const isIphone = item.tipo_item === 'APARELHO' && (prodNomeUpper.includes('IPHONE') || prodNomeUpper.includes('IP '));
+        const isAcessorio = item.tipo_item === 'ACESSORIO' || (!isChip && !isServico && item.tipo_item !== 'APARELHO' && (categoriaUpper.includes('ACESS') || categoriaUpper.includes('CAPA') || categoriaUpper.includes('PELICULA') || categoriaUpper.includes('CABO') || categoriaUpper.includes('FONTE') || categoriaUpper.includes('CARREGADOR') || categoriaUpper.includes('CAIXA DE SOM')));
         const formaPagtoNorm = (item.forma_pagamento || '').toUpperCase();
         const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => formaPagtoNorm.includes(m));
 
@@ -696,6 +716,15 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           } else {
             comissaoTitular = totalChipComm * 0.5;
             comissaoTrainee = totalChipComm * 0.5;
+          }
+        } else if (isServico) {
+          // SERVIÇO: 3% para profissional, 2% para trainee (ou dividido 50/50 se em dupla)
+          if (!temTrainee) {
+            comissaoTitular = valorTotalNum * 0.03;
+            comissaoTrainee = 0;
+          } else {
+            comissaoTitular = valorTotalNum * 0.015;
+            comissaoTrainee = valorTotalNum * 0.010;
           }
         } else if (isIphone) {
           // IPHONE: RIGIDAMENTE FIXA em R$ 30,00 por unidade
@@ -1102,19 +1131,27 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                               />
                             </td>
 
-                            {/* Tipo / Categoria */}
+                            {/* Tipo / Categoria (Select Editável) */}
                             <td className="py-3 px-3">
-                              {isAparelho ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold bg-purple-950/50 text-purple-300 border border-purple-800/40">
-                                  <Smartphone size={10} />
-                                  APARELHO
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-950/50 text-blue-300 border border-blue-800/40">
-                                  <Tag size={10} />
-                                  ACESSÓRIO
-                                </span>
-                              )}
+                              <select
+                                value={item.tipo_item || 'ACESSORIO'}
+                                onChange={(e) => handleUpdateItem(item.id, 'tipo_item', e.target.value)}
+                                className={`text-[11px] font-bold rounded px-2 py-1 outline-none border cursor-pointer transition-all ${
+                                  item.tipo_item === 'APARELHO'
+                                    ? 'bg-purple-950/60 text-purple-300 border-purple-800/60 hover:border-purple-600 focus:border-[#6A0DAD]'
+                                    : item.tipo_item === 'CHIP'
+                                      ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60 hover:border-emerald-600 focus:border-emerald-500'
+                                      : item.tipo_item === 'SERVICO'
+                                        ? 'bg-amber-950/60 text-amber-300 border-amber-800/60 hover:border-amber-600 focus:border-amber-500'
+                                        : 'bg-blue-950/60 text-blue-300 border-blue-800/60 hover:border-blue-600 focus:border-blue-500'
+                                }`}
+                                title="Alterar Categoria / Tipo do Item"
+                              >
+                                <option value="APARELHO" className="bg-[#111] text-purple-300">📱 APARELHO</option>
+                                <option value="ACESSORIO" className="bg-[#111] text-blue-300">🎧 ACESSÓRIO</option>
+                                <option value="CHIP" className="bg-[#111] text-emerald-300">📶 CHIP</option>
+                                <option value="SERVICO" className="bg-[#111] text-amber-300">🛠️ SERVIÇO</option>
+                              </select>
                             </td>
 
                             {/* Cor */}
@@ -1206,13 +1243,13 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                               />
                             </td>
 
-                            {/* Input de IMEI (Destacado em Amarelo para Aparelhos) */}
+                            {/* Input de IMEI (Destacado em Amarelo para Aparelhos, Desabilitado para demais) */}
                             <td className="py-3 px-4">
                               {isAparelho ? (
                                 <div className="relative">
                                   <input
                                     type="text"
-                                    value={item.imei}
+                                    value={item.imei || ''}
                                     onChange={(e) => handleUpdateItem(item.id, 'imei', e.target.value)}
                                     placeholder="Bipar ou digitar IMEI..."
                                     className={`w-full rounded px-3 py-1.5 text-xs font-mono outline-none transition-all ${imeiFaltante
@@ -1227,9 +1264,10 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                                   )}
                                 </div>
                               ) : (
-                                <span className="text-[11px] text-gray-500 italic">
-                                  Não requer IMEI
-                                </span>
+                                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#111111]/80 border border-[#222222] text-[11px] text-gray-500 select-none">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-gray-600 inline-block"></span>
+                                  <span>Não aplicável</span>
+                                </div>
                               )}
                             </td>
 
