@@ -428,20 +428,21 @@ export default function RankingVendedores({
                              Boolean(v.trainee_id) || 
                              Number(v.comissao_trainee) > 0;
 
-      // 1. Identificar Perfil do Vendedor Titular (antes da barra)
+      // 1. Identificar Perfil do Vendedor Titular (antes da barra ou nome completo)
       let titularProfile = null;
       if (v.vendedor_id) {
         titularProfile = listaColaboradores.find(p => String(p.id) === String(v.vendedor_id));
       }
-      if (!titularProfile && nomeTitular) {
-        const normTitular = cleanStr(nomeTitular);
+      if (!titularProfile && (nomeTitular || rawNome)) {
+        const normTitular = cleanStr(nomeTitular || rawNome);
         titularProfile = listaColaboradores.find(p => {
           const normP = cleanStr(p.nome);
           const palavras = normP.split(' ');
-          return normP === normTitular || palavras.includes(normTitular) || normP.startsWith(normTitular) || normP.endsWith(normTitular);
-        }) || listaColaboradores.find(p => {
-          const normP = cleanStr(p.nome);
-          return normP.includes(normTitular) || normTitular.includes(normP);
+          const palavrasTitular = normTitular.split(' ');
+          return normP === normTitular || 
+                 normTitular.includes(normP) || 
+                 normP.includes(normTitular) ||
+                 palavrasTitular.some(pt => pt.length > 2 && palavras.includes(pt));
         });
       }
 

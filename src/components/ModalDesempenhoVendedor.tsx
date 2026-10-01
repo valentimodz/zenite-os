@@ -235,13 +235,22 @@ export default function ModalDesempenhoVendedor({
 
       // Filtrar pelo ID do colaborador selecionado ou pelo nome dele
       const isUuid = (str: string | number) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str));
+      const isColabTrainee = Boolean(
+        colaborador?.role === 'TRAINEE' ||
+        colaborador?.is_treinner ||
+        (colaborador?.cargo || '').toLowerCase().includes('trainee')
+      );
       const primeiroNome = vendedorNome ? vendedorNome.trim().split(' ')[0] : '';
+      const nomeCompleto = (vendedorNome || '').trim();
 
       if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
-        if (isUuid(vendedorId) && primeiroNome) {
-          query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId},vendedor_nome.ilike.%${primeiroNome}%`);
-        } else if (isUuid(vendedorId)) {
-          query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`);
+        if (isUuid(vendedorId)) {
+          if (isColabTrainee) {
+            query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
+          } else {
+            // Vendedor titular: consulta estritamente por vendedor_id ou vendedor_nome
+            query = query.or(`vendedor_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
+          }
         } else if (primeiroNome) {
           query = query.ilike('vendedor_nome', `%${primeiroNome}%`);
         }
@@ -265,10 +274,12 @@ export default function ModalDesempenhoVendedor({
           .order('created_at', { ascending: false });
 
         if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
-          if (isUuid(vendedorId) && primeiroNome) {
-            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId},vendedor_nome.ilike.%${primeiroNome}%`);
-          } else if (isUuid(vendedorId)) {
-            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`);
+          if (isUuid(vendedorId)) {
+            if (isColabTrainee) {
+              fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
+            } else {
+              fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
+            }
           } else if (primeiroNome) {
             fbQuery = fbQuery.ilike('vendedor_nome', `%${primeiroNome}%`);
           }
@@ -292,16 +303,19 @@ export default function ModalDesempenhoVendedor({
         return ano === anoFiltro && mes === mesFiltro;
       };
 
+      const cleanStr = (s: any) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+      const normNomeColab = cleanStr(nomeCompleto);
+      const normPrimeiroNome = cleanStr(primeiroNome);
+
       // Fallback em cache se a consulta não retornar vendas
       if ((!vendasModal || vendasModal.length === 0) && Array.isArray(vendasCache) && vendasCache.length > 0) {
         const cachedVendas = (vendasCache as Venda[]).filter(v => {
           if (!pertenceAoMes(v.created_at || (v as any).data || (v as any).date)) return false;
           const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
-          const rawNome = (v.vendedor_nome || '').toLowerCase();
-          const pNome = (primeiroNome || '').toLowerCase();
-          const matchNome = pNome && rawNome.includes(pNome);
-          const matchTrainee = (v.treener_id && String(v.treener_id) === String(vendedorId)) || 
-                               (v.trainee_id && String(v.trainee_id) === String(vendedorId));
+          const rawNome = cleanStr(v.vendedor_nome);
+          const matchNome = (normPrimeiroNome && rawNome.includes(normPrimeiroNome)) || (normNomeColab && rawNome.includes(normNomeColab));
+          const matchTrainee = isColabTrainee && ((v.treener_id && String(v.treener_id) === String(vendedorId)) || 
+                               (v.trainee_id && String(v.trainee_id) === String(vendedorId)));
           return matchId || matchNome || matchTrainee;
         });
         if (cachedVendas.length > 0) {
@@ -316,6 +330,17 @@ export default function ModalDesempenhoVendedor({
         if (rawDate && !pertenceAoMes(rawDate)) {
           return false;
         }
+
+        // Se o colaborador não for trainee, garantir que a venda pertença a ele como vendedor titular
+        if (!isColabTrainee) {
+          const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
+          const rawNome = cleanStr(v.vendedor_nome);
+          const matchNome = (normPrimeiroNome && rawNome.includes(normPrimeiroNome)) || (normNomeColab && rawNome.includes(normNomeColab));
+          if (!matchId && !matchNome) {
+            return false;
+          }
+        }
+
         const chave = String(v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`);
         if (vistos.has(chave)) return false;
         vistos.add(chave);
@@ -522,9 +547,10 @@ export default function ModalDesempenhoVendedor({
     const comissaoAVistaCalc = totalAVista * 0.01;
     const comissaoCalculadaPorMetas = comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc;
 
-    const totalComissoes = isTrainee
-      ? totalComissoesHistorico
-      : Math.max(comissaoCalculadaPorMetas, totalComissoesHistorico);
+    // Priorizar estritamente o somatório real de comissões gravadas na tabela 'vendas'
+    const totalComissoes = totalComissoesHistorico > 0 
+      ? totalComissoesHistorico 
+      : comissaoCalculadaPorMetas;
 
     // Evolução diária (dias 1 a 31)
     const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
