@@ -3870,7 +3870,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // 5. Atualizar estado local visível e re-executar busca imediata da fonte de dados
       setTeamMembers(prev => prev.filter(m => m.id !== colabId && (!colabEmail || m.email !== colabEmail)));
-      await fetchTeamMembers(targetEmpresaId);
+      setVendedores(prev => prev.filter(v => v.id !== colabId && (!colabEmail || v.email !== colabEmail)));
+
+      invalidateCache('team_members_');
+      invalidateCache('vendedores_');
+
+      const targetEmpresaId = colaboradorToDelete?.empresa_id || profile?.empresa_id || company?.id || activeEmpresaId || null;
+      if (typeof fetchTeamMembers === 'function') {
+        await fetchTeamMembers(targetEmpresaId);
+      }
+      if (typeof fetchVendedores === 'function') {
+        await fetchVendedores(targetEmpresaId);
+      }
 
     } catch (err) {
       console.error('Erro inesperado ao remover colaborador:', err);
@@ -6653,6 +6664,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   const handleDeleteVendedor = async (vendedorId, vendedorNome) => {
+    if (!vendedorId) return;
     if (!window.confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE o vendedor "${vendedorNome}"? Isso apagará o acesso dele ao sistema.`)) {
       return;
     }
@@ -6664,13 +6676,29 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         .delete()
         .eq('id', vendedorId);
 
-      if (error) throw error;
+      if (error) {
+        // Tentar inativação caso falhe por chave estrangeira
+        const { error: inatError } = await supabase
+          .from('profiles')
+          .update({ status: 'INATIVO' })
+          .eq('id', vendedorId);
+
+        if (inatError) throw error;
+        showToast(`Vendedor "${vendedorNome}" inativado com sucesso (registros históricos preservados).`, 'info');
+      } else {
+        showToast(`Vendedor "${vendedorNome}" removido com sucesso!`, 'success');
+      }
 
       setVendedores(prev => prev.filter(v => v.id !== vendedorId));
-      alert('Vendedor removido com sucesso!');
+      if (typeof setTeamMembers === 'function') {
+        setTeamMembers(prev => prev.filter(m => m.id !== vendedorId));
+      }
+
+      invalidateCache('vendedores_');
+      invalidateCache('team_members_');
     } catch (err) {
       console.error('Erro ao excluir vendedor:', err);
-      alert('Falha ao excluir vendedor.');
+      showToast('Falha ao excluir vendedor: ' + (err.message || 'Erro inesperado'), 'error');
     } finally {
       setLoadingVendedor(false);
     }
