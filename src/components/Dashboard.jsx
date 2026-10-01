@@ -13024,19 +13024,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     if (precoNovo < 0) precoNovo = 0;
 
-    const descontoMaximoPermitido = calcularDescontoMaximo(item.produto);
+    const roleUsuario = profile?.role;
+    const descontoMaximoPermitido = calcularDescontoMaximo(item.produto, roleUsuario);
     const precoMinimoPermitido = Math.max(0, precoOriginal - descontoMaximoPermitido);
 
     // Bloqueia SOMENTE se o valor inserido for estritamente MENOR que o preço mínimo (Valor Inserido < Preço Mínimo)
     if (precoNovo < (precoMinimoPermitido - 0.001)) {
+      const tipo = (item.produto?.tipo || '').toUpperCase();
+      const catLower = (item.produto?.categoria || '').toLowerCase();
       const nomeLower = (item.produto?.nome || '').toLowerCase();
-      const isApple = nomeLower.includes('iphone') ||
-        nomeLower.includes('apple') ||
-        (item.produto?.categoria || '').toLowerCase().includes('ios') ||
-        (item.produto?.marca || '').toLowerCase().includes('apple');
+      const isAparelho = tipo === 'APARELHO' || tipo === 'CELULAR' || catLower.includes('celular') || catLower.includes('smartphone') || catLower.includes('aparelho');
+      const isAppleAparelho = isAparelho && (nomeLower.includes('iphone') || nomeLower.includes('apple') || catLower.includes('ios'));
 
-      if (isApple) {
-        showToast('Desconto Bloqueado: iPhones e produtos Apple possuem 0% de desconto permitido.', 'error');
+      if (isAppleAparelho) {
+        showToast('Desconto Bloqueado: Aparelhos iPhone possuem 0% de desconto permitido para vendedores.', 'error');
       } else {
         const percMax = Math.round((descontoMaximoPermitido / (precoOriginal || 1)) * 100);
         showToast(`Desconto Bloqueado: O desconto máximo permitido para este item é ${percMax}% (Preço mínimo: R$ ${precoMinimoPermitido.toFixed(2)}).`, 'error');
@@ -13049,7 +13050,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     const custo = Number(item.produto?.preco_custo) || 0;
     if (custo > 0 && precoNovo < custo) {
-      if (!['GERENTE', 'ADMIN', 'SUPER_ADMIN'].includes(profile?.role)) {
+      if (!['GERENTE', 'ADMIN', 'SUPER_ADMIN', 'DONO', 'OWNER'].includes(profile?.role)) {
         showToast('Desconto bloqueado: Somente administradores ou gerentes podem conceder descontos abaixo do preço de custo.', 'error');
         setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoOriginal } : i));
         return;
