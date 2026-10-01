@@ -6345,7 +6345,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       return;
     }
 
-    if (!nomeVendedor.trim() || !emailVendedor.trim() || !senhaVendedor.trim() || !filialVendedor) {
+    const filialValida = filiais?.some(f => String(f.id) === String(filialVendedor));
+    if (!filialVendedor || !filialValida) {
+      showToast('Por favor, selecione uma filial válida para vincular o vendedor.', 'warning');
+      return;
+    }
+
+    if (!nomeVendedor.trim() || !emailVendedor.trim() || !senhaVendedor.trim()) {
       showToast('Por favor, preencha todos os campos do vendedor.', 'error');
       return;
     }
@@ -6368,14 +6374,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       if (authError) {
         if (authError.message?.toLowerCase().includes('already registered')) {
-          const { data: existingProfile } = await supabase
+          const { data: existingProfile, error: profileFindError } = await supabase
             .from('profiles')
             .select('*')
             .ilike('email', emailVendedor.trim())
             .maybeSingle();
 
+          if (profileFindError) {
+            console.error('Erro ao verificar perfil existente:', profileFindError);
+            throw new Error(`Erro ao consultar perfil existente: ${profileFindError.message}`);
+          }
+
           if (existingProfile) {
-            await supabase
+            const { error: updateError } = await supabase
               .from('profiles')
               .update({
                 empresa_id: currentEmpresaId,
@@ -6385,26 +6396,42 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               })
               .eq('id', existingProfile.id);
 
+            if (updateError) {
+              console.error('Erro ao atualizar perfil existente:', updateError);
+              throw new Error(`Erro ao vincular perfil existente: ${updateError.message}`);
+            }
+
             showToast(`O e-mail (${emailVendedor.trim()}) já possuía cadastro e foi vinculado com sucesso a esta filial!`, 'info');
           } else {
-            showToast(`Aviso: O e-mail (${emailVendedor.trim()}) já possui cadastro no Auth.`, 'info');
+            showToast(`Aviso: O e-mail (${emailVendedor.trim()}) já possui cadastro no Auth mas não possui perfil cadastrado.`, 'warning');
+            return;
           }
         } else {
-          showToast(`Erro ao criar vendedor: ${authError.message}`, 'error');
-          return;
+          throw new Error(authError.message || 'Falha ao registrar usuário na autenticação.');
         }
-      } else if (authData?.user?.id) {
+      } else {
+        // Validação defensiva do retorno do Auth
+        const newUserId = authData?.user?.id;
+        if (!newUserId) {
+          throw new Error('A criação do usuário não retornou um ID válido. Verifique a autenticação ou se a confirmação de e-mail está ativada.');
+        }
+
         await new Promise(resolve => setTimeout(resolve, 500));
-        await supabase
+        const { error: upsertError } = await supabase
           .from('profiles')
           .upsert({
-            id: authData.user.id,
+            id: newUserId,
             empresa_id: currentEmpresaId,
             filial_id: filialVendedor,
             nome: nomeVendedor.trim(),
             email: emailVendedor.trim(),
             role: 'VENDEDOR'
           });
+
+        if (upsertError) {
+          console.error('Erro ao salvar perfil do vendedor:', upsertError);
+          throw new Error(`Erro ao salvar dados do vendedor no banco: ${upsertError.message}`);
+        }
       }
 
       showToast(`Funcionário / Vendedor "${nomeVendedor.trim()}" cadastrado com sucesso!`, 'success');
@@ -6412,10 +6439,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       setNomeVendedor('');
       setEmailVendedor('');
       setSenhaVendedor('');
-      fetchTeamMembers(company.id);
+      if (typeof fetchTeamMembers === 'function') {
+        const targetId = currentEmpresaId || company?.id;
+        if (targetId) {
+          fetchTeamMembers(targetId);
+        }
+      }
     } catch (err) {
       console.error('Erro ao cadastrar vendedor:', err);
-      alert('Erro ao cadastrar vendedor: ' + err.message);
+      showToast(err?.message || 'Erro inesperado ao cadastrar vendedor.', 'error');
     } finally {
       setLoadingVendedor(false);
     }
