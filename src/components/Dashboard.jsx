@@ -5944,7 +5944,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       if (!data || data.length === 0) {
         let query = supabase
           .from('profiles')
-          .select('id, nome, email, role');
+          .select('id, nome, email, role, cargo, is_treinner, filial_id');
 
         if (empresaId && empresaId !== 'MASTER' && empresaId !== 'all') {
           query = query.or(`filial_id.is.null,empresa_id.eq.${empresaId}`);
@@ -5953,7 +5953,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         let { data: fetchedData, error } = await query;
 
         if (error || !fetchedData || fetchedData.length === 0) {
-          const retryRes = await supabase.from('profiles').select('id, nome, email, role');
+          const retryRes = await supabase.from('profiles').select('id, nome, email, role, cargo, is_treinner, filial_id');
           fetchedData = retryRes.data || [];
         }
 
@@ -6593,6 +6593,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   const handleUpdateVendedorFilial = async (vendedorId, novaFilialId) => {
+    if (!vendedorId) {
+      showToast('ID do vendedor inválido.', 'error');
+      return;
+    }
     console.log('[ALTERAÇÃO VENDEDOR]', { id: vendedorId, campo: 'filial_id', novoValor: novaFilialId });
 
     // Guardar valor anterior para possível reversão em caso de erro
@@ -6630,7 +6634,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return;
       }
 
-      showToast('Alteração salva com sucesso!', 'success');
+      invalidateCache('vendedores_');
+      invalidateCache('team_members_');
+      showToast('Filial do vendedor atualizada com sucesso!', 'success');
     } catch (err) {
       console.error('[FALHA UPDATE VENDEDOR]:', err);
       // Reverta o estado local para o valor anterior
@@ -7014,21 +7020,56 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   const toggleVendedorTrainee = async (vendedorId, currentIsTreinner) => {
+    if (!vendedorId) {
+      showToast('ID do vendedor inválido.', 'error');
+      return;
+    }
+
+    const novoStatusTrainee = !Boolean(currentIsTreinner);
+    const novoCargo = novoStatusTrainee ? 'TRAINEE' : 'VENDEDOR';
+
+    // Atualização otimista
+    setVendedores(prev =>
+      prev.map(v => v.id === vendedorId ? { ...v, is_treinner: novoStatusTrainee, role: novoCargo, cargo: novoCargo } : v)
+    );
+    if (typeof setTeamMembers === 'function') {
+      setTeamMembers(prev =>
+        prev.map(m => m.id === vendedorId ? { ...m, is_treinner: novoStatusTrainee, role: novoCargo, cargo: novoCargo } : m)
+      );
+    }
+
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ is_treinner: !currentIsTreinner })
+        .update({
+          is_treinner: novoStatusTrainee,
+          role: novoCargo,
+          cargo: novoCargo
+        })
         .eq('id', vendedorId);
 
       if (error) throw error;
 
-      setVendedores(prev =>
-        prev.map(v => v.id === vendedorId ? { ...v, is_treinner: !currentIsTreinner } : v)
+      invalidateCache('vendedores_');
+      invalidateCache('team_members_');
+      showToast(
+        novoStatusTrainee
+          ? 'Vendedor alterado para Trainee (2% comissão serviço)!'
+          : 'Vendedor promovido para Profissional (3% comissão serviço)!',
+        'success'
       );
-      alert('Perfil do vendedor atualizado com sucesso!');
     } catch (err) {
       console.error('Erro ao alternar trainee:', err);
-      alert('Erro ao atualizar perfil do vendedor: ' + err.message);
+      // Reverter estado local
+      setVendedores(prev =>
+        prev.map(v => v.id === vendedorId ? { ...v, is_treinner: currentIsTreinner, role: currentIsTreinner ? 'TRAINEE' : 'VENDEDOR', cargo: currentIsTreinner ? 'TRAINEE' : 'VENDEDOR' } : v)
+      );
+      if (typeof setTeamMembers === 'function') {
+        setTeamMembers(prev =>
+          prev.map(m => m.id === vendedorId ? { ...m, is_treinner: currentIsTreinner, role: currentIsTreinner ? 'TRAINEE' : 'VENDEDOR', cargo: currentIsTreinner ? 'TRAINEE' : 'VENDEDOR' } : m)
+        );
+      }
+      showToast('Erro ao atualizar perfil do vendedor: ' + (err.message || 'Erro inesperado'), 'error');
     }
   };
 
