@@ -218,12 +218,15 @@ Responda exclusivamente com o objeto JSON.`;
   }
 
   // Modelos para chamada direta REST ultrarrápidos
-  const GEMINI_MODEL = process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const GEMINI_MODEL = process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
   const modelosTentativa = Array.from(new Set([
-    'gemini-3.6-flash',
     GEMINI_MODEL,
+    'gemini-1.5-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-3.6-flash',
     'gemini-flash-latest'
-  ])).filter(m => m && !m.includes('1.5') && !m.includes('2.5'));
+  ])).filter(Boolean);
   let lastError = null;
   const MAX_429_RETRIES = 2;
 

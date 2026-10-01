@@ -6,7 +6,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 export const GEMINI_MODEL =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_MODEL) ||
   (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_MODEL || process.env?.GEMINI_MODEL)) ||
-  'gemini-3.6-flash';
+  'gemini-1.5-flash';
 
 // Fallback OpenRouter API key (assembled dynamically or retrieved from env to comply with git push protection)
 export const DEFAULT_OPENROUTER_API_KEY =
@@ -14,6 +14,47 @@ export const DEFAULT_OPENROUTER_API_KEY =
   (typeof process !== 'undefined' && (process.env?.VITE_OPENROUTER_API_KEY || process.env?.OPENROUTER_API_KEY)) ||
   ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
 export const OPENROUTER_MODEL = 'openrouter/free';
+
+/**
+ * Prompt canônico para extração estruturada de fechamento de folha de caixa
+ */
+export const PROMPT_EXTRACAO_CAIXA = `Você é um perito em análise e digitação de folhas físicas de fechamento de caixa diário de lojas de varejo e celulares/smartphones (Monkey Shop).
+Sua missão é extrair com precisão matemática absoluta todos os dados de vendas, produtos, valores, vendedores, formas de pagamento e comissões contidos na folha de caixa (imagem ou PDF).
+
+REGRAS RÍGIDAS DE RECONHECIMENTO:
+1. IDENTIFICAÇÃO DE APARELHOS (SMARTPHONES):
+   - Qualquer produto que contenha marcas como Redmi, Realme, Itel, Infinix, Samsung, iPhone, Xiaomi, Motorola, Poco, Tecno ou capacidade de memória (ex: 64GB, 128GB, 256GB, 512GB, 1TB) DEVE ser categorizado obrigatoriamente como:
+     * tipo_item = 'APARELHO'
+     * categoria = 'Celulares'
+   - Extraia a cor se estiver indicada no texto ou abreviação (ex: "Titanium", "Preto", "Azul", "Dourado", "Grafite", "Verde", "Branco").
+
+2. IDENTIFICAÇÃO DE ACESSÓRIOS, CHIPS E SERVIÇOS:
+   - Capinhas, películas (3D, cerâmica, nano), cabos, fones de ouvido, fontes, carregadores, caixas de som:
+     * tipo_item = 'ACESSORIO'
+     * categoria = 'Acessórios'
+   - Chips de operadora (Vivo, Claro, Tim):
+     * tipo_item = 'CHIP'
+     * categoria = 'Chips'
+   - Serviços de assistência técnica ou aplicação:
+     * tipo_item = 'SERVICO'
+     * categoria = 'Serviços'
+
+3. RECONHECIMENTO DE MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
+   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
+   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações da venda (ex: "Troca iPhone 11 com volta de R$ 900,00").
+
+4. REGRA ESTRITA DE COMISSÃO:
+   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se vender 1 iPhone, comissão = 30.00. Se vender 2, comissão = 60.00.
+   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola, Poco, Tecno): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado em boleto/carnê/PayJoy).
+   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som, Carregadores, Fones): Comissão de 2,5% sobre o valor total vendido.
+   - CHIP: R$ 0,50 fixo por unidade de chip vendido.
+
+5. DATA DO CAIXA:
+   - Converta sempre a data da folha física para o formato ISO YYYY-MM-DD (ex: se na folha estiver "16/09/2026", "16-09" ou "16 de setembro de 2026", converta para "2026-09-16"). Se o ano não estiver explícito, adote o ano corrente (2026).
+
+6. VALORES E QUANTIDADES:
+   - Garanta que valor_total e quantidade sejam numéricos puros (ex: 79.90, e não "R$ 79,90").
+   - Trate vírgulas como decimais.`;
 
 /**
  * Extrai os segundos de espera de uma mensagem de erro de quota/rate limit (429)
@@ -68,7 +109,9 @@ export function extrairJsonPuro(textoCru) {
 }
 
 /**
- * Obtém a chave da IA de forma robusta e limpa das fontes disponíveis
+ * Obtém a chave da IA de forma robusta e limpa das fontes disponíveis.
+ * Prioriza a chave nativa do Gemini (VITE_GEMINI_API_KEY / localStorage)
+ * para evitar interrupções de quota diária do OpenRouter.
  */
 export function getEffectiveApiKey(customApiKey = '') {
   const localCustom = limparApiKey(customApiKey);
@@ -76,31 +119,40 @@ export function getEffectiveApiKey(customApiKey = '') {
 
   // 1. Chaves salvas explicitamente pelo usuário no navegador
   if (typeof window !== 'undefined') {
-    const k0 = limparApiKey(localStorage.getItem('openrouter_api_key'));
-    if (k0) return k0;
-    const k1 = limparApiKey(localStorage.getItem('gemini_api_key'));
-    if (k1) return k1;
-    const k2 = limparApiKey(localStorage.getItem('ia_api_key'));
-    if (k2) return k2;
-    const k3 = limparApiKey(localStorage.getItem('@zenite_gemini_api_key'));
-    if (k3) return k3;
+    const kGemini = limparApiKey(localStorage.getItem('gemini_api_key'));
+    if (kGemini) return kGemini;
+    const kZeniteGemini = limparApiKey(localStorage.getItem('@zenite_gemini_api_key'));
+    if (kZeniteGemini) return kZeniteGemini;
+    const kIa = limparApiKey(localStorage.getItem('ia_api_key'));
+    if (kIa && !kIa.startsWith('sk-or-')) return kIa;
   }
 
-  // 2. Variáveis de ambiente com prioridade para OpenRouter se disponível
+  // 2. Chave de ambiente nativa do Google Gemini (VITE_GEMINI_API_KEY)
+  if (typeof import.meta !== 'undefined') {
+    const kEnvGemini = limparApiKey(import.meta.env?.VITE_GEMINI_API_KEY) || limparApiKey(import.meta.env?.VITE_GOOGLE_GENAI_API_KEY);
+    if (kEnvGemini) return kEnvGemini;
+  }
+
+  if (typeof process !== 'undefined') {
+    const kProcGemini = limparApiKey(process.env?.VITE_GEMINI_API_KEY) || limparApiKey(process.env?.GEMINI_API_KEY);
+    if (kProcGemini) return kProcGemini;
+  }
+
+  // 3. Chave salva de OpenRouter se configurada pelo usuário
+  if (typeof window !== 'undefined') {
+    const kOr = limparApiKey(localStorage.getItem('openrouter_api_key'));
+    if (kOr) return kOr;
+  }
+
+  // 4. OpenRouter das variáveis de ambiente
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) {
     const kEnvOr = limparApiKey(import.meta.env.VITE_OPENROUTER_API_KEY);
     if (kEnvOr) return kEnvOr;
   }
 
-  // 3. Fallback principal OpenRouter
+  // 5. Fallback final OpenRouter
   if (DEFAULT_OPENROUTER_API_KEY) {
     return DEFAULT_OPENROUTER_API_KEY;
-  }
-
-  // 4. Outras chaves de ambiente
-  if (typeof import.meta !== 'undefined') {
-    const kEnv = limparApiKey(import.meta.env?.VITE_GEMINI_API_KEY) || limparApiKey(import.meta.env?.VITE_GOOGLE_GENAI_API_KEY);
-    if (kEnv) return kEnv;
   }
 
   return '';
@@ -114,7 +166,7 @@ export function getActiveModelName(apiKey = '') {
   if (chave.startsWith('sk-or-')) {
     return 'OpenRouter (Qwen-VL)';
   }
-  return 'gemini-3.6-flash';
+  return GEMINI_MODEL;
 }
 
 /**
@@ -195,13 +247,13 @@ export const CAIXA_RESPONSE_SCHEMA = {
           },
           categoria: {
             type: Type.STRING,
-            enum: ["Celulares", "Acessórios", "Serviços"],
+            enum: ["Celulares", "Acessórios", "Chips", "Serviços"],
             description: "Categoria do item"
           },
           tipo_item: {
             type: Type.STRING,
-            enum: ["APARELHO", "ACESSORIO"],
-            description: "APARELHO para smartphones/celulares/tablets, ACESSORIO para cabos, capas, películas, etc."
+            enum: ["APARELHO", "ACESSORIO", "CHIP", "SERVICO"],
+            description: "APARELHO para smartphones/celulares/tablets, ACESSORIO para cabos, capas, películas, CHIP para chips de operadora, SERVICO para serviços técnicos."
           },
           cor: {
             type: Type.STRING,
@@ -243,37 +295,7 @@ export const CAIXA_RESPONSE_SCHEMA = {
   required: ["data_caixa", "total_geral", "vendas"]
 };
 
-export const SYSTEM_INSTRUCTION = `Você é um perito em análise e digitação de folhas físicas de fechamento de caixa diário de lojas de varejo e celulares/smartphones (Monkey Shop).
-Sua missão é extrair com precisão matemática absoluta todos os dados de vendas, produtos, valores, vendedores, formas de pagamento e comissões contidos na folha de caixa (imagem ou PDF).
-
-REGRAS RÍGIDAS DE RECONHECIMENTO:
-1. IDENTIFICAÇÃO DE APARELHOS (SMARTPHONES):
-   - Qualquer produto que contenha marcas como Redmi, Realme, Itel, Infinix, Samsung, iPhone, Xiaomi, Motorola, Poco, Tecno ou capacidade de memória (ex: 64GB, 128GB, 256GB, 512GB, 1TB) DEVE ser categorizado obrigatoriamente como:
-     * tipo_item = 'APARELHO'
-     * categoria = 'Celulares'
-   - Extraia a cor se estiver indicada no texto ou abreviação (ex: "Titanium", "Preto", "Azul", "Dourado", "Grafite", "Verde", "Branco").
-
-2. IDENTIFICAÇÃO DE ACESSÓRIOS E SERVIÇOS:
-   - Itens como cabos, películas (3D, cerâmica, nano), capas, fones de ouvido, fontes, carregadores, caixas de som e chips de operadora DEVEM ser categorizados como:
-     * tipo_item = 'ACESSORIO'
-     * categoria = 'Acessórios'
-
-3. RECONHECIMENTO DE MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
-   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
-   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações da venda (ex: "Troca iPhone 11 com volta de R$ 900,00").
-
-4. REGRA ESTRITA DE COMISSÃO:
-   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se vender 1 iPhone, comissão = 30.00. Se vender 2, comissão = 60.00.
-   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola, Poco, Tecno): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado em boleto/carnê/PayJoy).
-   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som, Carregadores, Fones): Comissão de 2,5% sobre o valor total vendido.
-   - CHIP: R$ 0,50 fixo por unidade de chip vendido.
-
-5. DATA DO CAIXA:
-   - Converta sempre a data da folha física para o formato ISO YYYY-MM-DD (ex: se na folha estiver "16/09/2026", "16-09" ou "16 de setembro de 2026", converta para "2026-09-16"). Se o ano não estiver explícito, adote o ano corrente (2026).
-
-6. VALORES E QUANTIDADES:
-   - Garanta que valor_total e quantidade sejam numéricos puros (ex: 79.90, e não "R$ 79,90").
-   - Trate vírgulas como decimais.`;
+export const SYSTEM_INSTRUCTION = PROMPT_EXTRACAO_CAIXA;
 
 /**
  * Converte um arquivo do navegador (File/Blob) em base64 puro
@@ -353,63 +375,71 @@ REGRAS OBRIGATÓRIAS:
 
 Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
 
-  // 2. Se a chave for da OPENROUTER (sk-or-...), NUNCA chamar o SDK da Google:
+  // 2. Se a chave for da OPENROUTER (sk-or-...), tenta OpenRouter com fallback automático para Gemini se esgotar cota:
   if (chave.startsWith('sk-or-')) {
     console.log('[IA CAIXA] Executando chamada via OpenRouter...');
 
-    // Converter arquivo para Base64
-    const base64Data = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const res = reader.result;
-        resolve(res.includes(',') ? res.split(',')[1] : res);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(arquivo);
-    });
+    try {
+      // Converter arquivo para Base64
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result;
+          resolve(res.includes(',') ? res.split(',')[1] : res);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(arquivo);
+      });
 
-    const resposta = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${chave}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
-        'X-Title': 'PDV Fechamento de Caixa',
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: PROMPT_EXTRAIR_FOLHA_TEXT
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:image/jpeg;base64,${base64Data}`
+      const resposta = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${chave}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
+          'X-Title': 'PDV Fechamento de Caixa',
+        },
+        body: JSON.stringify({
+          model: OPENROUTER_MODEL,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: PROMPT_EXTRAIR_FOLHA_TEXT
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/jpeg;base64,${base64Data}`
+                  }
                 }
-              }
-            ]
-          }
-        ]
-      })
-    });
+              ]
+            }
+          ]
+        })
+      });
 
-    if (!resposta.ok) {
-      const err = await resposta.json().catch(() => ({}));
-      throw new Error(`OpenRouter (${resposta.status}): ${err.error?.message || resposta.statusText}`);
+      if (!resposta.ok) {
+        const err = await resposta.json().catch(() => ({}));
+        const erroMsg = err.error?.message || resposta.statusText;
+        console.warn(`[OpenRouter] Falhou com status ${resposta.status}: ${erroMsg}. Tentando fallback Gemini...`);
+        // Fallback imediato se atingir rate limit ou quota diária
+        return await parseCaixaComGeminiClient({ file: arquivo });
+      }
+
+      const jsonResp = await resposta.json();
+      const conteudoTexto = jsonResp.choices?.[0]?.message?.content || '';
+      return extrairJsonPuro(conteudoTexto);
+    } catch (errOR) {
+      console.warn('[OpenRouter] Erro ao chamar OpenRouter, acionando fallback nativo do Gemini:', errOR);
+      return await parseCaixaComGeminiClient({ file: arquivo });
     }
-
-    const jsonResp = await resposta.json();
-    const conteudoTexto = jsonResp.choices?.[0]?.message?.content || '';
-    return extrairJsonPuro(conteudoTexto);
   }
 
-  // 3. Caso NÃO seja OpenRouter, segue o fluxo do Gemini...
+  // 3. Caso NÃO seja OpenRouter, segue o fluxo nativo do Gemini...
   return await parseCaixaComGeminiClient({ file: arquivo, customApiKey: chave });
 }
 
@@ -751,10 +781,13 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '', onRet
 
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   const modelosTentativa = Array.from(new Set([
-    'gemini-3.6-flash',
     GEMINI_MODEL,
+    'gemini-1.5-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-3.6-flash',
     'gemini-flash-latest'
-  ])).filter(m => m && !m.includes('1.5') && !m.includes('2.5'));
+  ])).filter(Boolean);
   let lastError = null;
 
   for (const modelo of modelosTentativa) {
@@ -775,12 +808,12 @@ export async function parseCaixaComGeminiClient({ file, customApiKey = '', onRet
               parts: [
                 {
                   inlineData: {
-                    mimeType: mimeType,
+                    mimeType: mimeType || 'application/pdf',
                     data: base64Data
                   }
                 },
                 {
-                  text: 'Analise detalhadamente esta folha de fechamento de caixa e extraia a data, a filial e todas as vendas detalhadas de aparelhos e acessórios.'
+                  text: PROMPT_EXTRACAO_CAIXA
                 }
               ]
             }

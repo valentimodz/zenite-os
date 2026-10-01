@@ -2,7 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import {
   DEFAULT_OPENROUTER_API_KEY,
-  OPENROUTER_MODEL
+  OPENROUTER_MODEL,
+  parseCaixaComGeminiClient,
+  PROMPT_EXTRACAO_CAIXA,
+  GEMINI_MODEL
 } from '../services/geminiService';
 import {
   X,
@@ -162,14 +165,16 @@ export default function ImportarCaixaRetroativoModal({
   const [customApiKey, setCustomApiKey] = useState(() => {
     // 1. Chave explícita do usuário salva
     const kLocal =
-      localStorage.getItem('openrouter_api_key') ||
       localStorage.getItem('gemini_api_key') ||
+      localStorage.getItem('@zenite_gemini_api_key') ||
+      localStorage.getItem('openrouter_api_key') ||
       localStorage.getItem('ia_api_key');
     if (kLocal && kLocal.trim()) {
       return kLocal.trim().replace(/^["']|["']$/g, '');
     }
-    // 2. Chave OpenRouter padrão
+    // 2. Chave de ambiente Gemini ou OpenRouter
     return (
+      (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_GEMINI_API_KEY || import.meta.env?.VITE_GOOGLE_GENAI_API_KEY)) ||
       (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
       DEFAULT_OPENROUTER_API_KEY ||
       CHAVE_PADRAO
@@ -242,27 +247,33 @@ export default function ImportarCaixaRetroativoModal({
     }
   };
 
-  const handleSalvarChaveOpenRouter = () => {
+  const handleSalvarChaveIA = () => {
     const keyToSave = (customApiKey || '').trim().replace(/^["']|["']$/g, '').trim();
 
     if (!keyToSave || keyToSave.length < 15) {
-      const msgErro = 'Por favor, insira uma chave de API OpenRouter válida.';
+      const msgErro = 'Por favor, insira uma chave de API válida (Google Gemini ou OpenRouter).';
       setKeyValidationError(msgErro);
       setErrorMessage(msgErro);
       return;
     }
 
     // Salvar no localStorage
-    localStorage.setItem('openrouter_api_key', keyToSave);
-    localStorage.setItem('gemini_api_key', keyToSave);
+    if (keyToSave.startsWith('sk-or-')) {
+      localStorage.setItem('openrouter_api_key', keyToSave);
+    } else {
+      localStorage.setItem('gemini_api_key', keyToSave);
+      localStorage.setItem('@zenite_gemini_api_key', keyToSave);
+    }
     localStorage.setItem('ia_api_key', keyToSave);
     setCustomApiKey(keyToSave);
 
     setErrorMessage('');
     setKeyValidationError('');
-    setSuccessMessage('Chave OpenRouter configurada com sucesso!');
+    setSuccessMessage('Chave de API salva com sucesso!');
     setShowKeyInput(false);
   };
+
+  const handleSalvarChaveOpenRouter = handleSalvarChaveIA;
 
   // Helper para normalizar o resultado vindo do OpenRouter ou do Gemini
   const aplicarDadosFechamento = (resultado) => {
@@ -324,7 +335,7 @@ export default function ImportarCaixaRetroativoModal({
         trainee_nome: parsedVend.traineeNome,
         raw_vendedor: rawVend,
         categoria: item.categoria || (isAp ? 'Celulares' : 'Acessórios'),
-        tipo_item: isAp ? 'APARELHO' : 'ACESSORIO',
+        tipo_item: item.tipo_item || (isAp ? 'APARELHO' : 'ACESSORIO'),
         cor: item.cor || '',
         quantidade: Math.max(1, Number(item.quantidade) || 1),
         valor_total: Number(item.valor || item.valor_total) || 0,
@@ -346,124 +357,172 @@ export default function ImportarCaixaRetroativoModal({
     setErrorMessage('');
     setSuccessMessage('');
 
-    // Chave de API fixa com fallback rigoroso
-    const CHAVE_FIXA = ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
-
-    const apiKey = (
-      localStorage.getItem('openrouter_api_key') ||
-      localStorage.getItem('gemini_api_key') ||
-      localStorage.getItem('ia_api_key') ||
-      (customApiKey || '').replace(/^["']|["']$/g, '') ||
-      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
-      DEFAULT_OPENROUTER_API_KEY ||
-      CHAVE_FIXA
-    ).trim();
-
-    if (!apiKey) {
-      throw new Error('Chave de API da OpenRouter não encontrada.');
-    }
-
     try {
-      // Converte o arquivo (PDF renderizado em Canvas ou Imagem) para data URL compatível com visão (image/jpeg)
-      setProgressMsg('Processando imagem do documento...');
-      const imageUrl = await prepararArquivoParaVisao(selectedFile);
+      setProgressMsg('Preparando documento para análise com Google Gemini...');
 
-      const headers = {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://zenite-os.vercel.app',
-        'X-Title': 'PDV Fechamento de Caixa',
-      };
+      // 1. Resolução prioritária da chave de API
+      const geminiApiKey = (
+        (customApiKey && !customApiKey.startsWith('sk-or-') ? customApiKey : '') ||
+        localStorage.getItem('gemini_api_key') ||
+        localStorage.getItem('@zenite_gemini_api_key') ||
+        (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_GEMINI_API_KEY || import.meta.env?.VITE_GOOGLE_GENAI_API_KEY)) ||
+        ''
+      ).trim().replace(/^["']|["']$/g, '').trim();
 
-      setProgressMsg('Analisando folha de caixa com IA...');
-      const promptText = `Você é um assistente especialista em OCR e auditoria de caixa de loja (Monkey Shop).
-Analise detalhadamente esta folha física de fechamento de caixa e extraia estritamente em formato JSON válido:
-{
-  "data": "DD/MM/AAAA",
-  "data_caixa": "YYYY-MM-DD",
-  "filial_identificada": "",
-  "totais": { "dinheiro": 0, "pix": 0, "cartao": 0, "boleto": 0, "total_geral": 0 },
-  "vendas": [
-    {
-      "vendedor": "",
-      "produto": "",
-      "imei_serial": "",
-      "valor": 0,
-      "forma_pagamento": "",
-      "observacoes": "",
-      "comissao": 0,
-      "categoria": "Celulares",
-      "tipo_item": "APARELHO",
-      "cor": "",
-      "quantidade": 1
-    }
-  ],
-  "sangrias_despesas": [
-    { "descricao": "", "valor": 0 }
-  ]
-}
+      const openRouterApiKey = (
+        (customApiKey && customApiKey.startsWith('sk-or-') ? customApiKey : '') ||
+        localStorage.getItem('openrouter_api_key') ||
+        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
+        DEFAULT_OPENROUTER_API_KEY ||
+        ''
+      ).trim().replace(/^["']|["']$/g, '').trim();
 
-REGRAS OBRIGATÓRIAS:
-1. MÚLTIPLOS MÉTODOS DE PAGAMENTO / TROCAS:
-   - Sempre que uma venda envolver aparelho usado na troca com volta em dinheiro/pix/cartão, registre TODOS os métodos combinados separados por vírgula no campo forma_pagamento (exemplo: "TROCA, PIX", "TROCA, DINHEIRO", "TROCA, CARTAO_CREDITO").
-   - Se a anotação na folha indicar algo como "Troca IP11 + 900 volta", registre forma_pagamento como "TROCA, PIX" (ou a forma indicada da volta) e identifique o valor da entrada/volta no campo de observações (ex: "Troca IP11 + 900 volta").
+      // Determinar formato e converter arquivo em base64 puro
+      const isPdf = selectedFile.type === 'application/pdf' || selectedFile.name?.toLowerCase().endsWith('.pdf');
+      const mimeType = isPdf ? 'application/pdf' : (selectedFile.type || 'image/jpeg');
 
-2. REGRA ESTRITA DE COMISSÃO:
-   - IPHONE (Qualquer modelo de iPhone, lacrado ou de vitrine / seminovo): A comissão é RIGIDAMENTE FIXA em R$ 30,00 por unidade. NUNCA calcule percentual (1%) para iPhone. Se quantidade = 1, comissão = 30. Se quantidade = 2, comissão = 60.
-   - DEMAIS CELULARES / ANDROID (Xiaomi, Samsung, Realme, Infinix, Motorola): Comissão de 1% a 2% sobre o valor da venda (padrão 1%, ou 2% se financiado em carnê/boleto/PayJoy).
-   - ACESSÓRIOS (Capinhas, Películas, Fontes, Cabos, Caixas de som): Comissão de 2,5% sobre o valor vendido.
-   - CHIP: R$ 0,50 fixo por chip vendido.
-
-Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
-
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
-          'X-Title': 'PDV Fechamento de Caixa',
-        },
-        body: JSON.stringify({
-          model: 'openrouter/free',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: promptText
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: imageUrl
-                  }
-                }
-              ]
-            }
-          ]
-        })
+      // Converter arquivo para base64 puro
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result;
+          if (typeof res === 'string') {
+            resolve(res.includes(',') ? res.split(',')[1] : res);
+          } else {
+            reject(new Error('Falha ao ler arquivo em base64'));
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
       });
 
-      if (!response.ok) {
-        const errPayload = await response.json().catch(() => ({}));
-        throw new Error(errPayload.error?.message || `Erro HTTP ${response.status}`);
+      // 2. Chamada Direta à API do Gemini se houver chave Gemini configurada
+      if (geminiApiKey) {
+        setProgressMsg('Analisando folha de caixa com Google Gemini...');
+        const modeloGemini = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_MODEL) || GEMINI_MODEL || 'gemini-1.5-flash';
+        const modelosParaTentar = Array.from(new Set([
+          modeloGemini,
+          'gemini-1.5-flash',
+          'gemini-2.5-flash',
+          'gemini-2.0-flash',
+          'gemini-3.6-flash'
+        ])).filter(Boolean);
+
+        let parsedGemini = null;
+        let lastGeminiErr = null;
+
+        for (const modelo of modelosParaTentar) {
+          try {
+            console.log(`[CaixaRetroativo] Enviando requisição nativa para Gemini (${modelo})...`);
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(geminiApiKey)}`;
+
+            // Estrutura solicitada: envio direto do PDF em base64 no parts com mimeType application/pdf
+            const contents = [
+              {
+                role: 'user',
+                parts: [
+                  { inlineData: { mimeType: mimeType, data: base64Data } },
+                  { text: PROMPT_EXTRACAO_CAIXA }
+                ]
+              }
+            ];
+
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': geminiApiKey
+              },
+              body: JSON.stringify({
+                contents,
+                generationConfig: {
+                  responseMimeType: 'application/json',
+                  temperature: 0.1
+                }
+              })
+            });
+
+            if (!response.ok) {
+              const errPayload = await response.json().catch(() => ({}));
+              throw new Error(errPayload.error?.message || `Erro Gemini HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            const textoCru = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (!textoCru) {
+              throw new Error('O Gemini retornou uma resposta sem texto estruturado.');
+            }
+
+            const jsonExtraido = extrairJsonPuro(textoCru);
+            parsedGemini = jsonExtraido;
+            break;
+          } catch (errLoop) {
+            console.warn(`[CaixaRetroativo] Modelo ${modelo} falhou:`, errLoop);
+            lastGeminiErr = errLoop;
+          }
+        }
+
+        if (parsedGemini) {
+          aplicarDadosFechamento(parsedGemini);
+          return;
+        }
+
+        // Se falhou todos os modelos Gemini e não há OpenRouter, lança o erro do Gemini
+        if (!openRouterApiKey) {
+          throw lastGeminiErr || new Error('Falha ao processar folha de caixa com Google Gemini.');
+        }
+
+        console.warn('[CaixaRetroativo] Gemini falhou, tentando fallback OpenRouter...', lastGeminiErr);
       }
 
-      const data = await response.json();
-      const textoCru = data.choices?.[0]?.message?.content || '';
+      // 3. Fallback OpenRouter caso Gemini não esteja configurado ou tenha falhado
+      if (openRouterApiKey) {
+        setProgressMsg('Analisando folha de caixa via fallback OpenRouter...');
+        const imageUrl = await prepararArquivoParaVisao(selectedFile);
 
-      // Extrator robusto que encontra o primeiro '{' e o último '}' ignorando qualquer texto antes ou depois
-      const inicio = textoCru.indexOf('{');
-      const fim = textoCru.lastIndexOf('}');
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openRouterApiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'http://localhost:5173',
+            'X-Title': 'PDV Fechamento de Caixa',
+          },
+          body: JSON.stringify({
+            model: OPENROUTER_MODEL || 'openrouter/free',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: PROMPT_EXTRACAO_CAIXA
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: imageUrl
+                    }
+                  }
+                ]
+              }
+            ]
+          })
+        });
 
-      if (inicio === -1 || fim === -1) {
-        throw new Error('A IA não gerou uma estrutura JSON válida. Resposta: ' + textoCru.slice(0, 100));
+        if (!response.ok) {
+          const errPayload = await response.json().catch(() => ({}));
+          throw new Error(errPayload.error?.message || `Erro HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const textoCru = data.choices?.[0]?.message?.content || '';
+        const jsonExtraido = extrairJsonPuro(textoCru);
+        aplicarDadosFechamento(jsonExtraido);
+        return;
       }
 
-      const jsonExtraido = JSON.parse(textoCru.substring(inicio, fim + 1));
-      aplicarDadosFechamento(jsonExtraido);
+      throw new Error('Nenhuma chave de API configurada (VITE_GEMINI_API_KEY ou OpenRouter).');
     } catch (erro) {
       console.error('Falha no processamento:', erro);
       setErrorMessage(`Erro ao processar folha: ${erro?.message || 'Falha na leitura da IA'}`);
@@ -851,7 +910,7 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                   Importação de Caixa e Vendas Retroativas via IA
                 </h2>
                 <span className="text-xs bg-purple-900/60 text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-700/50 font-bold">
-                  ⚡ OpenRouter (Free Router)
+                  ⚡ Google Gemini (Flash)
                 </span>
               </div>
               <p className="text-xs text-gray-400">
@@ -871,10 +930,10 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                 });
               }}
               className="px-2.5 py-1.5 rounded-lg border border-[#333] hover:border-[#6A0DAD] bg-black text-gray-400 hover:text-white text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Configurar chave de API da OpenRouter"
+              title="Configurar chave de API Gemini ou OpenRouter"
             >
               <Key size={13} className="text-yellow-400" />
-              <span className="hidden sm:inline">Chave OpenRouter</span>
+              <span className="hidden sm:inline">Chave IA / Gemini</span>
             </button>
             <button
               type="button"
@@ -886,13 +945,13 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
           </div>
         </div>
 
-        {/* PAINEL OPCIONAL: CONFIGURAR CHAVE OPENROUTER */}
+        {/* PAINEL OPCIONAL: CONFIGURAR CHAVE IA */}
         {showKeyInput && (
           <div className="bg-[#111] px-6 py-3.5 border-b border-[#222] flex flex-col gap-2.5 text-xs animate-in fade-in duration-150">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-gray-300 w-full sm:w-auto">
                 <Key size={14} className="text-yellow-400 shrink-0" />
-                <span className="font-semibold">Chave OpenRouter:</span>
+                <span className="font-semibold">Chave de API (Gemini ou OpenRouter):</span>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <input
@@ -905,17 +964,17 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      handleSalvarChaveOpenRouter();
+                      handleSalvarChaveIA();
                     }
                   }}
-                  placeholder="sk-or-v1-..."
+                  placeholder="AIzaSy... ou AQ... / sk-or-..."
                   className={`bg-black border ${
                     keyValidationError ? 'border-rose-500 focus:border-rose-500 ring-1 ring-rose-500/30' : 'border-[#333] focus:border-[#6A0DAD]'
                   } text-white px-3 py-1.5 rounded-md outline-none text-xs w-full sm:w-72 font-mono transition-all`}
                 />
                 <button
                   type="button"
-                  onClick={handleSalvarChaveOpenRouter}
+                  onClick={handleSalvarChaveIA}
                   className="bg-[#6A0DAD] hover:bg-[#520885] text-white px-3.5 py-1.5 rounded-md font-bold text-xs shrink-0 cursor-pointer transition-colors shadow-sm"
                 >
                   Salvar
@@ -996,7 +1055,7 @@ Responda exclusivamente com o objeto JSON sem crases adicionais de markdown.`;
                   {isProcessing ? (
                     <>
                       <Loader2 size={18} className="animate-spin text-yellow-300" />
-                      <span>Processando folha com OpenRouter (Qwen 2.5 VL)...</span>
+                      <span>{progressMsg || 'Processando folha com Google Gemini IA...'}</span>
                     </>
                   ) : (
                     <>
