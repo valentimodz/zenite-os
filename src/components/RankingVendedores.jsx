@@ -132,14 +132,12 @@ export default function RankingVendedores({
       const pInicio = customInicio || periodoData.inicio;
       const pFim = customFim || periodoData.fim;
       
-      // Início: YYYY-MM-DD 00:00:00 (Local / -03:00) -> ISO UTC para consulta no banco
-      // Fim: YYYY-MM-DD 23:59:59.999 (Local / -03:00) -> ISO UTC para consulta no banco
+      // Início: YYYY-MM-DD 00:00:00 (Local Brasília -03:00)
+      // Fim: YYYY-MM-DD 23:59:59.999 (Local Brasília -03:00)
       const [anoI, mesI, diaI] = pInicio.split('-').map(Number);
       const [anoF, mesF, diaF] = pFim.split('-').map(Number);
-      const dataInicioObj = new Date(anoI, mesI - 1, diaI, 0, 0, 0, 0);
-      const dataFimObj = new Date(anoF, mesF - 1, diaF, 23, 59, 59, 999);
-      const dataInicio = dataInicioObj.toISOString();
-      const dataFim = dataFimObj.toISOString();
+      const dataInicioBrasilia = `${anoI}-${String(mesI).padStart(2, '0')}-${String(diaI).padStart(2, '0')}T00:00:00-03:00`;
+      const dataFimBrasilia = `${anoF}-${String(mesF).padStart(2, '0')}-${String(diaF).padStart(2, '0')}T23:59:59.999-03:00`;
 
       let query = supabase
         .from('vendas')
@@ -165,8 +163,8 @@ export default function RankingVendedores({
             nome
           )
         `)
-        .gte('created_at', dataInicio)
-        .lte('created_at', dataFim)
+        .gte('created_at', dataInicioBrasilia)
+        .lte('created_at', dataFimBrasilia)
         .order('created_at', { ascending: false });
 
       if (empresaId && empresaId !== 'MASTER') {
@@ -181,28 +179,30 @@ export default function RankingVendedores({
         const fallbackQ = await supabase
           .from('vendas')
           .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, categoria, comissao, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id, created_at')
-          .gte('created_at', dataInicio)
-          .lte('created_at', dataFim)
+          .gte('created_at', dataInicioBrasilia)
+          .lte('created_at', dataFimBrasilia)
           .order('created_at', { ascending: false });
 
         if (!fallbackQ.error) {
           data = fallbackQ.data || [];
         } else {
-          // Fallback para filtrar initialVendas em memória considerando fuso horário local
+          // Fallback para filtrar initialVendas em memória considerando fuso horário de Brasília (-03:00)
           const [fAno, fMes] = (filtroMes || currentMonthStr).split('-').map(Number);
           data = (initialVendas || []).filter(v => {
             const raw = v.created_at || v.data || v.date;
             if (!raw) return false;
             const dataVenda = new Date(raw);
             if (isNaN(dataVenda.getTime())) return false;
-            const ano = dataVenda.getFullYear();
-            const mes = dataVenda.getMonth() + 1;
+            const dStr = dataVenda.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+            const dObj = new Date(dStr);
+            const ano = dObj.getFullYear();
+            const mes = dObj.getMonth() + 1;
             return ano === fAno && mes === fMes;
           });
         }
       }
 
-      // Filtragem estrita de competência por fuso horário local
+      // Filtragem estrita de competência por fuso horário local de Brasília (-03:00)
       const [fAno, fMes] = (filtroMes || currentMonthStr).split('-').map(Number);
       const vistosRanking = new Set();
       const vendasUnicas = (data || []).filter(v => {
@@ -210,8 +210,10 @@ export default function RankingVendedores({
         if (raw) {
           const dataVenda = new Date(raw);
           if (!isNaN(dataVenda.getTime())) {
-            const ano = dataVenda.getFullYear();
-            const mes = dataVenda.getMonth() + 1; // 1-12
+            const dStr = dataVenda.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+            const dObj = new Date(dStr);
+            const ano = dObj.getFullYear();
+            const mes = dObj.getMonth() + 1; // 1-12
             if (ano !== fAno || mes !== fMes) {
               return false;
             }

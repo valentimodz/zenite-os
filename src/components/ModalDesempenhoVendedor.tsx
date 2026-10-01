@@ -185,24 +185,35 @@ export default function ModalDesempenhoVendedor({
   const vendasCacheLength = Array.isArray(vendasCache) ? vendasCache.length : 0;
   const lastLoadedVendedorRef = useRef<string | null>(null);
 
+  // Invalidação de cache local e força de recarga
+  const invalidarCacheERecarregar = useCallback((novoMes?: string) => {
+    lastLoadedVendedorRef.current = null;
+    if (novoMes) {
+      setMesAtivo(novoMes);
+    }
+  }, []);
+
   // Carregar dados de vendas e metas do colaborador selecionado
   const carregarDadosVendedor = useCallback(async () => {
     if (!colaboradorId) return;
     setIsLoading(true);
+    setVendasColaborador([]);
+    setMetaIndividual(null);
 
     try {
       const vendedorId = colaboradorId;
       const vendedorNome = colaboradorNome;
 
-      // Início e fim do mês selecionado considerando o fuso horário local
+      // Início e fim do mês selecionado considerando o fuso horário local de Brasília (-03:00)
       const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
       const anoFiltro = parseInt(anoStr, 10);
       const mesFiltro = parseInt(mesStr, 10);
       const ultimoDia = new Date(anoFiltro, mesFiltro, 0).getDate();
-      const dataInicioObj = new Date(anoFiltro, mesFiltro - 1, 1, 0, 0, 0, 0);
-      const dataFimObj = new Date(anoFiltro, mesFiltro - 1, ultimoDia, 23, 59, 59, 999);
-      const dataInicio = dataInicioObj.toISOString();
-      const dataFim = dataFimObj.toISOString();
+      const ultimoDiaPad = String(ultimoDia).padStart(2, '0');
+      const mesPad = String(mesFiltro).padStart(2, '0');
+
+      const dataInicioBrasilia = `${anoFiltro}-${mesPad}-01T00:00:00-03:00`;
+      const dataFimBrasilia = `${anoFiltro}-${mesPad}-${ultimoDiaPad}T23:59:59.999-03:00`;
 
       // 1. Consulta de vendas no Supabase
       let query = supabase
@@ -229,11 +240,11 @@ export default function ModalDesempenhoVendedor({
             preco_unitario
           )
         `)
-        .gte('created_at', dataInicio)
-        .lte('created_at', dataFim)
+        .gte('created_at', dataInicioBrasilia)
+        .lte('created_at', dataFimBrasilia)
         .order('created_at', { ascending: false });
 
-      // Filtrar pelo ID do colaborador selecionado ou pelo nome dele
+      // Filtrar pelo ID do colaborador selecionado ou pelo nome dele (incluindo vendas como titular ou trainee)
       const isUuid = (str: string | number) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str));
       const isColabTrainee = Boolean(
         colaborador?.role === 'TRAINEE' ||
@@ -245,12 +256,8 @@ export default function ModalDesempenhoVendedor({
 
       if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
         if (isUuid(vendedorId)) {
-          if (isColabTrainee) {
-            query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
-          } else {
-            // Vendedor titular: consulta estritamente por vendedor_id ou vendedor_nome
-            query = query.or(`vendedor_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
-          }
+          // Inclui vendas onde o colaborador é titular (vendedor_id/vendedor_nome) ou trainee (treener_id/trainee_id)
+          query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
         } else if (primeiroNome) {
           query = query.ilike('vendedor_nome', `%${primeiroNome}%`);
         }
@@ -269,17 +276,13 @@ export default function ModalDesempenhoVendedor({
         let fbQuery = supabase
           .from('vendas')
           .select('id, created_at, valor_total, metodo_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id')
-          .gte('created_at', dataInicio)
-          .lte('created_at', dataFim)
+          .gte('created_at', dataInicioBrasilia)
+          .lte('created_at', dataFimBrasilia)
           .order('created_at', { ascending: false });
 
         if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
           if (isUuid(vendedorId)) {
-            if (isColabTrainee) {
-              fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
-            } else {
-              fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
-            }
+            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
           } else if (primeiroNome) {
             fbQuery = fbQuery.ilike('vendedor_nome', `%${primeiroNome}%`);
           }
@@ -293,13 +296,16 @@ export default function ModalDesempenhoVendedor({
         }
       }
 
-      // Validação estrita de pertencimento ao mês considerando o fuso horário local
+      // Validação estrita de pertencimento ao mês considerando o fuso horário local de Brasília (-03:00)
       const pertenceAoMes = (rawDate: any) => {
         if (!rawDate) return false;
         const dataVenda = new Date(rawDate);
         if (isNaN(dataVenda.getTime())) return false;
-        const ano = dataVenda.getFullYear();
-        const mes = dataVenda.getMonth() + 1; // 1-12
+        // Obter ano e mês ajustados no fuso local (-03:00)
+        const dStr = dataVenda.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+        const dObj = new Date(dStr);
+        const ano = dObj.getFullYear();
+        const mes = dObj.getMonth() + 1; // 1-12
         return ano === anoFiltro && mes === mesFiltro;
       };
 
@@ -311,12 +317,10 @@ export default function ModalDesempenhoVendedor({
       if ((!vendasModal || vendasModal.length === 0) && Array.isArray(vendasCache) && vendasCache.length > 0) {
         const cachedVendas = (vendasCache as Venda[]).filter(v => {
           if (!pertenceAoMes(v.created_at || (v as any).data || (v as any).date)) return false;
-          const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
+          const matchId = vendedorId && (String(v.vendedor_id) === String(vendedorId) || String(v.trainee_id) === String(vendedorId) || String(v.treener_id) === String(vendedorId));
           const rawNome = cleanStr(v.vendedor_nome);
           const matchNome = (normPrimeiroNome && rawNome.includes(normPrimeiroNome)) || (normNomeColab && rawNome.includes(normNomeColab));
-          const matchTrainee = isColabTrainee && ((v.treener_id && String(v.treener_id) === String(vendedorId)) || 
-                               (v.trainee_id && String(v.trainee_id) === String(vendedorId)));
-          return matchId || matchNome || matchTrainee;
+          return matchId || matchNome;
         });
         if (cachedVendas.length > 0) {
           vendasModal = cachedVendas;
@@ -331,14 +335,15 @@ export default function ModalDesempenhoVendedor({
           return false;
         }
 
-        // Se o colaborador não for trainee, garantir que a venda pertença a ele como vendedor titular
-        if (!isColabTrainee) {
-          const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
-          const rawNome = cleanStr(v.vendedor_nome);
-          const matchNome = (normPrimeiroNome && rawNome.includes(normPrimeiroNome)) || (normNomeColab && rawNome.includes(normNomeColab));
-          if (!matchId && !matchNome) {
-            return false;
-          }
+        const matchId = vendedorId && (
+          String(v.vendedor_id) === String(vendedorId) || 
+          String(v.trainee_id) === String(vendedorId) || 
+          String(v.treener_id) === String(vendedorId)
+        );
+        const rawNome = cleanStr(v.vendedor_nome);
+        const matchNome = (normPrimeiroNome && rawNome.includes(normPrimeiroNome)) || (normNomeColab && rawNome.includes(normNomeColab));
+        if (!matchId && !matchNome) {
+          return false;
         }
 
         const chave = String(v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`);
@@ -407,14 +412,11 @@ export default function ModalDesempenhoVendedor({
     );
 
     // Mapeamento oficial de metas:
-    // Trainee: metaTotal = R$ 40.000, metaBoleto = R$ 35.000, metaAcessorios = R$ 5.000
-    // Vendedor: metaTotal = R$ 77.500, metaBoleto = R$ 67.500, metaAcessorios = R$ 10.000
+    // Trainee: metaBoleto = R$ 35.000, metaAcessorios = R$ 5.000
+    // Vendedor: metaBoleto = R$ 67.500, metaAcessorios = R$ 10.000
     const metaBanco = metaIndividual;
 
-    const metaTotal = Number(metaBanco?.valor_meta) > 0 
-      ? Number(metaBanco?.valor_meta) 
-      : (isTrainee ? 40000 : 77500);
-
+    // Respeitar valores numéricos de meta_boleto e meta_acessorios da tabela 'metas'
     const metaBoleto = Number(metaBanco?.meta_boleto) > 0 
       ? Number(metaBanco?.meta_boleto) 
       : (isTrainee ? (Number(metaBanco?.meta_trainee_boleto) || 35000) : 67500);
@@ -422,6 +424,10 @@ export default function ModalDesempenhoVendedor({
     const metaAcessorios = Number(metaBanco?.meta_acessorios) > 0 
       ? Number(metaBanco?.meta_acessorios) 
       : (isTrainee ? 5000 : 10000);
+
+    // META TOTAL COMBINADA: estritamente a soma de meta_boleto + meta_acessorios
+    // Evita ler campos de percentual ou indevidos como valor_meta incorreto
+    const metaTotal = metaBoleto + metaAcessorios;
 
     const superMetaBoleto = Number(metaBanco?.super_meta_boleto) > 0 
       ? Number(metaBanco?.super_meta_boleto) 
@@ -658,7 +664,10 @@ export default function ModalDesempenhoVendedor({
               <input
                 type="month"
                 value={mesAtivo}
-                onChange={(e) => setMesAtivo(e.target.value)}
+                onChange={(e) => {
+                  const novoM = e.target.value;
+                  invalidarCacheERecarregar(novoM);
+                }}
                 className="bg-transparent text-white text-xs font-bold font-mono outline-none cursor-pointer"
               />
             </div>
@@ -666,7 +675,10 @@ export default function ModalDesempenhoVendedor({
             {/* Botão Recarregar */}
             <button
               type="button"
-              onClick={carregarDadosVendedor}
+              onClick={() => {
+                invalidarCacheERecarregar();
+                carregarDadosVendedor();
+              }}
               disabled={isLoading}
               className="p-2 rounded-lg bg-black border border-[#222222] hover:border-[#6A0DAD]/50 text-gray-300 hover:text-white transition-colors cursor-pointer"
               title="Recarregar dados"
