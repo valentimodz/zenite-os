@@ -131,8 +131,15 @@ export default function RankingVendedores({
     try {
       const pInicio = customInicio || periodoData.inicio;
       const pFim = customFim || periodoData.fim;
-      const dataInicio = `${pInicio}T00:00:00.000Z`;
-      const dataFim = `${pFim}T23:59:59.999Z`;
+      
+      // Início: YYYY-MM-DD 00:00:00 (Local / -03:00) -> ISO UTC para consulta no banco
+      // Fim: YYYY-MM-DD 23:59:59.999 (Local / -03:00) -> ISO UTC para consulta no banco
+      const [anoI, mesI, diaI] = pInicio.split('-').map(Number);
+      const [anoF, mesF, diaF] = pFim.split('-').map(Number);
+      const dataInicioObj = new Date(anoI, mesI - 1, diaI, 0, 0, 0, 0);
+      const dataFimObj = new Date(anoF, mesF - 1, diaF, 23, 59, 59, 999);
+      const dataInicio = dataInicioObj.toISOString();
+      const dataFim = dataFimObj.toISOString();
 
       let query = supabase
         .from('vendas')
@@ -181,30 +188,48 @@ export default function RankingVendedores({
         if (!fallbackQ.error) {
           data = fallbackQ.data || [];
         } else {
-          // Fallback para filtrar initialVendas em memória com timezone safety
-            data = (initialVendas || []).filter(v => {
-              const d = v.created_at || v.data || v.date;
-              if (!d) return false;
-              return String(d).startsWith(filtroMes);
-            });
+          // Fallback para filtrar initialVendas em memória considerando fuso horário local
+          const [fAno, fMes] = (filtroMes || currentMonthStr).split('-').map(Number);
+          data = (initialVendas || []).filter(v => {
+            const raw = v.created_at || v.data || v.date;
+            if (!raw) return false;
+            const dataVenda = new Date(raw);
+            if (isNaN(dataVenda.getTime())) return false;
+            const ano = dataVenda.getFullYear();
+            const mes = dataVenda.getMonth() + 1;
+            return ano === fAno && mes === fMes;
+          });
+        }
+      }
+
+      // Filtragem estrita de competência por fuso horário local
+      const [fAno, fMes] = (filtroMes || currentMonthStr).split('-').map(Number);
+      const vistosRanking = new Set();
+      const vendasUnicas = (data || []).filter(v => {
+        const raw = v.created_at || v.data || v.date;
+        if (raw) {
+          const dataVenda = new Date(raw);
+          if (!isNaN(dataVenda.getTime())) {
+            const ano = dataVenda.getFullYear();
+            const mes = dataVenda.getMonth() + 1; // 1-12
+            if (ano !== fAno || mes !== fMes) {
+              return false;
+            }
           }
         }
+        const chave = v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`;
+        if (!chave || vistosRanking.has(chave)) return false;
+        vistosRanking.add(chave);
+        return true;
+      });
 
-        const vistosRanking = new Set();
-        const vendasUnicas = (data || []).filter(v => {
-          const chave = v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`;
-          if (!chave || vistosRanking.has(chave)) return false;
-          vistosRanking.add(chave);
-          return true;
-        });
-
-        setVendasPeriodo(vendasUnicas);
+      setVendasPeriodo(vendasUnicas);
     } catch (err) {
       console.error('[RankingVendedores] Exceção ao consultar vendas:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [filtroMes, empresaId, currentMonthStr, initialVendas?.length]);
+  }, [filtroMes, periodoData.inicio, periodoData.fim, empresaId, currentMonthStr, initialVendas]);
 
   // Carregar dados sempre que o filtroMes ou empresaId mudar
   useEffect(() => {

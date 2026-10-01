@@ -194,13 +194,15 @@ export default function ModalDesempenhoVendedor({
       const vendedorId = colaboradorId;
       const vendedorNome = colaboradorNome;
 
-      // Início e fim do mês selecionado
+      // Início e fim do mês selecionado considerando o fuso horário local
       const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
-      const ano = parseInt(anoStr, 10);
-      const mes = parseInt(mesStr, 10);
-      const ultimoDia = new Date(ano, mes, 0).getDate();
-      const dataInicio = `${anoStr}-${mesStr}-01T00:00:00Z`;
-      const dataFim = `${anoStr}-${mesStr}-${String(ultimoDia).padStart(2, '0')}T23:59:59Z`;
+      const anoFiltro = parseInt(anoStr, 10);
+      const mesFiltro = parseInt(mesStr, 10);
+      const ultimoDia = new Date(anoFiltro, mesFiltro, 0).getDate();
+      const dataInicioObj = new Date(anoFiltro, mesFiltro - 1, 1, 0, 0, 0, 0);
+      const dataFimObj = new Date(anoFiltro, mesFiltro - 1, ultimoDia, 23, 59, 59, 999);
+      const dataInicio = dataInicioObj.toISOString();
+      const dataFim = dataFimObj.toISOString();
 
       // 1. Consulta de vendas no Supabase
       let query = supabase
@@ -280,9 +282,20 @@ export default function ModalDesempenhoVendedor({
         }
       }
 
-      // Fallback em cache
+      // Validação estrita de pertencimento ao mês considerando o fuso horário local
+      const pertenceAoMes = (rawDate: any) => {
+        if (!rawDate) return false;
+        const dataVenda = new Date(rawDate);
+        if (isNaN(dataVenda.getTime())) return false;
+        const ano = dataVenda.getFullYear();
+        const mes = dataVenda.getMonth() + 1; // 1-12
+        return ano === anoFiltro && mes === mesFiltro;
+      };
+
+      // Fallback em cache se a consulta não retornar vendas
       if ((!vendasModal || vendasModal.length === 0) && Array.isArray(vendasCache) && vendasCache.length > 0) {
         const cachedVendas = (vendasCache as Venda[]).filter(v => {
+          if (!pertenceAoMes(v.created_at || (v as any).data || (v as any).date)) return false;
           const matchId = vendedorId && String(v.vendedor_id) === String(vendedorId);
           const rawNome = (v.vendedor_nome || '').toLowerCase();
           const pNome = (primeiroNome || '').toLowerCase();
@@ -296,7 +309,20 @@ export default function ModalDesempenhoVendedor({
         }
       }
 
-      setVendasColaborador(vendasModal || []);
+      // Aplica a validação estrita de mês local e remoção de duplicatas também sobre vendasModal
+      const vistos = new Set<string>();
+      const vendasFiltradas = (vendasModal || []).filter(v => {
+        const rawDate = v.created_at || (v as any).data || (v as any).date;
+        if (rawDate && !pertenceAoMes(rawDate)) {
+          return false;
+        }
+        const chave = String(v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`);
+        if (vistos.has(chave)) return false;
+        vistos.add(chave);
+        return true;
+      });
+
+      setVendasColaborador(vendasFiltradas);
 
       // 2. Consulta de Metas configuradas para o vendedor no mês na tabela 'metas'
       let metaEncontrada: MetaBanco | null = null;
@@ -513,12 +539,10 @@ export default function ModalDesempenhoVendedor({
       const dStr = s.created_at || s.data;
       if (dStr) {
         const dt = new Date(dStr);
-        if (!isNaN(dt.getTime())) {
-          const diaNum = dt.getUTCDate() || dt.getDate();
+          const diaNum = dt.getDate();
           if (diaNum >= 1 && diaNum <= diasNoMes) {
             evolucaoDiaria[diaNum - 1].total += parseFloat(String(s.valor_total || s.valor || 0));
           }
-        }
       }
     });
 
