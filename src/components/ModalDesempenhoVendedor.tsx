@@ -833,8 +833,8 @@ export default function ModalDesempenhoVendedor({
                     Boleto, PayJoy, Watu, Ume, Aiva e Crediário
                   </span>
                 </div>
-                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${dashboardInfo.badgeBoleto.classe}`}>
-                  {dashboardInfo.badgeBoleto.texto}
+                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${dashboardInfo?.badgeBoleto?.classe || 'bg-amber-950/40 text-amber-400 border border-amber-800/40'}`}>
+                  {dashboardInfo?.badgeBoleto?.texto || 'Faixa Atual: 1,0%'}
                 </div>
               </div>
 
@@ -886,8 +886,8 @@ export default function ModalDesempenhoVendedor({
                     Capas, Películas, Fones, Carregadores e Cabos
                   </span>
                 </div>
-                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${dashboardInfo.badgeAcessorios.classe}`}>
-                  {dashboardInfo.badgeAcessorios.texto}
+                <div className={`px-2.5 py-1 rounded text-[11px] font-bold ${dashboardInfo?.badgeAcessorios?.classe || 'bg-amber-950/40 text-amber-400 border border-amber-800/40'}`}>
+                  {dashboardInfo?.badgeAcessorios?.texto || 'Faixa Atual: 1,0%'}
                 </div>
               </div>
 

@@ -5028,8 +5028,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const anoNum = parseInt(anoStr, 10);
       const mesNum = parseInt(mesStr, 10);
       const ultimoDia = new Date(anoNum, mesNum, 0).getDate();
-      const dataInicio = `${mesAlvo}-01T00:00:00.000Z`;
-      const dataFim = `${mesAlvo}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999Z`;
+      const dataInicio = `${mesAlvo}-01T00:00:00.000-03:00`;
+      const dataFim = `${mesAlvo}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
 
       // 2. Ajustar a Query de Busca no Supabase (incluindo vendas como titular ou participação como trainee):
       let queryVendas = supabase
@@ -5118,21 +5118,65 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       console.log("Vendas do vendedor conectado recebidas:", listaVendas);
 
-      // Normalizar itens_venda garantindo valor_unitario e categoria em cada item
+      // Filtrar estritamente dentro do mês selecionado usando o fuso horário de Brasília ('America/Sao_Paulo')
+      // para garantir que vendas de outros meses (como 2026-10) jamais entrem na soma
       const dataNormalizada = (listaVendas || []).map(v => {
         const itensNorm = (v.itens_venda || []).map(it => ({
           ...it,
-          valor_unitario: it.valor_unitario || it.preco_unitario || 0,
+          valor_unitario: Number(it.valor_unitario || it.preco_unitario || 0),
           categoria: it.categoria || v.categoria || 'Geral'
         }));
         return {
           ...v,
           itens_venda: itensNorm
         };
+      }).filter(v => {
+        const rawDate = v.created_at || v.data;
+        if (!rawDate) return false;
+        try {
+          const dt = new Date(rawDate);
+          if (isNaN(dt.getTime())) return false;
+          // Converte para data local de Brasília (YYYY-MM)
+          const brComp = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Sao_Paulo',
+            year: 'numeric',
+            month: '2-digit'
+          }).format(dt); // Retorna "YYYY-MM"
+          return brComp === mesAlvo;
+        } catch (e) {
+          return false;
+        }
       });
 
-      const total = dataNormalizada.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
-      const qtd = dataNormalizada.length;
+      // Tentar obter números consolidados diretamente da view view_ranking_colaboradores_mensal
+      let consolidadoView = null;
+      try {
+        let viewQuery = supabase
+          .from('view_ranking_colaboradores_mensal')
+          .select('*')
+          .eq('competencia', mesAlvo);
+
+        if (currentUserId) {
+          viewQuery = viewQuery.eq('colaborador_id', currentUserId);
+        } else if (profile?.nome) {
+          viewQuery = viewQuery.ilike('colaborador', `%${profile.nome.trim()}%`);
+        }
+
+        const { data: viewData } = await viewQuery.maybeSingle();
+        if (viewData) {
+          consolidadoView = viewData;
+        }
+      } catch (errView) {
+        console.warn("[Dashboard] view_ranking_colaboradores_mensal indisponível para vendedor:", errView);
+      }
+
+      const totalVendasCalculado = dataNormalizada.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
+      const total = consolidadoView
+        ? (Number(consolidadoView.faturado_titular || 0) + Number(consolidadoView.faturado_trainee || 0))
+        : totalVendasCalculado;
+      const qtd = consolidadoView
+        ? Number(consolidadoView.total_transacoes || dataNormalizada.length)
+        : dataNormalizada.length;
       const media = qtd > 0 ? total / qtd : 0;
 
       // Atualizar os estados da UI do vendedor
@@ -16141,11 +16185,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const saleDate = new Date(rawDateStr);
       if (isNaN(saleDate.getTime())) return true;
 
-      // Comparação tolerante considerando tanto fuso UTC quanto fuso local para o mês selecionado
-      const isUtcMatch = saleDate.getUTCFullYear() === anoAlvo && saleDate.getUTCMonth() === mesAlvoIdx;
-      const isLocalMatch = saleDate.getFullYear() === anoAlvo && saleDate.getMonth() === mesAlvoIdx;
-
-      return isUtcMatch || isLocalMatch;
+      // Comparação estrita considerando o fuso horário oficial de Brasília ('America/Sao_Paulo')
+      // impedindo que vendas de competências diferentes (ex: 2026-10) entrem na soma de 2026-09
+      try {
+        const brCompetencia = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Sao_Paulo',
+          year: 'numeric',
+          month: '2-digit'
+        }).format(saleDate);
+        return brCompetencia === mesAlvo;
+      } catch (errBr) {
+        return saleDate.getFullYear() === anoAlvo && saleDate.getMonth() === mesAlvoIdx;
+      }
     });
 
     // 2. CÁLCULO E DISTRIBUIÇÃO DAS VENDAS NOS CARDS:
@@ -27141,10 +27192,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               Vendas Totais ({metasInfo?.mesReferencia || filtroMes})
                             </span>
                             <span className="text-2xl font-black text-white mt-1.5 block font-mono">
-                              R$ {(totalVendas || metasInfo.totalVendasGeral || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              R$ {(metasInfo?.totalVendasGeral ?? totalVendas ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                             <span className="text-[10px] text-gray-400 mt-1 block">
-                              {(qtdVendas || metasInfo.salesCount || 0)} {(qtdVendas || metasInfo.salesCount) === 1 ? 'venda realizada' : 'vendas realizadas'}
+                              {(metasInfo?.salesCount ?? qtdVendas ?? 0)} {(metasInfo?.salesCount ?? qtdVendas) === 1 ? 'venda realizada' : 'vendas realizadas'}
                             </span>
                           </div>
 
@@ -27154,7 +27205,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               Ticket Médio
                             </span>
                             <span className="text-2xl font-black text-blue-400 mt-1.5 block font-mono">
-                              R$ {(ticketMedio || metasInfo.ticketMedio || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              R$ {(metasInfo?.ticketMedio ?? ticketMedio ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
                             <span className="text-[10px] text-gray-400 mt-1 block">
                               Média financeira por venda
@@ -27212,8 +27263,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               </div>
 
                               {/* Badge de Faixa de Comissão */}
-                              <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${metasInfo.badgeBoleto.classe} whitespace-nowrap self-start sm:self-auto`}>
-                                {metasInfo.badgeBoleto.texto}
+                              <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${metasInfo?.badgeBoleto?.classe || 'bg-amber-950/40 text-amber-400 border border-amber-800/40'} whitespace-nowrap self-start sm:self-auto`}>
+                                {metasInfo?.badgeBoleto?.texto || 'Faixa Atual: 1,0%'}
                               </div>
                             </div>
 
@@ -27222,13 +27273,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               <div>
                                 <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
                                 <span className="text-sm sm:text-base font-black text-amber-400 mt-0.5 block">
-                                  R$ {metasInfo.totalBoletos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  R$ {(metasInfo?.totalBoletos || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                               <div className="border-x border-[#222222]">
                                 <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
                                 <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
-                                  R$ {metasInfo.metaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  R$ {(metasInfo?.metaBoleto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                               <div>
@@ -27236,7 +27287,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   <Sparkles size={10} /> Super Meta
                                 </span>
                                 <span className="text-sm sm:text-base font-black text-purple-300 mt-0.5 block">
-                                  R$ {metasInfo.superMetaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  R$ {(metasInfo?.superMetaBoleto || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                             </div>
@@ -27245,29 +27296,29 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <div className="space-y-1.5">
                               <div className="flex justify-between text-xs font-bold">
                                 <span className="text-gray-400">Progresso do Objetivo</span>
-                                <span className="text-amber-400 font-mono">{metasInfo.progressoBoleto}% atingido</span>
+                                <span className="text-amber-400 font-mono">{metasInfo?.progressoBoleto || 0}% atingido</span>
                               </div>
                               <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
                                 <div
                                   className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-amber-600 via-amber-400 to-yellow-300 shadow-[0_0_10px_#f59e0b]"
-                                  style={{ width: `${metasInfo.progressoBoleto}%` }}
+                                  style={{ width: `${metasInfo?.progressoBoleto || 0}%` }}
                                 ></div>
                               </div>
                             </div>
 
                             {/* Mensagem de Feedback Boletos */}
                             <p className="text-xs text-gray-400 leading-relaxed font-sans">
-                              {metasInfo.totalBoletos >= metasInfo.superMetaBoleto ? (
+                              {(metasInfo?.totalBoletos || 0) >= (metasInfo?.superMetaBoleto || 0) ? (
                                 <span className="text-purple-300 font-bold flex items-center gap-1">
                                   🔥 Parabéns! Super Meta de boletos superada com comissão máxima de 3,2%!
                                 </span>
-                              ) : metasInfo.totalBoletos >= metasInfo.metaBoleto ? (
+                              ) : (metasInfo?.totalBoletos || 0) >= (metasInfo?.metaBoleto || 0) ? (
                                 <span className="text-emerald-400 font-bold">
-                                  🚀 Meta batida! Falta R$ {(metasInfo.superMetaBoleto - metasInfo.totalBoletos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para a Super Meta (3,2%).
+                                  🚀 Meta batida! Falta R$ {((metasInfo?.superMetaBoleto || 0) - (metasInfo?.totalBoletos || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para a Super Meta (3,2%).
                                 </span>
                               ) : (
                                 <span>
-                                  Falta <strong className="text-white font-mono">R$ {(metasInfo.metaBoleto - metasInfo.totalBoletos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> em boletos para atingir a meta e desbloquear comissão de 3,0%.
+                                  Falta <strong className="text-white font-mono">R$ {Math.max(0, (metasInfo?.metaBoleto || 0) - (metasInfo?.totalBoletos || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> em boletos para atingir a meta e desbloquear comissão de 3,0%.
                                 </span>
                               )}
                             </p>
@@ -27288,23 +27339,24 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               </div>
 
                               {/* Badge de Faixa de Comissão */}
-                              <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${metasInfo.badgeAcessorios.classe} whitespace-nowrap self-start sm:self-auto`}>
-                                {metasInfo.badgeAcessorios.texto}
+                              <div className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${metasInfo?.badgeAcessorios?.classe || 'bg-amber-950/40 text-amber-400 border border-amber-800/40'} whitespace-nowrap self-start sm:self-auto`}>
+                                {metasInfo?.badgeAcessorios?.texto || 'Faixa Atual: 1,0%'}
                               </div>
                             </div>
+
 
                             {/* Valores Realizado vs Objetivo vs Super Meta */}
                             <div className="grid grid-cols-3 gap-2 bg-[#111111] p-3 rounded-lg border border-[#222222] text-center font-mono">
                               <div>
                                 <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
                                 <span className="text-sm sm:text-base font-black text-pink-400 mt-0.5 block">
-                                  R$ {metasInfo.totalAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  R$ {(metasInfo?.totalAcessorios || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                               <div className="border-x border-[#222222]">
                                 <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
                                 <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
-                                  R$ {metasInfo.metaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  R$ {(metasInfo?.metaAcessorios || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                               <div>
@@ -27312,7 +27364,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   <Sparkles size={10} /> Super Meta
                                 </span>
                                 <span className="text-sm sm:text-base font-black text-pink-300 mt-0.5 block">
-                                  R$ {metasInfo.superMetaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  R$ {(metasInfo?.superMetaAcessorios || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                             </div>
@@ -27322,30 +27374,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               <div className="flex justify-between text-xs font-bold">
                                 <span className="text-gray-400">Progresso do Objetivo</span>
                                 <span className="text-pink-400 font-mono">
-                                  {(metasInfo.metaAcessorios > 0 ? ((metasInfo.totalAcessorios / metasInfo.metaAcessorios) * 100) : 0).toFixed(1)}% atingido
+                                  {((metasInfo?.metaAcessorios || 0) > 0 ? (((metasInfo?.totalAcessorios || 0) / metasInfo.metaAcessorios) * 100) : 0).toFixed(1)}% atingido
                                 </span>
                               </div>
                               <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
                                 <div
                                   className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-pink-600 via-pink-500 to-rose-400 shadow-[0_0_10px_#ec4899]"
-                                  style={{ width: `${Math.min(100, Math.max(0, metasInfo.metaAcessorios > 0 ? (metasInfo.totalAcessorios / metasInfo.metaAcessorios) * 100 : 0))}%` }}
+                                  style={{ width: `${Math.min(100, Math.max(0, (metasInfo?.metaAcessorios || 0) > 0 ? ((metasInfo.totalAcessorios / metasInfo.metaAcessorios) * 100) : 0))}%` }}
                                 ></div>
                               </div>
                             </div>
 
                             {/* Mensagem de Feedback Acessórios */}
                             <p className="text-xs text-gray-400 leading-relaxed font-sans">
-                              {metasInfo.totalAcessorios >= metasInfo.superMetaAcessorios ? (
+                              {(metasInfo?.totalAcessorios || 0) >= (metasInfo?.superMetaAcessorios || 0) ? (
                                 <span className="text-pink-300 font-bold flex items-center gap-1">
                                   🔥 Incrível! Super Meta de acessórios superada com comissão máxima de 3,0%!
                                 </span>
-                              ) : metasInfo.totalAcessorios >= metasInfo.metaAcessorios ? (
+                              ) : (metasInfo?.totalAcessorios || 0) >= (metasInfo?.metaAcessorios || 0) ? (
                                 <span className="text-emerald-400 font-bold">
-                                  🚀 Meta batida! Falta R$ {Math.max(0, metasInfo.superMetaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} para a Super Meta (3,0%).
+                                  🚀 Meta batida! Falta R$ {Math.max(0, (metasInfo?.superMetaAcessorios || 0) - (metasInfo?.totalAcessorios || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} para a Super Meta (3,0%).
                                 </span>
                               ) : (
                                 <span>
-                                  Falta <strong className="text-white font-mono">R$ {Math.max(0, metasInfo.metaAcessorios - metasInfo.totalAcessorios).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> em acessórios para atingir a meta e desbloquear comissão de 2,5%.
+                                  Falta <strong className="text-white font-mono">R$ {Math.max(0, (metasInfo?.metaAcessorios || 0) - (metasInfo?.totalAcessorios || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> em acessórios para atingir a meta e desbloquear comissão de 2,5%.
                                 </span>
                               )}
                             </p>
