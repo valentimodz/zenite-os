@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Award, RefreshCw, Calendar, Store, Filter, Eye } from 'lucide-react';
+import { Award, RefreshCw, Calendar, Store, Filter, Eye, UserCheck } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import ModalDesempenhoVendedor from './ModalDesempenhoVendedor';
 import PeriodoSelector from './common/PeriodoSelector';
+import { useMetasRankings } from '../hooks/useMetasRankings';
+import { useQueryClient } from '@tanstack/react-query';
 
 // Helper de cálculo dinâmico de comissão do vendedor titular
 export function calcularComissaoVendedorItem(v, teveTrainee = false) {
@@ -276,9 +278,21 @@ export default function RankingVendedores({
     };
   }, [empresaId]);
 
-  // Atualização manual via botão Recarregar
+  // Consumo direto da nova View do PostgreSQL: view_ranking_colaboradores_mensal com React Query
+  const {
+    ranking: rankingViewRows,
+    isLoading: isLoadingView,
+    invalidarERefetch: invalidarRankingView
+  } = useMetasRankings({
+    competencia: filtroMes || currentMonthStr,
+    filialId: filtroFilial !== 'TODAS' ? filtroFilial : undefined,
+    enabled: true
+  });
+
+  // Atualização manual via botão Recarregar conectado à invalidação do React Query
   const handleRecarregar = async () => {
     await Promise.all([
+      invalidarRankingView(),
       fetchVendasRanking(),
       fetchColaboradores()
     ]);
@@ -550,10 +564,77 @@ export default function RankingVendedores({
       }
     });
 
-    let data = Object.values(rankingMap).map(item => ({
-      ...item,
-      ticketMedio: item.transacoes > 0 ? item.volume / item.transacoes : 0
-    }));
+    // 4. Integração e Conciliação com a View Oficial view_ranking_colaboradores_mensal
+    // Se a view tiver dados consolidados pelo PostgreSQL, mesclar faturado_titular e faturado_trainee
+    const viewRowsMap = new Map();
+    (rankingViewRows || []).forEach(vr => {
+      if (vr.colaborador_id) {
+        viewRowsMap.set(String(vr.colaborador_id), vr);
+      }
+    });
+
+    let data = Object.values(rankingMap).map(item => {
+      const vr = viewRowsMap.get(String(item.id));
+      if (vr) {
+        // Se a View oficial do banco já calculou a competência em fuso horário de Brasília
+        const faturadoTitular = vr.faturado_titular;
+        const faturadoTrainee = vr.faturado_trainee;
+        const volumeTotal = vr.volume_total_participado;
+        const transacoes = vr.total_transacoes;
+        const ticketMedio = vr.ticket_medio;
+        const isTrainee = vr.is_trainee || (faturadoTitular === 0 && faturadoTrainee > 0);
+
+        return {
+          ...item,
+          transacoes: transacoes > 0 ? transacoes : item.transacoes,
+          volume: faturadoTitular > 0 ? faturadoTitular : (volumeTotal > 0 ? volumeTotal : item.volume),
+          volumeTotalParticipado: volumeTotal,
+          faturadoTitular,
+          faturadoTrainee,
+          ticketMedio: ticketMedio > 0 ? ticketMedio : (item.transacoes > 0 ? item.volume / item.transacoes : 0),
+          cargo: isTrainee ? 'Trainee' : item.cargo,
+          isTraineeView: isTrainee,
+          origemView: true
+        };
+      }
+
+      return {
+        ...item,
+        faturadoTitular: item.volume,
+        faturadoTrainee: 0,
+        volumeTotalParticipado: item.volume,
+        ticketMedio: item.transacoes > 0 ? item.volume / item.transacoes : 0,
+        isTraineeView: item.cargo === 'Trainee'
+      };
+    });
+
+    // Se houver colaboradores retornados na View que não constavam no rankingMap, incluí-los
+    (rankingViewRows || []).forEach(vr => {
+      if (!rankingMap[String(vr.colaborador_id)]) {
+        const colabDb = (colaboradoresDb || []).find(c => String(c.id) === String(vr.colaborador_id));
+        if (!colabDb || isColaboradorDaFilialSelecionada(colabDb)) {
+          const isTrainee = vr.is_trainee || (vr.faturado_titular === 0 && vr.faturado_trainee > 0);
+          data.push({
+            id: vr.colaborador_id,
+            nome: vr.colaborador,
+            cargo: isTrainee ? 'Trainee' : (colabDb?.cargo || 'Profissional'),
+            filial_id: vr.filial_id,
+            filiais: colabDb?.filiais,
+            filialNome: resolverNomeFilial(colabDb || { filial_id: vr.filial_id, nome: vr.colaborador }),
+            transacoes: vr.total_transacoes,
+            volume: vr.faturado_titular > 0 ? vr.faturado_titular : vr.volume_total_participado,
+            volumeTotalParticipado: vr.volume_total_participado,
+            faturadoTitular: vr.faturado_titular,
+            faturadoTrainee: vr.faturado_trainee,
+            ticketMedio: vr.ticket_medio,
+            comissaoAcumulada: 0,
+            isSemVendedor: false,
+            isTraineeView: isTrainee,
+            origemView: true
+          });
+        }
+      }
+    });
 
     // Filtro de segurança final garantindo que somente colaboradores da filial selecionada permaneçam
     if (filtroFilial && filtroFilial !== 'TODAS') {
@@ -563,9 +644,9 @@ export default function RankingVendedores({
       });
     }
 
-    // Ordenação estrita por Volume decrescente (b.volume - a.volume)
+    // Ordenação estrita por Faturado Titular / Volume decrescente (b.volume - a.volume)
     return data.sort((a, b) => b.volume - a.volume);
-  }, [colaboradoresDb, vendedores, vendasPeriodo, filiais, filtroFilial]);
+  }, [colaboradoresDb, vendedores, vendasPeriodo, filiais, filtroFilial, rankingViewRows]);
 
   return (
     <div className="bg-black border border-[#222] rounded-xl overflow-hidden shadow-2xl animate-fadeIn mt-4 space-y-0">
@@ -668,19 +749,36 @@ export default function RankingVendedores({
                   </span>
                 </td>
                 <td className="py-3 px-4">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    colab.isSemVendedor
-                      ? 'bg-gray-900 text-gray-400 border border-gray-700'
-                      : colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee'
-                      ? 'bg-purple-950/40 text-purple-400 border border-purple-800/40'
-                      : 'bg-emerald-950/30 text-emerald-500 border border-emerald-800/30'
-                  }`}>
-                    {colab.isSemVendedor ? 'Balcão' : (colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee' ? 'Trainee' : 'Profissional')}
-                  </span>
+                  <div className="flex flex-col gap-1 items-start">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      colab.isSemVendedor
+                        ? 'bg-gray-900 text-gray-400 border border-gray-700'
+                        : colab.isTraineeView || colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee'
+                        ? 'bg-purple-950/50 text-purple-300 border border-purple-800/50'
+                        : 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/30'
+                    }`}>
+                      {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView || colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee' ? 'Trainee' : 'Profissional')}
+                    </span>
+                    {colab.origemView && (
+                      <span className="text-[9px] text-purple-400/80 font-mono">Consolidado DB</span>
+                    )}
+                  </div>
                 </td>
                 <td className="py-3 px-4 text-center font-mono font-bold text-gray-300">{colab.transacoes}</td>
-                <td className="py-3 px-4 text-right font-mono font-bold text-white">
-                  {colab.volume.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                <td className="py-3 px-4 text-right font-mono">
+                  <span className="font-bold text-white block">
+                    {colab.volume.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  {/* Se participou como titular e trainee, exibir breakdown detalhado */}
+                  {colab.faturadoTrainee > 0 && colab.faturadoTitular > 0 ? (
+                    <span className="text-[9px] text-gray-400 block mt-0.5">
+                      Titular: {colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  ) : colab.isTraineeView && colab.faturadoTrainee > 0 ? (
+                    <span className="text-[9px] text-purple-300 block mt-0.5">
+                      Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="py-3 px-4 text-right font-mono text-blue-400">
                   {colab.ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}

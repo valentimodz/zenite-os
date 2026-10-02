@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
+import { useMinhasMetasIndividual } from '../hooks/useMetasRankings';
+import { useQueryClient } from '@tanstack/react-query';
 
 export interface MetaBanco {
   id?: string;
@@ -185,13 +187,30 @@ export default function ModalDesempenhoVendedor({
   const vendasCacheLength = Array.isArray(vendasCache) ? vendasCache.length : 0;
   const lastLoadedVendedorRef = useRef<string | null>(null);
 
+  const queryClient = useQueryClient();
+
+  // Consulta à view consolidada do Supabase para conciliação perfeita
+  const { 
+    colaboradorMetas: dadosViewConsolidada, 
+    isLoading: isLoadingView, 
+    refetch: refetchViewConsolidada 
+  } = useMinhasMetasIndividual({
+    colaboradorId,
+    competencia: mesAtivo,
+    enabled: Boolean(colaboradorId)
+  });
+
   // Invalidação de cache local e força de recarga
   const invalidarCacheERecarregar = useCallback((novoMes?: string) => {
     lastLoadedVendedorRef.current = null;
+    const mesAlvo = novoMes || mesAtivo;
     if (novoMes) {
       setMesAtivo(novoMes);
     }
-  }, []);
+    queryClient.invalidateQueries({
+      queryKey: ['ranking-colaboradores', mesAlvo]
+    });
+  }, [mesAtivo, queryClient]);
 
   // Carregar dados de vendas e metas do colaborador selecionado
   const carregarDadosVendedor = useCallback(async () => {
@@ -438,9 +457,15 @@ export default function ModalDesempenhoVendedor({
       : (isTrainee ? 7500 : 15000);
 
     const sales = vendasColaborador || [];
-    const salesCount = sales.length;
-    const totalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
-    const ticketMedio = salesCount > 0 ? totalVendasGeral / salesCount : 0;
+    const rawSalesCount = sales.length;
+    const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
+    
+    // Se a view consolidada estiver disponível para o colaborador, utiliza os dados oficiais do banco de dados
+    const totalVendasGeral = dadosViewConsolidada?.volume_total_participado ?? (rawTotalVendasGeral > 0 ? rawTotalVendasGeral : 0);
+    const salesCount = dadosViewConsolidada?.total_transacoes ?? rawSalesCount;
+    const ticketMedio = dadosViewConsolidada?.ticket_medio ?? (salesCount > 0 ? totalVendasGeral / salesCount : 0);
+    const faturadoTitular = dadosViewConsolidada?.faturado_titular ?? 0;
+    const faturadoTrainee = dadosViewConsolidada?.faturado_trainee ?? 0;
 
     // Detecção de Acessórios com helper isAcessorio robusto
     const totalAcessorios = sales
@@ -599,14 +624,15 @@ export default function ModalDesempenhoVendedor({
       metaAcessorios,
       superMetaAcessorios,
       progressoAcessorios,
-      badgeAcessorios,
+      faturadoTitular,
+      faturadoTrainee,
       // Geral
       totalAVista,
       progressoTotal,
       evolucaoDiaria,
       historico: sales
     };
-  }, [metaIndividual, vendasColaborador, colaboradorId, colaborador?.cargo, colaborador?.role, colaborador?.is_treinner, mesAtivo, mesCompetencia]);
+  }, [metaIndividual, vendasColaborador, dadosViewConsolidada, colaboradorId, colaborador?.cargo, colaborador?.role, colaborador?.is_treinner, mesAtivo, mesCompetencia]);
 
   // Identificação da filial
   const filialDoColaborador = filiais.find(f => String(f.id) === String(colaborador?.filial_id)) || null;
@@ -719,6 +745,11 @@ export default function ModalDesempenhoVendedor({
                 <span className="text-[11px] text-gray-400 mt-1 block">
                   {dashboardInfo.salesCount} {dashboardInfo.salesCount === 1 ? 'venda realizada' : 'vendas realizadas'}
                 </span>
+                {(dashboardInfo.faturadoTitular > 0 || dashboardInfo.faturadoTrainee > 0) && (
+                  <span className="text-[10px] text-purple-300 mt-1 block font-medium">
+                    Titular: R$ {dashboardInfo.faturadoTitular.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Trainee: R$ {dashboardInfo.faturadoTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                )}
               </div>
             </div>
 
