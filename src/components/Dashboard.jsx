@@ -6914,16 +6914,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
     } else if (field === 'preco' || field === 'preco_venda') {
       const usuario = profile || profileDataProps || session?.user;
-      const role = String(usuario?.role || usuario?.cargo || usuario?.user_metadata?.role || '').toLowerCase();
-      // Permissão flexibilizada: Admins, Donos, Gerentes, Master, usuários com is_super_admin, ou qualquer usuário autenticado da empresa/filial
+      const userRole = String(usuario?.role || usuario?.cargo || usuario?.user_metadata?.role || '').toLowerCase();
+      const isSuperAdmin = userRole === 'super_admin' || userRole === 'superadmin' || userRole.includes('super');
+      const isAdmin = userRole === 'admin' || userRole === 'administrador' || isSuperAdmin;
+
+      // Se for Super Admin, permitir sempre a alteração em qualquer filial
       const isAuthorized = 
         Boolean(usuario) ||
-        role.includes('admin') || 
-        role.includes('super') || 
-        role.includes('gerente') || 
-        role.includes('owner') || 
-        role.includes('dono') || 
-        role.includes('master') || 
+        isSuperAdmin ||
+        isAdmin ||
+        userRole.includes('gerente') || 
+        userRole.includes('owner') || 
+        userRole.includes('dono') || 
+        userRole.includes('master') || 
         usuario?.is_super_admin === true;
 
       if (!isAuthorized) {
@@ -6951,7 +6954,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             })
             .eq('id', produtoId);
 
-          if (itemFilialId) {
+          // Contas Super Admin / Dono possuem acesso global e não devem ter restrição obrigatória de filial_id
+          if (itemFilialId && !isSuperAdmin) {
             q = q.eq('filial_id', itemFilialId);
           }
           let { data: updateData, error } = await q.select();
@@ -6959,7 +6963,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           // Se a coluna preco_venda não existir em alguma migration antiga, tenta apenas com preco
           if (error && (error.message?.includes('preco_venda') || error.details?.includes('preco_venda'))) {
             console.warn('Aviso: coluna preco_venda ausente em produtos, tentando update apenas com preco:', error);
-            const retryRes = await dbClient.from('produtos').update({ preco: novoValor }).eq('id', produtoId).select();
+            let retryQ = dbClient.from('produtos').update({ preco: novoValor }).eq('id', produtoId);
+            if (itemFilialId && !isSuperAdmin) {
+              retryQ = retryQ.eq('filial_id', itemFilialId);
+            }
+            const retryRes = await retryQ.select();
             error = retryRes.error;
             updateData = retryRes.data;
           }
@@ -6968,7 +6976,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
           if (error) {
             console.error('Erro ao atualizar preço:', error);
-            showToast('Erro ao salvar preço: ' + error.message, 'error');
+            // Mensagem amigável com orientação de permissão caso o trigger do banco bloqueie
+            if (error.message?.includes('Não autorizado') || error.message?.includes('Apenas Super Admin')) {
+              showToast('Erro de permissão no banco: ' + error.message + ' (Execute o script fix_preco_permission.sql no Supabase SQL Editor)', 'error');
+            } else {
+              showToast('Erro ao salvar preço: ' + error.message, 'error');
+            }
             return;
           }
         }
@@ -25830,8 +25843,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   </div>
                 )}
 
-                {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE (EXCLUSIVO PARA ADMIN / ESTOQUISTA - BLOQUEADO PARA GERENTE, VENDEDOR E DONO) */}
-                {(activeTab === 'estoque' || currentView === 'estoque') && profile?.role !== 'RH_ADMIN' && profile?.role !== 'VENDEDOR' && !isGerente && profile?.role !== 'GERENTE' && (
+                {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE (EXCLUSIVO PARA ADMIN / SUPER_ADMIN / ESTOQUISTA - BLOQUEADO PARA GERENTE E VENDEDOR) */}
+                {(activeTab === 'estoque' || currentView === 'estoque') && profile?.role !== 'RH_ADMIN' && profile?.role !== 'VENDEDOR' && (!isGerente || ['SUPER_ADMIN', 'ADMIN'].includes(String(profile?.role || '').toUpperCase())) && profile?.role !== 'GERENTE' && (
                   renderEstoqueContent()
                 )}
 
