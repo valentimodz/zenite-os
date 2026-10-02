@@ -6872,9 +6872,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         showToast('Erro ao atualizar cor: ' + (err.message || 'Falha na conexão.'), 'error');
       }
     } else if (field === 'preco' || field === 'preco_venda') {
-      const usuario = profile || profileDataProps;
-      const role = (usuario?.role || usuario?.cargo || '').toLowerCase();
+      const usuario = profile || profileDataProps || session?.user;
+      const role = String(usuario?.role || usuario?.cargo || usuario?.user_metadata?.role || '').toLowerCase();
+      // Permissão flexibilizada: Admins, Donos, Gerentes, Master, usuários com is_super_admin, ou qualquer usuário autenticado da empresa/filial
       const isAuthorized = 
+        Boolean(usuario) ||
         role.includes('admin') || 
         role.includes('super') || 
         role.includes('gerente') || 
@@ -6884,7 +6886,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         usuario?.is_super_admin === true;
 
       if (!isAuthorized) {
-        showToast("Não autorizado: Apenas Super Admin e Admin podem alterar preços.", "error");
+        showToast("Não autorizado: É necessário estar autenticado para alterar preços.", "error");
         return;
       }
 
