@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { supabase, supabaseAdmin, supabaseRegister } from '../supabaseClient';
+import { queryClient } from '../main';
 import {
   LogOut, User, Building, Shield, ShieldCheck, Plus, Users, ShoppingBag, UserPlus,
   BarChart3, AlertCircle, CheckCircle2, Store, Package, Database,
@@ -1649,6 +1650,44 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [profileSenhaConfirm, setProfileSenhaConfirm] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
+  // Estado e busca oficial do ranking de colaboradores vindo diretamente da View PostgreSQL (view_ranking_colaboradores_mensal)
+  const [rankingViewColaboradores, setRankingViewColaboradores] = useState([]);
+  const [loadingRankingView, setLoadingRankingView] = useState(false);
+
+  const fetchRankingColaboradoresView = async (mesParam) => {
+    const compAlvo = mesParam || filtroMes || new Date().toISOString().slice(0, 7);
+    try {
+      setLoadingRankingView(true);
+      const { data, error } = await supabase
+        .from('view_ranking_colaboradores_mensal')
+        .select('*')
+        .eq('competencia', compAlvo);
+
+      if (error) {
+        console.warn('[Dashboard] Aviso ao consultar view_ranking_colaboradores_mensal:', error);
+        return [];
+      }
+
+      const lista = (data || []).map(row => ({
+        ...row,
+        faturado_titular: Number(row.faturado_titular || 0),
+        faturado_trainee: Number(row.faturado_trainee || 0),
+        volume_total_participado: Number(row.volume_total_participado || 0),
+        total_transacoes: Number(row.total_transacoes || 0),
+        qtd_titular: Number(row.qtd_titular || 0),
+        qtd_trainee: Number(row.qtd_trainee || 0),
+      }));
+
+      setRankingViewColaboradores(lista);
+      return lista;
+    } catch (err) {
+      console.warn('[Dashboard] Erro ao carregar ranking da view:', err);
+      return [];
+    } finally {
+      setLoadingRankingView(false);
+    }
+  };
+
   useEffect(() => {
     if (torreSearch.length >= 15) {
       const s = torreSearch.toLowerCase();
@@ -2819,6 +2858,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     if ((podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) && isAbaGestao) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
       fetchGerenteData(targetEmpresaId, filtroMes, true).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
+      fetchRankingColaboradoresView(filtroMes).catch(e => console.warn('Aviso ao atualizar ranking da view:', e));
       fetchCatalogoProdutos(targetEmpresaId).catch(e => console.warn('Aviso ao carregar catálogo de produtos:', e));
     }
 
@@ -4019,13 +4059,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const token = currentSession?.access_token;
 
-      // Range dinâmico baseado no seletor de mês abrangendo todo o mês (ex: 2026-09)
+      // Range dinâmico baseado no seletor de mês abrangendo todo o mês (ex: 2026-09) no fuso de Brasília (-03:00)
       const [anoStr, mesStr] = selectedMonth.split('-');
       const anoNum = parseInt(anoStr, 10);
       const mesNum = parseInt(mesStr, 10);
-      const dtInicio = `${selectedMonth}-01T00:00:00.000Z`;
-      const endDay = new Date(Date.UTC(anoNum, mesNum, 0)).getUTCDate();
-      const dtFim = `${selectedMonth}-${String(endDay).padStart(2, '0')}T23:59:59.999Z`;
+      const dtInicio = `${selectedMonth}-01T00:00:00.000-03:00`;
+      const endDay = new Date(anoNum, mesNum, 0).getDate();
+      const dtFim = `${selectedMonth}-${String(endDay).padStart(2, '0')}T23:59:59.999-03:00`;
 
       const fetchSales = async () => {
         try {
@@ -4333,6 +4373,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         baseImeis
       }, 5); // 5 min (300.000ms)
 
+      fetchRankingColaboradoresView(selectedMonth).catch(e => console.warn('Aviso ranking view no fetchGerenteData:', e));
       fetchSessoesCaixas(empresaId, filtroFilialCaixa, selectedMonth).catch(e => console.warn('Aviso caixas:', e));
     } catch (err) {
       console.error('[Dashboard] Erro detalhado ao buscar dados do gerente/dashboard:', err?.message || err, err);
@@ -22594,12 +22635,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               <input
                                 type="month"
                                 value={filtroMes}
-                                onChange={(e) => {
+                                onChange={async (e) => {
                                   const novoMes = e.target.value;
                                   setFiltroMes(novoMes);
                                   const tenantId = profile?.empresa_id || company?.id || activeEmpresaId;
+                                  invalidateCache('gerente_data_');
+                                  invalidateCache('vendas_');
+                                  invalidateCache('metas_');
+                                  if (queryClient) {
+                                    await queryClient.invalidateQueries({ queryKey: ['dashboard-executivo'] });
+                                    await queryClient.invalidateQueries({ queryKey: ['ranking-colaboradores'] });
+                                    await queryClient.invalidateQueries({ queryKey: ['metas-rankings'] });
+                                  }
                                   if (tenantId) {
                                     fetchGerenteData(tenantId, novoMes, true).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas no seletor de mês:', err));
+                                    fetchRankingColaboradoresView(novoMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar ranking da view:', err));
                                     fetchCatalogoProdutos(tenantId).catch(err => console.warn('[Dashboard] Aviso ao atualizar catálogo:', err));
                                     fetchAuditoriaDescontos(tenantId, novoMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar descontos no seletor de mês:', err));
                                   }
@@ -22609,18 +22659,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </div>
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={async () => {
                                 const tenantId = profile?.empresa_id || company?.id || activeEmpresaId;
+                                // Invalidação completa de caches locais e React Query
+                                invalidateCache('gerente_data_');
+                                invalidateCache('vendas_');
+                                invalidateCache('metas_');
+                                if (queryClient) {
+                                  await queryClient.invalidateQueries({ queryKey: ['dashboard-executivo'] });
+                                  await queryClient.invalidateQueries({ queryKey: ['ranking-colaboradores'] });
+                                  await queryClient.invalidateQueries({ queryKey: ['metas-rankings'] });
+                                }
                                 if (tenantId) {
-                                  fetchGerenteData(tenantId, filtroMes, true).catch(err => console.warn('[Dashboard] Aviso ao atualizar vendas:', err));
-                                  fetchCatalogoProdutos(tenantId).catch(err => console.warn('[Dashboard] Aviso ao atualizar catálogo:', err));
-                                  fetchAuditoriaDescontos(tenantId, filtroMes).catch(err => console.warn('[Dashboard] Aviso ao atualizar descontos:', err));
+                                  await Promise.allSettled([
+                                    fetchGerenteData(tenantId, filtroMes, true),
+                                    fetchRankingColaboradoresView(filtroMes),
+                                    fetchCatalogoProdutos(tenantId),
+                                    fetchAuditoriaDescontos(tenantId, filtroMes)
+                                  ]);
                                 }
                               }}
                               className="flex items-center gap-1.5 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-purple-300 border border-[#6A0DAD]/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer"
                               title="Recarregar Dados Executivos"
                             >
-                              <RefreshCw size={13} className={loadingDados ? 'animate-spin' : ''} />
+                              <RefreshCw size={13} className={loadingDados || loadingRankingView ? 'animate-spin' : ''} />
                               <span>Atualizar</span>
                             </button>
                           </div>
@@ -22646,15 +22708,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           const dataInicioMes = new Date(anoFiltroNum, mesFiltroNum - 1, 1, 0, 0, 0, 0);
                           const dataFimMes = new Date(anoFiltroNum, mesFiltroNum, 0, 23, 59, 59, 999);
 
-                          // Filtragem timezone-safe e com fallback para timestamps ISO e ranges
+                          // Filtragem timezone-safe rigorosa em horário de Brasília (America/Sao_Paulo)
                           const isVendaNoMes = (rawDate) => {
-                            if (!rawDate) return true; // Se o registro veio da query com gte/lte do mês mas sem coluna created_at identificável, mantém
-                            const str = String(rawDate);
-                            if (str.startsWith(`${anoFiltroStr}-${mesFiltroStr}`)) return true;
-
-                            const d = new Date(rawDate);
-                            if (isNaN(d.getTime())) return true;
-                            return d >= dataInicioMes && d <= dataFimMes;
+                            if (!rawDate) return false;
+                            try {
+                              const d = new Date(rawDate);
+                              if (isNaN(d.getTime())) return false;
+                              const dStr = d.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+                              const dSp = new Date(dStr);
+                              return dSp.getFullYear() === anoFiltroNum && (dSp.getMonth() + 1) === mesFiltroNum;
+                            } catch (e) {
+                              const str = String(rawDate);
+                              return str.startsWith(`${anoFiltroStr}-${mesFiltroStr}`);
+                            }
                           };
 
                           // Log de inspeção dos dados brutos solicitado para auditoria
@@ -22975,7 +23041,28 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             }
                           });
 
-                          const rankingVendedores = Object.values(vendedorMap).sort((a, b) => b.totalVendido - a.totalVendido);
+                          // Se a view view_ranking_colaboradores_mensal tiver dados da competência, utiliza os dados consolidados do PostgreSQL
+                          let rankingVendedores = [];
+                          if (Array.isArray(rankingViewColaboradores) && rankingViewColaboradores.length > 0) {
+                            rankingVendedores = rankingViewColaboradores.map(row => {
+                              const faturado = Number(row.faturado_titular || row.volume_total_participado || 0);
+                              const qtdVendas = Number(row.qtd_titular || row.total_transacoes || 0);
+                              const calcObj = Object.values(vendedorMap).find(v => 
+                                (row.colaborador_id && String(v.id) === String(row.colaborador_id)) ||
+                                (row.colaborador && v.nome && v.nome.toUpperCase().includes(String(row.colaborador).trim().toUpperCase())) ||
+                                (row.colaborador && v.nome && String(row.colaborador).trim().toUpperCase().includes(v.nome.toUpperCase()))
+                              );
+                              return {
+                                id: row.colaborador_id || calcObj?.id,
+                                nome: row.colaborador || calcObj?.nome || 'Colaborador',
+                                totalVendido: faturado,
+                                qtdVendas: qtdVendas,
+                                comissaoTotal: calcObj?.comissaoTotal || (faturado * 0.02)
+                              };
+                            }).sort((a, b) => b.totalVendido - a.totalVendido);
+                          } else {
+                            rankingVendedores = Object.values(vendedorMap).sort((a, b) => b.totalVendido - a.totalVendido);
+                          }
 
                           // Vendas por filial: agrupe o faturamento somando por filial_id
                           const filialMap = {};
