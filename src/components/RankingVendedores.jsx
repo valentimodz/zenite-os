@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Award, RefreshCw, Calendar, Store, Filter, Eye, UserCheck } from 'lucide-react';
+import { Award, RefreshCw, Calendar, Store, Filter, Eye, UserCheck, Info } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import ModalDesempenhoVendedor from './ModalDesempenhoVendedor';
 import PeriodoSelector from './common/PeriodoSelector';
@@ -341,6 +341,17 @@ export default function RankingVendedores({
           <tbody className="divide-y divide-[#1A1A1A]">
             {rankingData.map((colab, idx) => {
               const nomeFilialExibicao = colab.filialNome || colab.filiais?.nome || 'Sem Filial';
+              const temValoresMistos = colab.faturadoTitular > 0 && colab.faturadoTrainee > 0;
+              const tooltipDetalhes = temValoresMistos
+                ? `Apoio Trainee: ${colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Titular: ${colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                : (colab.faturadoTrainee > 0
+                    ? `Apoio Trainee: ${colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                    : `Titular: ${colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+
+              const tooltipComissao = temValoresMistos
+                ? `Comissão Titular: ${colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio Trainee: ${colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                : undefined;
+
               return (
               <tr 
                 key={colab.id} 
@@ -351,68 +362,53 @@ export default function RankingVendedores({
                     : 'cursor-pointer hover:bg-purple-950/20 hover:border-[#6A0DAD]/30 group'
                 }`}
               >
-                <td className="py-3 px-4 font-mono font-bold text-gray-400">
+                <td className="py-3 px-4 font-mono font-bold text-gray-400 align-middle">
                   {idx === 0 ? '🥇 1º' : idx === 1 ? '🥈 2º' : idx === 2 ? '🥉 3º' : `${idx + 1}º`}
                 </td>
-                <td className="py-3 px-4 font-bold text-white uppercase group-hover:text-purple-300 transition-colors">
+                <td className="py-3 px-4 font-bold text-white uppercase group-hover:text-purple-300 transition-colors align-middle">
                   {colab.nome}
                 </td>
-                <td className="py-3 px-4">
+                <td className="py-3 px-4 align-middle">
                   <span className="text-zinc-200 font-semibold text-xs uppercase tracking-wide">
                     {nomeFilialExibicao}
                   </span>
                 </td>
-                <td className="py-3 px-4">
-                  <div className="flex flex-col gap-1 items-start">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      colab.isSemVendedor
-                        ? 'bg-gray-900 text-gray-400 border border-gray-700'
-                        : colab.isTraineeView
-                        ? 'bg-purple-950/50 text-purple-300 border border-purple-800/50'
-                        : 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/30'
-                    }`}>
-                      {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView ? 'Trainee' : 'Profissional')}
-                    </span>
+                <td className="py-3 px-4 align-middle">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
+                    colab.isSemVendedor
+                      ? 'bg-gray-900 text-gray-400 border border-gray-700'
+                      : colab.isTraineeView
+                      ? 'bg-purple-950/50 text-purple-300 border border-purple-800/50'
+                      : 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/30'
+                  }`}>
+                    {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView ? 'Trainee' : 'Profissional')}
+                  </span>
+                </td>
+                <td className="py-3 px-4 text-center font-mono font-bold text-gray-300 align-middle">{colab.transacoes}</td>
+                <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipDetalhes}>
+                  <div className="inline-flex items-center justify-end gap-1.5 font-bold text-white">
+                    <span>{colab.volume.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    {temValoresMistos && (
+                      <span className="text-purple-400/80 hover:text-purple-300 cursor-help" title={tooltipDetalhes}>
+                        <Info size={12} />
+                      </span>
+                    )}
                   </div>
                 </td>
-                <td className="py-3 px-4 text-center font-mono font-bold text-gray-300">{colab.transacoes}</td>
-                <td className="py-3 px-4 text-right font-mono">
-                  <span className="font-bold text-white block">
-                    {colab.volume.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  </span>
-                  {/* Breakdown de volume conforme perfil */}
-                  {colab.isTraineeView ? (
-                    colab.faturadoTitular > 0 ? (
-                      <span className="text-[9px] text-purple-300/90 block mt-0.5">
-                        Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Titular: {colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
-                    ) : (
-                      <span className="text-[9px] text-purple-300/90 block mt-0.5">
-                        Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
-                    )
-                  ) : (
-                    colab.faturadoTrainee > 0 ? (
-                      <span className="text-[9px] text-gray-400 block mt-0.5">
-                        Titular: {colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
-                    ) : null
-                  )}
-                </td>
-                <td className="py-3 px-4 text-right font-mono text-blue-400">
+                <td className="py-3 px-4 text-right font-mono text-blue-400 align-middle">
                   {colab.ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </td>
-                <td className="py-3 px-4 text-right font-mono">
-                  <span className="font-bold text-emerald-400 block">
-                    {colab.comissaoAcumulada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  </span>
-                  {colab.comissaoTrainee > 0 && colab.comissaoTitular > 0 && (
-                    <span className="text-[9px] text-gray-400 block mt-0.5">
-                      Titular: {colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio: {colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </span>
-                  )}
+                <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipComissao}>
+                  <div className="inline-flex items-center justify-end gap-1.5 font-bold text-emerald-400">
+                    <span>{colab.comissaoAcumulada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    {temValoresMistos && (
+                      <span className="text-emerald-500/60 hover:text-emerald-400 cursor-help" title={tooltipComissao}>
+                        <Info size={12} />
+                      </span>
+                    )}
+                  </div>
                 </td>
-                <td className="py-3 px-4 text-center">
+                <td className="py-3 px-4 text-center align-middle">
                   {!colab.isSemVendedor && (
                     <button
                       type="button"
