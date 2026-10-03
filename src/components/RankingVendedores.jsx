@@ -65,8 +65,10 @@ export default function RankingVendedores({
   // 1. Filtro de Mês/Ano Dinâmico no Topo (padrão: Mês Atual dinâmico YYYY-MM)
   const currentMonthStr = useMemo(() => {
     const d = new Date();
-    const ano = d.getFullYear();
-    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    const dStr = d.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+    const dObj = new Date(dStr);
+    const ano = dObj.getFullYear();
+    const mes = String(dObj.getMonth() + 1).padStart(2, '0');
     return `${ano}-${mes}`;
   }, []);
 
@@ -87,11 +89,7 @@ export default function RankingVendedores({
   // Filtro de Filial (Todas as Filiais / Por Filial)
   const [filtroFilial, setFiltroFilial] = useState('TODAS');
 
-  // Estado de Vendas do Período e Loading
-  const [vendasPeriodo, setVendasPeriodo] = useState(() => initialVendas || []);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // 1. Consulta dos Colaboradores com relação 'filiais' (Item 1 do requisito)
+  // 1. Consulta dos Colaboradores com relação 'filiais' para enriquecer dados cadastrais (ex.: filiais)
   const [colaboradoresDb, setColaboradoresDb] = useState([]);
 
   const fetchColaboradores = useCallback(async () => {
@@ -127,121 +125,17 @@ export default function RankingVendedores({
     fetchColaboradores();
   }, [fetchColaboradores]);
 
-  // 2. Consulta de Vendas Padronizada com Janela Temporal e Relação de Filiais
-  const fetchVendasRanking = useCallback(async (customInicio = null, customFim = null) => {
-    setIsLoading(true);
-    try {
-      const pInicio = customInicio || periodoData.inicio;
-      const pFim = customFim || periodoData.fim;
-      
-      // Início: YYYY-MM-DD 00:00:00 (Local Brasília -03:00)
-      // Fim: YYYY-MM-DD 23:59:59.999 (Local Brasília -03:00)
-      const [anoI, mesI, diaI] = pInicio.split('-').map(Number);
-      const [anoF, mesF, diaF] = pFim.split('-').map(Number);
-      const dataInicioBrasilia = `${anoI}-${String(mesI).padStart(2, '0')}-${String(diaI).padStart(2, '0')}T00:00:00-03:00`;
-      const dataFimBrasilia = `${anoF}-${String(mesF).padStart(2, '0')}-${String(diaF).padStart(2, '0')}T23:59:59.999-03:00`;
-
-      let query = supabase
-        .from('vendas')
-        .select(`
-          id,
-          empresa_id,
-          filial_id,
-          vendedor_id,
-          vendedor_nome,
-          valor_total,
-          metodo_pagamento,
-          categoria,
-          comissao,
-          produto_nome,
-          imei,
-          teve_participacao_trainee,
-          comissao_trainee,
-          treener_id,
-          trainee_id,
-          created_at,
-          filiais (
-            id,
-            nome
-          )
-        `)
-        .gte('created_at', dataInicioBrasilia)
-        .lte('created_at', dataFimBrasilia)
-        .order('created_at', { ascending: false });
-
-      if (empresaId && empresaId !== 'MASTER') {
-        query = query.eq('empresa_id', empresaId);
-      }
-
-      let { data, error } = await query;
-
-      if (error) {
-        console.warn('[RankingVendedores] Tentando fallback de vendas sem join de filiais:', error);
-        // Fallback para query padrão sem o join explícito caso o banco precise
-        const fallbackQ = await supabase
-          .from('vendas')
-          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, categoria, comissao, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id, created_at')
-          .gte('created_at', dataInicioBrasilia)
-          .lte('created_at', dataFimBrasilia)
-          .order('created_at', { ascending: false });
-
-        if (!fallbackQ.error) {
-          data = fallbackQ.data || [];
-        } else {
-          // Fallback para filtrar initialVendas em memória considerando fuso horário de Brasília (-03:00)
-          const [fAno, fMes] = (filtroMes || currentMonthStr).split('-').map(Number);
-          data = (initialVendas || []).filter(v => {
-            const raw = v.created_at || v.data || v.date;
-            if (!raw) return false;
-            const dataVenda = new Date(raw);
-            if (isNaN(dataVenda.getTime())) return false;
-            const dStr = dataVenda.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
-            const dObj = new Date(dStr);
-            const ano = dObj.getFullYear();
-            const mes = dObj.getMonth() + 1;
-            return ano === fAno && mes === fMes;
-          });
-        }
-      }
-
-      // Filtragem estrita de competência por fuso horário local de Brasília (-03:00)
-      const [fAno, fMes] = (filtroMes || currentMonthStr).split('-').map(Number);
-      const vistosRanking = new Set();
-      const vendasUnicas = (data || []).filter(v => {
-        const raw = v.created_at || v.data || v.date;
-        if (raw) {
-          const dataVenda = new Date(raw);
-          if (!isNaN(dataVenda.getTime())) {
-            const dStr = dataVenda.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
-            const dObj = new Date(dStr);
-            const ano = dObj.getFullYear();
-            const mes = dObj.getMonth() + 1; // 1-12
-            if (ano !== fAno || mes !== fMes) {
-              return false;
-            }
-          }
-        }
-        const chave = v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`;
-        if (!chave || vistosRanking.has(chave)) return false;
-        vistosRanking.add(chave);
-        return true;
-      });
-
-      setVendasPeriodo(vendasUnicas);
-    } catch (err) {
-      console.error('[RankingVendedores] Exceção ao consultar vendas:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filtroMes, periodoData.inicio, periodoData.fim, empresaId, currentMonthStr, initialVendas]);
-
-  // Carregar dados sempre que o filtroMes ou empresaId mudar
-  useEffect(() => {
-    fetchVendasRanking();
-  }, [fetchVendasRanking]);
-
-  const fetchVendasRankingRef = useRef(fetchVendasRanking);
-  fetchVendasRankingRef.current = fetchVendasRanking;
+  // Consumo direto e EXCLUSIVO da View oficial PostgreSQL: view_ranking_colaboradores_mensal com React Query
+  const competenciaAtiva = filtroMes || currentMonthStr;
+  const {
+    ranking: rankingViewRows,
+    isLoading: isLoadingView,
+    invalidarERefetch: invalidarRankingView
+  } = useMetasRankings({
+    competencia: competenciaAtiva,
+    filialId: filtroFilial !== 'TODAS' ? filtroFilial : undefined,
+    enabled: true
+  });
 
   const fetchColaboradoresRef = useRef(fetchColaboradores);
   fetchColaboradoresRef.current = fetchColaboradores;
@@ -249,8 +143,10 @@ export default function RankingVendedores({
   const fetchGerenteDataRef = useRef(fetchGerenteData);
   fetchGerenteDataRef.current = fetchGerenteData;
 
-  // 4. Canal Realtime:
-  // Listener realtime na tabela 'vendas' para disparar busca novamente sempre que houver INSERT de nova venda
+  const invalidarRankingViewRef = useRef(invalidarRankingView);
+  invalidarRankingViewRef.current = invalidarRankingView;
+
+  // Canal Realtime: Invalida a view e recarrega os dados ao detectar novas vendas
   useEffect(() => {
     const channelName = `realtime-ranking-vendas-${empresaId || 'global'}`;
     const channel = supabase
@@ -264,7 +160,7 @@ export default function RankingVendedores({
         },
         (payload) => {
           console.log('⚡ [Ranking Realtime] Nova venda detectada no ranking:', payload?.new);
-          if (fetchVendasRankingRef.current) fetchVendasRankingRef.current();
+          if (invalidarRankingViewRef.current) invalidarRankingViewRef.current();
           if (fetchColaboradoresRef.current) fetchColaboradoresRef.current();
           if (typeof fetchGerenteDataRef.current === 'function' && empresaId) {
             fetchGerenteDataRef.current(empresaId);
@@ -278,22 +174,10 @@ export default function RankingVendedores({
     };
   }, [empresaId]);
 
-  // Consumo direto da nova View do PostgreSQL: view_ranking_colaboradores_mensal com React Query
-  const {
-    ranking: rankingViewRows,
-    isLoading: isLoadingView,
-    invalidarERefetch: invalidarRankingView
-  } = useMetasRankings({
-    competencia: filtroMes || currentMonthStr,
-    filialId: filtroFilial !== 'TODAS' ? filtroFilial : undefined,
-    enabled: true
-  });
-
   // Atualização manual via botão Recarregar conectado à invalidação do React Query
   const handleRecarregar = async () => {
     await Promise.all([
       invalidarRankingView(),
-      fetchVendasRanking(),
       fetchColaboradores()
     ]);
     if (typeof fetchGerenteData === 'function' && empresaId) {
@@ -301,352 +185,63 @@ export default function RankingVendedores({
     }
   };
 
-  // 3. Agrupamento e Ordenação:
-  // - Agrupe as vendas pelo vendedor_id.
-  // - Some 'valor_total' para Volume, conte as vendas para 'Transações', calcule a média para 'Ticket Médio' e some a comissão acumulada.
-  // 3. Agrupamento e Ordenação:
+  // Mapeamento EXCLUSIVO a partir da view_ranking_colaboradores_mensal
+  // Sem concatenação de arrays de dados legados ou queries antigas em cache
   const rankingData = useMemo(() => {
-    const listaColaboradores = (colaboradoresDb && colaboradoresDb.length > 0) ? colaboradoresDb : (vendedores || []);
-    if (!listaColaboradores || listaColaboradores.length === 0) return [];
+    if (!rankingViewRows || rankingViewRows.length === 0) return [];
 
-    // Helper de limpeza e normalização para busca tolerante de nomes
-    const cleanStr = (s) => (s || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    const profilesList = (colaboradoresDb && colaboradoresDb.length > 0) ? colaboradoresDb : (vendedores || []);
 
-    // 2. Mapeamento de Filial Predominante por Vendas (Fallback Seguro):
-    // Ao processar o ranking a partir da tabela 'vendas', mapear a filial onde o vendedor mais realizou vendas no período:
-    const mapaFilialVendedor = {};
-    const contagemFiliaisPorVendedor = {};
-
-    (vendasPeriodo || []).forEach(v => {
-      const nomeVend = (v.vendedor_nome || '').trim().toUpperCase();
-      const nomeFilial = v.filiais?.nome || filiais?.find(f => String(f.id) === String(v.filial_id))?.nome;
-      if (nomeVend && nomeFilial) {
-        if (!contagemFiliaisPorVendedor[nomeVend]) contagemFiliaisPorVendedor[nomeVend] = {};
-        contagemFiliaisPorVendedor[nomeVend][nomeFilial] = (contagemFiliaisPorVendedor[nomeVend][nomeFilial] || 0) + 1;
-        if (!mapaFilialVendedor[nomeVend]) {
-          mapaFilialVendedor[nomeVend] = nomeFilial;
-        }
+    const resolverNomeFilial = (filialId, profile) => {
+      if (profile?.filiais?.nome) return profile.filiais.nome;
+      if (profile?.filialNome) return profile.filialNome;
+      const targetFilialId = filialId || profile?.filial_id;
+      if (targetFilialId) {
+        const encontrada = filiais?.find(f => String(f.id).trim().toLowerCase() === String(targetFilialId).trim().toLowerCase());
+        if (encontrada?.nome) return encontrada.nome;
       }
-    });
-
-    // Mapear a filial predominante (onde mais realizou vendas no período)
-    Object.keys(contagemFiliaisPorVendedor).forEach(nomeVend => {
-      const counts = contagemFiliaisPorVendedor[nomeVend];
-      let maxCount = -1;
-      let melhorFilial = '';
-      for (const [fNome, count] of Object.entries(counts)) {
-        if (count > maxCount) {
-          maxCount = count;
-          melhorFilial = fNome;
-        }
-      }
-      if (melhorFilial) {
-        mapaFilialVendedor[nomeVend] = melhorFilial;
-      }
-    });
-
-    // Helper de conferência estrita de filial para o colaborador
-    const isColaboradorDaFilialSelecionada = (colab) => {
-      if (!filtroFilial || filtroFilial === 'TODAS') return true;
-      if (!colab) return false;
-
-      const filialFiltroStr = String(filtroFilial).trim().toLowerCase();
-      const colabFilialIdStr = String(colab.filial_id || '').trim().toLowerCase();
-      const colabFiliaisObjIdStr = String(colab.filiais?.id || '').trim().toLowerCase();
-
-      // Comparação direta de IDs
-      if (colabFilialIdStr && colabFilialIdStr === filialFiltroStr) return true;
-      if (colabFiliaisObjIdStr && colabFiliaisObjIdStr === filialFiltroStr) return true;
-
-      // Comparação por nome de filial selecionada
-      const objFilialSelecionada = filiais?.find(f => String(f.id).trim().toLowerCase() === filialFiltroStr || String(f.nome || '').trim().toLowerCase() === filialFiltroStr);
-      const nomeFilialFiltro = String(objFilialSelecionada?.nome || filtroFilial).trim().toLowerCase();
-
-      const nomeFilialColab = String(colab.filiais?.nome || '').trim().toLowerCase();
-      if (nomeFilialColab && (nomeFilialColab === nomeFilialFiltro || nomeFilialColab === filialFiltroStr)) {
-        return true;
-      }
-
-      // Comparar por nome encontrado na lista geral de filiais pelo colab.filial_id
-      const objFilialDoColab = filiais?.find(f => String(f.id).trim().toLowerCase() === colabFilialIdStr);
-      if (objFilialDoColab && String(objFilialDoColab.nome || '').trim().toLowerCase() === nomeFilialFiltro) {
-        return true;
-      }
-
-      return false;
+      return 'Sem Filial';
     };
 
-    // 3. Resolução Segura do Nome da Filial (sem fallback fixo)
-    const resolverNomeFilial = (colab) => {
-      if (!colab) return 'Sem Filial';
-      const filialRelacao = colab.filiais?.nome;
-      const filialPorId = filiais?.find(f => String(f.id).trim().toLowerCase() === String(colab.filial_id || '').trim().toLowerCase())?.nome;
-      const nomeLimpo = (colab.nome || '').trim().toUpperCase();
-      const filialPorVenda = mapaFilialVendedor[nomeLimpo];
+    return rankingViewRows.map(vr => {
+      const colabDb = profilesList.find(c => String(c.id) === String(vr.colaborador_id));
+      const faturadoTitular = Number(vr.faturado_titular || 0);
+      const faturadoTrainee = Number(vr.faturado_trainee || 0);
+      const totalTransacoes = Number(vr.total_transacoes || 0);
+      const volumeExibicao = Number(vr.volume_exibicao || (faturadoTitular > 0 ? faturadoTitular : vr.volume_total_participado) || 0);
+      const ticketMedio = Number(vr.ticket_medio || 0);
+      const isTrainee = Boolean(vr.is_trainee || colabDb?.role === 'TRAINEE' || colabDb?.is_treinner);
 
-      return filialRelacao || filialPorId || filialPorVenda || 'Sem Filial';
-    };
-
-    // 1. Inicializar o mapa exclusivamente com os colaboradores cadastrados da filial selecionada (profiles)
-    const rankingMap = {};
-    listaColaboradores.forEach(colab => {
-      if (filtroFilial && filtroFilial !== 'TODAS' && !isColaboradorDaFilialSelecionada(colab)) {
-        return;
-      }
-      const colabKey = String(colab.id);
-      rankingMap[colabKey] = {
-        id: colabKey,
-        nome: colab.nome,
-        cargo: colab.role === 'TRAINEE' || colab.is_treinner ? 'Trainee' : (colab.cargo || 'Profissional'),
-        filial_id: colab.filial_id,
-        filiais: colab.filiais,
-        filialNome: resolverNomeFilial(colab),
-        transacoes: 0,
-        volume: 0,
-        ticketMedio: 0,
-        comissaoAcumulada: 0,
-        isSemVendedor: false
-      };
-    });
-
-    // Filtrar vendas pela filial selecionada, se houver filtro ativo
-    const vendasFiltradas = (vendasPeriodo || []).filter(v => {
-      if (!filtroFilial || filtroFilial === 'TODAS') return true;
-      const fFiltro = String(filtroFilial).trim().toLowerCase();
-      const vFilialId = String(v.filial_id || '').trim().toLowerCase();
-      const vFiliaisObjId = String(v.filiais?.id || '').trim().toLowerCase();
-      const vFilialNome = String(v.filiais?.nome || '').trim().toLowerCase();
-      const filialObj = filiais?.find(f => String(f.id).trim().toLowerCase() === fFiltro);
-      const filialNomeEsperado = String(filialObj?.nome || '').trim().toLowerCase();
-
-      return vFilialId === fFiltro || 
-             vFiliaisObjId === fFiltro || 
-             (filialNomeEsperado && vFilialNome === filialNomeEsperado);
-    });
-
-    // 2. Processar vendas com normalização de nomes compostos com barra ("AMANDA/PAULA", "SENA/PAULA")
-    vendasFiltradas.forEach(v => {
-      const rawNome = (v.vendedor_nome || '').trim();
-      const hasSlash = rawNome.includes('/');
-      const partesNome = hasSlash ? rawNome.split('/') : [rawNome];
-      const nomeTitular = partesNome[0].trim();
-      const nomeTrainee = partesNome[1]?.trim() || '';
-
-      const isTraineeVenda = v.teve_participacao_trainee === true || 
-                             hasSlash || 
-                             Boolean(v.treener_id) || 
-                             Boolean(v.trainee_id) || 
-                             Number(v.comissao_trainee) > 0;
-
-      // 1. Identificar Perfil do Vendedor Titular (antes da barra ou nome completo)
-      let titularProfile = null;
-      if (v.vendedor_id) {
-        titularProfile = listaColaboradores.find(p => String(p.id) === String(v.vendedor_id));
-      }
-      if (!titularProfile && (nomeTitular || rawNome)) {
-        const normTitular = cleanStr(nomeTitular || rawNome);
-        titularProfile = listaColaboradores.find(p => {
-          const normP = cleanStr(p.nome);
-          const palavras = normP.split(' ');
-          const palavrasTitular = normTitular.split(' ');
-          return normP === normTitular || 
-                 normTitular.includes(normP) || 
-                 normP.includes(normTitular) ||
-                 palavrasTitular.some(pt => pt.length > 2 && palavras.includes(pt));
-        });
-      }
-
-      // 2. Identificar Perfil da Trainee (ex: Paula Thaynara)
-      let traineeProfile = null;
-      const tId = v.treener_id || v.trainee_id;
-      if (tId) {
-        traineeProfile = listaColaboradores.find(p => String(p.id) === String(tId));
-      }
-      if (!traineeProfile && nomeTrainee) {
-        const normTrainee = cleanStr(nomeTrainee);
-        traineeProfile = listaColaboradores.find(p => {
-          const normP = cleanStr(p.nome);
-          const palavras = normP.split(' ');
-          return normP === normTrainee || palavras.includes(normTrainee) || normP.startsWith(normTrainee);
-        }) || listaColaboradores.find(p => {
-          const normP = cleanStr(p.nome);
-          return normP.includes(normTrainee) || normTrainee.includes(normP);
-        });
-      }
-      if (!traineeProfile && isTraineeVenda) {
-        // Localizar a trainee cadastrada no sistema (Paula Thaynara)
-        traineeProfile = listaColaboradores.find(p => {
-          const normP = cleanStr(p.nome);
-          return normP.includes('PAULA') || p.role === 'TRAINEE' || p.is_treinner;
-        });
-      }
-
-      // Valores monetários
-      const val = parseFloat(v.valor_total || v.valor_vendido || v.total || (v.preco * v.quantidade) || v.valor_pago || 0);
-      const safeVal = isNaN(val) ? 0 : val;
-
-      // Cálculo de comissão dinâmico
-      const comissaoTitular = calcularComissaoVendedorItem(v, isTraineeVenda);
-      const comissaoTrainee = isTraineeVenda ? calcularComissaoTraineeItem(v) : 0;
-      const comissaoTotalVenda = (Number(v.comissao) || 0) > 0 ? Number(v.comissao) : (comissaoTitular + comissaoTrainee);
-
-      // Atribuição ao Titular (somente se pertencer à filial caso haja filtro selecionado)
-      if (titularProfile && isColaboradorDaFilialSelecionada(titularProfile)) {
-        const key = String(titularProfile.id);
-        if (!rankingMap[key]) {
-          rankingMap[key] = {
-            id: key,
-            nome: titularProfile.nome,
-            cargo: titularProfile.role === 'TRAINEE' || titularProfile.is_treinner ? 'Trainee' : 'Profissional',
-            filial_id: titularProfile.filial_id,
-            filiais: titularProfile.filiais,
-            filialNome: resolverNomeFilial(titularProfile),
-            transacoes: 0,
-            volume: 0,
-            ticketMedio: 0,
-            comissaoAcumulada: 0,
-            isSemVendedor: false
-          };
-        }
-        rankingMap[key].transacoes += 1;
-        rankingMap[key].volume += safeVal;
-        rankingMap[key].comissaoAcumulada += comissaoTitular;
-      } else if (!titularProfile && !isTraineeVenda && !rawNome) {
-        // Venda Balcão sem nenhum vendedor identificado
-        const key = 'sem_vendedor';
-        if (!rankingMap[key]) {
-          const filialVenda = v.filiais?.nome || filiais?.find(f => String(f.id) === String(v.filial_id))?.nome;
-          rankingMap[key] = {
-            id: key,
-            nome: 'Vendas de Balcão / Sem Vendedor',
-            cargo: 'Balcão / Geral',
-            filial_id: v.filial_id || null,
-            filialNome: filialVenda || 'Balcão',
-            transacoes: 0,
-            volume: 0,
-            ticketMedio: 0,
-            comissaoAcumulada: 0,
-            isSemVendedor: true
-          };
-        }
-        rankingMap[key].transacoes += 1;
-        rankingMap[key].volume += safeVal;
-        rankingMap[key].comissaoAcumulada += comissaoTotalVenda;
-      }
-
-      // Atribuição à Trainee participante (somente se pertencer à filial caso haja filtro ativo)
-      if (isTraineeVenda && traineeProfile && isColaboradorDaFilialSelecionada(traineeProfile)) {
-        const tKey = String(traineeProfile.id);
-        if (!rankingMap[tKey]) {
-          rankingMap[tKey] = {
-            id: tKey,
-            nome: traineeProfile.nome,
-            cargo: 'Trainee',
-            filial_id: traineeProfile.filial_id,
-            filiais: traineeProfile.filiais,
-            filialNome: resolverNomeFilial(traineeProfile),
-            transacoes: 0,
-            volume: 0,
-            ticketMedio: 0,
-            comissaoAcumulada: 0,
-            isSemVendedor: false
-          };
-        }
-        rankingMap[tKey].transacoes += 1;
-        rankingMap[tKey].volume += safeVal;
-        rankingMap[tKey].comissaoAcumulada += comissaoTrainee;
-      }
-    });
-
-    // 4. Integração e Conciliação com a View Oficial view_ranking_colaboradores_mensal
-    // Se a view tiver dados consolidados pelo PostgreSQL, mesclar faturado_titular e faturado_trainee
-    const viewRowsMap = new Map();
-    (rankingViewRows || []).forEach(vr => {
-      if (vr.colaborador_id) {
-        viewRowsMap.set(String(vr.colaborador_id), vr);
-      }
-    });
-
-    let data = Object.values(rankingMap).map(item => {
-      const vr = viewRowsMap.get(String(item.id));
-      if (vr) {
-        // Se a View oficial do banco já calculou a competência em fuso horário de Brasília
-        const faturadoTitular = vr.faturado_titular;
-        const faturadoTrainee = vr.faturado_trainee;
-        const volumeTotal = vr.volume_total_participado;
-        const transacoes = vr.total_transacoes;
-        const ticketMedio = vr.ticket_medio;
-        const isTrainee = vr.is_trainee || (faturadoTitular === 0 && faturadoTrainee > 0);
-
-        return {
-          ...item,
-          transacoes: transacoes > 0 ? transacoes : item.transacoes,
-          volume: faturadoTitular > 0 ? faturadoTitular : (volumeTotal > 0 ? volumeTotal : item.volume),
-          volumeTotalParticipado: volumeTotal,
-          faturadoTitular,
-          faturadoTrainee,
-          ticketMedio: ticketMedio > 0 ? ticketMedio : (item.transacoes > 0 ? item.volume / item.transacoes : 0),
-          cargo: isTrainee ? 'Trainee' : item.cargo,
-          isTraineeView: isTrainee,
-          origemView: true
-        };
+      // Cálculo de comissões consumindo EXCLUSIVAMENTE os valores de faturado_titular da View
+      // (alíquota padrão de 2% sobre o faturamento titular ou apoio de 0.5% a 1% trainee se faturado titular for 0)
+      let comissaoCalculada = 0;
+      if (faturadoTitular > 0) {
+        comissaoCalculada = faturadoTitular * 0.02;
+      } else if (faturadoTrainee > 0) {
+        comissaoCalculada = faturadoTrainee * 0.01;
       }
 
       return {
-        ...item,
-        faturadoTitular: item.volume,
-        faturadoTrainee: 0,
-        volumeTotalParticipado: item.volume,
-        ticketMedio: item.transacoes > 0 ? item.volume / item.transacoes : 0,
-        isTraineeView: item.cargo === 'Trainee'
+        id: vr.colaborador_id,
+        nome: vr.colaborador,
+        cargo: isTrainee ? 'Trainee' : (colabDb?.cargo || colabDb?.role || 'Profissional'),
+        role: colabDb?.role,
+        is_treinner: colabDb?.is_treinner,
+        filial_id: vr.filial_id || colabDb?.filial_id,
+        filiais: colabDb?.filiais,
+        filialNome: resolverNomeFilial(vr.filial_id, colabDb),
+        transacoes: totalTransacoes,
+        volume: volumeExibicao,
+        volumeTotalParticipado: Number(vr.volume_total_participado || 0),
+        faturadoTitular,
+        faturadoTrainee,
+        ticketMedio,
+        comissaoAcumulada: comissaoCalculada,
+        isSemVendedor: false,
+        isTraineeView: isTrainee
       };
-    });
-
-    // Se houver colaboradores retornados na View que não constavam no rankingMap, incluí-los
-    (rankingViewRows || []).forEach(vr => {
-      if (!rankingMap[String(vr.colaborador_id)]) {
-        const colabDb = (colaboradoresDb || []).find(c => String(c.id) === String(vr.colaborador_id));
-        if (!colabDb || isColaboradorDaFilialSelecionada(colabDb)) {
-          const isTrainee = vr.is_trainee || (vr.faturado_titular === 0 && vr.faturado_trainee > 0);
-          data.push({
-            id: vr.colaborador_id,
-            nome: vr.colaborador,
-            cargo: isTrainee ? 'Trainee' : (colabDb?.cargo || 'Profissional'),
-            filial_id: vr.filial_id,
-            filiais: colabDb?.filiais,
-            filialNome: resolverNomeFilial(colabDb || { filial_id: vr.filial_id, nome: vr.colaborador }),
-            transacoes: vr.total_transacoes,
-            volume: vr.faturado_titular > 0 ? vr.faturado_titular : vr.volume_total_participado,
-            volumeTotalParticipado: vr.volume_total_participado,
-            faturadoTitular: vr.faturado_titular,
-            faturadoTrainee: vr.faturado_trainee,
-            ticketMedio: vr.ticket_medio,
-            comissaoAcumulada: 0,
-            isSemVendedor: false,
-            isTraineeView: isTrainee,
-            origemView: true
-          });
-        }
-      }
-    });
-
-    // Filtro de segurança final garantindo que somente colaboradores da filial selecionada permaneçam
-    if (filtroFilial && filtroFilial !== 'TODAS') {
-      data = data.filter(item => {
-        if (item.isSemVendedor) return true;
-        return isColaboradorDaFilialSelecionada(item);
-      });
-    }
-
-    // Ordenação estrita por Faturado Titular / Volume decrescente (b.volume - a.volume)
-    return data.sort((a, b) => b.volume - a.volume);
-  }, [colaboradoresDb, vendedores, vendasPeriodo, filiais, filtroFilial, rankingViewRows]);
+    }).sort((a, b) => b.volume - a.volume);
+  }, [rankingViewRows, colaboradoresDb, vendedores, filiais]);
 
   return (
     <div className="bg-black border border-[#222] rounded-xl overflow-hidden shadow-2xl animate-fadeIn mt-4 space-y-0">
@@ -672,8 +267,9 @@ export default function RankingVendedores({
             dataFim={periodoData.fim}
             onChange={({ inicio, fim, mesAno: novoMesAno }) => {
               setPeriodoData({ inicio, fim });
-              setFiltroMes(novoMesAno);
-              fetchVendasRanking(inicio, fim);
+              if (novoMesAno) {
+                setFiltroMes(novoMesAno);
+              }
             }}
           />
 
@@ -698,12 +294,12 @@ export default function RankingVendedores({
           {/* Botão Recarregar Dados */}
           <button
             onClick={handleRecarregar}
-            disabled={isLoading}
+            disabled={isLoadingView}
             className="flex items-center gap-2 bg-gradient-to-r from-[#6A0DAD]/20 to-purple-900/30 hover:from-[#6A0DAD]/30 hover:to-purple-900/50 text-purple-200 hover:text-white border border-[#6A0DAD]/40 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm shadow-purple-950/30"
             title="Recarregar Dados em Tempo Real"
           >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin text-purple-400' : 'text-purple-300'} />
-            <span>{isLoading ? 'Atualizando...' : 'Recarregar'}</span>
+            <RefreshCw size={14} className={isLoadingView ? 'animate-spin text-purple-400' : 'text-purple-300'} />
+            <span>{isLoadingView ? 'Atualizando...' : 'Recarregar'}</span>
           </button>
         </div>
       </div>
@@ -759,9 +355,6 @@ export default function RankingVendedores({
                     }`}>
                       {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView || colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee' ? 'Trainee' : 'Profissional')}
                     </span>
-                    {colab.origemView && (
-                      <span className="text-[9px] text-purple-400/80 font-mono">Consolidado DB</span>
-                    )}
                   </div>
                 </td>
                 <td className="py-3 px-4 text-center font-mono font-bold text-gray-300">{colab.transacoes}</td>
@@ -809,7 +402,7 @@ export default function RankingVendedores({
             {rankingData.length === 0 && (
               <tr>
                 <td colSpan="9" className="py-10 text-center text-gray-500 italic">
-                  {isLoading ? 'Carregando dados do período...' : 'Nenhum colaborador ou venda encontrada para os filtros selecionados.'}
+                  {isLoadingView ? 'Carregando dados do período...' : 'Nenhum colaborador ou venda encontrada para os filtros selecionados.'}
                 </td>
               </tr>
             )}
@@ -826,7 +419,6 @@ export default function RankingVendedores({
           dataInicio={periodoData.inicio}
           dataFim={periodoData.fim}
           filiais={filiais}
-          vendasCache={vendasPeriodo}
           onClose={() => setVendedorSelecionadoModal(null)}
         />
       )}
