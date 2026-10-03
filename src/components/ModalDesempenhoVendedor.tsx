@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   X, 
   Award, 
@@ -192,6 +193,11 @@ export default function ModalDesempenhoVendedor({
   const [vendasColaborador, setVendasColaborador] = useState<Venda[]>([]);
   const [metaIndividual, setMetaIndividual] = useState<MetaBanco | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [mounted, setMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const colaboradorId = colaborador?.id;
   const colaboradorNome = colaborador?.nome;
@@ -745,7 +751,11 @@ export default function ModalDesempenhoVendedor({
   // Identificação da filial
   const filialDoColaborador = filiais.find(f => String(f.id) === String(colaborador?.filial_id)) || null;
 
-  return (
+  if (!mounted || typeof document === 'undefined') {
+    return null;
+  }
+
+  const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
       <div className="bg-[#0D0D0D] border border-[#222222] rounded-2xl w-full max-w-6xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative my-auto">
         
@@ -788,12 +798,12 @@ export default function ModalDesempenhoVendedor({
                   Competência: <strong className="text-gray-200">{dashboardInfo.mesReferencia}</strong>
                 </span>
                 {(dashboardInfo.faturadoTitularSolo > 0 || dashboardInfo.faturadoComApoioTrainee > 0) && (
-                  <>
+                  <span className="inline-flex items-center gap-2">
                     <span className="text-gray-600">•</span>
                     <span className="text-purple-300 font-semibold">
                       Titular Solo: R$ {dashboardInfo.faturadoTitularSolo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Com Apoio Trainee: R$ {dashboardInfo.faturadoComApoioTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </span>
-                  </>
+                  </span>
                 )}
               </div>
             </div>
@@ -1079,7 +1089,8 @@ export default function ModalDesempenhoVendedor({
                       </td>
                     </tr>
                   ) : (
-                    dashboardInfo.historico.map(sale => {
+                    dashboardInfo.historico.map((sale, idx) => {
+                      const rowKey = sale.id ? `${sale.id}-${idx}` : `venda-${idx}`;
                       const itens = Array.isArray(sale.itens_venda) ? sale.itens_venda : [];
                       let nomeBase = sale.produto_nome || sale.descricao || (itens.length > 0 ? itens[0]?.produto_nome : null) || 'Produto Geral';
                       let produtoNome = nomeBase;
@@ -1102,14 +1113,14 @@ export default function ModalDesempenhoVendedor({
                       const metodoRaw = String(sale.forma_pagamento || sale.metodo_pagamento || 'N/A').toUpperCase();
 
                       return (
-                        <tr key={sale.id} className="hover:bg-purple-950/5 transition-colors">
+                        <tr key={rowKey} className="hover:bg-purple-950/5 transition-colors">
                           <td className="py-3 text-gray-400 font-mono">
                             {new Date(sale.created_at || Date.now()).toLocaleDateString('pt-BR')}
                           </td>
                           <td className="py-3">
                             <div className="flex flex-col">
                               <span className="font-semibold text-white">{produtoNome}</span>
-                              {sale.imei && (
+                              {Boolean(sale.imei) && (
                                 <span className="text-[10px] text-zinc-500 font-mono">IMEI: ...{String(sale.imei).slice(-4)}</span>
                               )}
                             </div>
@@ -1156,4 +1167,6 @@ export default function ModalDesempenhoVendedor({
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }
