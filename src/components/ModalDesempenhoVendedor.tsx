@@ -423,12 +423,15 @@ export default function ModalDesempenhoVendedor({
 
   // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'metas'
   const dashboardInfo = useMemo(() => {
-    const isTrainee = Boolean(
+    const fTitularView = Number(dadosViewConsolidada?.faturado_titular || 0);
+    const fTraineeView = Number(dadosViewConsolidada?.faturado_trainee || 0);
+    const isOriginalTrainee = Boolean(
       colaborador?.cargo === 'Trainee' || 
       colaborador?.role === 'TRAINEE' || 
       colaborador?.is_treinner ||
       (colaborador?.cargo || '').toLowerCase().includes('trainee')
     );
+    const isTrainee = fTraineeView > fTitularView || isOriginalTrainee || (fTitularView === 0 && fTraineeView > 0);
 
     // Mapeamento oficial de metas:
     // Trainee: metaBoleto = R$ 35.000, metaAcessorios = R$ 5.000

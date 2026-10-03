@@ -207,36 +207,54 @@ export default function RankingVendedores({
       const colabDb = profilesList.find(c => String(c.id) === String(vr.colaborador_id));
       const faturadoTitular = Number(vr.faturado_titular || 0);
       const faturadoTrainee = Number(vr.faturado_trainee || 0);
+      const volumeTotal = Number(vr.volume_total_participado || 0);
       const totalTransacoes = Number(vr.total_transacoes || 0);
-      const volumeExibicao = Number(vr.volume_exibicao || (faturadoTitular > 0 ? faturadoTitular : vr.volume_total_participado) || 0);
-      const ticketMedio = Number(vr.ticket_medio || 0);
-      const isTrainee = Boolean(vr.is_trainee || colabDb?.role === 'TRAINEE' || colabDb?.is_treinner);
 
-      // Cálculo de comissões consumindo EXCLUSIVAMENTE os valores de faturado_titular da View
-      // (alíquota padrão de 2% sobre o faturamento titular ou apoio de 0.5% a 1% trainee se faturado titular for 0)
-      let comissaoCalculada = 0;
-      if (faturadoTitular > 0) {
-        comissaoCalculada = faturadoTitular * 0.02;
-      } else if (faturadoTrainee > 0) {
-        comissaoCalculada = faturadoTrainee * 0.01;
-      }
+      // Regra 1: Definição Inteligente de Cargo (Badge)
+      // isTrainee = Number(item.faturado_trainee || 0) > Number(item.faturado_titular || 0) || item.cargo_original === 'Trainee'
+      const cargoOriginal = colabDb?.cargo || colabDb?.role;
+      const isOriginalTrainee = cargoOriginal === 'TRAINEE' || cargoOriginal === 'Trainee' || Boolean(colabDb?.is_treinner);
+      const isTrainee = faturadoTrainee > faturadoTitular || isOriginalTrainee || (faturadoTitular === 0 && faturadoTrainee > 0);
+
+      // Regra 2: Volume em Destaque
+      // Para quem é Trainee: o valor principal em destaque deve ser o 'volume_total_participado' (ou 'faturado_trainee')
+      // Para quem é Profissional/Titular: o valor principal é o 'faturado_titular'
+      const volumeDestaque = isTrainee
+        ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
+        : (faturadoTitular > 0 ? faturadoTitular : volumeTotal);
+
+      // Regra 3: Cálculo do Ticket Médio
+      // Deve ser sempre: Volume Exibido em Destaque ÷ total_transacoes
+      const ticketMedioConsistente = totalTransacoes > 0
+        ? (volumeDestaque / totalTransacoes)
+        : Number(vr.ticket_medio || 0);
+
+      // Regra 4: Cálculo da Comissão Acumulada
+      // comissaoTitular = faturado_titular * 0.02
+      // comissaoTrainee = faturado_trainee * 0.01 (0,5% a 1,0% sobre o apoio realizado)
+      // Total Comissão = comissaoTitular + comissaoTrainee
+      const comissaoTitular = faturadoTitular * 0.02;
+      const comissaoTrainee = faturadoTrainee * 0.01;
+      const comissaoTotal = comissaoTitular + comissaoTrainee;
 
       return {
         id: vr.colaborador_id,
         nome: vr.colaborador,
-        cargo: isTrainee ? 'Trainee' : (colabDb?.cargo || colabDb?.role || 'Profissional'),
+        cargo: isTrainee ? 'Trainee' : (cargoOriginal || 'Profissional'),
         role: colabDb?.role,
         is_treinner: colabDb?.is_treinner,
         filial_id: vr.filial_id || colabDb?.filial_id,
         filiais: colabDb?.filiais,
         filialNome: resolverNomeFilial(vr.filial_id, colabDb),
         transacoes: totalTransacoes,
-        volume: volumeExibicao,
-        volumeTotalParticipado: Number(vr.volume_total_participado || 0),
+        volume: volumeDestaque,
+        volumeTotalParticipado: volumeTotal,
         faturadoTitular,
         faturadoTrainee,
-        ticketMedio,
-        comissaoAcumulada: comissaoCalculada,
+        ticketMedio: ticketMedioConsistente,
+        comissaoAcumulada: comissaoTotal,
+        comissaoTitular,
+        comissaoTrainee,
         isSemVendedor: false,
         isTraineeView: isTrainee
       };
@@ -349,11 +367,11 @@ export default function RankingVendedores({
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                       colab.isSemVendedor
                         ? 'bg-gray-900 text-gray-400 border border-gray-700'
-                        : colab.isTraineeView || colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee'
+                        : colab.isTraineeView
                         ? 'bg-purple-950/50 text-purple-300 border border-purple-800/50'
                         : 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/30'
                     }`}>
-                      {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView || colab.role === 'TRAINEE' || colab.is_treinner || colab.cargo === 'Trainee' ? 'Trainee' : 'Profissional')}
+                      {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView ? 'Trainee' : 'Profissional')}
                     </span>
                   </div>
                 </td>
@@ -362,22 +380,37 @@ export default function RankingVendedores({
                   <span className="font-bold text-white block">
                     {colab.volume.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                   </span>
-                  {/* Se participou como titular e trainee, exibir breakdown detalhado */}
-                  {colab.faturadoTrainee > 0 && colab.faturadoTitular > 0 ? (
-                    <span className="text-[9px] text-gray-400 block mt-0.5">
-                      Titular: {colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </span>
-                  ) : colab.isTraineeView && colab.faturadoTrainee > 0 ? (
-                    <span className="text-[9px] text-purple-300 block mt-0.5">
-                      Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                    </span>
-                  ) : null}
+                  {/* Breakdown de volume conforme perfil */}
+                  {colab.isTraineeView ? (
+                    colab.faturadoTitular > 0 ? (
+                      <span className="text-[9px] text-purple-300/90 block mt-0.5">
+                        Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Titular: {colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-purple-300/90 block mt-0.5">
+                        Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </span>
+                    )
+                  ) : (
+                    colab.faturadoTrainee > 0 ? (
+                      <span className="text-[9px] text-gray-400 block mt-0.5">
+                        Titular: {colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio Trainee: {colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </span>
+                    ) : null
+                  )}
                 </td>
                 <td className="py-3 px-4 text-right font-mono text-blue-400">
                   {colab.ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </td>
-                <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400">
-                  {colab.comissaoAcumulada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                <td className="py-3 px-4 text-right font-mono">
+                  <span className="font-bold text-emerald-400 block">
+                    {colab.comissaoAcumulada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                  {colab.comissaoTrainee > 0 && colab.comissaoTitular > 0 && (
+                    <span className="text-[9px] text-gray-400 block mt-0.5">
+                      Titular: {colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio: {colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  )}
                 </td>
                 <td className="py-3 px-4 text-center">
                   {!colab.isSemVendedor && (

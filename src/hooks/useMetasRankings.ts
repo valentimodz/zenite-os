@@ -107,18 +107,24 @@ export async function fetchRankingColaboradoresMensal({
     const faturadoTrainee = parseNumber(r.faturado_trainee);
     const volumeTotal = parseNumber(r.volume_total_participado);
     const transacoes = parseInt(String(r.total_transacoes || 0), 10);
-    const ticketMedio = parseNumber(r.ticket_medio);
+    const validTransacoes = isNaN(transacoes) ? 0 : transacoes;
 
-    // Regra: se faturado_titular === 0 e faturado_trainee > 0, é Trainee puro no período
-    const isTrainee = faturadoTitular === 0 && faturadoTrainee > 0;
-    const volumeExibicao = faturadoTitular > 0 ? faturadoTitular : volumeTotal;
+    // Regra inteligente de Trainee: apoio maior que titular ou apoio exclusivo
+    const isTrainee = faturadoTrainee > faturadoTitular || (faturadoTitular === 0 && faturadoTrainee > 0);
+    // Para quem é Trainee: o volume em destaque é o volume_total_participado (ou faturado_trainee se volumeTotal for 0)
+    const volumeExibicao = isTrainee
+      ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
+      : (faturadoTitular > 0 ? faturadoTitular : volumeTotal);
+
+    // Ticket Médio consistente: Volume Exibido em Destaque ÷ total_transacoes
+    const ticketMedio = validTransacoes > 0 ? (volumeExibicao / validTransacoes) : parseNumber(r.ticket_medio);
 
     return {
       colaborador_id: r.colaborador_id,
       colaborador: r.colaborador || 'Sem Nome',
       filial_id: r.filial_id,
       competencia: r.competencia,
-      total_transacoes: isNaN(transacoes) ? 0 : transacoes,
+      total_transacoes: validTransacoes,
       faturado_titular: faturadoTitular,
       faturado_trainee: faturadoTrainee,
       volume_total_participado: volumeTotal,
