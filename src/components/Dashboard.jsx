@@ -13661,37 +13661,43 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       return;
     }
 
-    // 1.1 Regra de Negócio Estrita: Validação de Cliente Obrigatório EXCLUSIVAMENTE para Boleto/Crediário/AIVA
+    // 1.1 Regra de Negócio Estrita: Validação de Cliente Obrigatório para Financiamentos e Boletos (PAYJOY, WATU, AIVA, etc)
     const pagamentosEfetivos = (pdvListaPagamentos && pdvListaPagamentos.length > 0)
       ? pdvListaPagamentos
       : [{ metodo: pdvMetodoPagamento, label: pdvMetodoPagamento }];
 
-    const temPagamentoCrediario = pagamentosEfetivos.some(p => {
-      const m = String(p.metodo || p.label || '').toUpperCase();
-      return ['BOLETO', 'CREDIARIO', 'CREDIÁRIO', 'PROMISSORIA', 'PROMISSÓRIA', 'AIVA', 'CARNE', 'CARNÊ', 'PAYJOY', 'WATU', 'UME', 'UMA', 'FINANCIAMENTO'].some(cred => m.includes(cred));
+    const GENERIC_CONSUMIDOR_UUID = '3788fcc4-423c-46ce-a02e-5906d805925d';
+    const ZERO_CONSUMIDOR_UUID = '00000000-0000-0000-0000-000000000000';
+
+    const temPagamentoFinanciamentoOuBoleto = pagamentosEfetivos.some(p => {
+      const m = String(p.metodo || p.label || p.financeira || pdvFinanceiraParceira || pdvFinanceiraCustomInput || '').toUpperCase();
+      return ['PAYJOY', 'WATU', 'AIVA', 'BOLETO', 'FINANCIAMENTO', 'CREDIARIO', 'CREDIÁRIO', 'PROMISSORIA', 'PROMISSÓRIA', 'CARNE', 'CARNÊ', 'UME', 'UMA'].some(cred => m.includes(cred));
     });
 
-    if (temPagamentoCrediario) {
+    if (temPagamentoFinanciamentoOuBoleto) {
       const nomeClienteRaw = (pdvClienteNome || pdvClienteSearchInput || '').trim();
       const cpfClienteRaw = (pdvClienteCpfCnpj || '').replace(/\D/g, '');
-      const isConsumidorGenerico = !cpfClienteRaw ||
-        pdvClienteCpfCnpj.trim() === '000.000.000-01' ||
-        cpfClienteRaw === '00000000001' ||
+      const cleanClienteId = (selectedPdvClienteId || '').trim();
+
+      const isClienteGenerico = !cleanClienteId ||
+        cleanClienteId === GENERIC_CONSUMIDOR_UUID ||
+        cleanClienteId === ZERO_CONSUMIDOR_UUID ||
         !nomeClienteRaw ||
         nomeClienteRaw.toLowerCase() === 'consumidor final' ||
         nomeClienteRaw.toLowerCase() === 'consumidor balcão' ||
         nomeClienteRaw.toLowerCase() === 'consumidor balcao' ||
-        selectedPdvClienteId === '00000000-0000-0000-0000-000000000000';
+        nomeClienteRaw.toLowerCase() === 'consumidor';
 
-      const temCpfValido = (cpfClienteRaw.length === 11 || cpfClienteRaw.length === 14) && cpfClienteRaw !== '00000000001';
+      const temCpfValido = (cpfClienteRaw.length === 11 || cpfClienteRaw.length === 14) && cpfClienteRaw !== '00000000001' && !/^(\d)\1+$/.test(cpfClienteRaw);
 
-      if (isConsumidorGenerico || !temCpfValido) {
-        const msgAviso = "Identificação obrigatória: Vendas no Boleto/Crediário exigem cadastro completo do cliente (Nome e CPF).";
+      if (isClienteGenerico || !temCpfValido) {
+        const msgAviso = "Financiamentos exigem a vinculação de um cliente com CPF cadastrado.";
         toastHelper.warning(msgAviso);
+        alert(msgAviso);
         setTimeout(() => {
           const nomeInput = document.getElementById('pdv-cliente-busca-input');
           const cpfInput = document.getElementById('pdv-cliente-cpf-input');
-          if (isConsumidorGenerico) {
+          if (isClienteGenerico) {
             nomeInput?.focus();
             setIsPdvClienteDropdownOpen(true);
           } else if (!temCpfValido) {
@@ -13821,19 +13827,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     try {
       // 1. Validação e Inserção/Atualização Obrigatória (Upsert) do Cliente no Banco de Dados ANTES da Venda
       const CONSUMIDOR_FINAL_UUID = '00000000-0000-0000-0000-000000000000';
+      const GENERIC_CONSUMIDOR_UUID = '3788fcc4-423c-46ce-a02e-5906d805925d';
       const isValidUuid = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id.trim());
 
-      let clienteIdBanco = (isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID)
+      let clienteIdBanco = (isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID)
         ? selectedPdvClienteId.trim()
         : null;
 
-      if (selectedPdvClienteId && !isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID) {
+      if (selectedPdvClienteId && !isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID) {
         console.warn("⚠️ [PDV CHECKOUT] selectedPdvClienteId não é um UUID válido. Resetando:", selectedPdvClienteId);
         setSelectedPdvClienteId(null);
       }
 
       const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
-      const hasValidSelectedClient = !!clienteIdBanco && clienteIdBanco !== CONSUMIDOR_FINAL_UUID;
+      const hasValidSelectedClient = !!clienteIdBanco && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID;
       const isConsumidorFinal = !hasValidSelectedClient && (
         !nomeClienteFinal || 
         nomeClienteFinal.toLowerCase() === 'consumidor balcão' ||
@@ -13842,7 +13849,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         nomeClienteFinal.toLowerCase() === 'consumidor' ||
         nomeClienteFinal.toLowerCase() === 'cliente balcão' ||
         nomeClienteFinal.toLowerCase() === 'cliente balcao' ||
-        selectedPdvClienteId === CONSUMIDOR_FINAL_UUID
+        selectedPdvClienteId === CONSUMIDOR_FINAL_UUID ||
+        selectedPdvClienteId === GENERIC_CONSUMIDOR_UUID
       );
 
       const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
@@ -13992,41 +14000,50 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
 
       // PASSO 1 & 2: EXTRAÇÃO DE CONTEXTO E GUARD CLAUSES (TRAVAS DE SEGURANÇA)
-      const rawCandidateId = clienteIdBanco || (isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID ? selectedPdvClienteId : null);
+      const rawCandidateId = clienteIdBanco || (isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID ? selectedPdvClienteId : null);
       let cliente_id = null;
-      if (isValidUuid(rawCandidateId) && rawCandidateId !== CONSUMIDOR_FINAL_UUID) {
+      if (isValidUuid(rawCandidateId) && rawCandidateId !== CONSUMIDOR_FINAL_UUID && rawCandidateId !== GENERIC_CONSUMIDOR_UUID) {
         cliente_id = rawCandidateId;
       } else if (isConsumidorFinal) {
         cliente_id = idPadraoConsumidor || null;
       } else {
         cliente_id = rawCandidateId || idPadraoConsumidor || null;
       }
-      const vendedor_id = session?.user?.id || profile?.id || null;
 
-      // Resolver o nome e ID do vendedor selecionado com fallbacks seguros no escopo principal da venda:
-      const resolvedVendedorNome = (
+      // Resolução estrita e infalível de Vendedor (vendedor_id e vendedor_nome nunca podem ser nulos)
+      const rawVendedorId = session?.user?.id || profile?.id || null;
+      const effectiveVendedorNome = (
         profile?.nome ||
-        (vendedores || []).find(v => String(v.id) === String(vendedor_id) || v.nome === vendedor_id)?.nome ||
-        (teamMembers || []).find(m => String(m.id) === String(vendedor_id))?.nome ||
+        (vendedores || []).find(v => String(v.id) === String(rawVendedorId) || v.nome === rawVendedorId)?.nome ||
+        (teamMembers || []).find(m => String(m.id) === String(rawVendedorId))?.nome ||
         session?.user?.user_metadata?.nome ||
+        session?.user?.user_metadata?.full_name ||
         session?.user?.email?.split('@')[0] ||
-        'Vendedor Não Identificado'
+        (vendedores && vendedores.length > 0 ? vendedores[0].nome : null) ||
+        'Vendedor'
       ).trim();
 
-      const resolvedVendedorId = (
-        vendedor_id ||
-        (vendedores || []).find(v => v.nome === resolvedVendedorNome)?.id ||
-        (teamMembers || []).find(m => m.nome === resolvedVendedorNome)?.id ||
+      const effectiveVendedorId = (
+        rawVendedorId ||
+        (vendedores || []).find(v => v.nome === effectiveVendedorNome || String(v.id) === String(rawVendedorId))?.id ||
+        (teamMembers || []).find(m => m.nome === effectiveVendedorNome || String(m.id) === String(rawVendedorId))?.id ||
+        (vendedores && vendedores.length > 0 ? vendedores[0].id : null) ||
+        session?.user?.id ||
+        profile?.id ||
         null
       );
+
+      const vendedor_id = effectiveVendedorId;
+      const resolvedVendedorId = effectiveVendedorId;
+      const resolvedVendedorNome = effectiveVendedorNome;
 
       console.log("🔥 [PRE-SAVE CHECK] Contexto do Checkout:", {
         selectedPdvClienteId,
         clienteIdBanco,
         cliente_id,
-        vendedor_id,
-        resolvedVendedorId,
-        resolvedVendedorNome,
+        vendedor_id: effectiveVendedorId,
+        resolvedVendedorId: effectiveVendedorId,
+        resolvedVendedorNome: effectiveVendedorNome,
         nomeClienteFinal,
         isConsumidorFinal,
         pdvClienteCpfCnpj: pdvClienteCpfCnpj.trim()
@@ -14045,8 +14062,34 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return;
       }
 
+      // GUARD CLAUSE 0.5: OBRIGATORIEDADE DE CLIENTE EM FINANCIAMENTOS (PAYJOY, WATU, AIVA, etc)
+      if (temPagamentoFinanciamentoOuBoleto) {
+        const cpfLimpo = (pdvClienteCpfCnpj || '').replace(/\D/g, '');
+        const temCpfValido = (cpfLimpo.length === 11 || cpfLimpo.length === 14) && cpfLimpo !== '00000000001' && !/^(\d)\1+$/.test(cpfLimpo);
+        const ehGenerico = isConsumidorFinal ||
+          !cliente_id ||
+          cliente_id === CONSUMIDOR_FINAL_UUID ||
+          cliente_id === GENERIC_CONSUMIDOR_UUID ||
+          selectedPdvClienteId === GENERIC_CONSUMIDOR_UUID ||
+          selectedPdvClienteId === CONSUMIDOR_FINAL_UUID ||
+          !nomeClienteFinal ||
+          nomeClienteFinal.toLowerCase() === 'consumidor final' ||
+          nomeClienteFinal.toLowerCase() === 'consumidor balcão' ||
+          nomeClienteFinal.toLowerCase() === 'consumidor balcao' ||
+          nomeClienteFinal.toLowerCase() === 'consumidor';
+
+        if (ehGenerico || !temCpfValido) {
+          const msgAvisoFin = "Financiamentos exigem a vinculação de um cliente com CPF cadastrado.";
+          console.error("🔥 [GUARD CLAUSE FINANCIAMENTO TRIGGERED]:", msgAvisoFin);
+          showToast(msgAvisoFin, "error");
+          alert(msgAvisoFin);
+          setLoadingPdvVenda(false);
+          return;
+        }
+      }
+
       // GUARD CLAUSE 1: Se o usuário informou um cliente customizado (não consumidor final), o ID NÃO PODE ser nulo ou inválido.
-      if (!isConsumidorFinal && (!cliente_id || cliente_id === CONSUMIDOR_FINAL_UUID)) {
+      if (!isConsumidorFinal && (!cliente_id || cliente_id === CONSUMIDOR_FINAL_UUID || cliente_id === GENERIC_CONSUMIDOR_UUID)) {
         const msgErrCliente = "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo ou inválido. Venda abortada.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCliente);
         showToast(msgErrCliente, "error");
@@ -14056,7 +14099,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
 
       // GUARD CLAUSE 2: A venda não pode existir sem um vendedor atrelado
-      if (!vendedor_id) {
+      if (!effectiveVendedorId) {
         const msgErrVendedor = "Sessão Inválida: Vendedor não identificado. Faça login novamente.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrVendedor);
         showToast(msgErrVendedor, "error");
@@ -14176,7 +14219,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const { data: rpcRes, error: rpcErr } = await supabase.rpc('registrar_venda_hibrida', {
           p_empresa_id: obterUuidPuro(empresaId),
           p_filial_id: obterUuidPuro(activeFilialId),
-          p_vendedor_id: obterUuidPuro(vendedor_id || session.user.id),
+          p_vendedor_id: obterUuidPuro(effectiveVendedorId || vendedor_id || session?.user?.id),
           p_produto_novo_id: produtoIdFinalParaRpc,
           p_quantidade_novo: item.quantidade,
           p_imei_novo: (item.produto.tipo === 'CELULAR' && tenantSettings.enable_imei) ? item.imei : null,
@@ -14201,8 +14244,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             if (rawId && typeof rawId === 'string') {
               const trimmed = rawId.trim();
               if (trimmed !== '' && trimmed !== 'null' && trimmed !== 'undefined' && isValidUuid(trimmed)) {
-                // Se o UUID não for o de zeros, é um cliente real válido
-                if (trimmed !== CONSUMIDOR_FINAL_UUID) {
+                // Se o UUID não for o de zeros ou o genérico de consumidor, é um cliente real válido
+                if (trimmed !== CONSUMIDOR_FINAL_UUID && trimmed !== GENERIC_CONSUMIDOR_UUID) {
                   return trimmed;
                 }
                 // Se for o UUID zeros e for Consumidor Final, usa idPadraoConsumidor se disponível ou zeros
@@ -14218,11 +14261,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             return null;
           };
 
-          const candidateIdParaVenda = (isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID)
+          const candidateIdParaVenda = (isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID && cliente_id !== GENERIC_CONSUMIDOR_UUID)
             ? cliente_id
-            : ((isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID)
+            : ((isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID)
                 ? clienteIdBanco
-                : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID) ? selectedPdvClienteId : null));
+                : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID) ? selectedPdvClienteId : null));
 
           const clienteIdFinalValido = candidateIdParaVenda || getClienteIdValido(clienteResolvido?.id || cliente_id || clienteIdBanco || selectedPdvClienteId);
 
@@ -14235,18 +14278,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           const itemDescontoUnitario = Math.max(0, itemPrecoTabela - itemValorVendido);
           const itemDescontoTotal = itemDescontoUnitario * Number(item.quantidade);
 
-          if (!vendedor_id) {
+          const finalVendedorId = obterUuidPuro(effectiveVendedorId || vendedor_id || session?.user?.id || profile?.id);
+          const finalVendedorNome = effectiveVendedorNome || resolvedVendedorNome || 'Vendedor';
+
+          if (!finalVendedorId) {
             throw new Error("Tentativa de venda sem vendedor logado.");
           }
-
-          const resolvedVendedorNome = (
-            profile?.nome ||
-            (vendedores || []).find(v => String(v.id) === String(vendedor_id))?.nome ||
-            (teamMembers || []).find(m => String(m.id) === String(vendedor_id))?.nome ||
-            session?.user?.user_metadata?.nome ||
-            session?.user?.email?.split('@')[0] ||
-            'Vendedor'
-          ).trim();
 
           const payloadVendaUpdate = {
             empresa_id: obterUuidPuro(empresaId),
@@ -14262,10 +14299,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             cliente_email: resolvedClienteEmail,
             cliente_telefone: resolvedClienteTelefone,
             cliente_id: obterUuidPuro(clienteIdFinalValido) || null,
-            vendedor_id: obterUuidPuro(vendedor_id),
-            usuario_id: obterUuidPuro(vendedor_id),
-            criado_por: obterUuidPuro(vendedor_id),
-            vendedor_nome: resolvedVendedorNome,
+            vendedor_id: finalVendedorId,
+            usuario_id: finalVendedorId,
+            criado_por: finalVendedorId,
+            vendedor_nome: finalVendedorNome,
             trainee_id: obterUuidPuro(selectedTreenerId) || null,
             treener_id: obterUuidPuro(selectedTreenerId) || null,
             comissao: comissaoCalculada,
