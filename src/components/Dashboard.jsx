@@ -14465,13 +14465,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   valor_liquido: vLiq,
                   status: 'PENDENTE',
                   data_prevista_repasse: calcularDataPrevisao(finNome || metodoNorm),
+                  cliente_nome: resolvedClienteNome || 'Consumidor Final',
+                  vendedor_nome: resolvedVendedorNome || 'Vendedor',
                   created_at: new Date().toISOString()
                 };
 
                 console.log('💰 [Repasses Financeiras] Inserindo repasse automático no PDV:', repassePayload);
                 const { error: repErr } = await supabase.from('repasses_financeiras').insert(repassePayload);
                 if (repErr) {
-                  console.warn('Aviso ao registrar repasse financeiro automático:', repErr);
+                  console.warn('Aviso ao registrar repasse financeiro automático com nomes, tentando fallback:', repErr);
+                  // Caso a tabela repasses_financeiras não possua as colunas cliente_nome/vendedor_nome
+                  const fallbackRepPayload = { ...repassePayload };
+                  delete fallbackRepPayload.cliente_nome;
+                  delete fallbackRepPayload.vendedor_nome;
+                  const { error: repErrFallback } = await supabase.from('repasses_financeiras').insert(fallbackRepPayload);
+                  if (repErrFallback) {
+                    console.warn('Erro no fallback do repasse financeiro:', repErrFallback);
+                  }
                 }
               }
             }

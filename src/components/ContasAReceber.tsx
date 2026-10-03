@@ -18,18 +18,25 @@ export interface RepasseFinanceira {
   data_prevista_repasse: string | null;
   data_recebimento_real: string | null;
   comprovante_repasse_url?: string | null;
+  cliente_nome?: string | null;
+  vendedor_nome?: string | null;
   created_at: string;
   // Joined or populated fields
   filiais?: { id: string; nome: string } | null;
   vendas?: {
     id: string;
     valor_total?: number;
-    cliente_nome?: string;
-    vendedor_nome?: string;
-    produto_nome?: string;
-    forma_pagamento?: string;
-    metodo_pagamento?: string;
-    created_at?: string;
+    cliente_nome?: string | null;
+    vendedor_nome?: string | null;
+    cliente_id?: string | null;
+    produto_nome?: string | null;
+    forma_pagamento?: string | null;
+    metodo_pagamento?: string | null;
+    created_at?: string | null;
+    clientes?: {
+      nome?: string | null;
+      cpf?: string | null;
+    } | null;
   } | null;
 }
 
@@ -114,20 +121,23 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
       let query = supabase
         .from('repasses_financeiras')
         .select(`
-          id,
-          venda_id,
-          filial_id,
-          financeira,
-          valor_bruto,
-          taxa_retencao,
-          valor_liquido,
-          status,
-          data_prevista_repasse,
-          data_recebimento_real,
-          comprovante_repasse_url,
-          created_at,
+          *,
           filiais:filial_id (id, nome),
-          vendas:venda_id (id, valor_total, cliente_nome, vendedor_nome, produto_nome, metodo_pagamento, created_at)
+          vendas:venda_id (
+            id,
+            valor_total,
+            cliente_nome,
+            vendedor_nome,
+            cliente_id,
+            produto_nome,
+            forma_pagamento,
+            metodo_pagamento,
+            created_at,
+            clientes:cliente_id (
+              nome,
+              cpf
+            )
+          )
         `)
         .gte('created_at', inicioMes)
         .lt('created_at', fimMes)
@@ -136,8 +146,8 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
       const { data, error } = await query;
 
       if (error) {
-        console.warn('[ContasAReceber] Fallback para select sem joins explícitos:', error);
-        // Fallback sem joins caso as relações não estejam configuradas no schema cache
+        console.warn('[ContasAReceber] Fallback para select sem joins aninhados complexos:', error);
+        // Fallback: busca repasses e depois hidrata as vendas associadas
         const { data: rawData, error: rawErr } = await supabase
           .from('repasses_financeiras')
           .select('*')
@@ -147,13 +157,49 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
 
         if (rawErr) throw rawErr;
 
-        // Hidratar nomes de filiais se existirem
+        // Se houver venda_id nos repasses, buscar vendas em lote para trazer vendedor e cliente reais
+        const vendaIds = Array.from(new Set((rawData || []).map((r: any) => r.venda_id).filter(Boolean)));
+        let mapaVendas: Record<string, any> = {};
+
+        if (vendaIds.length > 0) {
+          try {
+            const { data: vendasData } = await supabase
+              .from('vendas')
+              .select(`
+                id,
+                valor_total,
+                cliente_nome,
+                vendedor_nome,
+                cliente_id,
+                produto_nome,
+                forma_pagamento,
+                metodo_pagamento,
+                created_at,
+                clientes:cliente_id (
+                  nome,
+                  cpf
+                )
+              `)
+              .in('id', vendaIds);
+
+            if (vendasData) {
+              vendasData.forEach((v: any) => {
+                mapaVendas[v.id] = v;
+              });
+            }
+          } catch (vErr) {
+            console.warn('[ContasAReceber] Aviso ao buscar vendas vinculadas no fallback:', vErr);
+          }
+        }
+
+        // Hidratar filiais e vendas
         const hydrated = (rawData || []).map((item: any) => {
           const filialObj = filiaisLista.find(f => f.id === item.filial_id);
+          const vendaObj = item.venda_id ? mapaVendas[item.venda_id] || null : null;
           return {
             ...item,
             filiais: filialObj ? { id: filialObj.id, nome: filialObj.nome } : null,
-            vendas: null
+            vendas: vendaObj
           };
         });
         setRepasses(hydrated);
@@ -289,16 +335,17 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
         if (statusFiltro === 'GLOSADO_CANCELADO' && !['GLOSADO', 'CANCELADO'].includes(s)) return false;
       }
 
-      // Busca por Texto (cliente, vendedor, contrato/venda)
+      // Busca por Texto (cliente, vendedor, contrato/venda, cpf)
       if (termoBusca.trim()) {
         const t = termoBusca.toLowerCase().trim();
-        const cliente = (item.vendas?.cliente_nome || '').toLowerCase();
-        const vendedor = (item.vendas?.vendedor_nome || '').toLowerCase();
+        const cliente = (item.vendas?.clientes?.nome || item.vendas?.cliente_nome || item.cliente_nome || '').toLowerCase();
+        const vendedor = (item.vendas?.vendedor_nome || item.vendedor_nome || '').toLowerCase();
+        const cpf = (item.vendas?.clientes?.cpf || '').toLowerCase();
         const vendaId = (item.venda_id || '').toLowerCase();
         const repasseId = (item.id || '').toLowerCase();
         const financeira = (item.financeira || '').toLowerCase();
 
-        const match = cliente.includes(t) || vendedor.includes(t) || vendaId.includes(t) || repasseId.includes(t) || financeira.includes(t);
+        const match = cliente.includes(t) || vendedor.includes(t) || cpf.includes(t) || vendaId.includes(t) || repasseId.includes(t) || financeira.includes(t);
         if (!match) return false;
       }
 
@@ -828,8 +875,8 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
                   const isSelected = selectedIds.includes(item.id);
                   const isPendente = String(item.status || '').toUpperCase() === 'PENDENTE';
                   const lojaNome = item.filiais?.nome || 'Loja Física';
-                  const clienteNome = item.vendas?.cliente_nome || 'Consumidor Final';
-                  const vendedorNome = item.vendas?.vendedor_nome || 'Vendedor';
+                  const clienteNome = item.vendas?.clientes?.nome || item.vendas?.cliente_nome || item.cliente_nome || 'Consumidor Final';
+                  const vendedorNome = item.vendas?.vendedor_nome || item.vendedor_nome || 'Vendedor';
 
                   return (
                     <tr
@@ -1054,11 +1101,15 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
                 </div>
                 <div>
                   <span className="text-[10px] text-zinc-500 uppercase font-bold block">Cliente</span>
-                  <span className="font-bold text-white">{modalAuditoriaItem.vendas?.cliente_nome || 'Consumidor Final'}</span>
+                  <span className="font-bold text-white">
+                    {modalAuditoriaItem.vendas?.clientes?.nome || modalAuditoriaItem.vendas?.cliente_nome || modalAuditoriaItem.cliente_nome || 'Consumidor Final'}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-zinc-500 uppercase font-bold block">Vendedor</span>
-                  <span className="font-bold text-white">{modalAuditoriaItem.vendas?.vendedor_nome || 'Vendedor'}</span>
+                  <span className="font-bold text-white">
+                    {modalAuditoriaItem.vendas?.vendedor_nome || modalAuditoriaItem.vendedor_nome || 'Vendedor'}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-zinc-500 uppercase font-bold block">Data da Venda</span>
