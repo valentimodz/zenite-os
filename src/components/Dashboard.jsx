@@ -39,6 +39,7 @@ import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
 import { parseMonetaryValue, formatCurrency, getFundoSessao, obterUuidPuro } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
+import PeriodoSelector from './common/PeriodoSelector';
 
 const extrairNumero = (valor) => {
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
@@ -1065,6 +1066,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [isSavingAuditStatus, setIsSavingAuditStatus] = useState(false);
   const [pdvFinanceiraParceira, setPdvFinanceiraParceira] = useState('PayJoy');
   const [pdvFinanceiraCustomInput, setPdvFinanceiraCustomInput] = useState('');
+  const [periodoCredito, setPeriodoCredito] = useState(() => {
+    const d = new Date();
+    const ano = d.getFullYear();
+    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    const ultimoDia = new Date(ano, d.getMonth() + 1, 0).getDate();
+    return {
+      inicio: `${ano}-${mes}-01`,
+      fim: `${ano}-${mes}-${String(ultimoDia).padStart(2, '0')}`,
+      mesAno: `${ano}-${mes}`
+    };
+  });
 
   // Modal para Vincular Cliente a Venda (Auditoria de Vendas & Crédito)
   const [vendaParaVincularCliente, setVendaParaVincularCliente] = useState(null);
@@ -1509,6 +1521,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [buscaDesconto, setBuscaDesconto] = useState('');
   const [isLoadingDescontos, setIsLoadingDescontos] = useState(false);
   const [isModalAuditoriaCegaOpen, setIsModalAuditoriaCegaOpen] = useState(false);
+  const [periodoDescontos, setPeriodoDescontos] = useState(() => {
+    const d = new Date();
+    const ano = d.getFullYear();
+    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    const ultimoDia = new Date(ano, d.getMonth() + 1, 0).getDate();
+    return {
+      inicio: `${ano}-${mes}-01`,
+      fim: `${ano}-${mes}-${String(ultimoDia).padStart(2, '0')}`,
+      mesAno: `${ano}-${mes}`
+    };
+  });
 
   // Estados para Edição de IMEI / Cor em Modal dedicado
   const [selectedImeiForEdit, setSelectedImeiForEdit] = useState(null);
@@ -2862,10 +2885,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       fetchCatalogoProdutos(targetEmpresaId).catch(e => console.warn('Aviso ao carregar catálogo de produtos:', e));
     }
 
-    if (activeTab === 'auditoria' || currentView === 'auditoria') {
-      fetchAuditoriaDescontos(targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
+    if (activeTab === 'auditoria' || currentView === 'auditoria' || activeTab === 'descontos' || currentView === 'descontos') {
+      fetchAuditoriaDescontos(targetEmpresaId, periodoDescontos?.mesAno || filtroMes, periodoDescontos?.inicio, periodoDescontos?.fim).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
     }
-  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria, filtroMes]);
+  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria, filtroMes, periodoDescontos]);
 
   // Log de inspeção de vendas no relatório solicitado para auditoria de vendedor e comissões
   useEffect(() => {
@@ -3077,18 +3100,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   };
 
-  const fetchAuditoriaDescontos = async (empresaId, mesAnoFiltro) => {
+  const fetchAuditoriaDescontos = async (empresaId, mesAnoFiltro = null, customInicio = null, customFim = null) => {
     const raw = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
     const targetEmpresaId = (raw && raw !== 'MASTER' && raw !== 'undefined' && raw !== 'null') ? raw : null;
 
-    // Range dinâmico baseado no seletor de mês abrangendo todo o mês (ex: 2026-09)
-    const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
-    const [anoStr, mesStr] = selectedMonth.split('-');
-    const anoNum = parseInt(anoStr, 10);
-    const mesNum = parseInt(mesStr, 10);
-    const dtInicio = `${selectedMonth}-01T00:00:00.000Z`;
-    const endDay = new Date(Date.UTC(anoNum, mesNum, 0)).getUTCDate();
-    const dtFim = `${selectedMonth}-${String(endDay).padStart(2, '0')}T23:59:59.999Z`;
+    let dtInicio = null;
+    let dtFim = null;
+
+    // Respeitar customInicio e customFim com fuso de Brasília (-03:00)
+    if (customInicio && customFim) {
+      dtInicio = `${customInicio}T00:00:00.000-03:00`;
+      dtFim = `${customFim}T23:59:59.999-03:00`;
+    } else {
+      // Range dinâmico baseado no seletor de mês abrangendo todo o mês (ex: 2026-09) com fuso horário local
+      const selectedMonth = mesAnoFiltro || periodoDescontos?.mesAno || filtroMes || new Date().toISOString().substring(0, 7);
+      const [anoStr, mesStr] = selectedMonth.split('-');
+      const anoNum = parseInt(anoStr, 10);
+      const mesNum = parseInt(mesStr, 10);
+      const endDay = new Date(anoNum, mesNum, 0).getDate();
+      dtInicio = `${selectedMonth}-01T00:00:00.000-03:00`;
+      dtFim = `${selectedMonth}-${String(endDay).padStart(2, '0')}T23:59:59.999-03:00`;
+    }
 
     setIsLoadingDescontos(true);
     try {
@@ -17527,6 +17559,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   // --- VISÃO DE AUDITORIA DE DESCONTOS (GERENTE & ADMIN) ---
   const renderAuditoriaDescontos = () => {
     const filteredDescontos = (descontosLogs || []).filter(d => {
+      // Filtro de Período (Datas de Início e Fim com fuso de Brasília)
+      if (periodoDescontos?.inicio && periodoDescontos?.fim && d.created_at) {
+        const itemDateStr = new Date(d.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+        if (itemDateStr < periodoDescontos.inicio || itemDateStr > periodoDescontos.fim) {
+          return false;
+        }
+      }
+
       const isTodasVendedores = !filtroDescontoVendedor || filtroDescontoVendedor === '' || filtroDescontoVendedor === 'todos' || filtroDescontoVendedor === 'ALL';
       const matchesVendedor = isTodasVendedores
         ? true
@@ -17593,7 +17633,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => fetchAuditoriaDescontos(profile?.empresa_id || company?.id || activeEmpresaId)}
+              onClick={() => fetchAuditoriaDescontos(
+                profile?.empresa_id || company?.id || activeEmpresaId,
+                periodoDescontos?.mesAno,
+                periodoDescontos?.inicio,
+                periodoDescontos?.fim
+              )}
               disabled={isLoadingDescontos}
               className="text-xs font-bold bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-[#333] px-3.5 py-1.5 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
             >
@@ -17654,8 +17699,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         </div>
 
         {/* FILTROS E BUSCA */}
-        <div className="bg-[#0A0A0A] border border-[#222222] p-4 rounded-xl flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="relative w-full sm:w-80">
+        <div className="bg-[#0A0A0A] border border-[#222222] p-4 rounded-xl flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4">
+          <div className="relative w-full md:w-80">
             <Search size={14} className="absolute left-3 top-3 text-gray-500" />
             <input
               type="text"
@@ -17666,7 +17711,29 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             />
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {/* Seletor de Período / Calendário */}
+            <PeriodoSelector
+              tipo="range"
+              mesAno={periodoDescontos?.mesAno}
+              dataInicio={periodoDescontos?.inicio}
+              dataFim={periodoDescontos?.fim}
+              onChange={({ inicio, fim, mesAno: novoMesAno }) => {
+                const novoPeriodo = {
+                  inicio,
+                  fim,
+                  mesAno: novoMesAno || inicio?.substring(0, 7)
+                };
+                setPeriodoDescontos(novoPeriodo);
+                fetchAuditoriaDescontos(
+                  profile?.empresa_id || company?.id || activeEmpresaId,
+                  novoPeriodo.mesAno,
+                  novoPeriodo.inicio,
+                  novoPeriodo.fim
+                );
+              }}
+            />
+
             {/* Filtro de Vendedor */}
             <select
               value={filtroDescontoVendedor}
@@ -19605,8 +19672,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ? vendasAuditadas.filter(s => s.is_credito_ou_financeira)
       : vendasAuditadas;
 
-    // Aplicar Filtros (Busca por Nome/CPF/IMEI, Status de Crédito, Parceiro Financeiro)
+    // Aplicar Filtros (Período de Data com fuso de Brasília, Busca por Nome/CPF/IMEI, Status de Crédito, Parceiro Financeiro)
     const filteredVendas = baseAuditVendas.filter(sale => {
+      // Filtro por Data / Intervalo de Calendário (respeitando fuso de São Paulo)
+      if (periodoCredito?.inicio && periodoCredito?.fim && sale.created_at) {
+        const itemDateStr = new Date(sale.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+        if (itemDateStr < periodoCredito.inicio || itemDateStr > periodoCredito.fim) {
+          return false;
+        }
+      }
+
       const q = buscaAuditoriaCredito.toLowerCase().trim();
       const matchSearch = !q ||
         (sale.cliente_nome && sale.cliente_nome.toLowerCase().includes(q)) ||
@@ -19629,6 +19704,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       return matchSearch && matchStatus && matchFin;
     });
+
+    // Calcular clientes bloqueados / inadimplentes com base nos registros do período filtrado
+    const inadimplentesNoPeriodo = filteredVendas.filter(s => String(s.status_credito || '').toUpperCase() === 'INADIMPLENTE');
+    const inadimplentesUnicosCount = new Set(inadimplentesNoPeriodo.map(s => s.cliente_id_real || s.cliente_cpf_cnpj || s.cliente_nome)).size;
 
     return (
       <div className="space-y-6 animate-fadeIn">
@@ -19654,7 +19733,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               <div className="text-right">
                 <span className="text-[10px] text-gray-500 uppercase font-bold block">Inadimplentes Bloqueados</span>
                 <span className="text-sm font-extrabold text-red-400 font-mono">
-                  {clientes.filter(c => c.status_credito === 'INADIMPLENTE').length} cliente(s)
+                  {inadimplentesUnicosCount > 0
+                    ? `${inadimplentesUnicosCount} no período`
+                    : `${clientes.filter(c => c.status_credito === 'INADIMPLENTE').length} total`}
                 </span>
               </div>
             </div>
@@ -19662,8 +19743,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         </div>
 
         {/* Barra de Filtros */}
-        <div className="bg-[#0A0A0A] border border-[#222222] p-4 rounded-xl flex flex-col md:flex-row gap-4 justify-between items-center">
-          <div className="relative w-full md:w-96">
+        <div className="bg-[#0A0A0A] border border-[#222222] p-4 rounded-xl flex flex-col md:flex-row gap-4 justify-between items-stretch md:items-center">
+          <div className="relative w-full md:w-80">
             <input
               type="text"
               value={buscaAuditoriaCredito}
@@ -19674,7 +19755,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             <Search size={14} className="absolute left-3 top-3 text-gray-500" />
           </div>
 
-          <div className="flex flex-wrap md:flex-nowrap gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {/* Seletor de Período / Calendário */}
+            <PeriodoSelector
+              tipo="range"
+              mesAno={periodoCredito?.mesAno}
+              dataInicio={periodoCredito?.inicio}
+              dataFim={periodoCredito?.fim}
+              onChange={({ inicio, fim, mesAno: novoMesAno }) => {
+                const novoPeriodo = {
+                  inicio,
+                  fim,
+                  mesAno: novoMesAno || inicio?.substring(0, 7)
+                };
+                setPeriodoCredito(novoPeriodo);
+                // Atualizar vendas executivas/gerenciais se o mês mudar
+                if (novoPeriodo.mesAno && novoPeriodo.mesAno !== filtroMes) {
+                  const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+                  if (targetEmpresaId) {
+                    fetchGerenteData(targetEmpresaId, novoPeriodo.mesAno, true).catch(e => console.warn('Aviso ao carregar vendas do período:', e));
+                  }
+                }
+              }}
+            />
+
             {/* Filtro Status de Crédito */}
             <div className="flex items-center gap-2 bg-black border border-[#222222] px-3 py-1.5 rounded-lg flex-1 md:flex-none">
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status:</span>
