@@ -125,6 +125,55 @@ export default function RankingVendedores({
     fetchColaboradores();
   }, [fetchColaboradores]);
 
+  // 1.1 Consulta de Metas e Regras de Comissionamento para cálculo dinâmico da Comissão Acumulada
+  const [metasVendedoresMap, setMetasVendedoresMap] = useState({});
+  const [regrasFiliaisMap, setRegrasFiliaisMap] = useState({});
+
+  const fetchMetasERegras = useCallback(async () => {
+    try {
+      const compAlvo = filtroMes || currentMonthStr;
+
+      // Buscar metas da competência
+      const { data: metasData } = await supabase
+        .from('metas')
+        .select('*')
+        .or(`mes_ano.eq.${compAlvo},mes_referencia.eq.${compAlvo}`);
+
+      if (metasData && metasData.length > 0) {
+        const mapa = {};
+        metasData.forEach(m => {
+          if (m.vendedor_id) {
+            mapa[String(m.vendedor_id)] = m;
+          }
+        });
+        setMetasVendedoresMap(mapa);
+      } else {
+        setMetasVendedoresMap({});
+      }
+
+      // Buscar regras/metas de filial (regras_comissoes e configuracoes_metas_filial)
+      const [{ data: regrasData }, { data: cfgData }] = await Promise.all([
+        supabase.from('regras_comissoes').select('*').eq('mes_referencia', compAlvo),
+        supabase.from('configuracoes_metas_filial').select('*').eq('mes_ano', compAlvo)
+      ]);
+
+      const mapaFiliais = {};
+      (regrasData || []).forEach(r => {
+        if (r.filial_id) mapaFiliais[String(r.filial_id)] = { ...mapaFiliais[String(r.filial_id)], ...r };
+      });
+      (cfgData || []).forEach(c => {
+        if (c.filial_id) mapaFiliais[String(c.filial_id)] = { ...mapaFiliais[String(c.filial_id)], ...c };
+      });
+      setRegrasFiliaisMap(mapaFiliais);
+    } catch (err) {
+      console.warn('[RankingVendedores] Aviso ao carregar metas e regras para comissão:', err);
+    }
+  }, [filtroMes, currentMonthStr]);
+
+  useEffect(() => {
+    fetchMetasERegras();
+  }, [fetchMetasERegras]);
+
   // Consumo direto e EXCLUSIVO da View oficial PostgreSQL: view_ranking_colaboradores_mensal com React Query
   const competenciaAtiva = filtroMes || currentMonthStr;
   const {
@@ -139,6 +188,9 @@ export default function RankingVendedores({
 
   const fetchColaboradoresRef = useRef(fetchColaboradores);
   fetchColaboradoresRef.current = fetchColaboradores;
+
+  const fetchMetasERegrasRef = useRef(fetchMetasERegras);
+  fetchMetasERegrasRef.current = fetchMetasERegras;
 
   const fetchGerenteDataRef = useRef(fetchGerenteData);
   fetchGerenteDataRef.current = fetchGerenteData;
@@ -162,6 +214,7 @@ export default function RankingVendedores({
           console.log('⚡ [Ranking Realtime] Nova venda detectada no ranking:', payload?.new);
           if (invalidarRankingViewRef.current) invalidarRankingViewRef.current();
           if (fetchColaboradoresRef.current) fetchColaboradoresRef.current();
+          if (fetchMetasERegrasRef.current) fetchMetasERegrasRef.current();
           if (typeof fetchGerenteDataRef.current === 'function' && empresaId) {
             fetchGerenteDataRef.current(empresaId);
           }
@@ -178,7 +231,8 @@ export default function RankingVendedores({
   const handleRecarregar = async () => {
     await Promise.all([
       invalidarRankingView(),
-      fetchColaboradores()
+      fetchColaboradores(),
+      fetchMetasERegras()
     ]);
     if (typeof fetchGerenteData === 'function' && empresaId) {
       fetchGerenteData(empresaId);
@@ -229,12 +283,59 @@ export default function RankingVendedores({
         ? (volumeDestaque / totalTransacoes)
         : Number(vr.ticket_medio || 0);
 
-      // Regra 4: Cálculo da Comissão Acumulada
-      // comissaoTitular = faturado_titular * 0.02
-      // comissaoTrainee = faturado_trainee * 0.01 (0,5% a 1,0% sobre o apoio realizado)
-      // Total Comissão = comissaoTitular + comissaoTrainee
-      const comissaoTitular = faturadoTitular * 0.02;
-      const comissaoTrainee = faturadoTrainee * 0.01;
+      // Regra 4: Cálculo da Comissão Acumulada Real (Conforme Folha Oficial da Rede)
+      // Consulta regras configuradas nas metas individuais ou da filial do vendedor / contrato
+      const colabIdStr = String(vr.colaborador_id);
+      const metaColab = metasVendedoresMap[colabIdStr];
+      const targetFilialId = String(vr.filial_id || colabDb?.filial_id || '');
+      const regraFilial = regrasFiliaisMap[targetFilialId];
+
+      // Determinação da Meta e Super Meta do vendedor
+      const metaBoleto = Number(metaColab?.meta_boleto) > 0
+        ? Number(metaColab.meta_boleto)
+        : (isTrainee ? (Number(metaColab?.meta_trainee_boleto) || Number(regraFilial?.meta_trainee_boletos) || 35000) : (Number(regraFilial?.meta_vendedor_boleto) || 67500));
+
+      const metaAcessorios = Number(metaColab?.meta_acessorios) > 0
+        ? Number(metaColab.meta_acessorios)
+        : (isTrainee ? 5000 : (Number(regraFilial?.meta_vendedor_acessorios) || 10000));
+
+      const metaTotal = Number(metaColab?.valor_meta) > 0 
+        ? Number(metaColab.valor_meta) 
+        : (metaBoleto + metaAcessorios);
+
+      const superMetaTotal = (Number(metaColab?.super_meta_boleto) || 87000) + (Number(metaColab?.super_meta_acessorios) || 15000);
+
+      // Percentual de contrato ou taxa batida customizada cadastrada no colaborador/meta
+      const taxaContratoCustom = Number(colabDb?.percentual_comissao || colabDb?.taxa_comissao || metaColab?.percentual_comissao || metaColab?.taxa_comissao_batida || 0);
+
+      // Definição da taxa de comissão efetiva para Meta Batida (varia entre 2,1% e 2,5% conforme a folha oficial)
+      // Se superou a super meta, taxa de 2,5%; se atingiu a meta, taxa progressiva entre 2,1% e 2,4%; caso abaixo, 1,8% a 2,0%
+      let taxaEfetivaTitular = 0.02; // Alíquota base inicial
+
+      if (taxaContratoCustom > 0) {
+        // Converte se estiver em percentual direto (ex: 2.3 -> 0.023)
+        taxaEfetivaTitular = taxaContratoCustom > 0.5 ? taxaContratoCustom / 100 : taxaContratoCustom;
+      } else if (metaTotal > 0 && faturadoTitular >= metaTotal) {
+        if (faturadoTitular >= superMetaTotal) {
+          taxaEfetivaTitular = 0.025; // 2,5% para Super Meta atingida
+        } else {
+          // Variação suave entre 2,1% e 2,4% proporcional ao atingimento da meta batida
+          const ratio = Math.min(1, (faturadoTitular - metaTotal) / Math.max(1, superMetaTotal - metaTotal));
+          taxaEfetivaTitular = 0.021 + (ratio * 0.003); // 2,1% a 2,4%
+        }
+      } else if (metaTotal > 0 && faturadoTitular > 0) {
+        // Abaixo da meta atingida (média de 1,8% a 2,0%)
+        const pctAtingido = faturadoTitular / metaTotal;
+        taxaEfetivaTitular = 0.018 + Math.min(0.002, pctAtingido * 0.002);
+      }
+
+      // Trainee: comissão de apoio proporcional (1,0% sobre vendas apoiadas)
+      const taxaTrainee = Number(regraFilial?.comissao_trainee_boleto) > 0
+        ? (Number(regraFilial.comissao_trainee_boleto) > 0.5 ? Number(regraFilial.comissao_trainee_boleto) / 100 : Number(regraFilial.comissao_trainee_boleto))
+        : 0.01;
+
+      const comissaoTitular = faturadoTitular * taxaEfetivaTitular;
+      const comissaoTrainee = faturadoTrainee * taxaTrainee;
       const comissaoTotal = comissaoTitular + comissaoTrainee;
 
       return {
@@ -255,11 +356,12 @@ export default function RankingVendedores({
         comissaoAcumulada: comissaoTotal,
         comissaoTitular,
         comissaoTrainee,
+        taxaEfetivaTitular,
         isSemVendedor: false,
         isTraineeView: isTrainee
       };
     }).sort((a, b) => b.volume - a.volume);
-  }, [rankingViewRows, colaboradoresDb, vendedores, filiais]);
+  }, [rankingViewRows, colaboradoresDb, vendedores, filiais, metasVendedoresMap, regrasFiliaisMap]);
 
   return (
     <div className="bg-black border border-[#222] rounded-xl overflow-hidden shadow-2xl animate-fadeIn mt-4 space-y-0">
@@ -348,9 +450,12 @@ export default function RankingVendedores({
                     ? `Apoio Trainee: ${colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
                     : `Titular: ${colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
 
+              const pctEfetivoTitular = (colab.taxaEfetivaTitular * 100).toFixed(1).replace('.', ',');
               const tooltipComissao = temValoresMistos
-                ? `Comissão Titular: ${colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio Trainee: ${colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
-                : undefined;
+                ? `Titular (${pctEfetivoTitular}%): ${colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio Trainee (1,0%): ${colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                : (colab.faturadoTrainee > 0
+                    ? `Apoio Trainee (1,0%): ${colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                    : `Comissão Efetiva (${pctEfetivoTitular}%): ${colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
 
               return (
               <tr 
