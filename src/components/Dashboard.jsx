@@ -14238,6 +14238,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         createdVendaIds.push(rpcRes.venda_id);
 
         try {
+          const DEFAULT_CONSUMIDOR_FINAL_ID = idPadraoConsumidor || '3788fcc4-423c-46ce-a02e-5906d805925d';
+
           // Helper de sanitização estrita para cliente_id evitando violação de foreign key vendas_cliente_id_fkey
           const getClienteIdValido = (cliente) => {
             const rawId = typeof cliente === 'object' && cliente !== null ? (cliente.id || cliente.cliente_id) : cliente;
@@ -14248,26 +14250,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 if (trimmed !== CONSUMIDOR_FINAL_UUID && trimmed !== GENERIC_CONSUMIDOR_UUID) {
                   return trimmed;
                 }
-                // Se for o UUID zeros e for Consumidor Final, usa idPadraoConsumidor se disponível ou zeros
+                // Se for o UUID zeros e for Consumidor Final, usa DEFAULT_CONSUMIDOR_FINAL_ID
                 if (isConsumidorFinal) {
-                  return idPadraoConsumidor || CONSUMIDOR_FINAL_UUID;
+                  return DEFAULT_CONSUMIDOR_FINAL_ID;
                 }
               }
             }
-            // Se for consumidor final e não tiver cliente, usa idPadraoConsumidor ou null
             if (isConsumidorFinal) {
-              return idPadraoConsumidor || null;
+              return DEFAULT_CONSUMIDOR_FINAL_ID;
             }
             return null;
           };
 
-          const candidateIdParaVenda = (isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID && cliente_id !== GENERIC_CONSUMIDOR_UUID)
-            ? cliente_id
-            : ((isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID)
-                ? clienteIdBanco
-                : ((isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID) ? selectedPdvClienteId : null));
-
-          const clienteIdFinalValido = candidateIdParaVenda || getClienteIdValido(clienteResolvido?.id || cliente_id || clienteIdBanco || selectedPdvClienteId);
+          const rawSelectedClienteId = selectedPdvCliente?.id || (isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID && cliente_id !== GENERIC_CONSUMIDOR_UUID ? cliente_id : null) || (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID ? clienteIdBanco : null) || (isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID ? selectedPdvClienteId : null);
+          const clienteIdFinalValido = rawSelectedClienteId || getClienteIdValido(clienteResolvido?.id || cliente_id || clienteIdBanco || selectedPdvClienteId) || DEFAULT_CONSUMIDOR_FINAL_ID;
 
           const actualValorPago = pdvStatusPagamento === 'PAGO'
             ? valorTotalNovo
@@ -14278,12 +14274,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           const itemDescontoUnitario = Math.max(0, itemPrecoTabela - itemValorVendido);
           const itemDescontoTotal = itemDescontoUnitario * Number(item.quantidade);
 
-          const finalVendedorId = obterUuidPuro(effectiveVendedorId || vendedor_id || session?.user?.id || profile?.id);
-          const finalVendedorNome = effectiveVendedorNome || resolvedVendedorNome || 'Vendedor';
+          const finalVendedorId = obterUuidPuro(session?.user?.id || profile?.id || effectiveVendedorId || vendedor_id);
+          const finalVendedorNome = (profile?.nome || session?.user?.user_metadata?.nome || session?.user?.user_metadata?.full_name || effectiveVendedorNome || resolvedVendedorNome || 'Vendedor').trim();
 
           if (!finalVendedorId) {
             throw new Error("Tentativa de venda sem vendedor logado.");
           }
+
+          const finalClienteNome = (selectedPdvCliente?.nome || clienteResolvido?.nome || (pdvClienteNome && pdvClienteNome.trim() && pdvClienteNome.trim().toLowerCase() !== 'consumidor final' && pdvClienteNome.trim().toLowerCase() !== 'consumidor balcão' && pdvClienteNome.trim().toLowerCase() !== 'consumidor balcao' ? pdvClienteNome.trim() : null) || resolvedClienteNome || 'Consumidor Final').trim();
 
           const payloadVendaUpdate = {
             empresa_id: obterUuidPuro(empresaId),
@@ -14292,13 +14290,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             produto_nome: item.produto.nome,
             imei_novo: item.imei || null,
             imei: item.imei || null,
-            cliente_nome: resolvedClienteNome,
+            cliente_nome: finalClienteNome,
             cliente_cpf_cnpj: resolvedClienteCpf,
             cliente_cpf: resolvedClienteCpf,
             cpf_cliente: resolvedClienteCpf,
             cliente_email: resolvedClienteEmail,
             cliente_telefone: resolvedClienteTelefone,
-            cliente_id: obterUuidPuro(clienteIdFinalValido) || null,
+            cliente_id: obterUuidPuro(clienteIdFinalValido) || obterUuidPuro(DEFAULT_CONSUMIDOR_FINAL_ID),
             vendedor_id: finalVendedorId,
             usuario_id: finalVendedorId,
             criado_por: finalVendedorId,
@@ -14340,7 +14338,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               console.warn("⚠️ Tentando fallback de cliente_id na venda com cliente padrão ou null...");
               await supabase
                 .from('vendas')
-                .update({ ...payloadVendaUpdate, cliente_id: (idPadraoConsumidor ? obterUuidPuro(idPadraoConsumidor) : null) })
+                .update({ ...payloadVendaUpdate, cliente_id: (DEFAULT_CONSUMIDOR_FINAL_ID ? obterUuidPuro(DEFAULT_CONSUMIDOR_FINAL_ID) : null) })
                 .eq('id', obterUuidPuro(rpcRes.venda_id));
             }
           }
@@ -16041,13 +16039,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const clienteObj = clientes.find(c => String(c.id) === String(venda.cliente_id)) || null;
 
     const clienteNomeFinal = 
+      venda.clientes?.nome ||
+      venda.cliente?.nome ||
       (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) ||
-      venda.cliente?.nome || 
-      (typeof venda.cliente === 'string' ? venda.cliente : null) || 
-      venda.nome_cliente || 
-      venda.clientes?.nome || 
-      clienteObj?.nome || 
-      venda.cliente_nome || 
+      clienteObj?.nome ||
+      (typeof venda.cliente === 'string' ? venda.cliente : null) ||
+      venda.nome_cliente ||
+      venda.cliente_nome ||
       'Consumidor Final';
 
     const clienteCpfCnpjFinal = 
