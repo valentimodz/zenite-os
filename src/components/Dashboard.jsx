@@ -2119,46 +2119,70 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [categorias, categoriaProduto]);
 
-  // Busca dos Treeners/Trainees da Filial Ativa (Filtro Estrito por cargo TRAINEE/TREENER/is_treinner)
+  // Busca dos Treeners/Trainees da Empresa (Sem filtro de filial_id para permitir atuação itinerante/multi-loja)
   useEffect(() => {
     const fetchTreeners = async () => {
-      if (!activeFilialId) {
-        setTreenersFilial([]);
-        return;
-      }
       try {
-        const empId = activeEmpresaId || company?.id;
-        let profQuery = supabase
-          .from('profiles')
-          .select('id, nome, email, role');
+        const empId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
+        let traineesEncontrados = [];
 
-        if (activeFilialId && activeFilialId !== 'null' && activeFilialId !== 'undefined') {
-          profQuery = profQuery.or(`filial_id.eq.${activeFilialId},empresa_id.eq.${activeFilialId}`);
-        } else if (empId) {
-          profQuery = profQuery.or(`filial_id.is.null,empresa_id.eq.${empId}`);
+        // 1. Tentar busca na tabela 'profiles'
+        try {
+          let profQuery = supabase
+            .from('profiles')
+            .select('id, nome, email, role, cargo, filial_id, is_treinner, ativo')
+            .order('nome', { ascending: true });
+
+          if (empId && empId !== 'MASTER' && empId !== 'all') {
+            profQuery = profQuery.or(`empresa_id.eq.${empId},empresa_id.is.null`);
+          }
+
+          const { data: profsData, error: profsErr } = await profQuery;
+          if (!profsErr && Array.isArray(profsData) && profsData.length > 0) {
+            traineesEncontrados = profsData.filter(u => {
+              if (u.ativo === false || u.status === 'INATIVO') return false;
+              const roleUpper = String(u.role || u.cargo || u.perfil || '').toUpperCase();
+              return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER') || Boolean(u.is_treinner);
+            });
+          }
+        } catch (errP) {
+          console.warn('Aviso ao consultar trainees em profiles:', errP);
         }
 
-        let { data, error } = await profQuery;
-        if (error || !data || data.length === 0) {
-          const { data: profs } = await supabase.from('profiles').select('id, nome, email, role');
-          data = profs || [];
+        // 2. Se não encontrou ou como fallback/complemento, verificar também na tabela 'usuarios'
+        if (traineesEncontrados.length === 0) {
+          try {
+            let userQuery = supabase
+              .from('usuarios')
+              .select('id, nome, role, cargo, filial_id, ativo')
+              .order('nome', { ascending: true });
+
+            if (empId && empId !== 'MASTER' && empId !== 'all') {
+              userQuery = userQuery.or(`empresa_id.eq.${empId},empresa_id.is.null`);
+            }
+
+            const { data: usersData, error: usersErr } = await userQuery;
+            if (!usersErr && Array.isArray(usersData) && usersData.length > 0) {
+              traineesEncontrados = usersData.filter(u => {
+                if (u.ativo === false) return false;
+                const roleUpper = String(u.role || u.cargo || '').toUpperCase();
+                return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER');
+              });
+            }
+          } catch (errU) {
+            console.warn('Aviso ao consultar trainees na tabela usuarios:', errU);
+          }
         }
 
-        // Filtrar estritamente apenas os colaboradores com perfil TRAINEE, TREENER ou is_treinner
-        const filteredTreeners = (data || []).filter(u => {
-          const roleUpper = (u.role || u.cargo || u.perfil || '').toUpperCase();
-          return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER') || Boolean(u.is_treinner);
-        });
-
-        console.log("🔥 [FETCH TREENERS] Treeners/Trainees elegíveis encontrados:", filteredTreeners.length);
-        setTreenersFilial(filteredTreeners);
+        console.log("🔥 [FETCH TRAINEES] Trainees itinerantes elegíveis carregados:", traineesEncontrados.length);
+        setTreenersFilial(traineesEncontrados);
       } catch (err) {
-        console.error('Erro ao carregar treeners da filial:', err);
+        console.error('Erro ao carregar trainees da empresa:', err);
       }
     };
 
     fetchTreeners();
-  }, [activeFilialId]);
+  }, [empresaId, activeEmpresaId, company?.id, profile?.empresa_id]);
 
   // Trava de Trainee: Se o carrinho for esvaziado, limpa a seleção de Treener Responsável
   useEffect(() => {
@@ -14169,6 +14193,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           metasState: metasInfo
         });
 
+        // Resolução segura de Trainee selecionado (id e nome)
+        const selectedTraineeObj = (treenersFilial || []).find(t => String(t.id) === String(selectedTreenerId)) || null;
+        const resolvedTraineeId = selectedTreenerId ? (obterUuidPuro(selectedTreenerId) || null) : null;
+        const resolvedTraineeNome = resolvedTraineeId ? (selectedTraineeObj?.nome || selectedTraineeObj?.nome_completo || null) : null;
+
         const comissaoCalculada = comissaoInfo.comissaoVendedor;
         const comissaoTraineeCalculada = comissaoInfo.comissaoTrainee;
         const teveParticipacaoTraineeFinal = comissaoInfo.teveParticipacaoTrainee;
@@ -14301,8 +14330,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             usuario_id: finalVendedorId,
             criado_por: finalVendedorId,
             vendedor_nome: finalVendedorNome,
-            trainee_id: obterUuidPuro(selectedTreenerId) || null,
-            treener_id: obterUuidPuro(selectedTreenerId) || null,
+            trainee_id: resolvedTraineeId,
+            treener_id: resolvedTraineeId,
+            trainee_nome: resolvedTraineeNome,
             comissao: comissaoCalculada,
             comissao_trainee: comissaoTraineeCalculada,
             teve_participacao_trainee: teveParticipacaoTraineeFinal,
@@ -14532,8 +14562,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           await supabase.from('vendas').update({
             teve_participacao_trainee: true,
             comissao_trainee: comissaoTraineeCalculada,
-            trainee_id: obterUuidPuro(selectedTreenerId) || null,
-            treener_id: obterUuidPuro(selectedTreenerId) || null
+            trainee_id: resolvedTraineeId,
+            treener_id: resolvedTraineeId,
+            trainee_nome: resolvedTraineeNome
           }).eq('id', obterUuidPuro(rpcRes.venda_id));
         }
 
@@ -14620,6 +14651,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         cliente_email: resolvedClienteEmail || '',
         cliente_telefone: resolvedClienteTelefone || '',
         obs_garantia: pdvObsGarantia,
+        trainee_id: resolvedTraineeId,
+        trainee_nome: resolvedTraineeNome,
         itens: itemsForRecibo,
         valor_total: totalNovoAjustado,
         total: totalNovoAjustado,
@@ -19442,10 +19475,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               }}
                               className="w-full bg-surface border border-border focus:border-primary rounded-lg px-3 py-2 text-xs text-foreground outline-none cursor-pointer font-bold"
                             >
-                              <option value="">Sem participação de Trainee</option>
+                              <option value="">Nenhum / Venda Solo</option>
                               {treenersFilial.map((t) => (
                                 <option key={t.id} value={t.id}>
-                                  {t.nome} {t.role ? `(${t.role})` : ''}
+                                  {t.nome} {t.role ? `(${t.role})` : (t.cargo ? `(${t.cargo})` : '')}
                                 </option>
                               ))}
                             </select>
