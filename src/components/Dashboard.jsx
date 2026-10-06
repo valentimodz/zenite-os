@@ -9749,34 +9749,60 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setSelectedPromoType('upgrade');
 
     try {
-      const cleanCpf = cliente.cpf_cnpj ? cliente.cpf_cnpj.replace(/\D/g, '') : '';
-      const rawCpf = cliente.cpf_cnpj ? cliente.cpf_cnpj.trim() : '';
+      const docRaw = (cliente.cpf_cnpj || cliente.cpf || cliente.documento || '').trim();
+      const docClean = docRaw.replace(/\D/g, '');
+      const clienteNomeClean = (cliente.nome || '').trim();
 
-      // Construir filtros flexíveis para garantir busca tanto por ID quanto por CPF/CNPJ legados
+      // Construir filtros flexíveis para garantir busca abrangente por ID, Nome, CPF ou CPF/CNPJ
       const orConditions = [];
       if (cliente.id) orConditions.push(`cliente_id.eq.${cliente.id}`);
-      if (cleanCpf) orConditions.push(`cliente_cpf_cnpj.eq.${cleanCpf}`);
-      if (rawCpf && rawCpf !== cleanCpf) orConditions.push(`cliente_cpf_cnpj.eq.${rawCpf}`);
+      if (clienteNomeClean) orConditions.push(`cliente_nome.ilike.%${clienteNomeClean}%`);
+      if (docClean) {
+        orConditions.push(`cliente_cpf_cnpj.eq.${docClean}`);
+        orConditions.push(`cliente_cpf.eq.${docClean}`);
+      }
+      if (docRaw && docRaw !== docClean) {
+        orConditions.push(`cliente_cpf_cnpj.eq.${docRaw}`);
+        orConditions.push(`cliente_cpf.eq.${docRaw}`);
+      }
 
       let data = null;
       let error = null;
 
+      // 1. Tentar busca ampla com join de filiais e itens_venda
       if (orConditions.length > 0) {
         const res = await supabase
           .from('vendas')
-          .select('*, filiais:filial_id(nome)')
+          .select('*, filiais:filial_id(nome), itens_venda(*)')
           .or(orConditions.join(','))
           .order('created_at', { ascending: false });
         data = res.data;
         error = res.error;
-      } else if (cliente.nome) {
-        const res = await supabase
+      }
+
+      // Se der erro de relação (ex: itens_venda ou filiais inexistente no schema) ou retornar vazio
+      if (error || (!data && orConditions.length > 0)) {
+        console.warn("⚠️ [HISTÓRICO CLIENTE] Tentando busca de fallback sem joins aninhados:", error?.message);
+        const resFallback = await supabase
+          .from('vendas')
+          .select('*')
+          .or(orConditions.join(','))
+          .order('created_at', { ascending: false });
+        data = resFallback.data;
+        error = resFallback.error;
+      }
+
+      // Se ainda não encontrou e temos o nome do cliente, faz uma busca direta por ilike
+      if ((!data || data.length === 0) && clienteNomeClean) {
+        const resNome = await supabase
           .from('vendas')
           .select('*, filiais:filial_id(nome)')
-          .ilike('cliente_nome', `%${cliente.nome.trim()}%`)
+          .ilike('cliente_nome', `%${clienteNomeClean}%`)
           .order('created_at', { ascending: false });
-        data = res.data;
-        error = res.error;
+        if (!resNome.error && resNome.data && resNome.data.length > 0) {
+          data = resNome.data;
+          error = null;
+        }
       }
 
       if (error) {
@@ -28475,7 +28501,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     <div className="space-y-3">
                       <div className="flex justify-between items-center bg-[#111111] p-3 rounded-lg text-xs font-semibold">
                         <span className="text-gray-400">Total de Compras: <strong className="text-white">{clienteHistoricoVendas.length}</strong></span>
-                        <span className="text-gray-400">Valor Total Acumulado: <strong className="text-[#6A0DAD] font-mono font-bold">R$ {clienteHistoricoVendas.reduce((acc, v) => acc + parseFloat(v.valor_total || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
+                        <span className="text-gray-400">Valor Total Acumulado: <strong className="text-[#6A0DAD] font-mono font-bold">R$ {clienteHistoricoVendas.reduce((acc, v) => acc + (Number(v.valor_total) || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></span>
                       </div>
 
                       {clienteHistoricoVendas.length === 0 ? (
