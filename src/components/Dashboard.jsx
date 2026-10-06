@@ -9759,7 +9759,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       // 1. Busca as vendas do cliente
       const { data: vendasData, error: vendasError } = await supabase
         .from('vendas')
-        .select('id, created_at, valor_total, forma_pagamento, status, vendedor_nome')
+        .select('id, created_at, valor_total, forma_pagamento, vendedor_nome')
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false });
 
