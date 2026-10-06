@@ -4,16 +4,16 @@ import Groq from 'groq-sdk';
  * Fallback estático de alta conversão para os casos em que a IA estiver indisponível ou sem chave API.
  */
 export function getStaticPromoFallback(cliente, vendas, promoType) {
-  const nomeCliente = cliente?.nome ? cliente.nome.split(' ')[0] : 'Cliente';
+  const primeiroNome = cliente?.nome ? cliente.nome.trim().split(' ')[0] : 'Cliente';
   const ultimaVenda = vendas && vendas.length > 0 ? vendas[0] : null;
   const aparelhoComprado = ultimaVenda?.produto_nome || ultimaVenda?.produtos_descricao || 'aparelho';
 
   if (promoType === 'upgrade') {
-    return `Olá, ${nomeCliente}! 🚀 Notamos que você tem o seu ${aparelhoComprado} com a gente. Que tal dar um upgrade para o modelo mais recente hoje com condições VIP exclusivas de carnê/troca na nossa loja? Responda este Whats para garantir sua oferta! 📱✨`;
+    return `Olá, ${primeiroNome}! 🚀 Notamos que você tem o seu ${aparelhoComprado} com a gente. Que tal dar um upgrade para o modelo mais recente hoje com condições VIP exclusivas de carnê/troca na nossa loja? Responda este Whats para garantir sua oferta! 📱✨`;
   } else if (promoType === 'quitacao') {
-    return `Parabéns, ${nomeCliente}! 🎉 Seu parcelamento do ${aparelhoComprado} está sendo concluído este mês! Temos uma condição especial de quitação com limite de crédito liberado na hora para você levar um aparelho novo. Bora conferir? 💳🔥`;
+    return `Parabéns, ${primeiroNome}! 🎉 Seu parcelamento do ${aparelhoComprado} está sendo concluído este mês! Temos uma condição especial de quitação com limite de crédito liberado na hora para você levar um aparelho novo. Bora conferir? 💳🔥`;
   } else {
-    return `Fala ${nomeCliente}! 🎧 Selecionamos você para uma condição especial essa semana: 20% OFF em qualquer acessório premium (capa, película de nano-gel ou carregador rápido). É só apresentar este Whats na loja! 🛍️⚡`;
+    return `Fala, ${primeiroNome}! 🎧 Selecionamos você para uma condição especial essa semana: 20% OFF em qualquer acessório premium (capa, película de nano-gel ou carregador rápido). É só apresentar este Whats na loja! 🛍️⚡`;
   }
 }
 

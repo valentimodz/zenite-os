@@ -9749,75 +9749,61 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setSelectedPromoType('upgrade');
 
     try {
-      const docRaw = (cliente.cpf_cnpj || cliente.cpf || cliente.documento || '').trim();
-      const docClean = docRaw.replace(/\D/g, '');
-      const clienteNomeClean = (cliente.nome || '').trim();
-
-      // Construir filtros flexíveis para garantir busca abrangente por ID, Nome, CPF ou CPF/CNPJ
-      const orConditions = [];
-      if (cliente.id) orConditions.push(`cliente_id.eq.${cliente.id}`);
-      if (clienteNomeClean) orConditions.push(`cliente_nome.ilike.%${clienteNomeClean}%`);
-      if (docClean) {
-        orConditions.push(`cliente_cpf_cnpj.eq.${docClean}`);
-        orConditions.push(`cliente_cpf.eq.${docClean}`);
-      }
-      if (docRaw && docRaw !== docClean) {
-        orConditions.push(`cliente_cpf_cnpj.eq.${docRaw}`);
-        orConditions.push(`cliente_cpf.eq.${docRaw}`);
+      if (!cliente?.id) {
+        console.warn('Cliente selecionado sem id para busca de histórico.');
+        setClienteHistoricoVendas([]);
+        return;
       }
 
-      let data = null;
-      let error = null;
+      // Consulta direta e estável na tabela vendas pelo cliente_id com itens_venda aninhados
+      let { data: vendas, error } = await supabase
+        .from('vendas')
+        .select(`
+          id,
+          created_at,
+          valor_total,
+          forma_pagamento,
+          status,
+          vendedor_nome,
+          itens_venda (
+            id,
+            produto_nome,
+            quantidade,
+            preco_unitario,
+            imei
+          )
+        `)
+        .eq('cliente_id', cliente.id)
+        .order('created_at', { ascending: false });
 
-      // 1. Tentar busca ampla com join de filiais e itens_venda
-      if (orConditions.length > 0) {
-        const res = await supabase
-          .from('vendas')
-          .select('*, filiais:filial_id(nome), itens_venda(*)')
-          .or(orConditions.join(','))
-          .order('created_at', { ascending: false });
-        data = res.data;
-        error = res.error;
-      }
-
-      // Se der erro de relação (ex: itens_venda ou filiais inexistente no schema) ou retornar vazio
-      if (error || (!data && orConditions.length > 0)) {
-        console.warn("⚠️ [HISTÓRICO CLIENTE] Tentando busca de fallback sem joins aninhados:", error?.message);
+      // Fallback defensivo: se a relação itens_venda falhar no PostgREST, busca direto de vendas
+      if (error) {
+        console.warn('Tentativa com itens_venda gerou erro, tentando fallback simples de vendas:', error.message);
         const resFallback = await supabase
           .from('vendas')
-          .select('*')
-          .or(orConditions.join(','))
+          .select('id, created_at, valor_total, forma_pagamento, status, vendedor_nome')
+          .eq('cliente_id', cliente.id)
           .order('created_at', { ascending: false });
-        data = resFallback.data;
-        error = resFallback.error;
-      }
 
-      // Se ainda não encontrou e temos o nome do cliente, faz uma busca direta por ilike
-      if ((!data || data.length === 0) && clienteNomeClean) {
-        const resNome = await supabase
-          .from('vendas')
-          .select('*, filiais:filial_id(nome)')
-          .ilike('cliente_nome', `%${clienteNomeClean}%`)
-          .order('created_at', { ascending: false });
-        if (!resNome.error && resNome.data && resNome.data.length > 0) {
-          data = resNome.data;
+        if (!resFallback.error) {
+          vendas = resFallback.data;
           error = null;
         }
       }
 
       if (error) {
-        console.error("🔥 [ERRO AO BUSCAR HISTÓRICO]:", error.message, error);
+        console.error('Erro ao buscar vendas:', error);
         showToast("Falha ao carregar histórico do banco de dados.", "error");
         return;
       }
 
-      console.log("🔥 [COMPRAS ENCONTRADAS]:", data);
-      const sales = data || [];
+      console.log("🔥 [COMPRAS ENCONTRADAS]:", vendas);
+      const sales = vendas || [];
       setClienteHistoricoVendas(sales);
       setCustomPromoText(getStaticPromoFallback(cliente, sales, 'upgrade'));
       handleGenerateAIPromo('upgrade', cliente, sales);
     } catch (err) {
-      console.error("🔥 [ERRO AO BUSCAR HISTÓRICO]:", err);
+      console.error('Erro ao buscar vendas:', err);
       showToast("Falha ao carregar histórico do banco de dados.", "error");
     } finally {
       setLoadingClienteHistorico(false);
