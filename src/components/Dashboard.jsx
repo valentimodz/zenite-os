@@ -14325,9 +14325,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             return null;
           };
 
-          const rawSelectedClienteId = selectedPdvCliente?.id || (isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID && cliente_id !== GENERIC_CONSUMIDOR_UUID ? cliente_id : null) || (isValidUuid(clienteIdBanco) && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID ? clienteIdBanco : null) || (isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID ? selectedPdvClienteId : null);
-          const clienteIdFinalValido = rawSelectedClienteId || getClienteIdValido(clienteResolvido?.id || cliente_id || clienteIdBanco || selectedPdvClienteId) || DEFAULT_CONSUMIDOR_FINAL_ID;
-
           const actualValorPago = pdvStatusPagamento === 'PAGO'
             ? valorTotalNovo
             : (pdvStatusPagamento === 'PARCIAL' ? (parseFloat(pdvValorPagoCustom) || 0) : 0);
@@ -14344,7 +14341,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             throw new Error("Tentativa de venda sem vendedor logado.");
           }
 
-          const finalClienteNome = (selectedPdvCliente?.nome || clienteResolvido?.nome || (pdvClienteNome && pdvClienteNome.trim() && pdvClienteNome.trim().toLowerCase() !== 'consumidor final' && pdvClienteNome.trim().toLowerCase() !== 'consumidor balcão' && pdvClienteNome.trim().toLowerCase() !== 'consumidor balcao' ? pdvClienteNome.trim() : null) || resolvedClienteNome || 'Consumidor Final').trim();
+          // Resolução explícita do cliente selecionado no checkout
+          const clienteSelecionadoObj = selectedPdvCliente || clienteResolvido || null;
+          const finalClienteId = clienteSelecionadoObj?.id
+            ? clienteSelecionadoObj.id
+            : (cliente_id || (isConsumidorFinal ? '3788fcc4-423c-46ce-a02e-5906d805925d' : (idPadraoConsumidor || '3788fcc4-423c-46ce-a02e-5906d805925d')));
+
+          const finalClienteNome = (
+            clienteSelecionadoObj?.nome ||
+            clienteSelecionadoObj?.razao_social ||
+            (pdvClienteNome && pdvClienteNome.trim() && !['consumidor final', 'consumidor balcão', 'consumidor balcao', 'consumidor'].includes(pdvClienteNome.trim().toLowerCase()) ? pdvClienteNome.trim() : null) ||
+            (nomeClienteFinal && !['consumidor final', 'consumidor balcão', 'consumidor balcao', 'consumidor'].includes(nomeClienteFinal.toLowerCase()) ? nomeClienteFinal : null) ||
+            'Consumidor Final'
+          ).trim();
 
           const payloadVendaUpdate = {
             empresa_id: obterUuidPuro(empresaId),
@@ -14359,7 +14368,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             cpf_cliente: resolvedClienteCpf,
             cliente_email: resolvedClienteEmail,
             cliente_telefone: resolvedClienteTelefone,
-            cliente_id: obterUuidPuro(clienteIdFinalValido) || obterUuidPuro(DEFAULT_CONSUMIDOR_FINAL_ID),
+            cliente_id: finalClienteId,
             vendedor_id: finalVendedorId,
             usuario_id: finalVendedorId,
             criado_por: finalVendedorId,
@@ -14388,6 +14397,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             itens_resumo: `${item.produto.nome} (Qtd: ${item.quantidade})`
           };
 
+          console.log('[DEBUG PDV PAYLOAD VENDA]:', { cliente_id: payloadVendaUpdate.cliente_id, cliente_nome: payloadVendaUpdate.cliente_nome });
           console.log("📦 Payload da Venda enviado ao banco:", payloadVendaUpdate);
 
           const { error: updateVendaErr } = await supabase
