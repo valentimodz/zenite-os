@@ -9756,12 +9756,37 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return;
       }
 
-      // 1. Busca as vendas do cliente
-      const { data: vendasData, error: vendasError } = await supabase
+      // 1. Busca as vendas do cliente (com join de filiais)
+      let { data: vendasData, error: vendasError } = await supabase
         .from('vendas')
-        .select('id, created_at, valor_total, forma_pagamento, vendedor_nome')
+        .select(`
+          id,
+          created_at,
+          valor_total,
+          forma_pagamento,
+          vendedor_nome,
+          filiais (
+            id,
+            nome
+          )
+        `)
         .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false });
+
+      // Fallback seguro caso haja erro na relação filiais
+      if (vendasError) {
+        console.warn('Tentativa com join filiais gerou erro, usando fallback direto de vendas:', vendasError.message);
+        const resFallback = await supabase
+          .from('vendas')
+          .select('id, created_at, valor_total, forma_pagamento, vendedor_nome')
+          .eq('cliente_id', clienteId)
+          .order('created_at', { ascending: false });
+
+        if (!resFallback.error) {
+          vendasData = resFallback.data;
+          vendasError = null;
+        }
+      }
 
       if (vendasError) throw vendasError;
 
@@ -28516,7 +28541,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       {new Date(venda.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
                                     </td>
                                     <td className="p-3 font-semibold text-purple-300 whitespace-nowrap">
-                                      {venda.filiais?.nome || venda.filial_nome || 'Filial'}
+                                      {venda.filiais?.nome || 'Monkey Shop'}
                                     </td>
                                     <td className="p-3 text-gray-200">
                                       <div className="flex flex-col">
@@ -28529,7 +28554,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     <td className="p-3">
                                       <div className="flex flex-col">
                                         <span className="inline-flex px-2 py-0.5 rounded text-[9px] font-bold bg-white/5 border border-white/10 text-gray-300 uppercase w-fit">
-                                          {finName} {venda.parcelas > 1 ? `(${venda.parcelas}x)` : ''}
+                                          {venda.forma_pagamento || 'PIX'} {venda.parcelas > 1 ? `(${venda.parcelas}x)` : ''}
                                         </span>
                                       </div>
                                     </td>
