@@ -756,6 +756,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [profile, setProfile] = useState(profileDataProps || null);
   const [company, setCompany] = useState(null);
   const activeEmpresaId = localStorage.getItem('@zenite_empresaId') || profile?.empresa_id;
+  const empresaId = profile?.empresa_id || session?.user?.empresa_id || company?.id || activeEmpresaId || null;
   const [loading, setLoading] = useState(profileDataProps ? false : true);
   const [error, setError] = useState('');
 
