@@ -9749,62 +9749,58 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setSelectedPromoType('upgrade');
 
     try {
-      if (!cliente?.id) {
+      const clienteId = cliente?.id;
+      if (!clienteId) {
         console.warn('Cliente selecionado sem id para busca de histórico.');
         setClienteHistoricoVendas([]);
         return;
       }
 
-      // Consulta direta e estável na tabela vendas pelo cliente_id com itens_venda aninhados
-      let { data: vendas, error } = await supabase
+      // 1. Busca as vendas do cliente
+      const { data: vendasData, error: vendasError } = await supabase
         .from('vendas')
-        .select(`
-          id,
-          created_at,
-          valor_total,
-          forma_pagamento,
-          status,
-          vendedor_nome,
-          itens_venda (
-            id,
-            produto_nome,
-            quantidade,
-            preco_unitario,
-            imei
-          )
-        `)
-        .eq('cliente_id', cliente.id)
+        .select('id, created_at, valor_total, forma_pagamento, status, vendedor_nome')
+        .eq('cliente_id', clienteId)
         .order('created_at', { ascending: false });
 
-      // Fallback defensivo: se a relação itens_venda falhar no PostgREST, busca direto de vendas
-      if (error) {
-        console.warn('Tentativa com itens_venda gerou erro, tentando fallback simples de vendas:', error.message);
-        const resFallback = await supabase
-          .from('vendas')
-          .select('id, created_at, valor_total, forma_pagamento, status, vendedor_nome')
-          .eq('cliente_id', cliente.id)
-          .order('created_at', { ascending: false });
+      if (vendasError) throw vendasError;
 
-        if (!resFallback.error) {
-          vendas = resFallback.data;
-          error = null;
-        }
-      }
-
-      if (error) {
-        console.error('Erro ao buscar vendas:', error);
-        showToast("Falha ao carregar histórico do banco de dados.", "error");
+      if (!vendasData || vendasData.length === 0) {
+        setClienteHistoricoVendas([]);
         return;
       }
 
-      console.log("🔥 [COMPRAS ENCONTRADAS]:", vendas);
-      const sales = vendas || [];
-      setClienteHistoricoVendas(sales);
-      setCustomPromoText(getStaticPromoFallback(cliente, sales, 'upgrade'));
-      handleGenerateAIPromo('upgrade', cliente, sales);
+      // 2. Busca os itens dessas vendas separadamente
+      const vendaIds = vendasData.map(v => v.id);
+      let itensData = [];
+      try {
+        const { data: itensRes, error: itensError } = await supabase
+          .from('itens_venda')
+          .select('id, venda_id, produto_nome, quantidade, preco_unitario, imei')
+          .in('venda_id', vendaIds);
+
+        if (itensError) {
+          console.warn('Não foi possível carregar os itens detalhados:', itensError);
+        } else {
+          itensData = itensRes || [];
+        }
+      } catch (errItens) {
+        console.warn('Erro ao consultar tabela itens_venda:', errItens);
+      }
+
+      // Agrupa os itens em cada venda
+      const vendasComItens = vendasData.map(venda => ({
+        ...venda,
+        itens: (itensData || []).filter(item => item.venda_id === venda.id)
+      }));
+
+      console.log("🔥 [COMPRAS ENCONTRADAS]:", vendasComItens);
+      setClienteHistoricoVendas(vendasComItens);
+      setCustomPromoText(getStaticPromoFallback(cliente, vendasComItens, 'upgrade'));
+      handleGenerateAIPromo('upgrade', cliente, vendasComItens);
     } catch (err) {
-      console.error('Erro ao buscar vendas:', err);
-      showToast("Falha ao carregar histórico do banco de dados.", "error");
+      console.error('Erro detalhado ao carregar histórico:', err);
+      showToast('Falha ao carregar histórico do banco de dados.', 'error');
     } finally {
       setLoadingClienteHistorico(false);
     }
@@ -28508,9 +28504,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </thead>
                             <tbody className="divide-y divide-[#161616]">
                               {clienteHistoricoVendas.map(venda => {
+                                const primeiroItem = Array.isArray(venda.itens) && venda.itens.length > 0 ? venda.itens[0] : null;
                                 const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id));
-                                const prodNome = venda.produtos?.nome || venda.produto_nome || prodObj?.nome || venda.produtos_descricao || venda.itens_resumo || 'Produto Geral';
-                                const imeiVal = venda.imei_novo || venda.imei || venda.used_imei || null;
+                                const prodNome = primeiroItem?.produto_nome || venda.produtos?.nome || venda.produto_nome || prodObj?.nome || venda.produtos_descricao || venda.itens_resumo || 'Produto Geral';
+                                const imeiVal = primeiroItem?.imei || venda.imei_novo || venda.imei || venda.used_imei || null;
                                 const finName = venda.financeira_parceira || venda.financeira || venda.metodo_pagamento?.toUpperCase() || 'PDV';
 
                                 return (
