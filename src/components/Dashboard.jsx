@@ -14397,6 +14397,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             itens_resumo: `${item.produto.nome} (Qtd: ${item.quantidade})`
           };
 
+          console.log('🚨 [PAYLOAD VENDA PDV]:', {
+            clienteSelecionado: clienteSelecionadoObj,
+            cliente_id: clienteSelecionadoObj?.id || finalClienteId,
+            cliente_nome: clienteSelecionadoObj?.nome || finalClienteNome,
+            vendedor: finalVendedorNome,
+            forma_pagamento: metodoEfetivo,
+            payloadCompleto: payloadVendaUpdate
+          });
           console.log('[DEBUG PDV PAYLOAD VENDA]:', { cliente_id: payloadVendaUpdate.cliente_id, cliente_nome: payloadVendaUpdate.cliente_nome });
           console.log("📦 Payload da Venda enviado ao banco:", payloadVendaUpdate);
 
