@@ -27908,7 +27908,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                                 <div>
                                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                                    Total em Gaveta (R$)
+                                    DINHEIRO FÍSICO (R$)
                                   </label>
                                   <input
                                     type="number"
