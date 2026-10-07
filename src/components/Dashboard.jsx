@@ -10337,12 +10337,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   }, [isVendaEditModalOpen]);
 
   // Função para sanitização numérica robusta (trata '79,89', '1.250,50', etc.)
-  const parseValorNumerico = (val) => {
+  const parseDecimal = (val) => {
     if (val === null || val === undefined || val === '') return 0;
     if (typeof val === 'number') return isNaN(val) ? 0 : val;
     const str = String(val).trim();
     if (!str) return 0;
-    // Se tiver vírgula, remove pontos de milhar e substitui vírgula por ponto
     if (str.includes(',')) {
       const parsed = parseFloat(str.replace(/\./g, '').replace(',', '.'));
       return isNaN(parsed) ? 0 : parsed;
@@ -10350,6 +10349,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const parsed = parseFloat(str);
     return isNaN(parsed) ? 0 : parsed;
   };
+  const parseValorNumerico = parseDecimal;
 
   // Salva correção da venda concluída com tratamento numérico e atualização em tempo real
   const handleSaveVendaEdit = async (e) => {
@@ -10368,8 +10368,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const novoNome = (vendaNewNomeProduto || '').trim();
     const novaCategoria = vendaNewCategoria || 'Celulares';
     const novaQtd = Math.max(1, parseInt(vendaNewQty, 10) || 1);
-    const novoValor = parseValorNumerico(vendaNewValor);
-    const novaComissao = parseValorNumerico(vendaNewComissao);
+    const novoValor = parseDecimal(vendaNewValor);
+    const comissaoTratada = parseDecimal(vendaNewComissao);
+    const novaComissao = comissaoTratada;
     const novoMetodo = vendaNewMetodoPagamento || 'PIX';
     const isBoleto = novoMetodo?.toLowerCase() === 'boleto' ||
                      novoMetodo?.toLowerCase() === 'financiadora' ||
@@ -10430,8 +10431,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         valor_total: novoValor,
         preco_unitario_vendido: precoUnitario,
         quantidade: novaQtd,
-        comissao: novaComissao,
-        comissao_vendedor: novaComissao,
+        comissao: comissaoTratada,
+        comissao_vendedor: comissaoTratada,
         metodo_pagamento: novoMetodo,
         financeira: resolvedFinanceira,
         financeira_parceira: resolvedFinanceira,
@@ -10446,6 +10447,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         treener_id: resolvedTraineeId,
         trainee_nome: resolvedTraineeNome,
         comissao_trainee: resolvedComissaoTrainee,
+        justificativa_alteracao: justificativaTexto,
         justificativa_correcao: justificativaTexto,
         atualizado_em: new Date().toISOString(),
         ...(novaDataIso ? { created_at: novaDataIso, data_venda: novaDataIso } : {})
@@ -10465,8 +10467,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const essentialPayload = {
           valor_total: novoValor,
           quantidade: novaQtd,
-          comissao: novaComissao,
-          comissao_vendedor: novaComissao,
+          comissao: comissaoTratada,
+          comissao_vendedor: comissaoTratada,
           metodo_pagamento: novoMetodo,
           produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
           categoria: novaCategoria,
@@ -10572,8 +10574,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           produto_nome: novoNome || editingVenda.produto_nome || 'Produto',
           preco_unitario: precoUnitario,
           valor_total: novoValor,
-          comissao: Number(novaComissao),
-          comissao_trainee: Number(resolvedComissaoTrainee),
+          comissao: comissaoTratada,
+          comissao_trainee: resolvedComissaoTrainee,
           trainee_id: resolvedTraineeId,
           filial_id: novaFilialId,
           vendedor_id: novoVendedorId
@@ -10593,7 +10595,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               produto_nome: novoNome || editingVenda.produto_nome || 'Produto',
               preco_unitario: precoUnitario,
               valor_total: novoValor,
-              comissao: Number(novaComissao)
+              comissao: comissaoTratada
             })
             .eq('venda_id', vendaId);
         }
@@ -10619,16 +10621,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             usuarios: { ...(v.usuarios || {}), id: novoVendedorId, nome: novoVendedorNome },
             profiles: { ...(v.profiles || {}), id: novoVendedorId, nome: novoVendedorNome },
             produto_nome: novoNome || v.produto_nome,
-            comissao: Number(novaComissao),
-            comissao_vendedor: Number(novaComissao),
-            comissao_trainee: Number(resolvedComissaoTrainee),
+            comissao: comissaoTratada,
+            comissao_vendedor: comissaoTratada,
+            comissao_trainee: resolvedComissaoTrainee,
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
               ? v.itens_venda.map((it, idx) => idx === 0 ? {
                   ...it,
                   produto_nome: novoNome,
+                  preco_unitario: precoUnitario,
                   valor_total: novoValor,
-                  comissao: Number(novaComissao),
-                  comissao_trainee: Number(resolvedComissaoTrainee)
+                  comissao: comissaoTratada,
+                  comissao_trainee: resolvedComissaoTrainee
                 } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
@@ -10656,16 +10659,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             usuarios: { ...(v.usuarios || {}), id: novoVendedorId, nome: novoVendedorNome },
             profiles: { ...(v.profiles || {}), id: novoVendedorId, nome: novoVendedorNome },
             produto_nome: novoNome || v.produto_nome,
-            comissao: Number(novaComissao),
-            comissao_vendedor: Number(novaComissao),
-            comissao_trainee: Number(resolvedComissaoTrainee),
+            comissao: comissaoTratada,
+            comissao_vendedor: comissaoTratada,
+            comissao_trainee: resolvedComissaoTrainee,
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
               ? v.itens_venda.map((it, idx) => idx === 0 ? {
                   ...it,
                   produto_nome: novoNome,
+                  preco_unitario: precoUnitario,
                   valor_total: novoValor,
-                  comissao: Number(novaComissao),
-                  comissao_trainee: Number(resolvedComissaoTrainee)
+                  comissao: comissaoTratada,
+                  comissao_trainee: resolvedComissaoTrainee
                 } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
@@ -10685,13 +10689,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         window.dispatchEvent(new Event('estoque_updated'));
       } catch (_) {}
 
-      // 7. Recarregar dados do gerente/dashboard com forceRefresh = true para recalcular totais e métricas imediatamente
+      // 7. Revalidação completa das queries da listagem de vendas (refetch)
       const targetEmpresaId = company?.id || profile?.empresa_id;
       if (targetEmpresaId && typeof fetchGerenteData === 'function') {
         fetchGerenteData(targetEmpresaId, filtroMes, true).catch(e => console.warn('Aviso ao recarregar dados do gerente:', e));
       }
+      if (typeof carregarVendas === 'function') {
+        carregarVendas(session?.user?.id || profile?.id, filtroMes).catch(e => console.warn('Aviso ao recarregar carregarVendas:', e));
+      }
       if (typeof fetchVendedorData === 'function' && activeFilialId && session?.user?.id) {
-        fetchVendedorData(activeFilialId, session.user.id);
+        fetchVendedorData(activeFilialId, session.user.id, targetEmpresaId, filtroMes).catch(e => console.warn('Aviso ao recarregar fetchVendedorData:', e));
       }
     } catch (err) {
       console.error('Erro ao corrigir venda:', err);
