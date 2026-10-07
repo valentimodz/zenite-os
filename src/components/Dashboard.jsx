@@ -17551,19 +17551,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   }, [agruparPorModelo, listaProdutosConsolidada]);
 
   const filteredProdutosPdv = listaProdutosPdvDinamica.filter(p => {
-    const searchLower = pdvBusca.toLowerCase().trim();
-    const matchesSearch = !searchLower ||
-      (p.nome && p.nome.toLowerCase().includes(searchLower)) ||
-      (p.sku && p.sku.toLowerCase().includes(searchLower)) ||
-      (p.codigo_barras && p.codigo_barras.toLowerCase().includes(searchLower)) ||
-      (p.categoria && p.categoria.toLowerCase().includes(searchLower)) ||
-      (p.tipo && p.tipo.toLowerCase().includes(searchLower)) ||
-      ((p.uniqueCores || []).some(c => String(c).toLowerCase().includes(searchLower))) ||
-      ((p.variants || []).some(v => (v.sku && String(v.sku).toLowerCase().includes(searchLower)) || (v.codigo_barras && String(v.codigo_barras).toLowerCase().includes(searchLower))));
+    // 1. Busca por Múltiplos Termos (AND lógico, dividindo por espaços)
+    const termos = pdvBusca ? pdvBusca.trim().toLowerCase().split(/\s+/).filter(Boolean) : [];
+    const nomeLower = (p.nome || p.produto_nome || '').toLowerCase();
+    const skuLower = (p.sku || '').toLowerCase();
+    const barcodeLower = (p.codigo_barras || '').toLowerCase();
+    const catLower = (p.categoria || '').toLowerCase();
+    const tipoLower = (p.tipo || '').toLowerCase();
+    const imeiLower = (p.imei || '').toLowerCase();
+    const uniqueCoresStr = (p.uniqueCores || []).map(c => String(c).toLowerCase()).join(' ');
+    const variantsStr = (p.variants || []).map(v => `${v.sku || ''} ${v.codigo_barras || ''} ${v.cor || ''}`).join(' ').toLowerCase();
+
+    const matchesSearch = termos.length === 0 || termos.every(t =>
+      nomeLower.includes(t) ||
+      skuLower.includes(t) ||
+      barcodeLower.includes(t) ||
+      catLower.includes(t) ||
+      tipoLower.includes(t) ||
+      imeiLower.includes(t) ||
+      uniqueCoresStr.includes(t) ||
+      variantsStr.includes(t)
+    );
 
     const catUpper = p.categoria ? String(p.categoria).toUpperCase() : '';
     const tipoUpper = p.tipo ? String(p.tipo).toUpperCase() : '';
-    const nomeLower = p.nome ? String(p.nome).toLowerCase() : '';
 
     const isAcessorioCategory = tipoUpper === 'ACESSORIO' || tipoUpper === 'ACESSÓRIO' ||
       catUpper.includes('ACESSOR') || catUpper.includes('CAPA') || catUpper.includes('PELICULA') ||
@@ -17603,9 +17614,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       return catUpper.includes(pdvCatUpper) || nomeLower.includes(pdvCatLower) || (p.tipo && String(p.tipo).toUpperCase().includes(pdvCatUpper));
     })();
 
-    // 4. Não renderizar cards zerados na grade do PDV (quantidade/estoque > 0, exceto SERVICO)
-    const estoqueLocal = Number(p.estoqueTotal ?? p.total_estoque ?? p.estoque_local ?? p.quantidade_local ?? p.estoque ?? p.quantidade ?? 0);
-    const hasEstoque = p.categoria === 'SERVICO' || estoqueLocal > 0;
+    // 4. Não renderizar cards zerados na grade do PDV (quantidade/estoque > 0, exceto SERVICO ou se estiver pesquisando com termo específico)
+    const estoqueLocal = Number(p.estoqueTotal ?? p.total_estoque ?? p.estoque_local ?? p.quantidade_local ?? p.estoque ?? p.quantidade ?? p.qtd ?? 0);
+    const hasEstoque = p.categoria === 'SERVICO' || estoqueLocal > 0 || Number(p.quantidade || 0) > 0 || Number(p.qtd || 0) > 0;
 
     return matchesSearch && matchesCat && hasEstoque;
   });
