@@ -31863,7 +31863,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       placeholder="Descrição ou nome do produto vendido..."
                       className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-medium transition-all"
                     />
-                    <p className="text-[11px] text-gray-500 font-mono pt-0.5">ID da Venda: {editingVenda.id}</p>
+                    <div className="flex items-center justify-between pt-0.5">
+                      <p className="text-[11px] text-gray-500 font-mono">
+                        ID da Venda: <span className="text-gray-300 select-all">{editingVenda.id}</span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (editingVenda?.id) {
+                            navigator.clipboard.writeText(editingVenda.id);
+                            showToast('ID da venda copiado com sucesso!', 'success');
+                          }
+                        }}
+                        className="text-[10px] text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1 cursor-pointer bg-purple-950/30 px-2 py-0.5 rounded border border-purple-800/40 hover:bg-purple-900/40 transition-all"
+                        title="Copiar ID da Venda para a área de transferência"
+                      >
+                        <Copy size={11} />
+                        <span>Copiar ID</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
