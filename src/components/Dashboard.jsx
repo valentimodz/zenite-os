@@ -1062,6 +1062,28 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [vendaTraineeNome, setVendaTraineeNome] = useState('');
   const [vendaComissaoTrainee, setVendaComissaoTrainee] = useState('');
 
+  // Estados para Modal "Nova Venda / Inserir Venda Manual"
+  const [isNovaVendaModalOpen, setIsNovaVendaModalOpen] = useState(false);
+  const [isSavingNovaVenda, setIsSavingNovaVenda] = useState(false);
+  const [novaVendaData, setNovaVendaData] = useState(() => new Date().toISOString().split('T')[0]);
+  const [novaVendaFilialId, setNovaVendaFilialId] = useState('');
+  const [novaVendaVendedorId, setNovaVendaVendedorId] = useState('');
+  const [novaVendaVendedorNome, setNovaVendaVendedorNome] = useState('');
+  const [novaVendaHasTrainee, setNovaVendaHasTrainee] = useState(false);
+  const [novaVendaTraineeId, setNovaVendaTraineeId] = useState('');
+  const [novaVendaTraineeNome, setNovaVendaTraineeNome] = useState('');
+  const [novaVendaComissaoTrainee, setNovaVendaComissaoTrainee] = useState('');
+  const [novaVendaClienteId, setNovaVendaClienteId] = useState('3788fcc4-423c-46ce-a02e-5906d805925d');
+  const [novaVendaClienteNome, setNovaVendaClienteNome] = useState('Consumidor Final');
+  const [novaVendaClienteBusca, setNovaVendaClienteBusca] = useState('');
+  const [novaVendaProdutoDescricao, setNovaVendaProdutoDescricao] = useState('');
+  const [novaVendaImei, setNovaVendaImei] = useState('');
+  const [novaVendaCategoria, setNovaVendaCategoria] = useState('Celulares');
+  const [novaVendaQuantidade, setNovaVendaQuantidade] = useState('1');
+  const [novaVendaValorTotal, setNovaVendaValorTotal] = useState('');
+  const [novaVendaFormaPagamento, setNovaVendaFormaPagamento] = useState('PIX');
+  const [novaVendaComissaoVendedor, setNovaVendaComissaoVendedor] = useState('');
+
   // Estados para Auditoria de Vendas & Crédito
   const [buscaAuditoriaCredito, setBuscaAuditoriaCredito] = useState('');
   const [filtroStatusCredito, setFiltroStatusCredito] = useState('TODOS');
@@ -10637,6 +10659,177 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     } catch (err) {
       console.error('Erro ao corrigir venda:', err);
       showToast('Erro ao salvar correção: ' + (err.message || 'Falha ao atualizar dados.'), 'error');
+    }
+  };
+
+  // --- NOVA VENDA MANUAL (RELATÓRIO DE VENDAS) ---
+  const handleOpenNovaVenda = () => {
+    const hoje = new Date().toISOString().split('T')[0];
+    const initialFilialId = activeFilialId || (filiais && filiais.length > 0 ? String(filiais[0].id) : '');
+    const currentUserId = session?.user?.id || profile?.id || '';
+    const initialVendedor = (vendedores || []).find(v => String(v.id) === String(currentUserId)) ||
+                            (teamMembers || []).find(m => String(m.id) === String(currentUserId)) ||
+                            (vendedores && vendedores.length > 0 ? vendedores[0] : null) ||
+                            (teamMembers && teamMembers.length > 0 ? teamMembers[0] : null);
+
+    setNovaVendaData(hoje);
+    setNovaVendaFilialId(initialFilialId);
+    setNovaVendaVendedorId(initialVendedor ? String(initialVendedor.id) : String(currentUserId));
+    setNovaVendaVendedorNome(initialVendedor?.nome || initialVendedor?.name || profile?.nome || 'Vendedor');
+    setNovaVendaHasTrainee(false);
+    setNovaVendaTraineeId('');
+    setNovaVendaTraineeNome('');
+    setNovaVendaComissaoTrainee('');
+    setNovaVendaClienteId('3788fcc4-423c-46ce-a02e-5906d805925d');
+    setNovaVendaClienteNome('Consumidor Final');
+    setNovaVendaClienteBusca('');
+    setNovaVendaProdutoDescricao('');
+    setNovaVendaImei('');
+    setNovaVendaCategoria('Celulares');
+    setNovaVendaQuantidade('1');
+    setNovaVendaValorTotal('');
+    setNovaVendaFormaPagamento('PIX');
+    setNovaVendaComissaoVendedor('');
+    setIsNovaVendaModalOpen(true);
+  };
+
+  const handleSalvarNovaVendaManual = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    if (!novaVendaProdutoDescricao.trim()) {
+      showToast('Por favor, informe a descrição ou nome do produto.', 'error');
+      return;
+    }
+
+    const valorTotalNum = parseValorNumerico(novaVendaValorTotal);
+    if (valorTotalNum <= 0) {
+      showToast('Informe um valor total válido para a venda.', 'error');
+      return;
+    }
+
+    const qtdNum = Math.max(1, parseInt(novaVendaQuantidade, 10) || 1);
+    const comissaoVendNum = parseValorNumerico(novaVendaComissaoVendedor);
+    const comissaoTraineeNum = novaVendaHasTrainee ? parseValorNumerico(novaVendaComissaoTrainee) : 0;
+
+    setIsSavingNovaVenda(true);
+    try {
+      const targetEmpresaId = obterUuidPuro(company?.id || profile?.empresa_id);
+      const targetFilialId = obterUuidPuro(novaVendaFilialId || activeFilialId);
+      const targetVendedorId = obterUuidPuro(novaVendaVendedorId || session?.user?.id || profile?.id);
+      const targetClienteId = obterUuidPuro(novaVendaClienteId) || '3788fcc4-423c-46ce-a02e-5906d805925d';
+
+      // 1. Resolver timestamp a partir de novaVendaData
+      let createdAtIso = new Date().toISOString();
+      if (novaVendaData) {
+        const agora = new Date();
+        const [ano, mes, dia] = novaVendaData.split('-').map(Number);
+        const dataComHora = new Date(ano, (mes || 1) - 1, dia || 1, agora.getHours(), agora.getMinutes(), agora.getSeconds());
+        createdAtIso = dataComHora.toISOString();
+      }
+
+      // 2. Inserir venda principal na tabela 'vendas'
+      const vendaPayload = {
+        empresa_id: targetEmpresaId,
+        filial_id: targetFilialId,
+        vendedor_id: targetVendedorId,
+        usuario_id: targetVendedorId,
+        criado_por: targetVendedorId,
+        vendedor_nome: novaVendaVendedorNome || 'Vendedor',
+        cliente_id: targetClienteId,
+        cliente_nome: novaVendaClienteNome || 'Consumidor Final',
+        valor_total: valorTotalNum,
+        total: valorTotalNum,
+        valor_pago: valorTotalNum,
+        forma_pagamento: novaVendaFormaPagamento,
+        metodo_pagamento: novaVendaFormaPagamento,
+        comissao: comissaoVendNum,
+        comissao_vendedor: comissaoVendNum,
+        teve_participacao_trainee: Boolean(novaVendaHasTrainee),
+        trainee_id: novaVendaHasTrainee ? (obterUuidPuro(novaVendaTraineeId) || null) : null,
+        treener_id: novaVendaHasTrainee ? (obterUuidPuro(novaVendaTraineeId) || null) : null,
+        trainee_nome: novaVendaHasTrainee ? (novaVendaTraineeNome || null) : null,
+        comissao_trainee: comissaoTraineeNum,
+        created_at: createdAtIso
+      };
+
+      const { data: vendaCriada, error: vendaErr } = await supabase
+        .from('vendas')
+        .insert(vendaPayload)
+        .select()
+        .single();
+
+      if (vendaErr || !vendaCriada) {
+        throw new Error(vendaErr?.message || 'Falha ao inserir registro na tabela de vendas.');
+      }
+
+      const vendaId = vendaCriada.id;
+      const precoUnitario = valorTotalNum / qtdNum;
+
+      // 3. Inserir item da venda na tabela 'itens_venda'
+      const itemPayload = {
+        venda_id: vendaId,
+        empresa_id: targetEmpresaId,
+        filial_id: targetFilialId,
+        vendedor_id: targetVendedorId,
+        produto_nome: novaVendaProdutoDescricao.trim(),
+        imei: novaVendaImei.trim() || null,
+        quantidade: qtdNum,
+        preco_unitario: precoUnitario,
+        subtotal: valorTotalNum,
+        created_at: createdAtIso
+      };
+
+      const { data: itemCriado, error: itemErr } = await supabase
+        .from('itens_venda')
+        .insert(itemPayload)
+        .select()
+        .maybeSingle();
+
+      if (itemErr) {
+        console.warn('Aviso ao registrar item em itens_venda:', itemErr);
+      }
+
+      // 4. Montar objeto completo para atualização otimista
+      const vendaCompleta = {
+        ...vendaCriada,
+        itens_venda: [
+          itemCriado || {
+            produto_nome: novaVendaProdutoDescricao.trim(),
+            quantidade: qtdNum,
+            preco_unitario: precoUnitario,
+            subtotal: valorTotalNum,
+            imei: novaVendaImei.trim() || null
+          }
+        ],
+        filiais: filiais.find(f => String(f.id) === String(targetFilialId)) || null
+      };
+
+      setVendas(prev => [vendaCompleta, ...(prev || [])]);
+      if (typeof setVendasVendedor === 'function') {
+        setVendasVendedor(prev => [vendaCompleta, ...(prev || [])]);
+      }
+
+      // 5. Notificar listeners e atualizar caches
+      try {
+        window.dispatchEvent(new CustomEvent('venda_criada', { detail: { vendaId, venda: vendaCompleta } }));
+        window.dispatchEvent(new Event('estoque_updated'));
+      } catch (_) {}
+
+      // 6. Recarregar dados das vendas / dashboard
+      if (typeof fetchGerenteData === 'function' && targetEmpresaId) {
+        fetchGerenteData(targetEmpresaId, filtroMes, true).catch(e => console.warn('Aviso ao recarregar dados do gerente:', e));
+      }
+      if (typeof fetchVendedorData === 'function' && activeFilialId && session?.user?.id) {
+        fetchVendedorData(activeFilialId, session.user.id);
+      }
+
+      showToast('Venda manual registrada com sucesso!', 'success');
+      setIsNovaVendaModalOpen(false);
+    } catch (err) {
+      console.error('Erro ao salvar nova venda manual:', err);
+      showToast('Erro ao criar venda: ' + (err.message || 'Falha ao salvar no banco.'), 'error');
+    } finally {
+      setIsSavingNovaVenda(false);
     }
   };
 
@@ -26596,27 +26789,38 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                       {/* PAINEL DE FILTROS AVANÇADOS */}
                       <div className="mb-6 p-4 bg-black/60 border border-[#222222] rounded-xl space-y-4 print:hidden">
-                        <div className="flex items-center justify-between gap-2 border-b border-[#1c1c1c] pb-3">
+                        <div className="flex items-center justify-between gap-3 border-b border-[#1c1c1c] pb-3">
                           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                             <SlidersHorizontal size={14} className="text-[#6A0DAD]" />
                             Filtros Avançados
                           </span>
-                          {(filtroVendedor !== 'TODOS' || filtroFilial !== 'TODAS' || filtroDataInicio || filtroDataFim || filtroPagamento !== 'TODOS' || buscaTermo) && (
+                          <div className="flex items-center gap-3">
+                            {(filtroVendedor !== 'TODOS' || filtroFilial !== 'TODAS' || filtroDataInicio || filtroDataFim || filtroPagamento !== 'TODOS' || buscaTermo) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFiltroVendedor('TODOS');
+                                  setFiltroFilial('TODAS');
+                                  setFiltroDataInicio('');
+                                  setFiltroDataFim('');
+                                  setFiltroPagamento('TODOS');
+                                  setBuscaTermo('');
+                                }}
+                                className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold cursor-pointer transition-colors"
+                              >
+                                Limpar Filtros
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => {
-                                setFiltroVendedor('TODOS');
-                                setFiltroFilial('TODAS');
-                                setFiltroDataInicio('');
-                                setFiltroDataFim('');
-                                setFiltroPagamento('TODOS');
-                                setBuscaTermo('');
-                              }}
-                              className="text-[11px] text-purple-400 hover:text-purple-300 font-semibold cursor-pointer transition-colors"
+                              onClick={handleOpenNovaVenda}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#6A0DAD] hover:bg-[#530a88] text-white text-xs font-bold shadow-md shadow-purple-900/30 transition-all cursor-pointer active:scale-95"
+                              title="Inserir Venda Manualmente"
                             >
-                              Limpar Filtros
+                              <Plus size={14} className="stroke-[2.5]" />
+                              <span>Nova Venda</span>
                             </button>
-                          )}
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
@@ -31927,6 +32131,428 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md text-xs font-bold transition-all cursor-pointer"
                   >
                     Salvar Correção
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE CADASTRO DE NOVA VENDA MANUAL */}
+        {isNovaVendaModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-[#0A0A0A] border border-[#6A0DAD]/40 rounded-xl max-w-2xl w-full shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-fadeIn">
+              {/* Cabeçalho */}
+              <div className="flex items-center justify-between border-b border-[#222222] p-5 bg-[#111111]/80 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-[#6A0DAD]/20 rounded-lg text-purple-400">
+                    <Plus size={20} className="stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white tracking-wide">
+                      Nova Venda / Inserir Venda Manual
+                    </h3>
+                    <p className="text-[11px] text-gray-400">
+                      Cadastre uma venda retroativa ou manual diretamente no relatório
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsNovaVendaModalOpen(false)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Corpo com scroll */}
+              <form onSubmit={handleSalvarNovaVendaManual} className="flex flex-col flex-1 overflow-hidden">
+                <div className="p-5 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
+                  
+                  {/* Linha 1: Data, Filial e Vendedor Titular */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Data da Venda <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={novaVendaData}
+                        onChange={(e) => setNovaVendaData(e.target.value)}
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Filial <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={novaVendaFilialId}
+                        onChange={(e) => setNovaVendaFilialId(e.target.value)}
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
+                      >
+                        <option value="" className="bg-[#111] text-gray-500">Selecione a Filial...</option>
+                        {(filiais || []).map(f => (
+                          <option key={f.id} value={String(f.id)} className="bg-[#111] text-white">
+                            {f.nome || f.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Vendedor Titular <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={novaVendaVendedorId}
+                        onChange={(e) => {
+                          const vId = e.target.value;
+                          setNovaVendaVendedorId(vId);
+                          const found = (vendedores || []).find(v => String(v.id) === String(vId)) ||
+                                        (teamMembers || []).find(m => String(m.id) === String(vId));
+                          if (found) {
+                            setNovaVendaVendedorNome(found.nome || found.name || found.email || 'Vendedor');
+                          }
+                        }}
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
+                      >
+                        <option value="" className="bg-[#111] text-gray-500">Selecione o Vendedor...</option>
+                        {(() => {
+                          const seen = new Set();
+                          const list = [];
+                          (vendedores || []).forEach(v => {
+                            if (v && v.id && !seen.has(String(v.id))) {
+                              seen.add(String(v.id));
+                              list.push({ id: String(v.id), nome: v.nome || v.name });
+                            }
+                          });
+                          (teamMembers || []).forEach(m => {
+                            if (m && m.id && !seen.has(String(m.id))) {
+                              seen.add(String(m.id));
+                              list.push({ id: String(m.id), nome: m.nome || m.name || m.email });
+                            }
+                          });
+                          return list.map(opt => (
+                            <option key={opt.id} value={opt.id} className="bg-[#111] text-white">
+                              {opt.nome}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Participação de Trainee / Assistente */}
+                  <div className="bg-[#141419] border border-[#222222] rounded-lg p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-gray-300">
+                          Teve participação de Trainee / Assistente?
+                        </span>
+                        <span className="text-[10px] text-gray-500 font-normal">
+                          (Bonificação compartilhada na venda)
+                        </span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={novaVendaHasTrainee}
+                          onChange={(e) => {
+                            const ativo = e.target.checked;
+                            setNovaVendaHasTrainee(ativo);
+                            if (!ativo) {
+                              setNovaVendaTraineeId('');
+                              setNovaVendaTraineeNome('');
+                              setNovaVendaComissaoTrainee('');
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6A0DAD]"></div>
+                      </label>
+                    </div>
+
+                    {novaVendaHasTrainee && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#222222] animate-fadeIn">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                            Trainee / Assistente <span className="text-purple-400">*</span>
+                          </label>
+                          <select
+                            value={novaVendaTraineeId}
+                            onChange={(e) => {
+                              const chosenId = e.target.value;
+                              setNovaVendaTraineeId(chosenId);
+                              const matchObj = (treenersFilial || []).find(t => String(t.id) === String(chosenId)) ||
+                                               (teamMembers || []).find(m => String(m.id) === String(chosenId)) ||
+                                               (vendedores || []).find(v => String(v.id) === String(chosenId));
+                              if (matchObj) {
+                                setNovaVendaTraineeNome(matchObj.nome || matchObj.name || matchObj.email || '');
+                              }
+                            }}
+                            required={novaVendaHasTrainee}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
+                          >
+                            <option value="" className="bg-[#111] text-gray-500">Selecione o Trainee...</option>
+                            {(() => {
+                              const mapaTrainees = new Map();
+                              (treenersFilial || []).forEach(t => {
+                                if (t.id) mapaTrainees.set(String(t.id), t.nome || t.name || 'Trainee');
+                              });
+                              (teamMembers || []).forEach(m => {
+                                const cargoUpper = String(m.role || m.cargo || '').toUpperCase();
+                                if (m.id && (cargoUpper.includes('TRAINEE') || cargoUpper.includes('TREENER') || m.is_treinner) && !mapaTrainees.has(String(m.id))) {
+                                  mapaTrainees.set(String(m.id), m.nome || m.name || m.email || 'Trainee');
+                                }
+                              });
+                              if (mapaTrainees.size === 0) {
+                                (teamMembers || []).forEach(m => {
+                                  if (m.id && !mapaTrainees.has(String(m.id))) {
+                                    mapaTrainees.set(String(m.id), m.nome || m.name || m.email || 'Colaborador');
+                                  }
+                                });
+                                (vendedores || []).forEach(v => {
+                                  if (v.id && !mapaTrainees.has(String(v.id))) {
+                                    mapaTrainees.set(String(v.id), v.nome || v.name || 'Vendedor');
+                                  }
+                                });
+                              }
+                              return Array.from(mapaTrainees.entries()).map(([id, nome]) => (
+                                <option key={id} value={id} className="bg-[#111] text-white">
+                                  {nome}
+                                </option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                            Comissão Trainee (R$)
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={novaVendaComissaoTrainee}
+                            onChange={(e) => setNovaVendaComissaoTrainee(e.target.value)}
+                            placeholder="Ex: 5,00"
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Linha 2: Cliente */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                        Cliente <span className="text-red-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNovaVendaClienteId('3788fcc4-423c-46ce-a02e-5906d805925d');
+                          setNovaVendaClienteNome('Consumidor Final');
+                          setNovaVendaClienteBusca('');
+                        }}
+                        className="text-[10px] text-purple-400 hover:text-purple-300 font-semibold cursor-pointer"
+                      >
+                        Resetar p/ Consumidor Final
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Buscar cliente por nome ou CPF..."
+                        value={novaVendaClienteBusca}
+                        onChange={(e) => setNovaVendaClienteBusca(e.target.value)}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none placeholder:text-gray-600 transition-all"
+                      />
+                      <select
+                        value={novaVendaClienteId}
+                        onChange={(e) => {
+                          const cId = e.target.value;
+                          setNovaVendaClienteId(cId);
+                          const matchedCliente = (clientes || []).find(c => String(c.id) === String(cId));
+                          if (matchedCliente) {
+                            setNovaVendaClienteNome(matchedCliente.nome || matchedCliente.razao_social || 'Consumidor Final');
+                          } else if (cId === '3788fcc4-423c-46ce-a02e-5906d805925d') {
+                            setNovaVendaClienteNome('Consumidor Final');
+                          }
+                        }}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
+                      >
+                        <option value="3788fcc4-423c-46ce-a02e-5906d805925d" className="bg-[#111] text-white">
+                          Consumidor Final (Padrão)
+                        </option>
+                        {(() => {
+                          const busca = novaVendaClienteBusca.trim().toLowerCase();
+                          const filtrados = (clientes || []).filter(c => {
+                            if (!c || !c.id || c.id === '3788fcc4-423c-46ce-a02e-5906d805925d') return false;
+                            if (!busca) return true;
+                            const n = (c.nome || c.razao_social || '').toLowerCase();
+                            const doc = (c.cpf || c.cnpj || '').toLowerCase();
+                            return n.includes(busca) || doc.includes(busca);
+                          });
+                          return filtrados.slice(0, 30).map(c => (
+                            <option key={c.id} value={String(c.id)} className="bg-[#111] text-white">
+                              {c.nome || c.razao_social} {c.cpf ? `(${c.cpf})` : ''}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Linha 3: Produto / Descrição e IMEI */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Produto / Descrição <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={novaVendaProdutoDescricao}
+                        onChange={(e) => setNovaVendaProdutoDescricao(e.target.value)}
+                        placeholder="Ex: iPhone 13 128GB Estelar"
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none transition-all placeholder:text-gray-600"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        IMEI / Serial <span className="text-gray-600 font-normal">(Opcional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={novaVendaImei}
+                        onChange={(e) => setNovaVendaImei(e.target.value)}
+                        placeholder="Ex: 356890..."
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all placeholder:text-gray-600"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Linha 4: Categoria, Quantidade e Valor Total */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Categoria <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={novaVendaCategoria}
+                        onChange={(e) => setNovaVendaCategoria(e.target.value)}
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
+                      >
+                        <option value="Celulares" className="bg-[#111] text-white">Celulares / Smartphones</option>
+                        <option value="Acessórios" className="bg-[#111] text-white">Acessórios</option>
+                        <option value="Smartwatches" className="bg-[#111] text-white">Smartwatches</option>
+                        <option value="Tablets" className="bg-[#111] text-white">Tablets / iPads</option>
+                        <option value="Serviços" className="bg-[#111] text-white">Serviços / Assistência</option>
+                        <option value="Outros" className="bg-[#111] text-white">Outros</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Quantidade <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={novaVendaQuantidade}
+                        onChange={(e) => setNovaVendaQuantidade(e.target.value)}
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none text-center font-mono transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Valor Total (R$) <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={novaVendaValorTotal}
+                        onChange={(e) => setNovaVendaValorTotal(e.target.value)}
+                        placeholder="Ex: 2.500,00"
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono font-bold text-green-400 transition-all placeholder:text-gray-600"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Linha 5: Método de Pagamento e Comissão do Vendedor */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Método de Pagamento <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={novaVendaFormaPagamento}
+                        onChange={(e) => setNovaVendaFormaPagamento(e.target.value)}
+                        required
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
+                      >
+                        <option value="PIX" className="bg-[#111] text-white">PIX</option>
+                        <option value="CARTAO_CREDITO" className="bg-[#111] text-white">Cartão de Crédito</option>
+                        <option value="CARTAO_DEBITO" className="bg-[#111] text-white">Cartão de Débito</option>
+                        <option value="DINHEIRO" className="bg-[#111] text-white">Dinheiro</option>
+                        <option value="BOLETO" className="bg-[#111] text-white">Boleto / Financiadora</option>
+                        <option value="TROCA" className="bg-[#111] text-white">Aparelho na Troca</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Comissão Vendedor Titular (R$)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={novaVendaComissaoVendedor}
+                        onChange={(e) => setNovaVendaComissaoVendedor(e.target.value)}
+                        placeholder="Ex: 50,00"
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all placeholder:text-gray-600"
+                      />
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Rodapé Fixo */}
+                <div className="p-4 border-t border-[#222222] flex items-center justify-end gap-3 bg-[#111111]/90 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsNovaVendaModalOpen(false)}
+                    disabled={isSavingNovaVenda}
+                    className="bg-[#222] hover:bg-[#333] text-white px-4 py-2 rounded-md text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingNovaVenda || !novaVendaProdutoDescricao.trim() || !novaVendaValorTotal}
+                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-5 py-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    {isSavingNovaVenda ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>Salvando Venda...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={14} className="stroke-[2.5]" />
+                        <span>Confirmar e Salvar Venda</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
