@@ -4175,9 +4175,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             filial_id,
             empresa_id,
             quantidade,
-            comissao,
             produto_nome,
             cliente_nome,
+            trainee_id,
+            treener_id,
+            trainee_nome,
+            comissao_trainee,
+            teve_participacao_trainee,
             filiais ( nome ),
             usuarios:vendedor_id ( id, nome ),
             itens_venda (
@@ -4213,6 +4217,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao,
             produto_nome,
             cliente_nome,
+            trainee_id,
+            treener_id,
+            trainee_nome,
+            comissao_trainee,
+            teve_participacao_trainee,
             filiais ( nome ),
             usuarios:vendedor_id ( id, nome ),
             itens_venda ( * )
@@ -27181,14 +27190,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     <td className="py-3 text-gray-400 font-mono">
                                       {new Date(sale.created_at).toLocaleDateString('pt-BR')}
                                     </td>
-                                    <td className="py-3 font-semibold text-white print:text-black">
-                                      <div>{vendedorNome}</div>
-                                      {sale.trainee_nome && (
-                                        <div className="text-[10px] text-purple-400 font-normal flex items-center gap-1">
-                                          <span>Apoio: {sale.trainee_nome}</span>
-                                          {comissaoTrainee > 0 && <span className="text-gray-500">(R$ {comissaoTrainee.toFixed(2)})</span>}
-                                        </div>
-                                      )}
+                                    <td className="py-3 print:text-black">
+                                      <div className="flex flex-col">
+                                        <span className="font-semibold text-white print:text-black">{vendedorNome}</span>
+                                        {(() => {
+                                          const tNome = sale.trainee_nome ||
+                                                        (sale.trainee_id && (mapaFuncionarios[String(sale.trainee_id)]?.nome || mapaFuncionarios[String(sale.trainee_id)]?.name)) ||
+                                                        (sale.treener_id && (mapaFuncionarios[String(sale.treener_id)]?.nome || mapaFuncionarios[String(sale.treener_id)]?.name));
+                                          const tComissao = Number(sale.comissao_trainee ?? 0);
+                                          if (!tNome) return null;
+                                          return (
+                                            <span className="text-xs text-purple-400 font-medium">
+                                              Apoio: {tNome} {tComissao > 0 && `(R$ ${tComissao.toFixed(2)})`}
+                                            </span>
+                                          );
+                                        })()}
+                                      </div>
                                     </td>
                                     <td className="py-3 font-semibold text-white print:text-black">{produtoNome}</td>
                                     <td className="py-3 text-gray-400">{filialNome}</td>
