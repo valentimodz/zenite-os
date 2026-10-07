@@ -14458,13 +14458,24 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         ? (pdvFinanceiraParceira === 'Outra' ? (pdvFinanceiraCustomInput.trim() || 'BOLETO') : (pdvFinanceiraParceira || 'PayJoy'))
         : metodoNomeFormatado;
 
+      // Resolução segura de Trainee selecionado (escopo geral da função para inserts e recibo)
+      const hasTraineeSelecionado = Boolean(selectedTreenerId && String(selectedTreenerId).trim() !== '');
+      const selectedTraineeObj = hasTraineeSelecionado
+        ? ((treenersFilial || []).find(t => String(t.id) === String(selectedTreenerId)) ||
+           (teamMembers || []).find(m => String(m.id) === String(selectedTreenerId)) ||
+           (vendedores || []).find(v => String(v.id) === String(selectedTreenerId)) ||
+           null)
+        : null;
+      const resolvedTraineeId = hasTraineeSelecionado ? (obterUuidPuro(selectedTreenerId) || null) : null;
+      const resolvedTraineeNome = resolvedTraineeId ? (selectedTraineeObj?.nome || selectedTraineeObj?.name || selectedTraineeObj?.nome_completo || null) : null;
+      const valorManualTraineeGeral = parseValorNumerico(pdvComissaoTraineeInput);
+
       // Loop para processar os itens
       for (let idx = 0; idx < pdvCart.length; idx++) {
         const item = pdvCart[idx];
         const valorTotalNovo = item.valorUnitario * item.quantidade * feeFactor;
 
         // Cálculo de comissões corporativo (Vendedor e Trainee)
-        const hasTraineeSelecionado = Boolean(selectedTreenerId && selectedTreenerId.trim() !== '');
         const comissaoInfo = calcularComissaoVenda({
           produto: item.produto,
           quantidade: item.quantidade,
@@ -14476,16 +14487,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           metasState: metasInfo
         });
 
-        // Resolução segura de Trainee selecionado (id e nome)
-        const selectedTraineeObj = (treenersFilial || []).find(t => String(t.id) === String(selectedTreenerId)) || null;
-        const resolvedTraineeId = selectedTreenerId ? (obterUuidPuro(selectedTreenerId) || null) : null;
-        const resolvedTraineeNome = resolvedTraineeId ? (selectedTraineeObj?.nome || selectedTraineeObj?.nome_completo || null) : null;
-
         const comissaoCalculada = comissaoInfo.comissaoVendedor;
-        const valorManualTrainee = parseValorNumerico(pdvComissaoTraineeInput);
-        const comissaoTraineeCalculada = hasTraineeSelecionado && valorManualTrainee > 0
-          ? valorManualTrainee
-          : comissaoInfo.comissaoTrainee;
+        const comissaoTraineeCalculada = hasTraineeSelecionado && valorManualTraineeGeral > 0
+          ? valorManualTraineeGeral
+          : (comissaoInfo.comissaoTrainee || 0);
         const teveParticipacaoTraineeFinal = Boolean(hasTraineeSelecionado || comissaoInfo.teveParticipacaoTrainee);
 
         // Só vincula trocas e desconto de troca no primeiro item
