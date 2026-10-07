@@ -126,30 +126,29 @@ export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): numb
   const qtd = parseInt(sale.quantidade || 1, 10);
   if (totalBruto <= 0) return 0;
 
+  // 1. PRIORIDADE MÁXIMA: ACESSÓRIOS
+  if (isAcessorio(sale)) {
+    return totalBruto * 0.025;
+  }
+
+  // 2. BOLETO
+  const mp = (sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
+  const fin = (sale.financeira || sale.financeira_parceira || '').toUpperCase();
+  if (mp.includes('BOLETO') || fin.includes('BOLETO') || mp.includes('PAYJOY') || mp.includes('WATU') || mp.includes('UME') || mp.includes('AIVA')) {
+    return totalBruto * 0.03;
+  }
+
   const cat = (sale.produtos?.categoria || sale.categoria || '').toUpperCase();
   const tipo = (sale.produtos?.tipo || sale.tipo || '').toUpperCase();
   const nomeProd = (sale.produto_nome || sale.produtos?.nome || '').toUpperCase();
 
-  // Serviços
-  if (cat === 'SERVICO' || tipo === 'SERVICO') {
-    return totalBruto * (isTrainee ? 0.02 : 0.03);
-  }
-  
-  // Acessórios
-  if (tipo === 'ACESSORIO' || cat.includes('ACESSORIO') || cat.includes('CAPA') || cat.includes('PELICULA') || cat.includes('FONE')) {
-    return totalBruto * 0.025;
+  // 3. APARELHOS APPLE (não acessórios)
+  if (cat === 'IOS' || cat === 'APPLE' || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE') || nomeProd.includes('IPAD')) {
+    return 30.00 * qtd;
   }
 
-  // Celulares / Aparelhos
-  const isCelular = tipo === 'CELULAR' || cat === 'ANDROID' || cat === 'IOS' || cat.includes('CELULAR') || cat === 'APPLE_JBL_CONSOLE' || !!sale.imei;
-  if (isCelular) {
-    if (cat === 'IOS' || cat === 'APPLE_JBL_CONSOLE' || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE')) {
-      return Math.max(30 * qtd, totalBruto * 0.02);
-    }
-    return totalBruto * 0.02;
-  }
-
-  return totalBruto * 0.02;
+  // 4. Demais celulares / padrão
+  return totalBruto * 0.015;
 };
 
 // Helper robusto para identificar se a venda é de acessório

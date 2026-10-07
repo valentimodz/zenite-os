@@ -12917,37 +12917,65 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     return BOLETO_KEYWORDS.some(k => m.includes(k) || f.includes(k));
   };
 
-  // Identificador de Especiais por Unidade: JBL, iPhones, Consoles, Drones, Apple Watch, AirPods
-  const isProdutoEspecialPorUnidade = (produto) => {
-    if (!produto) return false;
-    const cat = String(produto.categoria || produto.tipo || '').toUpperCase();
-    const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
-    if (cat === 'APPLE_JBL_CONSOLE' || cat === 'IOS') return true;
-    const termos = ['JBL', 'IPHONE', 'CONSOLE', 'PLAYSTATION', 'PS4', 'PS5', 'XBOX', 'NINTENDO', 'SWITCH', 'DRONE', 'DJI', 'APPLE WATCH', 'AIRPOD'];
-    return termos.some(t => nome.includes(t));
-  };
-
-  // Identificador de Acessórios
+  // Identificador de Acessórios (PRIORIDADE MÁXIMA: Capas, Películas, Cabos, Carregadores, etc.)
+  // Mesmo que contenha 'IPHONE' ou 'APPLE' no nome, se for acessório segue a regra de acessório!
   const isProdutoAcessorio = (produto) => {
     if (!produto) return false;
-    const cat = String(produto.categoria || '').toUpperCase();
-    const tipo = String(produto.tipo || '').toUpperCase();
-    const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
-    if (tipo === 'ACESSORIO' || cat.includes('ACESSORIO')) return true;
-    const termos = ['CAPA', 'CASE', 'PELICULA', 'FILME', 'FONE', 'FONTE', 'CABO', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
-    return termos.some(t => nome.includes(t));
+    const cat = String(produto.categoria || produto.tipo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    const nome = String(produto.nome || produto.produto_nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    
+    if (
+      cat.includes('ACESSORIO') ||
+      cat.includes('PELICULA') ||
+      cat.includes('CABO') ||
+      cat.includes('CARREGADOR') ||
+      cat.includes('FONE')
+    ) {
+      return true;
+    }
+
+    if (
+      nome.startsWith('CASE') ||
+      nome.startsWith('CAPA') ||
+      nome.startsWith('PELICULA') ||
+      nome.startsWith('CHIP') ||
+      nome.includes('CAPA') ||
+      nome.includes('CASE') ||
+      nome.includes('PELICULA') ||
+      nome.includes('CABO') ||
+      nome.includes('CARREGADOR') ||
+      nome.includes('FONE') ||
+      nome.includes('FONTE') ||
+      nome.includes('ADAPTADOR') ||
+      nome.includes('POWERBANK') ||
+      nome.includes('SUPORTE')
+    ) {
+      return true;
+    }
+
+    return false;
   };
 
-  // Identificador de Celulares
+  // Identificador de Aparelhos Apple (iPhone / iPad / Apple Watch): APENAS se for o aparelho em si (não acessório)
+  const isProdutoAparelhoApple = (produto) => {
+    if (!produto) return false;
+    if (isProdutoAcessorio(produto)) return false;
+    const cat = String(produto.categoria || produto.tipo || '').toUpperCase();
+    const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
+    return cat === 'IOS' || cat === 'APPLE' || nome.includes('IPHONE') || nome.includes('APPLE') || nome.includes('IPAD');
+  };
+
+  // Identificador de Celulares (Android ou Aparelhos em geral)
   const isProdutoCelular = (produto) => {
     if (!produto) return false;
+    if (isProdutoAcessorio(produto)) return false;
     const cat = String(produto.categoria || '').toUpperCase();
     const tipo = String(produto.tipo || '').toUpperCase();
     const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
     return tipo === 'CELULAR' || cat.includes('CELULAR') || cat === 'ANDROID' || cat === 'IOS' || nome.includes('CELULAR') || nome.includes('SMARTPHONE');
   };
 
-  // Motor Centralizado de Cálculo de Comissões (Vendedor e Trainee Bonificado)
+  // Motor Centralizado Oficial de Cálculo de Comissões (calculateCommission / calcularComissaoVenda)
   const calcularComissaoVenda = ({
     produto,
     quantidade = 1,
@@ -12961,20 +12989,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const qtd = Math.max(1, Number(quantidade) || 1);
     const total = Number(valorTotal) > 0 ? Number(valorTotal) : (Number(produto?.preco || 0) * qtd);
 
-    // Obter referências de metas do vendedor (evitar getMetasVendedor recursivo)
+    // Obter referências de metas do vendedor
     const metasRef = metasState !== null && metasState !== undefined ? metasState : null;
     const totalBoletos = Number(metasRef?.totalBoletos || 0);
     const metaBoleto = Number(metasRef?.metaBoleto || 67500);
-    const superMetaBoleto = Number(metasRef?.superMetaBoleto || 87000);
-
     const totalAcessorios = Number(metasRef?.totalAcessorios || 0);
     const metaAcessorios = Number(metasRef?.metaAcessorios || 10000);
-    const superMetaAcessorios = Number(metasRef?.superMetaAcessorios || 15000);
-
     const totalVendasGeral = Number(metasRef?.totalVendasGeral || 0);
     const metaTotal = Number(metasRef?.metaTotal || 77500);
+
     const isMetaBatidaGeral = Boolean(
       metasRef?.metaBatida ||
+      metasRef?.bateuMeta ||
       (metaBoleto > 0 && totalBoletos >= metaBoleto) ||
       (metaTotal > 0 && totalVendasGeral >= metaTotal) ||
       (Number(metasRef?.progressoTotal || 0) >= 100) ||
@@ -12984,70 +13010,55 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     );
 
     const isBoleto = isBoletoOuFinanciadora(metodoPagamento, financeira);
-
     let comissaoVendedor = 0;
     let comissaoTrainee = 0;
     let teveParticipacaoTrainee = false;
 
-    // REGRA 1: Boletos / Financiadoras (PayJoy, Aiva, Ume, Watu, Crediário)
+    // 1. PRIORIDADE MÁXIMA: ACESSÓRIOS (qualquer capa, película, cabo, fone, pen drive, chip, etc.)
+    // Mesmo que tenha 'IPHONE' ou 'APPLE' no nome, se for acessório segue a regra de acessório!
+    if (isProdutoAcessorio(produto)) {
+      const bateuMetaAcessorios = Boolean(
+        isMetaBatidaGeral ||
+        (metaAcessorios > 0 && totalAcessorios >= metaAcessorios) ||
+        (Number(metasRef?.progressoAcessorios || 0) >= 100) ||
+        metasRef?.badgeAcessorios?.status === 'batida' ||
+        metasRef?.badgeAcessorios?.status === 'super'
+      );
+      const aliquotaAcessorio = bateuMetaAcessorios ? 0.025 : 0.01; // 2.5% ou 1%
+      comissaoVendedor = Number((total * aliquotaAcessorio).toFixed(2));
+      return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false, taxaVendedor: aliquotaAcessorio };
+    }
+
+    // 2. BOLETO (Financiamento / Carnê / Boleto parcelado)
     if (isBoleto) {
-      // Vendedor: 1% (meta não batida) | 3% (meta batida) | 3,2% (super meta)
-      let taxaVendedor = 0.01;
-      if (
-        (superMetaBoleto > 0 && totalBoletos >= superMetaBoleto) ||
-        (Number(metasRef?.progressoBoleto || 0) >= 120) ||
-        metasRef?.badgeBoleto?.status === 'super'
-      ) {
-        taxaVendedor = 0.032;
-      } else if (
+      const bateuMetaBoleto = Boolean(
+        isMetaBatidaGeral ||
         (metaBoleto > 0 && totalBoletos >= metaBoleto) ||
         (Number(metasRef?.progressoBoleto || 0) >= 100) ||
-        metasRef?.badgeBoleto?.status === 'batida'
-      ) {
-        taxaVendedor = 0.030;
-      }
-      comissaoVendedor = Number((total * taxaVendedor).toFixed(2));
+        metasRef?.badgeBoleto?.status === 'batida' ||
+        metasRef?.badgeBoleto?.status === 'super'
+      );
+      const aliquotaBoleto = bateuMetaBoleto ? 0.03 : 0.01; // 3% ou 1%
+      comissaoVendedor = Number((total * aliquotaBoleto).toFixed(2));
 
-      // Trainee Bonificado: 1% fixo sobre o valor_total da venda no boleto quando houver trainee selecionado
       if (hasTrainee) {
         teveParticipacaoTrainee = true;
         comissaoTrainee = Number((total * 0.01).toFixed(2));
       }
-      return { comissaoVendedor, comissaoTrainee, teveParticipacaoTrainee, taxaVendedor };
+      return { comissaoVendedor, comissaoTrainee, teveParticipacaoTrainee, taxaVendedor: aliquotaBoleto };
     }
 
-    // REGRA 4: Especiais por Unidade (JBL, iPhones, Consoles, Drones, Apple Watch, AirPods)
-    // R$ 15,00 (não batida) | R$ 30,00 (batida)
-    if (isProdutoEspecialPorUnidade(produto)) {
-      const valorPorUnidade = isMetaBatidaGeral ? 30.00 : 15.00;
-      comissaoVendedor = Number((valorPorUnidade * qtd).toFixed(2));
+    // 3. APARELHOS APPLE (IPHONE / IPAD) - Apenas se for o aparelho em si!
+    if (isProdutoAparelhoApple(produto)) {
+      const valorFixoApple = isMetaBatidaGeral ? 30.00 : 15.00; // R$ 30,00 ou R$ 15,00 fixos
+      comissaoVendedor = Number((valorFixoApple * qtd).toFixed(2));
       return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
     }
 
-    // REGRA 2: Acessórios: 1% (não batida) | 2,5% (batida) | 3% (super meta)
-    if (isProdutoAcessorio(produto)) {
-      let taxaAcessorio = 0.01;
-      if (
-        (superMetaAcessorios > 0 && totalAcessorios >= superMetaAcessorios) ||
-        (Number(metasRef?.progressoAcessorios || 0) >= 150) ||
-        metasRef?.badgeAcessorios?.status === 'super'
-      ) {
-        taxaAcessorio = 0.030;
-      } else if (
-        (metaAcessorios > 0 && totalAcessorios >= metaAcessorios) ||
-        (Number(metasRef?.progressoAcessorios || 0) >= 100) ||
-        metasRef?.badgeAcessorios?.status === 'batida'
-      ) {
-        taxaAcessorio = 0.025;
-      }
-      comissaoVendedor = Number((total * taxaAcessorio).toFixed(2));
-      return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
-    }
-
-    // REGRA 3: Celulares À Vista / Cartão / Pix: 1% (não batida) | 2% (batida)
+    // 4. DEMAIS APARELHOS CELULARES (Android à vista / PIX / Cartão)
     if (isProdutoCelular(produto)) {
-      const taxaCelular = isMetaBatidaGeral ? 0.02 : 0.01;
-      comissaoVendedor = Number((total * taxaCelular).toFixed(2));
+      const aliquotaCelular = isMetaBatidaGeral ? 0.015 : 0.01;
+      comissaoVendedor = Number((total * aliquotaCelular).toFixed(2));
       return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
     }
 
@@ -13058,9 +13069,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
     }
 
-    // Fallback Geral
-    const taxaGeral = isMetaBatidaGeral ? 0.02 : 0.01;
-    comissaoVendedor = Number((total * taxaGeral).toFixed(2));
+    // Demais casos (Fallback Geral)
+    const aliquotaPadrao = isMetaBatidaGeral ? 0.015 : 0.01;
+    comissaoVendedor = Number((total * aliquotaPadrao).toFixed(2));
     return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
   };
 
@@ -13082,6 +13093,73 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     return res.comissaoVendedor;
   };
+
+  // Auto-cálculo e sugestão automática de comissão no Modal "Corrigir Venda Concluída"
+  useEffect(() => {
+    if (!isVendaEditModalOpen || !editingVenda) return;
+    const valorNum = parseValorNumerico(vendaNewValor);
+    if (valorNum <= 0) return;
+
+    const res = calcularComissaoVenda({
+      produto: {
+        nome: vendaNewNomeProduto || editingVenda.produto_nome || '',
+        categoria: vendaNewCategoria || 'Celulares'
+      },
+      quantidade: Math.max(1, parseInt(vendaNewQty, 10) || 1),
+      valorTotal: valorNum,
+      metodoPagamento: vendaNewMetodoPagamento || 'PIX',
+      financeira: vendaNewFinanceira || '',
+      hasTrainee: Boolean(vendaHasTrainee),
+      metasState: metasInfo
+    });
+
+    if (res && res.comissaoVendedor !== undefined) {
+      setVendaNewComissao(res.comissaoVendedor.toFixed(2));
+    }
+  }, [
+    isVendaEditModalOpen,
+    vendaNewNomeProduto,
+    vendaNewCategoria,
+    vendaNewQty,
+    vendaNewValor,
+    vendaNewMetodoPagamento,
+    vendaNewFinanceira,
+    vendaHasTrainee
+  ]);
+
+  // Auto-cálculo e sugestão automática de comissão no Modal "Nova Venda Manual"
+  useEffect(() => {
+    if (!isNovaVendaModalOpen) return;
+    const valorNum = parseValorNumerico(novaVendaValorTotal);
+    if (valorNum <= 0) {
+      setNovaVendaComissaoVendedor('');
+      return;
+    }
+
+    const res = calcularComissaoVenda({
+      produto: {
+        nome: novaVendaProdutoDescricao || '',
+        categoria: novaVendaCategoria || 'Celulares'
+      },
+      quantidade: Math.max(1, parseInt(novaVendaQuantidade, 10) || 1),
+      valorTotal: valorNum,
+      metodoPagamento: novaVendaFormaPagamento || 'PIX',
+      hasTrainee: Boolean(novaVendaHasTrainee),
+      metasState: metasInfo
+    });
+
+    if (res && res.comissaoVendedor !== undefined) {
+      setNovaVendaComissaoVendedor(res.comissaoVendedor.toFixed(2));
+    }
+  }, [
+    isNovaVendaModalOpen,
+    novaVendaProdutoDescricao,
+    novaVendaCategoria,
+    novaVendaQuantidade,
+    novaVendaValorTotal,
+    novaVendaFormaPagamento,
+    novaVendaHasTrainee
+  ]);
 
 
 
@@ -14693,6 +14771,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             treener_id: resolvedTraineeId,
             trainee_nome: resolvedTraineeNome,
             comissao: comissaoCalculada,
+            comissao_vendedor: comissaoCalculada,
             comissao_trainee: comissaoTraineeCalculada,
             teve_participacao_trainee: teveParticipacaoTraineeFinal,
             metodo_pagamento: metodoEfetivo,
@@ -14757,7 +14836,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             valor_desconto: itemDescontoTotal,
             desconto: itemDescontoTotal,
             percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0,
-            valor_total: valorTotalNovo
+            valor_total: valorTotalNovo,
+            comissao: comissaoCalculada,
+            comissao_trainee: comissaoTraineeCalculada,
+            trainee_id: resolvedTraineeId
           };
 
           console.log("🛒 [ITENS_VENDA PAYLOAD] Gravando item no Supabase:", itemVendaPayload);
@@ -16562,7 +16644,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       financeira: sale.financeira || sale.financeira_parceira || '',
       hasTrainee: Boolean(sale.trainee_id || sale.treener_id || sale.teve_participacao_trainee),
       isTreinner: Boolean(profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee),
-      metasState: { metaBatida: false }
+      metasState: metasInfo || { metaBatida: false }
     });
 
     return res.comissaoVendedor;
@@ -16967,6 +17049,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       totalAVista,
       // Geral
       progressoTotal,
+      metaBatida: (metaTotal > 0 && totalVendasGeral >= metaTotal) || (metaBoleto > 0 && totalBoletos >= metaBoleto) || progressoTotal >= 100 || progressoBoleto >= 100,
+      bateuMeta: (metaTotal > 0 && totalVendasGeral >= metaTotal) || (metaBoleto > 0 && totalBoletos >= metaBoleto) || progressoTotal >= 100 || progressoBoleto >= 100,
       // Gráficos
       evolucaoDiaria,
       // 4. Histórico Recente de Vendas
