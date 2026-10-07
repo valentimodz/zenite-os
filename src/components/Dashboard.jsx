@@ -1056,6 +1056,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [vendaNewFilialId, setVendaNewFilialId] = useState('');
   const [vendaJustificativa, setVendaJustificativa] = useState('');
   const [isVendaEditModalOpen, setIsVendaEditModalOpen] = useState(false);
+  // Estados para Trainee / Assistente no modal Corrigir Venda Concluída
+  const [vendaHasTrainee, setVendaHasTrainee] = useState(false);
+  const [vendaTraineeId, setVendaTraineeId] = useState('');
+  const [vendaTraineeNome, setVendaTraineeNome] = useState('');
+  const [vendaComissaoTrainee, setVendaComissaoTrainee] = useState('');
 
   // Estados para Auditoria de Vendas & Crédito
   const [buscaAuditoriaCredito, setBuscaAuditoriaCredito] = useState('');
@@ -1418,6 +1423,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [pdvVendaTrainee, setPdvVendaTrainee] = useState(false);
   const [treenersFilial, setTreenersFilial] = useState([]);
   const [selectedTreenerId, setSelectedTreenerId] = useState('');
+  const [pdvComissaoTraineeInput, setPdvComissaoTraineeInput] = useState('');
   const [pdvComissaoPrevia, setPdvComissaoPrevia] = useState(0);
   const [loadingPdvVenda, setLoadingPdvVenda] = useState(false);
 
@@ -10264,6 +10270,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
     setDataVenda(dataVendaInicial);
 
+    // Identificar Trainee / Assistente inicial
+    const hasTraineeInicial = Boolean(
+      venda.teve_participacao_trainee ||
+      venda.trainee_id ||
+      venda.treener_id ||
+      venda.trainee_nome ||
+      Number(venda.comissao_trainee) > 0
+    );
+    setVendaHasTrainee(hasTraineeInicial);
+    const traineeIdInicial = venda.trainee_id || venda.treener_id || '';
+    setVendaTraineeId(traineeIdInicial ? String(traineeIdInicial) : '');
+    setVendaTraineeNome(venda.trainee_nome || '');
+    setVendaComissaoTrainee(venda.comissao_trainee !== undefined && venda.comissao_trainee !== null ? String(venda.comissao_trainee) : '0');
+
     setVendaJustificativa('');
     setIsVendaEditModalOpen(true);
   };
@@ -10369,6 +10389,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
       }
 
+      // Formatar dados de Trainee / Assistente participante
+      const resolvedTraineeId = vendaHasTrainee && vendaTraineeId ? vendaTraineeId : null;
+      const resolvedTraineeNome = vendaHasTrainee && vendaTraineeNome ? vendaTraineeNome : null;
+      const resolvedComissaoTrainee = vendaHasTrainee ? parseValorNumerico(vendaComissaoTrainee) : 0;
+
       // 1. UPDATE direto na tabela 'vendas' garantindo sincronização total com colunas reais
       const updatePayload = {
         valor_total: novoValor,
@@ -10384,6 +10409,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         usuario_id: novoVendedorId,
         vendedor_nome: novoVendedorNome,
         filial_id: novaFilialId,
+        teve_participacao_trainee: vendaHasTrainee,
+        trainee_id: resolvedTraineeId,
+        treener_id: resolvedTraineeId,
+        trainee_nome: resolvedTraineeNome,
+        comissao_trainee: resolvedComissaoTrainee,
         justificativa_correcao: justificativaTexto,
         atualizado_em: new Date().toISOString(),
         ...(novaDataIso ? { created_at: novaDataIso, data_venda: novaDataIso } : {})
@@ -10411,6 +10441,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           usuario_id: novoVendedorId,
           vendedor_nome: novoVendedorNome,
           filial_id: novaFilialId,
+          teve_participacao_trainee: vendaHasTrainee,
+          trainee_id: resolvedTraineeId,
+          treener_id: resolvedTraineeId,
+          trainee_nome: resolvedTraineeNome,
+          comissao_trainee: resolvedComissaoTrainee,
           ...(novaDataIso ? { created_at: novaDataIso } : {})
         };
         console.log('Tentando update com payload essencial:', essentialPayload);
@@ -13165,6 +13200,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setPdvNovoParcelas(1);
     setPdvNovoFinanceira('PayJoy');
     setPdvOutraFinanceiraNome('');
+    setSelectedTreenerId('');
+    setPdvVendaTrainee(false);
+    setPdvComissaoTraineeInput('');
     setPdvTrocaModelo('');
     setPdvTrocaCapacidade('');
     setPdvTrocaCor('');
@@ -14251,8 +14289,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const resolvedTraineeNome = resolvedTraineeId ? (selectedTraineeObj?.nome || selectedTraineeObj?.nome_completo || null) : null;
 
         const comissaoCalculada = comissaoInfo.comissaoVendedor;
-        const comissaoTraineeCalculada = comissaoInfo.comissaoTrainee;
-        const teveParticipacaoTraineeFinal = comissaoInfo.teveParticipacaoTrainee;
+        const valorManualTrainee = parseValorNumerico(pdvComissaoTraineeInput);
+        const comissaoTraineeCalculada = hasTraineeSelecionado && valorManualTrainee > 0
+          ? valorManualTrainee
+          : comissaoInfo.comissaoTrainee;
+        const teveParticipacaoTraineeFinal = Boolean(hasTraineeSelecionado || comissaoInfo.teveParticipacaoTrainee);
 
         // Só vincula trocas e desconto de troca no primeiro item
         const itemTrocaJson = idx === 0 && isTrocaAtiva ? pdvUsadoList : [];
@@ -14627,8 +14668,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           console.error('Erro ao atualizar dados estendidos e pagamentos na venda:', clientUpdateErr);
         }
 
-        // Se houver participação de trainee bonificado registrada no boleto/financiadora
-        if (teveParticipacaoTraineeFinal && comissaoTraineeCalculada > 0) {
+        // Se houver participação de trainee registrada
+        if (teveParticipacaoTraineeFinal || (hasTraineeSelecionado && resolvedTraineeId)) {
           await supabase.from('vendas').update({
             teve_participacao_trainee: true,
             comissao_trainee: comissaoTraineeCalculada,
@@ -19542,6 +19583,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 const val = e.target.value;
                                 setSelectedTreenerId(val);
                                 setPdvVendaTrainee(!!val);
+                                if (!val) setPdvComissaoTraineeInput('');
                               }}
                               className="w-full bg-surface border border-border focus:border-primary rounded-lg px-3 py-2 text-xs text-foreground outline-none cursor-pointer font-bold"
                             >
@@ -19552,6 +19594,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 </option>
                               ))}
                             </select>
+
+                            {selectedTreenerId && (
+                              <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between gap-3 animate-fadeIn">
+                                <label className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+                                  Comissão Trainee (R$):
+                                </label>
+                                <div className="flex-1 max-w-[160px]">
+                                  <input
+                                    type="text"
+                                    value={pdvComissaoTraineeInput}
+                                    onChange={(e) => setPdvComissaoTraineeInput(e.target.value)}
+                                    placeholder="Ex: 5,00 ou 10,00"
+                                    className="w-full bg-surface border border-border focus:border-primary rounded-lg px-2.5 py-1 text-xs text-foreground font-mono outline-none text-right"
+                                  />
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -26773,11 +26832,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   if (filtroVendedor && filtroVendedor !== 'TODOS') {
                                     const vId = String(sale.vendedor_id || sale.usuario_id || '');
                                     const vNome = extrairNomeVendedor(sale).toLowerCase();
+                                    const tId = String(sale.trainee_id || sale.treener_id || '');
+                                    const tNome = String(sale.trainee_nome || '').toLowerCase();
                                     const alvoObj = mapaFuncionarios[String(filtroVendedor)];
                                     const alvoNome = alvoObj ? (alvoObj.nome || alvoObj.name || '').toLowerCase() : '';
                                     const matchId = vId && vId === String(filtroVendedor);
-                                    const matchNome = alvoNome && vNome.includes(alvoNome);
-                                    if (!matchId && !matchNome) return false;
+                                    const matchNome = Boolean(alvoNome && vNome.includes(alvoNome));
+                                    const matchTraineeId = tId && tId === String(filtroVendedor);
+                                    const matchTraineeNome = Boolean(alvoNome && tNome.includes(alvoNome));
+                                    if (!matchId && !matchNome && !matchTraineeId && !matchTraineeNome) return false;
                                   }
 
                                   // Filtro por Filial
@@ -26847,16 +26910,44 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 // 3. Coluna FILIAL: exibir venda.filiais?.nome || 'Monkey Shop'
                                 const filialNome = sale.filiais?.nome || filiais.find(f => f.id === sale.filial_id)?.nome || 'Monkey Shop';
 
-                                const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
+                                 const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
                                 const comissaoRegistrada = Number(sale.comissao ?? 0);
-                                const comissaoFinal = comissaoRegistrada > 0 ? comissaoRegistrada : calcularComissaoItem(sale);
+                                const comissaoTitular = comissaoRegistrada > 0 ? comissaoRegistrada : calcularComissaoItem(sale);
+                                const comissaoTrainee = Number(sale.comissao_trainee ?? 0);
+
+                                // Determinar comissão a exibir baseado no filtro selecionado
+                                let comissaoFinal = comissaoTitular;
+                                let isVisualizandoComoTrainee = false;
+                                if (filtroVendedor && filtroVendedor !== 'TODOS') {
+                                  const tId = String(sale.trainee_id || sale.treener_id || '');
+                                  const tNome = String(sale.trainee_nome || '').toLowerCase();
+                                  const vId = String(sale.vendedor_id || sale.usuario_id || '');
+                                  const alvoObj = mapaFuncionarios[String(filtroVendedor)];
+                                  const alvoNome = alvoObj ? (alvoObj.nome || alvoObj.name || '').toLowerCase() : '';
+
+                                  const matchTrainee = (tId && tId === String(filtroVendedor)) || (alvoNome && tNome.includes(alvoNome));
+                                  const matchTitular = (vId && vId === String(filtroVendedor)) || (alvoNome && extrairNomeVendedor(sale).toLowerCase().includes(alvoNome));
+
+                                  if (matchTrainee && !matchTitular) {
+                                    comissaoFinal = comissaoTrainee;
+                                    isVisualizandoComoTrainee = true;
+                                  }
+                                }
 
                                 return (
                                   <tr key={sale.id} className="hover:bg-purple-950/5 print:hover:bg-transparent transition-colors">
                                     <td className="py-3 text-gray-400 font-mono">
                                       {new Date(sale.created_at).toLocaleDateString('pt-BR')}
                                     </td>
-                                    <td className="py-3 font-semibold text-white print:text-black">{vendedorNome}</td>
+                                    <td className="py-3 font-semibold text-white print:text-black">
+                                      <div>{vendedorNome}</div>
+                                      {sale.trainee_nome && (
+                                        <div className="text-[10px] text-purple-400 font-normal flex items-center gap-1">
+                                          <span>Apoio: {sale.trainee_nome}</span>
+                                          {comissaoTrainee > 0 && <span className="text-gray-500">(R$ {comissaoTrainee.toFixed(2)})</span>}
+                                        </div>
+                                      )}
+                                    </td>
                                     <td className="py-3 font-semibold text-white print:text-black">{produtoNome}</td>
                                     <td className="py-3 text-gray-400">{filialNome}</td>
                                     <td className="py-3 text-gray-300">
@@ -26873,6 +26964,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     )}
                                     <td className="py-3 font-mono font-bold text-[#6A0DAD] print:text-black text-right">
                                       R$ {Number(comissaoFinal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      {isVisualizandoComoTrainee && (
+                                        <div className="text-[9px] text-purple-400 uppercase font-semibold">Trainee</div>
+                                      )}
                                     </td>
                                     <td className="py-3 text-right print:hidden">
                                       <div className="flex justify-end items-center gap-1.5">
@@ -31580,6 +31674,118 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         ))}
                       </select>
                     </div>
+                  </div>
+
+                  {/* SUPORTE A TRAINEE / ASSISTENTE COM COMISSÃO NA VENDA */}
+                  <div className="bg-[#111111]/90 border border-[#222222] rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Users size={16} className="text-purple-400" />
+                        <div>
+                          <label htmlFor="check-venda-has-trainee" className="text-xs font-bold text-white cursor-pointer select-none">
+                            Teve participação de Trainee / Assistente?
+                          </label>
+                          <p className="text-[10px] text-gray-500">
+                            Habilite para registrar e bonificar o apoio de um Trainee nesta venda.
+                          </p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          id="check-venda-has-trainee"
+                          type="checkbox"
+                          checked={vendaHasTrainee}
+                          onChange={(e) => {
+                            const ativo = e.target.checked;
+                            setVendaHasTrainee(ativo);
+                            if (!ativo) {
+                              setVendaTraineeId('');
+                              setVendaTraineeNome('');
+                              setVendaComissaoTrainee('0');
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-10 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6A0DAD]"></div>
+                      </label>
+                    </div>
+
+                    {vendaHasTrainee && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#222222] animate-fadeIn">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                            Trainee / Assistente <span className="text-purple-400">*</span>
+                          </label>
+                          <select
+                            value={vendaTraineeId}
+                            onChange={(e) => {
+                              const chosenId = e.target.value;
+                              setVendaTraineeId(chosenId);
+                              const matchObj = (treenersFilial || []).find(t => String(t.id) === String(chosenId)) ||
+                                               (teamMembers || []).find(m => String(m.id) === String(chosenId)) ||
+                                               (vendedores || []).find(v => String(v.id) === String(chosenId));
+                              if (matchObj) {
+                                setVendaTraineeNome(matchObj.nome || matchObj.name || matchObj.email || '');
+                              }
+                            }}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-sm outline-none font-medium cursor-pointer transition-all"
+                          >
+                            <option value="" className="bg-[#111] text-gray-500">
+                              {vendaTraineeNome ? `Manter: ${vendaTraineeNome}` : 'Selecione o Trainee...'}
+                            </option>
+                            {(() => {
+                              const mapaTrainees = new Map();
+                              // 1. Trainees específicos cadastrados
+                              (treenersFilial || []).forEach(t => {
+                                if (t.id) mapaTrainees.set(String(t.id), t.nome || t.name || 'Trainee');
+                              });
+                              // 2. Colaboradores com cargo Trainee/Treener
+                              (teamMembers || []).forEach(m => {
+                                const cargoUpper = String(m.role || m.cargo || '').toUpperCase();
+                                if (m.id && (cargoUpper.includes('TRAINEE') || cargoUpper.includes('TREENER') || m.is_treinner) && !mapaTrainees.has(String(m.id))) {
+                                  mapaTrainees.set(String(m.id), m.nome || m.name || m.email || 'Trainee');
+                                }
+                              });
+                              // 3. Fallback: todos os colaboradores disponíveis
+                              if (mapaTrainees.size === 0) {
+                                (teamMembers || []).forEach(m => {
+                                  if (m.id && !mapaTrainees.has(String(m.id))) {
+                                    mapaTrainees.set(String(m.id), m.nome || m.name || m.email || 'Colaborador');
+                                  }
+                                });
+                                (vendedores || []).forEach(v => {
+                                  if (v.id && !mapaTrainees.has(String(v.id))) {
+                                    mapaTrainees.set(String(v.id), v.nome || v.name || 'Vendedor');
+                                  }
+                                });
+                              }
+                              // Se já tiver trainee cadastrado na venda e não estiver no mapa
+                              if (editingVenda?.trainee_id && editingVenda?.trainee_nome && !mapaTrainees.has(String(editingVenda.trainee_id))) {
+                                mapaTrainees.set(String(editingVenda.trainee_id), editingVenda.trainee_nome);
+                              }
+                              return Array.from(mapaTrainees.entries()).map(([id, nome]) => (
+                                <option key={id} value={id} className="bg-[#111] text-white">
+                                  {nome}
+                                </option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                            Comissão Trainee (R$)
+                          </label>
+                          <input
+                            type="text"
+                            value={vendaComissaoTrainee}
+                            onChange={(e) => setVendaComissaoTrainee(e.target.value)}
+                            placeholder="Ex: 5,00 ou 10,00"
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-sm outline-none font-mono transition-all"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {editingVenda?.imei && (

@@ -265,6 +265,16 @@ export default function ModalDetalheRelatorio({
       porVendedor[vendedor].valor += valor;
       porVendedor[vendedor].count += 1;
       porVendedor[vendedor].comissao += comissao;
+
+      // Se houver trainee participante com comissão registrada, computar também no relatório de comissões
+      const comissaoTrainee = Number(v.comissao_trainee || 0);
+      const traineeNome = v.trainee_nome || (v.trainee_id ? 'Trainee / Assistente' : null);
+      if (traineeNome && (comissaoTrainee > 0 || v.teve_participacao_trainee || v.trainee_id)) {
+        if (!porVendedor[traineeNome]) porVendedor[traineeNome] = { valor: 0, count: 0, comissao: 0 };
+        porVendedor[traineeNome].valor += valor;
+        porVendedor[traineeNome].count += 1;
+        porVendedor[traineeNome].comissao += comissaoTrainee;
+      }
     });
 
     // Cálculo real do CMV abatendo o preco_custo dos itens vendidos
