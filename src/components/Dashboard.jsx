@@ -10431,6 +10431,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         preco_unitario_vendido: precoUnitario,
         quantidade: novaQtd,
         comissao: novaComissao,
+        comissao_vendedor: novaComissao,
         metodo_pagamento: novoMetodo,
         financeira: resolvedFinanceira,
         financeira_parceira: resolvedFinanceira,
@@ -10465,6 +10466,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           valor_total: novoValor,
           quantidade: novaQtd,
           comissao: novaComissao,
+          comissao_vendedor: novaComissao,
           metodo_pagamento: novoMetodo,
           produto_nome: novoNome || editingVenda.produto_nome || editingVenda.produtos?.nome || 'Produto',
           categoria: novaCategoria,
@@ -10570,6 +10572,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           produto_nome: novoNome || editingVenda.produto_nome || 'Produto',
           preco_unitario: precoUnitario,
           valor_total: novoValor,
+          comissao: Number(novaComissao),
+          comissao_trainee: Number(resolvedComissaoTrainee),
+          trainee_id: resolvedTraineeId,
           filial_id: novaFilialId,
           vendedor_id: novoVendedorId
         };
@@ -10586,7 +10591,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             .from('itens_venda')
             .update({
               produto_nome: novoNome || editingVenda.produto_nome || 'Produto',
-              preco_unitario: precoUnitario
+              preco_unitario: precoUnitario,
+              valor_total: novoValor,
+              comissao: Number(novaComissao)
             })
             .eq('venda_id', vendaId);
         }
@@ -10612,8 +10619,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             usuarios: { ...(v.usuarios || {}), id: novoVendedorId, nome: novoVendedorNome },
             profiles: { ...(v.profiles || {}), id: novoVendedorId, nome: novoVendedorNome },
             produto_nome: novoNome || v.produto_nome,
+            comissao: Number(novaComissao),
+            comissao_vendedor: Number(novaComissao),
+            comissao_trainee: Number(resolvedComissaoTrainee),
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
-              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome, valor_total: novoValor } : it)
+              ? v.itens_venda.map((it, idx) => idx === 0 ? {
+                  ...it,
+                  produto_nome: novoNome,
+                  valor_total: novoValor,
+                  comissao: Number(novaComissao),
+                  comissao_trainee: Number(resolvedComissaoTrainee)
+                } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
@@ -10640,8 +10656,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             usuarios: { ...(v.usuarios || {}), id: novoVendedorId, nome: novoVendedorNome },
             profiles: { ...(v.profiles || {}), id: novoVendedorId, nome: novoVendedorNome },
             produto_nome: novoNome || v.produto_nome,
+            comissao: Number(novaComissao),
+            comissao_vendedor: Number(novaComissao),
+            comissao_trainee: Number(resolvedComissaoTrainee),
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
-              ? v.itens_venda.map((it, idx) => idx === 0 ? { ...it, produto_nome: novoNome, valor_total: novoValor } : it)
+              ? v.itens_venda.map((it, idx) => idx === 0 ? {
+                  ...it,
+                  produto_nome: novoNome,
+                  valor_total: novoValor,
+                  comissao: Number(novaComissao),
+                  comissao_trainee: Number(resolvedComissaoTrainee)
+                } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
@@ -10664,6 +10689,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const targetEmpresaId = company?.id || profile?.empresa_id;
       if (targetEmpresaId && typeof fetchGerenteData === 'function') {
         fetchGerenteData(targetEmpresaId, filtroMes, true).catch(e => console.warn('Aviso ao recarregar dados do gerente:', e));
+      }
+      if (typeof fetchVendedorData === 'function' && activeFilialId && session?.user?.id) {
+        fetchVendedorData(activeFilialId, session.user.id);
       }
     } catch (err) {
       console.error('Erro ao corrigir venda:', err);
