@@ -10737,6 +10737,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         vendedor_nome: novaVendaVendedorNome || 'Vendedor',
         cliente_id: targetClienteId,
         cliente_nome: novaVendaClienteNome || 'Consumidor Final',
+        produto_nome: novaVendaProdutoDescricao.trim(),
+        categoria: novaVendaCategoria || 'Celulares',
+        quantidade: qtdNum,
+        imei: novaVendaImei.trim() || null,
         valor_total: valorTotalNum,
         total: valorTotalNum,
         valor_pago: valorTotalNum,
@@ -10765,17 +10769,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const vendaId = vendaCriada.id;
       const precoUnitario = valorTotalNum / qtdNum;
 
-      // 3. Inserir item da venda na tabela 'itens_venda'
+      // 3. Inserir item da venda na tabela 'itens_venda' com o schema oficial
       const itemPayload = {
         venda_id: vendaId,
-        empresa_id: targetEmpresaId,
         filial_id: targetFilialId,
         vendedor_id: targetVendedorId,
+        empresa_id: targetEmpresaId,
+        produto_id: null,
         produto_nome: novaVendaProdutoDescricao.trim(),
-        imei: novaVendaImei.trim() || null,
         quantidade: qtdNum,
+        imei: novaVendaImei.trim() || null,
         preco_unitario: precoUnitario,
-        subtotal: valorTotalNum,
+        valor_total: valorTotalNum,
+        comissao: comissaoVendNum,
+        trainee_id: novaVendaHasTrainee ? (obterUuidPuro(novaVendaTraineeId) || null) : null,
+        comissao_trainee: comissaoTraineeNum,
         created_at: createdAtIso
       };
 
@@ -10787,17 +10795,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       if (itemErr) {
         console.warn('Aviso ao registrar item em itens_venda:', itemErr);
+        // Fallback resiliente caso alguma coluna opcional gere divergência
+        await supabase
+          .from('itens_venda')
+          .insert({
+            venda_id: vendaId,
+            filial_id: targetFilialId,
+            vendedor_id: targetVendedorId,
+            produto_nome: novaVendaProdutoDescricao.trim(),
+            quantidade: qtdNum,
+            preco_unitario: precoUnitario,
+            valor_total: valorTotalNum,
+            imei: novaVendaImei.trim() || null
+          });
       }
 
       // 4. Montar objeto completo para atualização otimista
       const vendaCompleta = {
         ...vendaCriada,
+        produto_nome: novaVendaProdutoDescricao.trim(),
         itens_venda: [
           itemCriado || {
             produto_nome: novaVendaProdutoDescricao.trim(),
             quantidade: qtdNum,
             preco_unitario: precoUnitario,
-            subtotal: valorTotalNum,
+            valor_total: valorTotalNum,
             imei: novaVendaImei.trim() || null
           }
         ],
