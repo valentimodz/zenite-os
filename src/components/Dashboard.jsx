@@ -10498,16 +10498,34 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         console.warn('Registro em sales_audit_logs ignorado ou não disponível:', auditErr);
       }
 
-      // 3.1 Atualizar também a descrição no itens_venda caso haja registros vinculados
-      if (novoNome) {
-        try {
+      // 3.1 ATUALIZAÇÃO OBRIGATÓRIA NO ITEM DA VENDA: Sincronizar na tabela 'itens_venda'
+      try {
+        const itemUpdatePayload = {
+          produto_nome: novoNome || editingVenda.produto_nome || 'Produto',
+          preco_unitario: precoUnitario,
+          valor_total: novoValor,
+          filial_id: novaFilialId,
+          vendedor_id: novoVendedorId
+        };
+
+        const { error: itemUpdateErr } = await supabase
+          .from('itens_venda')
+          .update(itemUpdatePayload)
+          .eq('venda_id', vendaId);
+
+        if (itemUpdateErr) {
+          console.warn('Tentando fallback de update em itens_venda:', itemUpdateErr);
+          // Fallback resiliente caso alguma coluna não exista
           await supabase
             .from('itens_venda')
-            .update({ produto_nome: novoNome })
+            .update({
+              produto_nome: novoNome || editingVenda.produto_nome || 'Produto',
+              preco_unitario: precoUnitario
+            })
             .eq('venda_id', vendaId);
-        } catch (itemErr) {
-          console.warn('Aviso ao sincronizar produto_nome em itens_venda:', itemErr);
         }
+      } catch (itemErr) {
+        console.warn('Aviso ao sincronizar dados em itens_venda:', itemErr);
       }
 
       showToast('Venda e vínculos atualizados com sucesso!', 'success');
