@@ -16643,21 +16643,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       if (!isNaN(val)) return val;
     }
 
-    // 2. Se não estiver gravada, aplica a regra oficial:
+    // 2. Se não estiver gravada, aplica a regra oficial de calcularComissaoTotal:
     const produtoNome = String(sale.produto_nome || sale.nome || sale.produtos?.nome || sale.descricao || '').toUpperCase();
     const categoria = String(sale.categoria || sale.produtos?.categoria || '').toUpperCase();
-    const formaPagamento = String(sale.forma_pagamento || sale.metodo_pagamento || sale.pagamento || '').toUpperCase();
+    const formaPgto = String(sale.forma_pagamento || sale.metodo_pagamento || sale.pagamento || '').toUpperCase();
     const valor = Number(sale.valor_total || sale.valor || sale.preco || sale.preco_unitario || 0);
 
     if (valor <= 0) return 0;
 
-    // 1. REGRA: 2,5% PARA ACESSÓRIOS
+    // 1. ACESSÓRIOS (2,5%)
     const isAcessorio = 
       categoria.includes('ACESS') ||
       categoria.includes('CARREGADOR') ||
       categoria.includes('CABO') ||
       categoria.includes('PELIC') ||
       categoria.includes('FONE') ||
+      categoria.includes('LIMPA TELA') ||
       produtoNome.includes('CASE') ||
       produtoNome.includes('CAPA') ||
       produtoNome.includes('CHIP') ||
@@ -16670,20 +16671,38 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     if (isAcessorio) {
       return Number((valor * 0.025).toFixed(2));
     }
-
-    // 2. REGRA: 3% PARA CELULAR VENDIDO NO BOLETO
-    if (formaPagamento.includes('BOLETO')) {
-      return Number((valor * 0.03).toFixed(2));
-    }
-
-    // 3. REGRA: PRODUTOS APPLE (APARELHOS) = R$ 15,00 FIXO
-    const isApple = (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) && !isAcessorio;
-    if (isApple) {
+    // 2. CONSOLES / DRONES (R$ 15,00 FIXO)
+    else if (
+      categoria.includes('CONSOLE') ||
+      categoria.includes('DRONE') ||
+      produtoNome.includes('PLAYSTATION') ||
+      produtoNome.includes('PS5') ||
+      produtoNome.includes('PS4') ||
+      produtoNome.includes('XBOX') ||
+      produtoNome.includes('NINTENDO') ||
+      produtoNome.includes('DRONE')
+    ) {
       return 15.00;
     }
-
-    // Celulares que não são Apple e não foram vendidos no boleto (PIX / Dinheiro / Cartão):
-    return 0.00;
+    // 3. CAIXA DE SOM JBL (R$ 15,00 FIXO)
+    else if (
+      produtoNome.includes('JBL') ||
+      (categoria.includes('SOM') && produtoNome.includes('JBL'))
+    ) {
+      return 15.00;
+    }
+    // 4. APARELHOS APPLE (IPHONE / IPAD) = R$ 15,00 FIXO
+    else if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
+      return 15.00;
+    }
+    // 5. CELULARES NO BOLETO (3%)
+    else if (formaPgto.includes('BOLETO')) {
+      return Number((valor * 0.03).toFixed(2));
+    }
+    // 6. DEMAIS CELULARES FORA DO BOLETO (PIX, DINHEIRO, CARTÃO) = 2%
+    else {
+      return Number((valor * 0.02).toFixed(2));
+    }
   };
 
   // --- HELPERS DE METAS DINÂMICAS & REBRANDING ---

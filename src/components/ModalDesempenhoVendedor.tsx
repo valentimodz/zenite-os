@@ -105,30 +105,31 @@ export interface ModalDesempenhoVendedorProps {
   onClose: () => void;
 }
 
-export function calcularComissao(vendaOuItem: any): number {
-  const produtoNome = String(vendaOuItem.produto_nome || vendaOuItem.nome || '').toUpperCase();
-  const categoria = String(vendaOuItem.categoria || '').toUpperCase();
+export function calcularComissaoTotal(venda: any, item?: any) {
+  const produtoNome = String(item?.produto_nome || venda?.produto_nome || venda?.nome || '').toUpperCase();
+  const categoria = String(item?.categoria || venda?.categoria || '').toUpperCase();
   
-  // Captura a forma de pagamento independentemente de vir como forma_pagamento ou metodo_pagamento
-  const formaPagamento = String(
-    vendaOuItem.forma_pagamento || 
-    vendaOuItem.metodo_pagamento || 
-    vendaOuItem.pagamento || 
+  // Captura a forma de pagamento tanto da venda quanto do item
+  const formaPgto = String(
+    venda?.forma_pagamento || 
+    venda?.metodo_pagamento || 
+    item?.forma_pagamento || 
     ''
   ).toUpperCase();
   
-  const valor = Number(vendaOuItem.valor_total || vendaOuItem.preco_unitario || 0);
+  const valor = Number(item?.valor_total || venda?.valor_total || 0);
+  if (valor <= 0) return { comissaoVendedor: 0, comissaoTrainee: 0 };
 
-  if (valor <= 0) return 0;
+  let comissaoVendedor = 0;
 
-  // 1. REGRA: 2,5% PARA ACESSÓRIOS
-  // Cobre chips, capas, películas, pendrives, cabos, fones e carregadores/chargers
+  // 1. ACESSÓRIOS (2,5%)
   const isAcessorio = 
     categoria.includes('ACESS') ||
     categoria.includes('CARREGADOR') ||
     categoria.includes('CABO') ||
     categoria.includes('PELIC') ||
     categoria.includes('FONE') ||
+    categoria.includes('LIMPA TELA') ||
     produtoNome.includes('CASE') ||
     produtoNome.includes('CAPA') ||
     produtoNome.includes('CHIP') ||
@@ -139,28 +140,64 @@ export function calcularComissao(vendaOuItem: any): number {
     produtoNome.includes('CABO');
 
   if (isAcessorio) {
-    return Number((valor * 0.025).toFixed(2)); // 2,5%
+    comissaoVendedor = Number((valor * 0.025).toFixed(2));
+  }
+  // 2. CONSOLES / DRONES (R$ 15,00 FIXO)
+  else if (
+    categoria.includes('CONSOLE') ||
+    categoria.includes('DRONE') ||
+    produtoNome.includes('PLAYSTATION') ||
+    produtoNome.includes('PS5') ||
+    produtoNome.includes('PS4') ||
+    produtoNome.includes('XBOX') ||
+    produtoNome.includes('NINTENDO') ||
+    produtoNome.includes('DRONE')
+  ) {
+    comissaoVendedor = 15.00;
+  }
+  // 3. CAIXA DE SOM JBL (R$ 15,00 FIXO)
+  else if (
+    produtoNome.includes('JBL') ||
+    (categoria.includes('SOM') && produtoNome.includes('JBL'))
+  ) {
+    comissaoVendedor = 15.00;
+  }
+  // 4. APARELHOS APPLE (IPHONE / IPAD) = R$ 15,00 FIXO
+  else if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
+    comissaoVendedor = 15.00;
+  }
+  // 5. CELULARES NO BOLETO (3%)
+  else if (formaPgto.includes('BOLETO')) {
+    comissaoVendedor = Number((valor * 0.03).toFixed(2));
+  }
+  // 6. DEMAIS CELULARES FORA DO BOLETO (PIX, DINHEIRO, CARTÃO) = 2%
+  else {
+    comissaoVendedor = Number((valor * 0.02).toFixed(2));
   }
 
-  // 2. REGRA: 3% PARA CELULAR VENDIDO NO BOLETO
-  if (formaPagamento.includes('BOLETO')) {
-    return Number((valor * 0.03).toFixed(2)); // 3,0%
-  }
+  // 7. TRAINEE / APOIO: 1% SOBRE O VALOR DA VENDA
+  const temTrainee = Boolean(venda?.trainee_id || venda?.trainee_nome);
+  const comissaoTrainee = temTrainee ? Number((valor * 0.01).toFixed(2)) : 0;
 
-  // 3. REGRA: PRODUTOS APPLE (APARELHOS) = R$ 15,00 FIXO
-  const isApple = (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) && !isAcessorio;
-  if (isApple) {
-    return 15.00; // Fixo R$ 15,00
-  }
+  return { comissaoVendedor, comissaoTrainee };
+}
 
-  // Celulares que não são Apple e não foram vendidos no boleto (PIX / Dinheiro / Cartão):
-  return 0.00;
+export function calcularComissao(vendaOuItem: any): number {
+  return calcularComissaoTotal(vendaOuItem).comissaoVendedor;
 }
 
 // Helper robusto de comissão para cada item
 export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): number => {
   if (!sale) return 0;
   
+  if (isTrainee) {
+    if (sale.comissao_trainee !== undefined && sale.comissao_trainee !== null && sale.comissao_trainee !== '') {
+      const val = parseFloat(sale.comissao_trainee);
+      if (!isNaN(val)) return val;
+    }
+    return calcularComissaoTotal(sale).comissaoTrainee;
+  }
+
   if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
     const val = parseFloat(sale.comissao_vendedor);
     if (!isNaN(val)) return val;
@@ -178,7 +215,7 @@ export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): numb
     if (!isNaN(val)) return val;
   }
 
-  return calcularComissao(sale);
+  return calcularComissaoTotal(sale).comissaoVendedor;
 };
 
 // Helper robusto para identificar se a venda é de acessório
