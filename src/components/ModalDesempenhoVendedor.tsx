@@ -105,6 +105,81 @@ export interface ModalDesempenhoVendedorProps {
   onClose: () => void;
 }
 
+export function obterComissaoVenda(venda: any): number {
+  // 1. Se já existir valor numérico válido editado ou salvo na venda, priorize-o:
+  const valorSalvo = Number(venda?.comissao_vendedor ?? venda?.comissao ?? venda?.valor_comissao ?? venda?.itens_venda?.[0]?.comissao);
+  if (valorSalvo > 0) return valorSalvo;
+
+  // 2. Extração dos dados da venda e do item
+  const item = venda?.itens_venda?.[0] || {};
+  const produtoNome = String(venda?.produto_nome || item.produto_nome || venda?.nome || item.nome || '').toUpperCase();
+  const categoria = String(venda?.categoria || item.categoria || '').toUpperCase();
+  
+  // A FORMA DE PAGAMENTO DEVE VIR DA VENDA PRINCIPAL
+  const formaPgto = String(venda?.forma_pagamento || venda?.metodo_pagamento || item.forma_pagamento || item.metodo_pagamento || '').toUpperCase();
+  
+  const valorTotal = Number(venda?.valor_total || item.valor_total || item.preco_unitario || venda?.valor || 0);
+  if (valorTotal <= 0) return 0;
+
+  // REGRA 1: ACESSÓRIOS (2,5%)
+  const isAcessorio = 
+    categoria.includes('ACESS') ||
+    categoria.includes('CARREGADOR') ||
+    categoria.includes('CABO') ||
+    categoria.includes('PELIC') ||
+    categoria.includes('FONE') ||
+    categoria.includes('CHIP') ||
+    categoria.includes('PEN DRIVE') ||
+    categoria.includes('LIMPA TELA') ||
+    produtoNome.includes('CASE') ||
+    produtoNome.includes('CAPA') ||
+    produtoNome.includes('CHIP') ||
+    produtoNome.includes('PEN DRIVE') ||
+    produtoNome.includes('CHARGER') ||
+    produtoNome.includes('FONTE') ||
+    produtoNome.includes('PELICULA') ||
+    produtoNome.includes('CABO') ||
+    produtoNome.includes('LIMPA TELA') ||
+    produtoNome.includes('IWILL');
+
+  if (isAcessorio) {
+    return Number((valorTotal * 0.025).toFixed(2));
+  }
+
+  // REGRA 2: CONSOLES / DRONES (R$ 15,00)
+  if (
+    categoria.includes('CONSOLE') ||
+    categoria.includes('DRONE') ||
+    produtoNome.includes('PLAYSTATION') ||
+    produtoNome.includes('PS5') ||
+    produtoNome.includes('PS4') ||
+    produtoNome.includes('XBOX') ||
+    produtoNome.includes('NINTENDO') ||
+    produtoNome.includes('DRONE')
+  ) {
+    return 15.00;
+  }
+
+  // REGRA 3: CAIXAS DE SOM JBL (R$ 15,00)
+  if (produtoNome.includes('JBL')) {
+    return 15.00;
+  }
+
+  // REGRA 4: APARELHOS APPLE (IPHONE / IPAD) = R$ 15,00
+  if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
+    return 15.00;
+  }
+
+  // REGRA 5: CELULARES NO BOLETO (3,0%)
+  if (formaPgto.includes('BOLETO')) {
+    return Number((valorTotal * 0.03).toFixed(2));
+  }
+
+  // REGRA 6: CELULARES FORA DO BOLETO (PIX, DINHEIRO, CARTÃO) = 2,0%
+  // Qualquer outro aparelho (Galaxy, Realme, Redmi, Infinix, etc.)
+  return Number((valorTotal * 0.02).toFixed(2));
+}
+
 export function calcularComissaoTotal(venda: any, item?: any) {
   const produtoNome = String(item?.produto_nome || venda?.produto_nome || venda?.nome || '').toUpperCase();
   const categoria = String(item?.categoria || venda?.categoria || '').toUpperCase();
@@ -120,60 +195,7 @@ export function calcularComissaoTotal(venda: any, item?: any) {
   const valor = Number(item?.valor_total || venda?.valor_total || 0);
   if (valor <= 0) return { comissaoVendedor: 0, comissaoTrainee: 0 };
 
-  let comissaoVendedor = 0;
-
-  // 1. ACESSÓRIOS (2,5%)
-  const isAcessorio = 
-    categoria.includes('ACESS') ||
-    categoria.includes('CARREGADOR') ||
-    categoria.includes('CABO') ||
-    categoria.includes('PELIC') ||
-    categoria.includes('FONE') ||
-    categoria.includes('LIMPA TELA') ||
-    produtoNome.includes('CASE') ||
-    produtoNome.includes('CAPA') ||
-    produtoNome.includes('CHIP') ||
-    produtoNome.includes('PEN DRIVE') ||
-    produtoNome.includes('CHARGER') ||
-    produtoNome.includes('FONTE') ||
-    produtoNome.includes('PELICULA') ||
-    produtoNome.includes('CABO');
-
-  if (isAcessorio) {
-    comissaoVendedor = Number((valor * 0.025).toFixed(2));
-  }
-  // 2. CONSOLES / DRONES (R$ 15,00 FIXO)
-  else if (
-    categoria.includes('CONSOLE') ||
-    categoria.includes('DRONE') ||
-    produtoNome.includes('PLAYSTATION') ||
-    produtoNome.includes('PS5') ||
-    produtoNome.includes('PS4') ||
-    produtoNome.includes('XBOX') ||
-    produtoNome.includes('NINTENDO') ||
-    produtoNome.includes('DRONE')
-  ) {
-    comissaoVendedor = 15.00;
-  }
-  // 3. CAIXA DE SOM JBL (R$ 15,00 FIXO)
-  else if (
-    produtoNome.includes('JBL') ||
-    (categoria.includes('SOM') && produtoNome.includes('JBL'))
-  ) {
-    comissaoVendedor = 15.00;
-  }
-  // 4. APARELHOS APPLE (IPHONE / IPAD) = R$ 15,00 FIXO
-  else if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
-    comissaoVendedor = 15.00;
-  }
-  // 5. CELULARES NO BOLETO (3%)
-  else if (formaPgto.includes('BOLETO')) {
-    comissaoVendedor = Number((valor * 0.03).toFixed(2));
-  }
-  // 6. DEMAIS CELULARES FORA DO BOLETO (PIX, DINHEIRO, CARTÃO) = 2%
-  else {
-    comissaoVendedor = Number((valor * 0.02).toFixed(2));
-  }
+  const comissaoVendedor = obterComissaoVenda(item ? { ...venda, ...item, forma_pagamento: formaPgto, valor_total: valor } : venda);
 
   // 7. TRAINEE / APOIO: 1% SOBRE O VALOR DA VENDA
   const temTrainee = Boolean(venda?.trainee_id || venda?.trainee_nome);
@@ -183,7 +205,7 @@ export function calcularComissaoTotal(venda: any, item?: any) {
 }
 
 export function calcularComissao(vendaOuItem: any): number {
-  return calcularComissaoTotal(vendaOuItem).comissaoVendedor;
+  return obterComissaoVenda(vendaOuItem);
 }
 
 // Helper robusto de comissão para cada item
@@ -1219,7 +1241,7 @@ export default function ModalDesempenhoVendedor({
                           </td>
                           <td className="py-3 text-right font-mono font-bold">
                             <span className="text-purple-400 font-bold">
-                              {valorComissaoBruto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              {(dashboardInfo.isTrainee ? valorComissaoBruto : obterComissaoVenda(sale)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </span>
                           </td>
                         </tr>

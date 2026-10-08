@@ -16643,21 +16643,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       if (!isNaN(val)) return val;
     }
 
-    // 2. Se não estiver gravada, aplica a regra oficial de calcularComissaoTotal:
-    const produtoNome = String(sale.produto_nome || sale.nome || sale.produtos?.nome || sale.descricao || '').toUpperCase();
-    const categoria = String(sale.categoria || sale.produtos?.categoria || '').toUpperCase();
-    const formaPgto = String(sale.forma_pagamento || sale.metodo_pagamento || sale.pagamento || '').toUpperCase();
-    const valor = Number(sale.valor_total || sale.valor || sale.preco || sale.preco_unitario || 0);
+    // 2. Extração dos dados da venda e do item
+    const item = sale.itens_venda?.[0] || {};
+    const produtoNome = String(sale.produto_nome || item.produto_nome || sale.nome || item.nome || sale.produtos?.nome || sale.descricao || '').toUpperCase();
+    const categoria = String(sale.categoria || item.categoria || sale.produtos?.categoria || '').toUpperCase();
+    
+    // A FORMA DE PAGAMENTO DEVE VIR DA VENDA PRINCIPAL
+    const formaPgto = String(sale.forma_pagamento || sale.metodo_pagamento || sale.pagamento || item.forma_pagamento || item.metodo_pagamento || '').toUpperCase();
+    const valor = Number(sale.valor_total || item.valor_total || item.preco_unitario || sale.valor || sale.preco || 0);
 
     if (valor <= 0) return 0;
 
-    // 1. ACESSÓRIOS (2,5%)
+    // REGRA 1: ACESSÓRIOS (2,5%)
     const isAcessorio = 
       categoria.includes('ACESS') ||
       categoria.includes('CARREGADOR') ||
       categoria.includes('CABO') ||
       categoria.includes('PELIC') ||
       categoria.includes('FONE') ||
+      categoria.includes('CHIP') ||
+      categoria.includes('PEN DRIVE') ||
       categoria.includes('LIMPA TELA') ||
       produtoNome.includes('CASE') ||
       produtoNome.includes('CAPA') ||
@@ -16666,13 +16671,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       produtoNome.includes('CHARGER') ||
       produtoNome.includes('FONTE') ||
       produtoNome.includes('PELICULA') ||
-      produtoNome.includes('CABO');
+      produtoNome.includes('CABO') ||
+      produtoNome.includes('LIMPA TELA') ||
+      produtoNome.includes('IWILL');
 
     if (isAcessorio) {
       return Number((valor * 0.025).toFixed(2));
     }
-    // 2. CONSOLES / DRONES (R$ 15,00 FIXO)
-    else if (
+
+    // REGRA 2: CONSOLES / DRONES (R$ 15,00)
+    if (
       categoria.includes('CONSOLE') ||
       categoria.includes('DRONE') ||
       produtoNome.includes('PLAYSTATION') ||
@@ -16684,25 +16692,28 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     ) {
       return 15.00;
     }
-    // 3. CAIXA DE SOM JBL (R$ 15,00 FIXO)
-    else if (
+
+    // REGRA 3: CAIXAS DE SOM JBL (R$ 15,00)
+    if (
       produtoNome.includes('JBL') ||
       (categoria.includes('SOM') && produtoNome.includes('JBL'))
     ) {
       return 15.00;
     }
-    // 4. APARELHOS APPLE (IPHONE / IPAD) = R$ 15,00 FIXO
-    else if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
+
+    // REGRA 4: APARELHOS APPLE (IPHONE / IPAD) = R$ 15,00
+    if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
       return 15.00;
     }
-    // 5. CELULARES NO BOLETO (3%)
-    else if (formaPgto.includes('BOLETO')) {
+
+    // REGRA 5: CELULARES NO BOLETO (3,0%)
+    if (formaPgto.includes('BOLETO')) {
       return Number((valor * 0.03).toFixed(2));
     }
-    // 6. DEMAIS CELULARES FORA DO BOLETO (PIX, DINHEIRO, CARTÃO) = 2%
-    else {
-      return Number((valor * 0.02).toFixed(2));
-    }
+
+    // REGRA 6: CELULARES FORA DO BOLETO (PIX, DINHEIRO, CARTÃO) = 2,0%
+    // Qualquer outro aparelho (Galaxy, Realme, Redmi, Infinix, etc.)
+    return Number((valor * 0.02).toFixed(2));
   };
 
   // --- HELPERS DE METAS DINÂMICAS & REBRANDING ---
