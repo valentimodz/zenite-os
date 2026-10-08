@@ -1150,8 +1150,10 @@ export default function ModalDesempenhoVendedor({
                               {metodoRaw}
                             </span>
                           </td>
-                          <td className="py-3 text-right font-mono font-bold text-emerald-400">
-                            R$ {comissaoFormatada}
+                          <td className="py-3 text-right font-mono font-bold">
+                            <span className="text-purple-400 font-bold">
+                              {valorComissaoBruto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
                           </td>
                         </tr>
                       );

@@ -27287,15 +27287,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 const filialNome = sale.filiais?.nome || filiais.find(f => f.id === sale.filial_id)?.nome || 'Monkey Shop';
 
                                  const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
-                                const valorComissaoSalva = 
+                                 // Extração do valor persistido no banco
+                                const comissaoGravada = 
                                   sale.comissao_vendedor ?? 
                                   sale.comissao ?? 
-                                  sale.valor_comissao ?? 
-                                  sale.itens_venda?.[0]?.comissao;
+                                  sale.valor_comissao ??
+                                  sale.itens_venda?.[0]?.comissao_vendedor ??
+                                  sale.itens_venda?.[0]?.comissao ??
+                                  sale.itens_venda?.[0]?.valor_comissao;
 
-                                const comissaoTitular = valorComissaoSalva !== undefined && valorComissaoSalva !== null && valorComissaoSalva !== ''
-                                  ? Number(valorComissaoSalva)
-                                  : calcularComissaoItem(sale);
+                                // Se existir valor gravado (mesmo que seja 0 ou float), usa-o diretamente sem recálculo
+                                const valorFinalExibicao = (comissaoGravada !== undefined && comissaoGravada !== null && comissaoGravada !== '')
+                                  ? Number(comissaoGravada)
+                                  : (calcularComissaoItem(sale) || 0);
+
+                                const comissaoTitular = valorFinalExibicao;
                                 const comissaoTrainee = Number(sale.comissao_trainee ?? 0);
 
                                 // Determinar comissão a exibir baseado no filtro selecionado
@@ -27353,8 +27359,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                         {sale.autorizador?.nome || sale.desconto_autorizado_por || '-'}
                                       </td>
                                     )}
-                                    <td className="py-3 font-mono font-bold text-[#6A0DAD] print:text-black text-right">
-                                      R$ {Number(comissaoFinal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <td className="py-3 font-mono font-bold text-right print:text-black">
+                                      <span className="text-purple-400 font-bold">
+                                        {Number(comissaoFinal || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                      </span>
                                       {isVisualizandoComoTrainee && (
                                         <div className="text-[9px] text-purple-400 uppercase font-semibold">Trainee</div>
                                       )}
