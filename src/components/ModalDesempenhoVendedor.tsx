@@ -115,10 +115,17 @@ export function obterComissaoVenda(venda: any): number {
   const produtoNome = String(venda?.produto_nome || item.produto_nome || venda?.nome || item.nome || '').toUpperCase();
   const categoria = String(venda?.categoria || item.categoria || '').toUpperCase();
   
-  // A FORMA DE PAGAMENTO DEVE VIR DA VENDA PRINCIPAL
-  const formaPgto = String(venda?.forma_pagamento || venda?.metodo_pagamento || item.forma_pagamento || item.metodo_pagamento || '').toUpperCase();
+  // A FORMA DE PAGAMENTO DEVE VIR DA VENDA PRINCIPAL (extração tolerante)
+  const formaPgto = String(
+    venda?.forma_pagamento || 
+    venda?.metodo_pagamento || 
+    venda?.pagamento || 
+    item?.forma_pagamento || 
+    item?.metodo_pagamento || 
+    ''
+  ).toUpperCase();
   
-  const valorTotal = Number(venda?.valor_total || item.valor_total || item.preco_unitario || venda?.valor || 0);
+  const valorTotal = Number(venda?.valor_total || item?.valor_total || item?.preco_unitario || venda?.valor || 0);
   if (valorTotal <= 0) return 0;
 
   // REGRA 1: ACESSÓRIOS (2,5%)
