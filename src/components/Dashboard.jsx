@@ -8505,13 +8505,44 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const custoNumerico = extrairNumero(precoCustoProduto);
       const precoNumerico = extrairNumero(precoProduto);
 
+      const targetId = formData.id || editingCatalogoProduto?.id;
+      const isEditMode = Boolean(targetId);
+
+      // Determinar permissão para definir ou alterar o Preço de Custo (OWNER, ADMIN, SOCIO, DONO, SUPER_ADMIN)
+      const userRole = (profile?.role || '').toUpperCase();
+      const userCargo = (profile?.cargo || '').toUpperCase();
+      const canEditPrecoCusto = ['OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN'].includes(userRole) ||
+                                ['OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN'].includes(userCargo);
+
+      // Checagem de alteração de Preço de Custo no modo edição
+      let precoCustoAlterado = false;
+      if (isEditMode) {
+        const custoOriginalDetectado = editingCatalogoProduto?.preco_custo ?? 
+                                       editingCatalogoProduto?.custo ?? 
+                                       editingCatalogoProduto?.valor_custo ?? 
+                                       editingCatalogoProduto?.preco_compra ?? 
+                                       formData.preco_custo ?? 
+                                       formData.valor_custo ?? 
+                                       0;
+        const custoOriginalNum = extrairNumero(custoOriginalDetectado);
+        precoCustoAlterado = Math.abs(custoNumerico - custoOriginalNum) > 0.001;
+      } else {
+        // No cadastro de novo produto, se informou custo > 0, considera alteração/definição
+        precoCustoAlterado = custoNumerico > 0;
+      }
+
+      if (!canEditPrecoCusto && precoCustoAlterado) {
+        showToast("Acesso Negado: Apenas Sócios (OWNER) ou Administradores podem definir ou alterar o Preço de Custo.", "error");
+        alert("Acesso Negado: Apenas Sócios (OWNER) ou Administradores podem definir ou alterar o Preço de Custo.");
+        return;
+      }
+
       const payload = {
         empresa_id: targetEmpresaId,
         nome: nomeProduto.trim(),
         tipo: tipoProduto,
         categoria: categoriaProduto,
         preco: precoNumerico,
-        preco_custo: custoNumerico,
         sku: skuProduto.trim() || null,
         codigo_barras: codigoBarrasFinal,
         numero_serie: numeroSerie.trim() || null,
@@ -8524,33 +8555,35 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         origem: origemProduto || '0'
       };
 
-      if (['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role)) {
+      // Só envia preco_custo se for criação com permissão ou se o usuário realmente alterou o valor com permissão
+      if (canEditPrecoCusto && (!isEditMode || precoCustoAlterado)) {
         payload.preco_custo = custoNumerico;
       }
 
       console.log('Payload enviado no UPDATE do produto:', payload);
-
-      const targetId = formData.id || editingCatalogoProduto?.id;
-      const isEditMode = Boolean(targetId);
 
       // Usar cliente autenticado (supabase) para preservar JWT de sessão e permissões
       const dbClient = supabase;
 
       if (isProdutoExistenteCatalogo && produtoExistenteMaster) {
         // Se o produto já existia no catálogo mestre, reaproveitamos o registro e apenas atualizamos o preço/custo se alterado
+        const updateExistingPayload = {
+          preco: precoNumerico || produtoExistenteMaster.preco || 0
+        };
+        if (canEditPrecoCusto && precoCustoAlterado) {
+          updateExistingPayload.preco_custo = custoNumerico;
+        }
+
         let { error: updateExistingErr } = await dbClient
           .from('produtos_catalogo')
-          .update({
-            preco: precoNumerico || produtoExistenteMaster.preco || 0,
-            preco_custo: custoNumerico || produtoExistenteMaster.preco_custo || 0
-          })
+          .update(updateExistingPayload)
           .eq('id', produtoExistenteMaster.id);
 
         if (updateExistingErr) {
           console.error('Erro ao atualizar produto no Supabase:', updateExistingErr);
           console.warn("Aviso ao atualizar preço do produto existente no catálogo:", updateExistingErr);
         }
-        var data = { ...produtoExistenteMaster, preco: precoNumerico || produtoExistenteMaster.preco || 0, preco_custo: custoNumerico || produtoExistenteMaster.preco_custo || 0 };
+        var data = { ...produtoExistenteMaster, ...updateExistingPayload };
         showToast(`Vinculando estoque ao produto existente: '${data.nome}'`, 'info');
       } else if (isEditMode && targetId) {
         // BIFURCAÇÃO 1: UPDATE NO CATÁLOGO MESTRE E PRODUTOS FÍSICOS
@@ -8566,9 +8599,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           categoria: categoriaProduto,
           nome: String(nomeProduto || '').trim(),
           tipo: tipoProduto,
-          preco: precoNumerico,
-          preco_custo: custoNumerico
+          preco: precoNumerico
         };
+        if (canEditPrecoCusto && precoCustoAlterado) {
+          payloadProdutosFisico.preco_custo = custoNumerico;
+        }
         if (codigoBarrasFinal) payloadProdutosFisico.codigo_barras = codigoBarrasFinal;
         if (corCatalogoProduto && corCatalogoProduto.trim()) payloadProdutosFisico.cor = corCatalogoProduto.trim();
 
@@ -8642,9 +8677,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             nome: String(nomeProduto || '').trim(),
             tipo: tipoProduto,
             categoria: categoriaProduto,
-            preco: precoNumerico,
-            preco_custo: custoNumerico
+            preco: precoNumerico
           };
+          if (canEditPrecoCusto && (!isEditMode || precoCustoAlterado)) {
+            payloadCatalogoSanitizado.preco_custo = custoNumerico;
+          }
           if (targetEmpresaId) payloadCatalogoSanitizado.empresa_id = targetEmpresaId;
           if (skuProduto?.trim()) payloadCatalogoSanitizado.sku = skuProduto.trim();
           if (codigoBarrasFinal) payloadCatalogoSanitizado.codigo_barras = codigoBarrasFinal;
@@ -25085,7 +25122,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       </div>
                                     </div>
 
-                                    {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE'].includes(profile?.role) && (
+                                    {(['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'SOCIO', 'GERENTE'].includes(profile?.role?.toUpperCase()) ||
+                                      ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'SOCIO'].includes(profile?.cargo?.toUpperCase())) && (
                                       <div>
                                         <label className="block text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1.5">Preço de Custo / Compra (R$)</label>
                                         <div className="relative">

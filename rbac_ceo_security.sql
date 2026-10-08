@@ -11,19 +11,21 @@ WHERE nome ILIKE '%Neto%';
 ALTER TABLE public.produtos_catalogo 
 ADD COLUMN IF NOT EXISTS preco_custo NUMERIC(10,2) DEFAULT 0;
 
--- 3. Função para garantir que apenas OWNER e SUPER_ADMIN podem alterar preco_custo
+-- 3. Função para garantir que Sócios (OWNER), Administradores (ADMIN) e Sócios possam alterar preco_custo
 CREATE OR REPLACE FUNCTION block_preco_custo_for_admin()
 RETURNS TRIGGER AS $$
 DECLARE
   v_role TEXT;
+  v_cargo TEXT;
 BEGIN
-  -- Obter a role do utilizador atual
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
+  -- Obter role e cargo do utilizador atual
+  SELECT role, cargo INTO v_role, v_cargo FROM public.profiles WHERE id = auth.uid();
   
-  -- Se o preço de custo foi alterado e o utilizador não é OWNER nem SUPER_ADMIN
+  -- Se o preço de custo foi alterado
   IF NEW.preco_custo IS DISTINCT FROM OLD.preco_custo THEN
-    IF v_role NOT IN ('OWNER', 'SUPER_ADMIN') THEN
-      RAISE EXCEPTION 'Acesso Negado: Apenas Sócios (OWNER) podem definir ou alterar o Preço de Custo.';
+    IF UPPER(COALESCE(v_role, '')) NOT IN ('OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN') AND
+       UPPER(COALESCE(v_cargo, '')) NOT IN ('OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN') THEN
+      RAISE EXCEPTION 'Acesso Negado: Apenas Sócios (OWNER) ou Administradores podem definir ou alterar o Preço de Custo.';
     END IF;
   END IF;
   

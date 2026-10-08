@@ -1,4 +1,4 @@
-﻿-- =========================================================================
+-- =========================================================================
 -- SYSTEM MIGRATION: ADICIONAR PAPEL 'DONO' E CONFIGURAÇÕES DE NICHO
 -- Execute este script no SQL Editor do console do seu projeto Supabase
 -- =========================================================================
@@ -11,17 +11,19 @@ ALTER TABLE public.profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('
 ALTER TABLE public.companies
   ADD COLUMN IF NOT EXISTS settings jsonb DEFAULT '{"enable_troca": true, "enable_imei": true}'::jsonb;
 
--- 3. Atualizar block_preco_custo_for_admin para incluir 'DONO'
+-- 3. Atualizar block_preco_custo_for_admin para incluir 'ADMIN', 'SOCIO', 'DONO', 'OWNER'
 CREATE OR REPLACE FUNCTION block_preco_custo_for_admin()
 RETURNS TRIGGER AS $$
 DECLARE
   v_role TEXT;
+  v_cargo TEXT;
 BEGIN
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
+  SELECT role, cargo INTO v_role, v_cargo FROM public.profiles WHERE id = auth.uid();
   
   IF NEW.preco_custo IS DISTINCT FROM OLD.preco_custo THEN
-    IF v_role NOT IN ('OWNER', 'DONO', 'SUPER_ADMIN') THEN
-      RAISE EXCEPTION 'Acesso Negado: Apenas Sócios (OWNER/DONO) podem definir ou alterar o Preço de Custo.';
+    IF UPPER(COALESCE(v_role, '')) NOT IN ('OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN') AND
+       UPPER(COALESCE(v_cargo, '')) NOT IN ('OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN') THEN
+      RAISE EXCEPTION 'Acesso Negado: Apenas Sócios (OWNER) ou Administradores podem definir ou alterar o Preço de Custo.';
     END IF;
   END IF;
   
