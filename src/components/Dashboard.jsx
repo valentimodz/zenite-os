@@ -16626,41 +16626,64 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     if (!sale) return 0;
     
     // 1. Se já estiver gravada no banco na coluna 'comissao' (ou variantes), prioriza o valor gravado
+    if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
+      const val = parseFloat(sale.comissao_vendedor);
+      if (!isNaN(val)) return val;
+    }
     if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
       const val = parseFloat(sale.comissao);
-      if (!isNaN(val) && val > 0) return val;
+      if (!isNaN(val)) return val;
     }
     if (sale.valor_comissao !== undefined && sale.valor_comissao !== null && sale.valor_comissao !== '') {
       const val = parseFloat(sale.valor_comissao);
-      if (!isNaN(val) && val > 0) return val;
+      if (!isNaN(val)) return val;
     }
-    if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
-      const val = parseFloat(sale.comissao_vendedor);
-      if (!isNaN(val) && val > 0) return val;
+    if (sale.itens_venda?.[0]?.comissao !== undefined && sale.itens_venda?.[0]?.comissao !== null && sale.itens_venda?.[0]?.comissao !== '') {
+      const val = parseFloat(sale.itens_venda[0].comissao);
+      if (!isNaN(val)) return val;
     }
 
-    // 2. Se não estiver gravada ou for 0, calcula dinamicamente no frontend com as regras corporativas
-    const totalBruto = parseFloat(sale.valor_total || sale.valor || sale.preco || 0);
-    const qtd = parseInt(sale.quantidade || 1, 10);
-    if (totalBruto <= 0) return 0;
+    // 2. Se não estiver gravada, aplica a regra oficial:
+    const produtoNome = String(sale.produto_nome || sale.nome || sale.produtos?.nome || sale.descricao || '').toUpperCase();
+    const categoria = String(sale.categoria || sale.produtos?.categoria || '').toUpperCase();
+    const formaPagamento = String(sale.forma_pagamento || sale.metodo_pagamento || sale.pagamento || '').toUpperCase();
+    const valor = Number(sale.valor_total || sale.valor || sale.preco || sale.preco_unitario || 0);
 
-    const res = calcularComissaoVenda({
-      produto: {
-        nome: sale.produto_nome || sale.produtos?.nome || sale.descricao || '',
-        categoria: sale.produtos?.categoria || sale.categoria || '',
-        tipo: sale.produtos?.tipo || sale.tipo || '',
-        preco: totalBruto / qtd
-      },
-      quantidade: qtd,
-      valorTotal: totalBruto,
-      metodoPagamento: sale.metodo_pagamento || sale.forma_pagamento || '',
-      financeira: sale.financeira || sale.financeira_parceira || '',
-      hasTrainee: Boolean(sale.trainee_id || sale.treener_id || sale.teve_participacao_trainee),
-      isTreinner: Boolean(profile?.is_treinner || sale.vendaTrainee || sale.venda_trainee),
-      metasState: metasInfo || { metaBatida: false }
-    });
+    if (valor <= 0) return 0;
 
-    return res.comissaoVendedor;
+    // 1. REGRA: 2,5% PARA ACESSÓRIOS
+    const isAcessorio = 
+      categoria.includes('ACESS') ||
+      categoria.includes('CARREGADOR') ||
+      categoria.includes('CABO') ||
+      categoria.includes('PELIC') ||
+      categoria.includes('FONE') ||
+      produtoNome.includes('CASE') ||
+      produtoNome.includes('CAPA') ||
+      produtoNome.includes('CHIP') ||
+      produtoNome.includes('PEN DRIVE') ||
+      produtoNome.includes('CHARGER') ||
+      produtoNome.includes('FONTE') ||
+      produtoNome.includes('PELICULA') ||
+      produtoNome.includes('CABO');
+
+    if (isAcessorio) {
+      return Number((valor * 0.025).toFixed(2));
+    }
+
+    // 2. REGRA: 3% PARA CELULAR VENDIDO NO BOLETO
+    if (formaPagamento.includes('BOLETO')) {
+      return Number((valor * 0.03).toFixed(2));
+    }
+
+    // 3. REGRA: PRODUTOS APPLE (APARELHOS) = R$ 15,00 FIXO
+    const isApple = (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) && !isAcessorio;
+    if (isApple) {
+      return 15.00;
+    }
+
+    // Celulares que não são Apple e não foram vendidos no boleto (PIX / Dinheiro / Cartão):
+    return 0.00;
   };
 
   // --- HELPERS DE METAS DINÂMICAS & REBRANDING ---

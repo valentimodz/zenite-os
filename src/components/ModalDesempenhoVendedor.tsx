@@ -105,50 +105,80 @@ export interface ModalDesempenhoVendedorProps {
   onClose: () => void;
 }
 
+export function calcularComissao(vendaOuItem: any): number {
+  const produtoNome = String(vendaOuItem.produto_nome || vendaOuItem.nome || '').toUpperCase();
+  const categoria = String(vendaOuItem.categoria || '').toUpperCase();
+  
+  // Captura a forma de pagamento independentemente de vir como forma_pagamento ou metodo_pagamento
+  const formaPagamento = String(
+    vendaOuItem.forma_pagamento || 
+    vendaOuItem.metodo_pagamento || 
+    vendaOuItem.pagamento || 
+    ''
+  ).toUpperCase();
+  
+  const valor = Number(vendaOuItem.valor_total || vendaOuItem.preco_unitario || 0);
+
+  if (valor <= 0) return 0;
+
+  // 1. REGRA: 2,5% PARA ACESSÓRIOS
+  // Cobre chips, capas, películas, pendrives, cabos, fones e carregadores/chargers
+  const isAcessorio = 
+    categoria.includes('ACESS') ||
+    categoria.includes('CARREGADOR') ||
+    categoria.includes('CABO') ||
+    categoria.includes('PELIC') ||
+    categoria.includes('FONE') ||
+    produtoNome.includes('CASE') ||
+    produtoNome.includes('CAPA') ||
+    produtoNome.includes('CHIP') ||
+    produtoNome.includes('PEN DRIVE') ||
+    produtoNome.includes('CHARGER') ||
+    produtoNome.includes('FONTE') ||
+    produtoNome.includes('PELICULA') ||
+    produtoNome.includes('CABO');
+
+  if (isAcessorio) {
+    return Number((valor * 0.025).toFixed(2)); // 2,5%
+  }
+
+  // 2. REGRA: 3% PARA CELULAR VENDIDO NO BOLETO
+  if (formaPagamento.includes('BOLETO')) {
+    return Number((valor * 0.03).toFixed(2)); // 3,0%
+  }
+
+  // 3. REGRA: PRODUTOS APPLE (APARELHOS) = R$ 15,00 FIXO
+  const isApple = (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) && !isAcessorio;
+  if (isApple) {
+    return 15.00; // Fixo R$ 15,00
+  }
+
+  // Celulares que não são Apple e não foram vendidos no boleto (PIX / Dinheiro / Cartão):
+  return 0.00;
+}
+
 // Helper robusto de comissão para cada item
 export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): number => {
   if (!sale) return 0;
   
+  if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
+    const val = parseFloat(sale.comissao_vendedor);
+    if (!isNaN(val)) return val;
+  }
   if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
     const val = parseFloat(sale.comissao);
-    if (!isNaN(val) && val > 0) return val;
+    if (!isNaN(val)) return val;
   }
   if (sale.valor_comissao !== undefined && sale.valor_comissao !== null && sale.valor_comissao !== '') {
     const val = parseFloat(sale.valor_comissao);
-    if (!isNaN(val) && val > 0) return val;
+    if (!isNaN(val)) return val;
   }
-  if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
-    const val = parseFloat(sale.comissao_vendedor);
-    if (!isNaN(val) && val > 0) return val;
-  }
-
-  const totalBruto = parseFloat(sale.valor_total || sale.valor || sale.preco || 0);
-  const qtd = parseInt(sale.quantidade || 1, 10);
-  if (totalBruto <= 0) return 0;
-
-  // 1. PRIORIDADE MÁXIMA: ACESSÓRIOS
-  if (isAcessorio(sale)) {
-    return totalBruto * 0.025;
+  if (sale.itens_venda?.[0]?.comissao !== undefined && sale.itens_venda?.[0]?.comissao !== null && sale.itens_venda?.[0]?.comissao !== '') {
+    const val = parseFloat(sale.itens_venda[0].comissao);
+    if (!isNaN(val)) return val;
   }
 
-  // 2. BOLETO
-  const mp = (sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
-  const fin = (sale.financeira || sale.financeira_parceira || '').toUpperCase();
-  if (mp.includes('BOLETO') || fin.includes('BOLETO') || mp.includes('PAYJOY') || mp.includes('WATU') || mp.includes('UME') || mp.includes('AIVA')) {
-    return totalBruto * 0.03;
-  }
-
-  const cat = (sale.produtos?.categoria || sale.categoria || '').toUpperCase();
-  const tipo = (sale.produtos?.tipo || sale.tipo || '').toUpperCase();
-  const nomeProd = (sale.produto_nome || sale.produtos?.nome || '').toUpperCase();
-
-  // 3. APARELHOS APPLE (não acessórios)
-  if (cat === 'IOS' || cat === 'APPLE' || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE') || nomeProd.includes('IPAD')) {
-    return 30.00 * qtd;
-  }
-
-  // 4. Demais celulares / padrão
-  return totalBruto * 0.015;
+  return calcularComissao(sale);
 };
 
 // Helper robusto para identificar se a venda é de acessório
