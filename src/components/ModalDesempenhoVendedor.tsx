@@ -262,6 +262,7 @@ export default function ModalDesempenhoVendedor({
           forma_pagamento,
           categoria,
           comissao,
+          comissao_vendedor,
           vendedor_id,
           vendedor_nome,
           produto_nome,
@@ -278,7 +279,9 @@ export default function ModalDesempenhoVendedor({
             id,
             produto_nome,
             quantidade,
-            preco_unitario
+            preco_unitario,
+            valor_total,
+            comissao
           )
         `)
         .gte('created_at', dataInicioBrasilia)
@@ -655,16 +658,17 @@ export default function ModalDesempenhoVendedor({
     let totalComissaoComoTrainee = 0;
 
     sales.forEach(s => {
-      const vTitular = Number(s.comissao || 0);
+      const vSalva = s.comissao_vendedor ?? s.comissao ?? s.valor_comissao ?? s.itens_venda?.[0]?.comissao;
+      const vTitular = (vSalva !== undefined && vSalva !== null && vSalva !== '') ? Number(vSalva) : null;
       const vTrainee = Number(s.comissao_trainee || 0);
       if (isTrainee) {
-        const cTitular = vTitular > 0 ? vTitular : calcularComissaoItem(s, true);
+        const cTitular = vTitular !== null ? vTitular : calcularComissaoItem(s, true);
         const cTrainee = vTrainee > 0 ? vTrainee : (temApoioTrainee(s) ? Number((Number(s.valor_total || 0) * 0.01).toFixed(2)) : 0);
         totalComissaoComoTitular += cTitular;
         totalComissaoComoTrainee += cTrainee;
         totalComissoesHistorico += (cTitular + cTrainee);
       } else {
-        const c = vTitular > 0 ? vTitular : calcularComissaoItem(s, false);
+        const c = vTitular !== null ? vTitular : calcularComissaoItem(s, false);
         totalComissaoComoTitular += c;
         totalComissoesHistorico += c;
       }
@@ -1106,7 +1110,15 @@ export default function ModalDesempenhoVendedor({
                         ? itens[0].categoria
                         : (sale.categoria || 'Geral');
 
-                      const valorComissaoBruto = Number(calcularComissaoItem(sale, dashboardInfo.isTrainee));
+                      const valorComissaoSalva = 
+                        sale.comissao_vendedor ?? 
+                        sale.comissao ?? 
+                        sale.valor_comissao ?? 
+                        itens?.[0]?.comissao;
+
+                      const valorComissaoBruto = valorComissaoSalva !== undefined && valorComissaoSalva !== null && valorComissaoSalva !== ''
+                        ? Number(valorComissaoSalva)
+                        : Number(calcularComissaoItem(sale, dashboardInfo.isTrainee));
                       const comissaoFormatada = valorComissaoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
                       const metodoRaw = String(sale.forma_pagamento || sale.metodo_pagamento || 'N/A').toUpperCase();

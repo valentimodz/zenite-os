@@ -4175,6 +4175,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             filial_id,
             empresa_id,
             quantidade,
+            comissao,
+            comissao_vendedor,
             produto_nome,
             cliente_nome,
             trainee_id,
@@ -4194,6 +4196,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               preco_base,
               desconto,
               valor_desconto,
+              comissao,
               produtos ( id, nome, preco_custo )
             )
           `;
@@ -4215,6 +4218,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             empresa_id,
             quantidade,
             comissao,
+            comissao_vendedor,
             produto_nome,
             cliente_nome,
             trainee_id,
@@ -5178,6 +5182,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           financeira_parceira,
           categoria,
           comissao,
+          comissao_vendedor,
           comissao_trainee,
           teve_participacao_trainee,
           trainee_id,
@@ -5201,6 +5206,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             preco_base,
             desconto,
             valor_desconto,
+            comissao,
             produtos ( id, nome, preco_custo )
           )
         `)
@@ -27281,8 +27287,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 const filialNome = sale.filiais?.nome || filiais.find(f => f.id === sale.filial_id)?.nome || 'Monkey Shop';
 
                                  const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
-                                const comissaoRegistrada = Number(sale.comissao ?? 0);
-                                const comissaoTitular = comissaoRegistrada > 0 ? comissaoRegistrada : calcularComissaoItem(sale);
+                                const valorComissaoSalva = 
+                                  sale.comissao_vendedor ?? 
+                                  sale.comissao ?? 
+                                  sale.valor_comissao ?? 
+                                  sale.itens_venda?.[0]?.comissao;
+
+                                const comissaoTitular = valorComissaoSalva !== undefined && valorComissaoSalva !== null && valorComissaoSalva !== ''
+                                  ? Number(valorComissaoSalva)
+                                  : calcularComissaoItem(sale);
                                 const comissaoTrainee = Number(sale.comissao_trainee ?? 0);
 
                                 // Determinar comissão a exibir baseado no filtro selecionado
@@ -28280,7 +28293,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       : (sale.categoria || sale.produtos?.categoria || 'Geral');
 
                                     // 3. Formatação da Comissão: 2 casas decimais com máscara monetária (ex.: R$ 104,42 em vez de R$ 104,415)
-                                    const valorComissaoBruto = Number(calcularComissaoItem(sale) ?? sale.comissao ?? 0);
+                                    const valorComissaoSalvaHistorico = 
+                                      sale.comissao_vendedor ?? 
+                                      sale.comissao ?? 
+                                      sale.valor_comissao ?? 
+                                      itens?.[0]?.comissao;
+
+                                    const valorComissaoBruto = valorComissaoSalvaHistorico !== undefined && valorComissaoSalvaHistorico !== null && valorComissaoSalvaHistorico !== ''
+                                      ? Number(valorComissaoSalvaHistorico)
+                                      : Number(calcularComissaoItem(sale));
                                     const comissaoFormatada = valorComissaoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
                                     // Renderizador de Badge de Pagamento

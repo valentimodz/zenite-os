@@ -110,7 +110,30 @@ export default function ModalDetalheRelatorio({
         // 1. Buscar vendas com filtros no range de datas
         let queryVendas = supabase
           .from('vendas')
-          .select('id, empresa_id, filial_id, vendedor_id, vendedor_nome, valor_total, metodo_pagamento, created_at')
+          .select(`
+            id,
+            empresa_id,
+            filial_id,
+            vendedor_id,
+            vendedor_nome,
+            valor_total,
+            metodo_pagamento,
+            forma_pagamento,
+            comissao,
+            comissao_vendedor,
+            comissao_trainee,
+            teve_participacao_trainee,
+            trainee_id,
+            trainee_nome,
+            created_at,
+            itens_venda (
+              id,
+              produto_nome,
+              quantidade,
+              valor_total,
+              comissao
+            )
+          `)
           .order('created_at', { ascending: false });
 
         if (dataInicioISO) {
@@ -220,7 +243,8 @@ export default function ModalDetalheRelatorio({
 
     vendas.forEach(v => {
       const valor = Number(v.valor_total || v.valor || v.valor_pago || 0);
-      const comissao = Number(v.comissao || 0);
+      const valSalvo = v.comissao_vendedor ?? v.comissao ?? v.itens_venda?.[0]?.comissao;
+      const comissao = Number(valSalvo || 0);
       const qtd = Number(v.quantidade || 1);
 
       faturamentoTotal += valor;
