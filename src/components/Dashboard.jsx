@@ -14672,12 +14672,85 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const resolvedTraineeNome = resolvedTraineeId ? (selectedTraineeObj?.nome || selectedTraineeObj?.name || selectedTraineeObj?.nome_completo || null) : null;
       const valorManualTraineeGeral = parseValorNumerico(pdvComissaoTraineeInput);
 
+      // 1. ANTES DE FAZER O INSERT, calcular a comissão de cada item do carrinho com base nas regras do PDV
+      const formaPagamentoSelecionada = metodoEfetivo;
+      const itensComComissao = pdvCart.map(item => {
+        const produtoNome = String(item.nome || item.produto_nome || item.produto?.nome || '').toUpperCase();
+        const categoria = String(item.categoria || item.produto?.categoria || '').toUpperCase();
+        const formaPgto = String(formaPagamentoSelecionada || '').toUpperCase();
+        const valorItem = Number(item.valor_total || (item.valorUnitario ? (item.valorUnitario * item.quantidade * feeFactor) : (item.preco * item.quantidade)) || 0);
+
+        let comissaoItem = 0;
+
+        // Se forma de pagamento for BRINDE, comissão é 0
+        if (formaPgto.includes('BRINDE')) {
+          comissaoItem = 0;
+        }
+        // 1. Acessórios (2,5%)
+        else if (
+          categoria.includes('ACESS') || categoria.includes('CARREGADOR') || categoria.includes('CABO') ||
+          categoria.includes('PELIC') || categoria.includes('FONE') || categoria.includes('CHIP') ||
+          produtoNome.includes('CASE') || produtoNome.includes('CAPA') || produtoNome.includes('CHIP') ||
+          produtoNome.includes('PEN DRIVE') || produtoNome.includes('CHARGER') || produtoNome.includes('FONTE') ||
+          produtoNome.includes('PELICULA') || produtoNome.includes('CABO')
+        ) {
+          comissaoItem = Number((valorItem * 0.025).toFixed(2));
+        }
+        // 2. Consoles, Drones e JBL (R$ 15,00 fixo)
+        else if (
+          categoria.includes('CONSOLE') || categoria.includes('DRONE') ||
+          produtoNome.includes('JBL') || produtoNome.includes('PLAYSTATION') || produtoNome.includes('PS5') ||
+          produtoNome.includes('XBOX') || produtoNome.includes('DRONE')
+        ) {
+          comissaoItem = 15.00;
+        }
+        // 3. Aparelhos Apple (R$ 15,00 fixo)
+        else if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
+          comissaoItem = 15.00;
+        }
+        // 4. Celulares no Boleto (3,0%)
+        else if (formaPgto.includes('BOLETO')) {
+          comissaoItem = Number((valorItem * 0.03).toFixed(2));
+        }
+        // 5. Demais Celulares (PIX, Dinheiro, Cartão) = 2,0%
+        else {
+          comissaoItem = Number((valorItem * 0.02).toFixed(2));
+        }
+
+        return {
+          ...item,
+          comissao: comissaoItem
+        };
+      });
+
+      const totalComissaoVendedor = itensComComissao.reduce((acc, curr) => acc + curr.comissao, 0);
+
       // Loop para processar os itens
       for (let idx = 0; idx < pdvCart.length; idx++) {
         const item = pdvCart[idx];
         const valorTotalNovo = item.valorUnitario * item.quantidade * feeFactor;
 
-        // Cálculo de comissões corporativo (Vendedor e Trainee)
+        // Comissão do item calculada pelas regras do PDV
+        const itemComissaoObj = itensComComissao[idx];
+        let comissaoCalculada = itemComissaoObj ? itemComissaoObj.comissao : 0;
+
+        // Se por algum motivo veio 0 e não for BRINDE, tentar fallback de calcularComissaoVenda
+        if (comissaoCalculada === 0 && !String(formaPagamentoSelecionada || '').toUpperCase().includes('BRINDE')) {
+          const comissaoInfoFallback = calcularComissaoVenda({
+            produto: item.produto,
+            quantidade: item.quantidade,
+            valorTotal: valorTotalNovo,
+            metodoPagamento: metodoEfetivo,
+            financeira: resolvedFinanceira,
+            hasTrainee: hasTraineeSelecionado,
+            isTreinner: Boolean(profile?.is_treinner),
+            metasState: metasInfo
+          });
+          if (comissaoInfoFallback?.comissaoVendedor > 0) {
+            comissaoCalculada = comissaoInfoFallback.comissaoVendedor;
+          }
+        }
+
         const comissaoInfo = calcularComissaoVenda({
           produto: item.produto,
           quantidade: item.quantidade,
@@ -14689,7 +14762,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           metasState: metasInfo
         });
 
-        const comissaoCalculada = comissaoInfo.comissaoVendedor;
         const comissaoTraineeCalculada = hasTraineeSelecionado && valorManualTraineeGeral > 0
           ? valorManualTraineeGeral
           : (comissaoInfo.comissaoTrainee || 0);
