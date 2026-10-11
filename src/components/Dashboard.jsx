@@ -32662,7 +32662,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               <form onSubmit={handleSalvarNovaVendaManual} className="flex flex-col flex-1 overflow-hidden">
                 <div className="p-5 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
                   
-                  {/* Linha 1: Data, Filial e Vendedor Titular */}
+                    {/* Linha 1: Data, Filial e Vendedor Titular */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -32687,9 +32687,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         required
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                       >
-                        <option value="" className="bg-[#111] text-gray-500">Selecione a Filial...</option>
+                        <option key="default-filial" value="" className="bg-[#111] text-gray-500">Selecione a Filial...</option>
                         {(filiais || []).map(f => (
-                          <option key={f.id} value={String(f.id)} className="bg-[#111] text-white">
+                          <option key={`filial-${f.id}`} value={String(f.id)} className="bg-[#111] text-white">
                             {f.nome || f.name}
                           </option>
                         ))}
@@ -32714,7 +32714,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         required
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                       >
-                        <option value="" className="bg-[#111] text-gray-500">Selecione o Vendedor...</option>
+                        <option key="default-vendedor" value="" className="bg-[#111] text-gray-500">Selecione o Vendedor...</option>
                         {(() => {
                           const seen = new Set();
                           const list = [];
@@ -32731,7 +32731,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             }
                           });
                           return list.map(opt => (
-                            <option key={opt.id} value={opt.id} className="bg-[#111] text-white">
+                            <option key={`vendedor-${opt.id}`} value={opt.id} className="bg-[#111] text-white">
                               {opt.nome}
                             </option>
                           ));
@@ -32770,8 +32770,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       </label>
                     </div>
 
-                    {novaVendaHasTrainee && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#222222] animate-fadeIn">
+                    {novaVendaHasTrainee ? (
+                      <div key="container-trainee-fields" className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-[#222222] animate-fadeIn">
                         <div>
                           <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
                             Trainee / Assistente <span className="text-purple-400">*</span>
@@ -32791,7 +32791,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             required={novaVendaHasTrainee}
                             className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                           >
-                            <option value="" className="bg-[#111] text-gray-500">Selecione o Trainee...</option>
+                            <option key="default-trainee" value="" className="bg-[#111] text-gray-500">Selecione o Trainee...</option>
                             {(() => {
                               const mapaTrainees = new Map();
                               (treenersFilial || []).forEach(t => {
@@ -32816,7 +32816,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 });
                               }
                               return Array.from(mapaTrainees.entries()).map(([id, nome]) => (
-                                <option key={id} value={id} className="bg-[#111] text-white">
+                                <option key={`trainee-${id}`} value={id} className="bg-[#111] text-white">
                                   {nome}
                                 </option>
                               ));
@@ -32837,7 +32837,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           />
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Linha 2: Cliente */}
@@ -32881,7 +32881,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         }}
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                       >
-                        <option value="" className="bg-[#111] text-white">
+                        <option key="default-cliente" value="" className="bg-[#111] text-white">
                           Consumidor Final (Padrão)
                         </option>
                         {(() => {
@@ -32895,8 +32895,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             const tel = (c.telefone || '').toLowerCase();
                             return n.includes(busca) || doc.includes(busca) || tel.includes(busca);
                           });
-                          return filtrados.slice(0, 100).map(c => (
-                            <option key={c.id} value={String(c.id)} className="bg-[#111] text-white">
+                          return filtrados.slice(0, 100).map((c, idx) => (
+                            <option key={`cliente-${c.id || idx}`} value={String(c.id)} className="bg-[#111] text-white">
                               {c.nome || c.razao_social} {c.cpf ? `(${c.cpf})` : ''}
                             </option>
                           ));
@@ -32958,12 +32958,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       <datalist id="lista-produtos-venda-manual">
                         {(() => {
                           const pool = (listaProdutosCatalogo && listaProdutosCatalogo.length > 0) ? listaProdutosCatalogo : (produtos || []);
-                          return pool.slice(0, 150).map(p => {
+                          return pool.slice(0, 150).map((p, idx) => {
                             const preco = Number(p.preco_venda || p.preco || 0);
                             const labelPreco = preco > 0 ? ` - R$ ${preco.toFixed(2)}` : '';
                             const labelCat = p.categoria ? ` (${p.categoria})` : '';
+                            const itemKey = `prod-opt-${p.id || p.nome || idx}`;
                             return (
-                              <option key={p.id || p.nome} value={p.nome}>
+                              <option key={itemKey} value={p.nome}>
                                 {`${p.nome}${labelCat}${labelPreco}`}
                               </option>
                             );
@@ -32996,12 +32997,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         onChange={(e) => setNovaVendaCategoria(e.target.value)}
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                       >
-                        <option value="Celulares" className="bg-[#111] text-white">Celulares / Smartphones</option>
-                        <option value="Acessórios" className="bg-[#111] text-white">Acessórios</option>
-                        <option value="Smartwatches" className="bg-[#111] text-white">Smartwatches</option>
-                        <option value="Tablets" className="bg-[#111] text-white">Tablets / iPads</option>
-                        <option value="Serviços" className="bg-[#111] text-white">Serviços / Assistência</option>
-                        <option value="Outros" className="bg-[#111] text-white">Outros</option>
+                        <option key="cat-cel" value="Celulares" className="bg-[#111] text-white">Celulares / Smartphones</option>
+                        <option key="cat-aces" value="Acessórios" className="bg-[#111] text-white">Acessórios</option>
+                        <option key="cat-watch" value="Smartwatches" className="bg-[#111] text-white">Smartwatches</option>
+                        <option key="cat-tab" value="Tablets" className="bg-[#111] text-white">Tablets / iPads</option>
+                        <option key="cat-serv" value="Serviços" className="bg-[#111] text-white">Serviços / Assistência</option>
+                        <option key="cat-out" value="Outros" className="bg-[#111] text-white">Outros</option>
                       </select>
                     </div>
 
@@ -33079,13 +33080,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         required
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                       >
-                        <option value="PIX" className="bg-[#111] text-white">PIX</option>
-                        <option value="CARTAO_CREDITO" className="bg-[#111] text-white">Cartão de Crédito</option>
-                        <option value="CARTAO_DEBITO" className="bg-[#111] text-white">Cartão de Débito</option>
-                        <option value="DINHEIRO" className="bg-[#111] text-white">Dinheiro</option>
-                        <option value="BOLETO" className="bg-[#111] text-white">Boleto / Financiadora</option>
-                        <option value="TROCA" className="bg-[#111] text-white">Aparelho na Troca</option>
-                        <option value="BRINDE" className="bg-[#111] text-purple-300 font-semibold">Brinde / Cortesia</option>
+                        <option key="pgto-pix" value="PIX" className="bg-[#111] text-white">PIX</option>
+                        <option key="pgto-cc" value="CARTAO_CREDITO" className="bg-[#111] text-white">Cartão de Crédito</option>
+                        <option key="pgto-cd" value="CARTAO_DEBITO" className="bg-[#111] text-white">Cartão de Débito</option>
+                        <option key="pgto-din" value="DINHEIRO" className="bg-[#111] text-white">Dinheiro</option>
+                        <option key="pgto-bol" value="BOLETO" className="bg-[#111] text-white">Boleto / Financiadora</option>
+                        <option key="pgto-troca" value="TROCA" className="bg-[#111] text-white">Aparelho na Troca</option>
+                        <option key="pgto-brinde" value="BRINDE" className="bg-[#111] text-purple-300 font-semibold">Brinde / Cortesia</option>
                       </select>
                     </div>
 
@@ -33125,15 +33126,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-5 py-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
                   >
                     {isSavingNovaVenda ? (
-                      <>
+                      <span key="btn-saving" className="flex items-center gap-1.5">
                         <RefreshCw size={14} className="animate-spin" />
                         <span>Salvando Venda...</span>
-                      </>
+                      </span>
                     ) : (
-                      <>
+                      <span key="btn-ready" className="flex items-center gap-1.5">
                         <Check size={14} className="stroke-[2.5]" />
                         <span>Confirmar e Salvar Venda</span>
-                      </>
+                      </span>
                     )}
                   </button>
                 </div>
