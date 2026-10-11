@@ -37,7 +37,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
-import { parseMonetaryValue, formatCurrency, getFundoSessao, obterUuidPuro } from '../utils/currencyUtils';
+import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
 import PeriodoSelector from './common/PeriodoSelector';
 
@@ -27531,7 +27531,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       </span>
                                     </td>
                                     <td className="py-3 text-center font-bold">{sale.quantidade || 1}</td>
-                                    <td className="py-3 font-mono font-bold text-white print:text-black">R$ {parseFloat(sale.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                                    <td className="py-3 font-mono font-bold text-white print:text-black">{formatarMoeda(sale.valor_total)}</td>
                                     {['ADMIN', 'ADM', 'ADMINISTRADOR', 'RH', 'RH_ADMIN', 'GERENTE', 'SUPER_ADMIN', 'OWNER'].includes(profile?.role) && (
                                       <td className="py-3 text-gray-400">
                                         {sale.autorizador?.nome || sale.desconto_autorizado_por || '-'}
@@ -27539,7 +27539,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     )}
                                     <td className="py-3 font-mono font-bold text-right print:text-black">
                                       <span className="text-purple-400 font-bold">
-                                        {Number(comissaoFinal || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        {formatarMoeda(comissaoFinal)}
                                       </span>
                                       {isVisualizandoComoTrainee && (
                                         <div className="text-[9px] text-purple-400 uppercase font-semibold">Trainee</div>
@@ -28592,10 +28592,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                           </span>
                                         </td>
                                         <td className="py-3 text-center font-bold text-gray-300">{quantidadeItens}</td>
-                                        <td className="py-3 font-mono font-bold text-white">R$ {parseFloat(sale.valor_total || sale.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="py-3 font-mono font-bold text-white">{formatarMoeda(sale.valor_total || sale.valor)}</td>
                                         <td className="py-3 text-center">{renderPagamentoBadge()}</td>
                                         <td className="py-3 text-right font-mono font-bold text-emerald-400">
-                                          R$ {comissaoFormatada}
+                                          {formatarMoeda(valorComissaoBruto)}
                                         </td>
                                         <td className="py-3 text-right">
                                           <button
@@ -29274,7 +29274,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       </div>
                                     </td>
                                     <td className="p-3 text-right font-mono font-bold text-white whitespace-nowrap">
-                                      R$ {parseFloat(venda.valor_total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      {formatarMoeda(venda.valor_total)}
                                     </td>
                                   </tr>
                                 );

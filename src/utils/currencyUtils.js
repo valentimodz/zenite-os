@@ -47,11 +47,25 @@ export const parseMonetaryValue = (val) => {
 };
 
 /**
+ * Formata um valor numérico para exibição em Real brasileiro (R$ 0,00) com exatamente 2 casas decimais.
+ */
+export const formatarMoeda = (valor) => {
+  const numero = typeof valor === 'string' ? parseFloat(valor.replace(',', '.')) : Number(valor);
+  if (isNaN(numero) || numero === null || numero === undefined) return 'R$ 0,00';
+  
+  return numero.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
+/**
  * Formata um valor numérico para exibição em Real brasileiro (R$ 0,00)
  */
 export const formatCurrency = (val) => {
-  const num = parseMonetaryValue(val);
-  return `R$ ${num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatarMoeda(val);
 };
 
 /**

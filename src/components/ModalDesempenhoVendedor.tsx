@@ -21,6 +21,7 @@ import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import { useMinhasMetasIndividual } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
+import { formatarMoeda } from '../utils/currencyUtils';
 
 export interface MetaBanco {
   id?: string;
@@ -1239,7 +1240,7 @@ export default function ModalDesempenhoVendedor({
                           </td>
                           <td className="py-3 text-center font-bold text-gray-300">{quantidadeItens}</td>
                           <td className="py-3 text-right font-mono font-bold text-white">
-                            R$ {parseFloat(String(sale.valor_total || sale.valor || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatarMoeda(sale.valor_total || sale.valor)}
                           </td>
                           <td className="py-3 text-center">
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#111] text-gray-300 border border-[#333] uppercase">
@@ -1248,7 +1249,7 @@ export default function ModalDesempenhoVendedor({
                           </td>
                           <td className="py-3 text-right font-mono font-bold">
                             <span className="text-purple-400 font-bold">
-                              {(dashboardInfo.isTrainee ? valorComissaoBruto : obterComissaoVenda(sale)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              {formatarMoeda(dashboardInfo.isTrainee ? valorComissaoBruto : obterComissaoVenda(sale))}
                             </span>
                           </td>
                         </tr>
