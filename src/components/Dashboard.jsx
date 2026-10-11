@@ -10788,15 +10788,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       return;
     }
 
-    const valorTotalNum = parseValorNumerico(novaVendaValorTotal);
-    if (valorTotalNum <= 0) {
+    const isBrinde = String(novaVendaFormaPagamento).toUpperCase() === 'BRINDE';
+    const valorTotalNum = isBrinde ? 0 : parseValorNumerico(novaVendaValorTotal);
+    if (!isBrinde && valorTotalNum <= 0) {
       showToast('Informe um valor total válido para a venda.', 'error');
       return;
     }
 
     const qtdNum = Math.max(1, parseInt(novaVendaQuantidade, 10) || 1);
-    const comissaoVendNum = parseValorNumerico(novaVendaComissaoVendedor);
-    const comissaoTraineeNum = novaVendaHasTrainee ? parseValorNumerico(novaVendaComissaoTrainee) : 0;
+    const comissaoVendNum = isBrinde ? 0 : parseValorNumerico(novaVendaComissaoVendedor);
+    const comissaoTraineeNum = (!isBrinde && novaVendaHasTrainee) ? parseValorNumerico(novaVendaComissaoTrainee) : 0;
 
     setIsSavingNovaVenda(true);
     try {
@@ -13039,6 +13040,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const qtd = Math.max(1, Number(quantidade) || 1);
     const total = Number(valorTotal) > 0 ? Number(valorTotal) : (Number(produto?.preco || 0) * qtd);
 
+    if (String(metodoPagamento).toUpperCase() === 'BRINDE') {
+      return { comissaoVendedor: 0, comissaoTrainee: 0, teveParticipacaoTrainee: false, taxaVendedor: 0 };
+    }
+
     // Obter referências de metas do vendedor
     const metasRef = metasState !== null && metasState !== undefined ? metasState : null;
     const totalBoletos = Number(metasRef?.totalBoletos || 0);
@@ -13180,6 +13185,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   // Auto-cálculo e sugestão automática de comissão no Modal "Nova Venda Manual"
   useEffect(() => {
     if (!isNovaVendaModalOpen) return;
+
+    if (novaVendaFormaPagamento === 'BRINDE') {
+      setNovaVendaValorTotal('0');
+      setNovaVendaComissaoVendedor('0');
+      if (novaVendaHasTrainee) {
+        setNovaVendaComissaoTrainee('0');
+      }
+      return;
+    }
+
     const valorNum = parseValorNumerico(novaVendaValorTotal);
     if (valorNum <= 0) {
       setNovaVendaComissaoVendedor('');
@@ -32795,8 +32810,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         value={novaVendaValorTotal}
                         onChange={(e) => setNovaVendaValorTotal(e.target.value)}
                         placeholder="Ex: 2.500,00"
-                        required
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono font-bold text-green-400 transition-all placeholder:text-gray-600"
+                        disabled={novaVendaFormaPagamento === 'BRINDE'}
+                        required={novaVendaFormaPagamento !== 'BRINDE'}
+                        className={`w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono font-bold transition-all placeholder:text-gray-600 ${
+                          novaVendaFormaPagamento === 'BRINDE' ? 'opacity-60 cursor-not-allowed text-purple-400' : 'text-green-400'
+                        }`}
                       />
                     </div>
                   </div>
@@ -32809,7 +32827,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       </label>
                       <select
                         value={novaVendaFormaPagamento}
-                        onChange={(e) => setNovaVendaFormaPagamento(e.target.value)}
+                        onChange={(e) => {
+                          const novoMetodo = e.target.value;
+                          setNovaVendaFormaPagamento(novoMetodo);
+                          if (novoMetodo === 'BRINDE') {
+                            setNovaVendaValorTotal('0');
+                            setNovaVendaComissaoVendedor('0');
+                            if (novaVendaHasTrainee) setNovaVendaComissaoTrainee('0');
+                          }
+                        }}
                         required
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                       >
@@ -32819,6 +32845,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         <option value="DINHEIRO" className="bg-[#111] text-white">Dinheiro</option>
                         <option value="BOLETO" className="bg-[#111] text-white">Boleto / Financiadora</option>
                         <option value="TROCA" className="bg-[#111] text-white">Aparelho na Troca</option>
+                        <option value="BRINDE" className="bg-[#111] text-purple-300 font-semibold">Brinde / Cortesia</option>
                       </select>
                     </div>
 
@@ -32832,7 +32859,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         value={novaVendaComissaoVendedor}
                         onChange={(e) => setNovaVendaComissaoVendedor(e.target.value)}
                         placeholder="Ex: 50,00"
-                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all placeholder:text-gray-600"
+                        disabled={novaVendaFormaPagamento === 'BRINDE'}
+                        className={`w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all placeholder:text-gray-600 ${
+                          novaVendaFormaPagamento === 'BRINDE' ? 'opacity-60 cursor-not-allowed text-gray-400' : ''
+                        }`}
                       />
                     </div>
                   </div>
@@ -32851,7 +32881,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   </button>
                   <button
                     type="submit"
-                    disabled={isSavingNovaVenda || !novaVendaProdutoDescricao.trim() || !novaVendaValorTotal}
+                    disabled={isSavingNovaVenda || !novaVendaProdutoDescricao.trim() || (novaVendaFormaPagamento !== 'BRINDE' && !novaVendaValorTotal)}
                     className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white px-5 py-2 rounded-md text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
                   >
                     {isSavingNovaVenda ? (
