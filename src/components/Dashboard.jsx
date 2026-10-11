@@ -13072,14 +13072,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // 1. PRIORIDADE MÁXIMA: ACESSÓRIOS (qualquer capa, película, cabo, fone, pen drive, chip, etc.)
     // Mesmo que tenha 'IPHONE' ou 'APPLE' no nome, se for acessório segue a regra de acessório!
     if (isProdutoAcessorio(produto)) {
-      const bateuMetaAcessorios = Boolean(
-        isMetaBatidaGeral ||
-        (metaAcessorios > 0 && totalAcessorios >= metaAcessorios) ||
-        (Number(metasRef?.progressoAcessorios || 0) >= 100) ||
-        metasRef?.badgeAcessorios?.status === 'batida' ||
-        metasRef?.badgeAcessorios?.status === 'super'
-      );
-      const aliquotaAcessorio = bateuMetaAcessorios ? 0.025 : 0.01; // 2.5% ou 1%
+      const aliquotaAcessorio = 0.025; // Regra oficial: 2.5% para acessórios
       comissaoVendedor = Number((total * aliquotaAcessorio).toFixed(2));
       return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false, taxaVendedor: aliquotaAcessorio };
     }
@@ -13188,40 +13181,83 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     if (novaVendaFormaPagamento === 'BRINDE') {
       setNovaVendaValorTotal('0');
-      setNovaVendaComissaoVendedor('0');
+      setNovaVendaComissaoVendedor('0.00');
       if (novaVendaHasTrainee) {
-        setNovaVendaComissaoTrainee('0');
+        setNovaVendaComissaoTrainee('0.00');
       }
       return;
     }
 
-    const valorNum = parseValorNumerico(novaVendaValorTotal);
-    if (valorNum <= 0) {
-      setNovaVendaComissaoVendedor('');
+    const valor = typeof novaVendaValorTotal === 'string'
+      ? parseFloat(novaVendaValorTotal.replace(',', '.'))
+      : Number(novaVendaValorTotal);
+
+    if (!valor || isNaN(valor) || valor <= 0) {
+      setNovaVendaComissaoVendedor('0.00');
       return;
     }
 
-    const res = calcularComissaoVenda({
-      produto: {
-        nome: novaVendaProdutoDescricao || '',
-        categoria: novaVendaCategoria || 'Celulares'
-      },
-      quantidade: Math.max(1, parseInt(novaVendaQuantidade, 10) || 1),
-      valorTotal: valorNum,
-      metodoPagamento: novaVendaFormaPagamento || 'PIX',
-      hasTrainee: Boolean(novaVendaHasTrainee),
-      metasState: metasInfo
-    });
+    const catLimpa = String(novaVendaCategoria || '').toUpperCase();
+    const prodLimpo = String(novaVendaProdutoDescricao || '').toUpperCase();
+    const pgtoLimpo = String(novaVendaFormaPagamento || '').toUpperCase();
+    const temTrainee = Boolean(novaVendaHasTrainee);
 
-    if (res && res.comissaoVendedor !== undefined) {
-      setNovaVendaComissaoVendedor(res.comissaoVendedor.toFixed(2));
+    // 1. REGRA: ACESSÓRIOS (2,5%)
+    // OBS: Como produtos como "CAPA MK IPHONE" têm categoria "Acessórios", caem aqui prioritariamente!
+    const isAcessorio =
+      catLimpa.includes('ACESS') ||
+      prodLimpo.startsWith('CAPA') ||
+      prodLimpo.startsWith('CASE') ||
+      prodLimpo.startsWith('PELICULA') ||
+      prodLimpo.startsWith('CHIP') ||
+      prodLimpo.startsWith('CABO') ||
+      prodLimpo.startsWith('FONTE') ||
+      prodLimpo.startsWith('CARREGADOR') ||
+      prodLimpo.includes('CASE') ||
+      prodLimpo.includes('CAPA') ||
+      prodLimpo.includes('PELICULA') ||
+      prodLimpo.includes('CABO') ||
+      prodLimpo.includes('FONE');
+
+    if (isAcessorio) {
+      // 2,5% para acessórios:
+      setNovaVendaComissaoVendedor((valor * 0.025).toFixed(2));
+      return;
+    }
+
+    // 2. REGRA: PRODUTOS APPLE, JBL, CONSOLES, DRONES = R$ 15,00 FIXO
+    const isFixo15 =
+      prodLimpo.includes('IPHONE') ||
+      prodLimpo.includes('APPLE') ||
+      prodLimpo.includes('IPAD') ||
+      prodLimpo.includes('JBL') ||
+      prodLimpo.includes('DRONE') ||
+      prodLimpo.includes('PS5') ||
+      prodLimpo.includes('PLAYSTATION') ||
+      prodLimpo.includes('XBOX') ||
+      catLimpa.includes('CONSOLE') ||
+      catLimpa.includes('DRONE');
+
+    if (isFixo15) {
+      setNovaVendaComissaoVendedor('15.00');
+      return;
+    }
+
+    // 3. REGRA: CELULARES
+    if (pgtoLimpo.includes('BOLETO')) {
+      // Boleto: 2% se tem trainee, 3% se não tem trainee
+      const taxa = temTrainee ? 0.02 : 0.03;
+      setNovaVendaComissaoVendedor((valor * taxa).toFixed(2));
+    } else {
+      // Fora do boleto: 1% se tem trainee, 2% se não tem trainee
+      const taxa = temTrainee ? 0.01 : 0.02;
+      setNovaVendaComissaoVendedor((valor * taxa).toFixed(2));
     }
   }, [
     isNovaVendaModalOpen,
-    novaVendaProdutoDescricao,
-    novaVendaCategoria,
-    novaVendaQuantidade,
     novaVendaValorTotal,
+    novaVendaCategoria,
+    novaVendaProdutoDescricao,
     novaVendaFormaPagamento,
     novaVendaHasTrainee
   ]);
