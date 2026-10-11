@@ -1085,6 +1085,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [novaVendaFormaPagamento, setNovaVendaFormaPagamento] = useState('PIX');
   const [novaVendaComissaoVendedor, setNovaVendaComissaoVendedor] = useState('');
   const [listaClientesBanco, setListaClientesBanco] = useState([]);
+  const [listaProdutosCatalogo, setListaProdutosCatalogo] = useState([]);
 
   // Estados para Auditoria de Vendas & Crédito
   const [buscaAuditoriaCredito, setBuscaAuditoriaCredito] = useState('');
@@ -2060,6 +2061,33 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       fetchNotices();
     }
   }, [session?.user?.id, profile?.role]);
+
+  useEffect(() => {
+    // Carregamento de clientes e catálogo de produtos para uso em vendas manuais / PDV
+    const carregarClientesEProdutos = async () => {
+      try {
+        const { data: clis } = await supabase
+          .from('clientes')
+          .select('id, nome, cpf, telefone')
+          .order('nome', { ascending: true });
+        if (clis) setListaClientesBanco(clis);
+      } catch (e) {
+        console.warn('Aviso ao carregar clientes:', e);
+      }
+
+      try {
+        const { data: prods } = await supabase
+          .from('produtos')
+          .select('id, nome, categoria, preco_venda, preco')
+          .order('nome', { ascending: true });
+        if (prods) setListaProdutosCatalogo(prods);
+      } catch (e) {
+        console.warn('Aviso ao carregar produtos:', e);
+      }
+    };
+
+    carregarClientesEProdutos();
+  }, []);
 
   useEffect(() => {
     if (profile) {
@@ -10793,6 +10821,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
       })
       .catch(err => console.warn('Erro ao carregar clientes para o modal de venda:', err));
+
+    // Fetch do catálogo de produtos para auto-complete e preço sugerido
+    supabase
+      .from('produtos')
+      .select('id, nome, categoria, preco_venda, preco')
+      .order('nome', { ascending: true })
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setListaProdutosCatalogo(data);
+        }
+      })
+      .catch(err => console.warn('Erro ao carregar catálogo de produtos para o modal de venda:', err));
   };
 
   const handleSalvarNovaVendaManual = async (e) => {
@@ -32873,12 +32913,63 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       </label>
                       <input
                         type="text"
+                        list="lista-produtos-venda-manual"
                         value={novaVendaProdutoDescricao}
-                        onChange={(e) => setNovaVendaProdutoDescricao(e.target.value)}
-                        placeholder="Ex: iPhone 13 128GB Estelar"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNovaVendaProdutoDescricao(val);
+
+                          // Verificar se corresponde exatamente a um produto do catálogo ou se selecionou da lista
+                          const pool = (listaProdutosCatalogo && listaProdutosCatalogo.length > 0) ? listaProdutosCatalogo : (produtos || []);
+                          const prodEncontrado = pool.find(p => p.nome && p.nome.trim().toLowerCase() === val.trim().toLowerCase());
+                          if (prodEncontrado) {
+                            // 1. Preencher categoria se correspondente
+                            const catOriginal = prodEncontrado.categoria || '';
+                            const catUpper = catOriginal.toUpperCase();
+                            if (catUpper.includes('ACESS')) {
+                              setNovaVendaCategoria('Acessórios');
+                            } else if (catUpper.includes('SMARTWATCH') || catUpper.includes('RELOGIO') || catUpper.includes('WATCH')) {
+                              setNovaVendaCategoria('Smartwatches');
+                            } else if (catUpper.includes('TABLET') || catUpper.includes('IPAD')) {
+                              setNovaVendaCategoria('Tablets');
+                            } else if (catUpper.includes('SERVIC') || catUpper.includes('ASSIST')) {
+                              setNovaVendaCategoria('Serviços');
+                            } else if (catUpper.includes('OUTRO')) {
+                              setNovaVendaCategoria('Outros');
+                            } else {
+                              setNovaVendaCategoria('Celulares');
+                            }
+
+                            // 2. Preencher preço unitário e calcular valor total com base na quantidade atual
+                            const precoVendaNum = Number(prodEncontrado.preco_venda || prodEncontrado.preco || 0);
+                            if (precoVendaNum > 0) {
+                              setNovaVendaPrecoUnitario(precoVendaNum);
+                              if (novaVendaFormaPagamento !== 'BRINDE') {
+                                const qtdNum = Math.max(1, parseInt(novaVendaQuantidade, 10) || 1);
+                                setNovaVendaValorTotal((precoVendaNum * qtdNum).toFixed(2));
+                              }
+                            }
+                          }
+                        }}
+                        placeholder="Ex: iPhone 13 128GB Estelar (ou selecione do catálogo)"
                         required
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none transition-all placeholder:text-gray-600"
                       />
+                      <datalist id="lista-produtos-venda-manual">
+                        {(() => {
+                          const pool = (listaProdutosCatalogo && listaProdutosCatalogo.length > 0) ? listaProdutosCatalogo : (produtos || []);
+                          return pool.slice(0, 150).map(p => {
+                            const preco = Number(p.preco_venda || p.preco || 0);
+                            const labelPreco = preco > 0 ? ` - R$ ${preco.toFixed(2)}` : '';
+                            const labelCat = p.categoria ? ` (${p.categoria})` : '';
+                            return (
+                              <option key={p.id || p.nome} value={p.nome}>
+                                {`${p.nome}${labelCat}${labelPreco}`}
+                              </option>
+                            );
+                          });
+                        })()}
+                      </datalist>
                     </div>
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
