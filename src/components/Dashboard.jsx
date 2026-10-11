@@ -31996,7 +31996,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </label>
                           <input
                             type="text"
-                            value={clienteCep}
+                            value={clienteCep ?? ''}
                             onChange={(e) => handleCepChange(e.target.value)}
                             placeholder="00000-000"
                             maxLength="9"
@@ -32013,11 +32013,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           <input
                             type="text"
                             ref={clienteNumeroInputRef}
-                            value={clienteNumero}
+                            value={clienteNumero ?? ''}
                             onChange={(e) => setClienteNumero(e.target.value)}
                             placeholder="Ex: 123 ou S/N"
+                            disabled={cepLookupLoading}
                             required={!clienteIsZonaRural}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
                           />
                         </div>
 
@@ -32027,13 +32028,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </label>
                         <input
                           type="text"
-                          value={clienteUf}
+                          value={clienteUf ?? ''}
                           onChange={(e) => setClienteUf(e.target.value.toUpperCase())}
                           placeholder="Ex: SP"
                           maxLength="2"
+                          disabled={cepLookupLoading}
                           required={!clienteIsZonaRural}
-                          readOnly={!!clienteUf && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all disabled:opacity-50"
                         />
                       </div>
 
@@ -32043,12 +32044,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </label>
                         <input
                           type="text"
-                          value={clienteLogradouro}
+                          value={clienteLogradouro ?? ''}
                           onChange={(e) => setClienteLogradouro(e.target.value)}
                           placeholder="Rua, Avenida, Travessa..."
+                          disabled={cepLookupLoading}
                           required={!clienteIsZonaRural}
-                          readOnly={!!clienteLogradouro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
                         />
                       </div>
 
@@ -32058,12 +32059,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </label>
                         <input
                           type="text"
-                          value={clienteBairro}
+                          value={clienteBairro ?? ''}
                           onChange={(e) => setClienteBairro(e.target.value)}
                           placeholder="Bairro..."
+                          disabled={cepLookupLoading}
                           required={!clienteIsZonaRural}
-                          readOnly={!!clienteBairro && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
                         />
                       </div>
 
@@ -32073,12 +32074,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </label>
                         <input
                           type="text"
-                          value={clienteCidade}
+                          value={clienteCidade ?? ''}
                           onChange={(e) => setClienteCidade(e.target.value)}
                           placeholder="Cidade..."
+                          disabled={cepLookupLoading}
                           required={!clienteIsZonaRural}
-                          readOnly={!!clienteCidade && !cepLookupFailed && clienteCep.replace(/\D/g, '').length === 8}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all read-only:text-gray-500 read-only:bg-neutral-950/20"
+                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
                         />
                       </div>
 
@@ -32088,10 +32089,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </label>
                           <input
                             type="text"
-                            value={clienteComplemento}
+                            value={clienteComplemento ?? ''}
                             onChange={(e) => setClienteComplemento(e.target.value)}
                             placeholder="Ex: Apto 4"
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
+                            disabled={cepLookupLoading}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
                           />
                         </div>
                       </div>
