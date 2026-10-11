@@ -13274,14 +13274,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       prodLimpo.includes('CABO') ||
       prodLimpo.includes('FONE');
 
-    if (isAcessorio) {
-      // 2,5% para acessórios:
-      setNovaVendaComissaoVendedor((valor * 0.025).toFixed(2));
-      return;
-    }
-
     // 2. REGRA: PRODUTOS APPLE, JBL, CONSOLES, DRONES = R$ 15,00 FIXO
-    const isFixo15 =
+    const isFixo15 = !isAcessorio && (
       prodLimpo.includes('IPHONE') ||
       prodLimpo.includes('APPLE') ||
       prodLimpo.includes('IPAD') ||
@@ -13291,7 +13285,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       prodLimpo.includes('PLAYSTATION') ||
       prodLimpo.includes('XBOX') ||
       catLimpa.includes('CONSOLE') ||
-      catLimpa.includes('DRONE');
+      catLimpa.includes('DRONE')
+    );
+
+    // Atualização automática da Comissão do Trainee:
+    if (temTrainee) {
+      if (valor > 0 && !isFixo15) {
+        setNovaVendaComissaoTrainee((valor * 0.01).toFixed(2));
+      } else {
+        setNovaVendaComissaoTrainee('0.00');
+      }
+    } else {
+      setNovaVendaComissaoTrainee('0.00');
+    }
+
+    if (isAcessorio) {
+      // 2,5% para acessórios:
+      setNovaVendaComissaoVendedor((valor * 0.025).toFixed(2));
+      return;
+    }
 
     if (isFixo15) {
       setNovaVendaComissaoVendedor('15.00');
@@ -32758,10 +32770,50 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           onChange={(e) => {
                             const ativo = e.target.checked;
                             setNovaVendaHasTrainee(ativo);
-                            if (!ativo) {
+                            if (ativo) {
+                              const valorNum = typeof novaVendaValorTotal === 'string'
+                                ? parseFloat(novaVendaValorTotal.replace(',', '.'))
+                                : Number(novaVendaValorTotal);
+
+                              const catLimpa = String(novaVendaCategoria || '').toUpperCase();
+                              const prodLimpo = String(novaVendaProdutoDescricao || '').toUpperCase();
+                              const isAcessorio =
+                                catLimpa.includes('ACESS') ||
+                                prodLimpo.startsWith('CAPA') ||
+                                prodLimpo.startsWith('CASE') ||
+                                prodLimpo.startsWith('PELICULA') ||
+                                prodLimpo.startsWith('CHIP') ||
+                                prodLimpo.startsWith('CABO') ||
+                                prodLimpo.startsWith('FONTE') ||
+                                prodLimpo.startsWith('CARREGADOR') ||
+                                prodLimpo.includes('CASE') ||
+                                prodLimpo.includes('CAPA') ||
+                                prodLimpo.includes('PELICULA') ||
+                                prodLimpo.includes('CABO') ||
+                                prodLimpo.includes('FONE');
+
+                              const isFixo = !isAcessorio && (
+                                prodLimpo.includes('IPHONE') ||
+                                prodLimpo.includes('APPLE') ||
+                                prodLimpo.includes('IPAD') ||
+                                prodLimpo.includes('JBL') ||
+                                prodLimpo.includes('DRONE') ||
+                                prodLimpo.includes('PS5') ||
+                                prodLimpo.includes('PLAYSTATION') ||
+                                prodLimpo.includes('XBOX') ||
+                                catLimpa.includes('CONSOLE') ||
+                                catLimpa.includes('DRONE')
+                              );
+
+                              if (valorNum > 0 && !isFixo) {
+                                setNovaVendaComissaoTrainee((valorNum * 0.01).toFixed(2));
+                              } else {
+                                setNovaVendaComissaoTrainee('0.00');
+                              }
+                            } else {
                               setNovaVendaTraineeId('');
                               setNovaVendaTraineeNome('');
-                              setNovaVendaComissaoTrainee('');
+                              setNovaVendaComissaoTrainee('0.00');
                             }
                           }}
                           className="sr-only peer"
