@@ -1080,9 +1080,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [novaVendaImei, setNovaVendaImei] = useState('');
   const [novaVendaCategoria, setNovaVendaCategoria] = useState('Celulares');
   const [novaVendaQuantidade, setNovaVendaQuantidade] = useState('1');
+  const [novaVendaPrecoUnitario, setNovaVendaPrecoUnitario] = useState(0);
   const [novaVendaValorTotal, setNovaVendaValorTotal] = useState('');
   const [novaVendaFormaPagamento, setNovaVendaFormaPagamento] = useState('PIX');
   const [novaVendaComissaoVendedor, setNovaVendaComissaoVendedor] = useState('');
+  const [listaClientesBanco, setListaClientesBanco] = useState([]);
 
   // Estados para Auditoria de Vendas & Crédito
   const [buscaAuditoriaCredito, setBuscaAuditoriaCredito] = useState('');
@@ -10774,10 +10776,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setNovaVendaImei('');
     setNovaVendaCategoria('Celulares');
     setNovaVendaQuantidade('1');
+    setNovaVendaPrecoUnitario(0);
     setNovaVendaValorTotal('');
     setNovaVendaFormaPagamento('PIX');
     setNovaVendaComissaoVendedor('');
     setIsNovaVendaModalOpen(true);
+
+    // Fetch da lista oficial de clientes cadastrados no Supabase
+    supabase
+      .from('clientes')
+      .select('id, nome, cpf, telefone')
+      .order('nome', { ascending: true })
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setListaClientesBanco(data);
+        }
+      })
+      .catch(err => console.warn('Erro ao carregar clientes para o modal de venda:', err));
   };
 
   const handleSalvarNovaVendaManual = async (e) => {
@@ -32794,7 +32809,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       <button
                         type="button"
                         onClick={() => {
-                          setNovaVendaClienteId('3788fcc4-423c-46ce-a02e-5906d805925d');
+                          setNovaVendaClienteId('');
                           setNovaVendaClienteNome('Consumidor Final');
                           setNovaVendaClienteBusca('');
                         }}
@@ -32816,28 +32831,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         onChange={(e) => {
                           const cId = e.target.value;
                           setNovaVendaClienteId(cId);
-                          const matchedCliente = (clientes || []).find(c => String(c.id) === String(cId));
+                          const pool = (listaClientesBanco && listaClientesBanco.length > 0) ? listaClientesBanco : (clientes || []);
+                          const matchedCliente = pool.find(c => String(c.id) === String(cId));
                           if (matchedCliente) {
                             setNovaVendaClienteNome(matchedCliente.nome || matchedCliente.razao_social || 'Consumidor Final');
-                          } else if (cId === '3788fcc4-423c-46ce-a02e-5906d805925d') {
+                          } else {
                             setNovaVendaClienteNome('Consumidor Final');
                           }
                         }}
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none cursor-pointer transition-all"
                       >
-                        <option value="3788fcc4-423c-46ce-a02e-5906d805925d" className="bg-[#111] text-white">
+                        <option value="" className="bg-[#111] text-white">
                           Consumidor Final (Padrão)
                         </option>
                         {(() => {
+                          const pool = (listaClientesBanco && listaClientesBanco.length > 0) ? listaClientesBanco : (clientes || []);
                           const busca = novaVendaClienteBusca.trim().toLowerCase();
-                          const filtrados = (clientes || []).filter(c => {
+                          const filtrados = pool.filter(c => {
                             if (!c || !c.id || c.id === '3788fcc4-423c-46ce-a02e-5906d805925d') return false;
                             if (!busca) return true;
                             const n = (c.nome || c.razao_social || '').toLowerCase();
                             const doc = (c.cpf || c.cnpj || '').toLowerCase();
-                            return n.includes(busca) || doc.includes(busca);
+                            const tel = (c.telefone || '').toLowerCase();
+                            return n.includes(busca) || doc.includes(busca) || tel.includes(busca);
                           });
-                          return filtrados.slice(0, 30).map(c => (
+                          return filtrados.slice(0, 100).map(c => (
                             <option key={c.id} value={String(c.id)} className="bg-[#111] text-white">
                               {c.nome || c.razao_social} {c.cpf ? `(${c.cpf})` : ''}
                             </option>
@@ -32904,7 +32922,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         type="number"
                         min="1"
                         value={novaVendaQuantidade}
-                        onChange={(e) => setNovaVendaQuantidade(e.target.value)}
+                        onChange={(e) => {
+                          const novaQtd = Math.max(1, parseInt(e.target.value, 10) || 1);
+                          setNovaVendaQuantidade(String(novaQtd));
+
+                          if (novaVendaPrecoUnitario > 0 && novaVendaFormaPagamento !== 'BRINDE') {
+                            const novoValorTotal = (novaVendaPrecoUnitario * novaQtd).toFixed(2);
+                            setNovaVendaValorTotal(novoValorTotal);
+                          }
+                        }}
                         required
                         className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none text-center font-mono transition-all"
                       />
@@ -32918,7 +32944,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         type="text"
                         inputMode="decimal"
                         value={novaVendaValorTotal}
-                        onChange={(e) => setNovaVendaValorTotal(e.target.value)}
+                        onChange={(e) => {
+                          const valStr = e.target.value;
+                          setNovaVendaValorTotal(valStr);
+
+                          if (novaVendaFormaPagamento !== 'BRINDE') {
+                            const valorNum = typeof valStr === 'string'
+                              ? parseFloat(valStr.replace(',', '.'))
+                              : Number(valStr);
+                            const qtdNum = Math.max(1, parseInt(novaVendaQuantidade, 10) || 1);
+                            if (valorNum > 0 && !isNaN(valorNum)) {
+                              setNovaVendaPrecoUnitario(valorNum / qtdNum);
+                            }
+                          }
+                        }}
                         placeholder="Ex: 2.500,00"
                         disabled={novaVendaFormaPagamento === 'BRINDE'}
                         required={novaVendaFormaPagamento !== 'BRINDE'}
