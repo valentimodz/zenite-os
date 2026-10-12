@@ -1061,6 +1061,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [vendaTraineeId, setVendaTraineeId] = useState('');
   const [vendaTraineeNome, setVendaTraineeNome] = useState('');
   const [vendaComissaoTrainee, setVendaComissaoTrainee] = useState('');
+  const [listaTrainees, setListaTrainees] = useState([]);
 
   // Estados para Modal "Nova Venda / Inserir Venda Manual"
   const [isNovaVendaModalOpen, setIsNovaVendaModalOpen] = useState(false);
@@ -10390,6 +10391,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     setVendaJustificativa('');
     setIsVendaEditModalOpen(true);
+
+    // Fetch da lista oficial de trainees conforme solicitado
+    (async () => {
+      try {
+        const { data: listaTraineesData, error: traineesErr } = await supabase
+          .from('profiles')
+          .select('id, nome, role, is_treinner')
+          .or('is_treinner.eq.true,role.eq.TRAINEE');
+        if (!traineesErr && Array.isArray(listaTraineesData)) {
+          setListaTrainees(listaTraineesData);
+        } else {
+          console.warn('Erro ou lista vazia ao buscar trainees:', traineesErr);
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar lista de trainees para o modal:', err);
+      }
+    })();
   };
 
   const handleCloseEditVenda = () => {
@@ -32425,58 +32443,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             Trainee / Assistente <span className="text-purple-400">*</span>
                           </label>
                           <select
-                            value={vendaTraineeId}
+                            value={vendaTraineeId || ''}
                             onChange={(e) => {
-                              const chosenId = e.target.value;
-                              setVendaTraineeId(chosenId);
-                              const matchObj = (treenersFilial || []).find(t => String(t.id) === String(chosenId)) ||
-                                               (teamMembers || []).find(m => String(m.id) === String(chosenId)) ||
-                                               (vendedores || []).find(v => String(v.id) === String(chosenId));
-                              if (matchObj) {
-                                setVendaTraineeNome(matchObj.nome || matchObj.name || matchObj.email || '');
-                              }
+                              const selectedId = e.target.value;
+                              setVendaTraineeId(selectedId || null);
+                              const traineeObj = listaTrainees.find(t => t.id === selectedId);
+                              setVendaTraineeNome(traineeObj?.nome || null);
                             }}
                             className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-sm outline-none font-medium cursor-pointer transition-all"
                           >
-                            <option value="" className="bg-[#111] text-gray-500">
-                              {vendaTraineeNome ? `Manter: ${vendaTraineeNome}` : 'Selecione o Trainee...'}
-                            </option>
-                            {(() => {
-                              const mapaTrainees = new Map();
-                              // 1. Trainees específicos cadastrados
-                              (treenersFilial || []).forEach(t => {
-                                if (t.id) mapaTrainees.set(String(t.id), t.nome || t.name || 'Trainee');
-                              });
-                              // 2. Colaboradores com cargo Trainee/Treener
-                              (teamMembers || []).forEach(m => {
-                                const cargoUpper = String(m.role || m.cargo || '').toUpperCase();
-                                if (m.id && (cargoUpper.includes('TRAINEE') || cargoUpper.includes('TREENER') || m.is_treinner) && !mapaTrainees.has(String(m.id))) {
-                                  mapaTrainees.set(String(m.id), m.nome || m.name || m.email || 'Trainee');
-                                }
-                              });
-                              // 3. Fallback: todos os colaboradores disponíveis
-                              if (mapaTrainees.size === 0) {
-                                (teamMembers || []).forEach(m => {
-                                  if (m.id && !mapaTrainees.has(String(m.id))) {
-                                    mapaTrainees.set(String(m.id), m.nome || m.name || m.email || 'Colaborador');
-                                  }
-                                });
-                                (vendedores || []).forEach(v => {
-                                  if (v.id && !mapaTrainees.has(String(v.id))) {
-                                    mapaTrainees.set(String(v.id), v.nome || v.name || 'Vendedor');
-                                  }
-                                });
-                              }
-                              // Se já tiver trainee cadastrado na venda e não estiver no mapa
-                              if (editingVenda?.trainee_id && editingVenda?.trainee_nome && !mapaTrainees.has(String(editingVenda.trainee_id))) {
-                                mapaTrainees.set(String(editingVenda.trainee_id), editingVenda.trainee_nome);
-                              }
-                              return Array.from(mapaTrainees.entries()).map(([id, nome]) => (
-                                <option key={id} value={id} className="bg-[#111] text-white">
-                                  {nome}
-                                </option>
-                              ));
-                            })()}
+                            <option value="">Selecione o Trainee...</option>
+                            {listaTrainees.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.nome}
+                              </option>
+                            ))}
                           </select>
                         </div>
 
