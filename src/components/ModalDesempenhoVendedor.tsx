@@ -314,6 +314,14 @@ export default function ModalDesempenhoVendedor({
     enabled: Boolean(colaboradorId)
   });
 
+  // Estados alimentados diretamente pela RPC 'obter_resumo_metas_vendedor'
+  const [totalVendas, setTotalVendas] = useState<number>(0);
+  const [qtdVendas, setQtdVendas] = useState<number>(0);
+  const [ticketMedio, setTicketMedio] = useState<number>(0);
+  const [comissoesAcumuladas, setComissoesAcumuladas] = useState<number>(0);
+  const [realizadoBoletos, setRealizadoBoletos] = useState<number>(0);
+  const [realizadoAcessorios, setRealizadoAcessorios] = useState<number>(0);
+
   // Invalidação de cache local e força de recarga
   const invalidarCacheERecarregar = useCallback((novoMes?: string) => {
     lastLoadedVendedorRef.current = null;
@@ -326,222 +334,127 @@ export default function ModalDesempenhoVendedor({
     });
   }, [mesAtivo, queryClient]);
 
-  // Carregar dados de vendas e metas do colaborador selecionado
-  const carregarDadosVendedor = useCallback(async () => {
-    if (!colaboradorId) return;
+  // Função única de carregamento de dados e metas (eliminação total de N+1 queries)
+  const carregarDadosMetas = useCallback(async () => {
+    const vendedorId = colaboradorId;
+    if (!vendedorId || !mounted) return;
+
     setIsLoading(true);
-    setVendasColaborador([]);
-    setMetaIndividual(null);
-
     try {
-      const vendedorId = colaboradorId;
-      const vendedorNome = colaboradorNome;
+      // 1. Define início e fim do mês (ex: 2026-10)
+      const competencia = mesAtivo || mesCompetencia || '2026-10';
+      const [anoStr, mesStr] = (competencia || '2026-10').split('-');
+      const ano = parseInt(anoStr, 10);
+      const mes = parseInt(mesStr, 10);
+      const dataInicio = new Date(Date.UTC(ano, mes - 1, 1, 0, 0, 0)).toISOString();
+      const dataFim = new Date(Date.UTC(ano, mes, 0, 23, 59, 59, 999)).toISOString();
 
-      // Início e fim do mês selecionado considerando o fuso horário local de Brasília (-03:00)
-      const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
-      const anoFiltro = parseInt(anoStr, 10);
-      const mesFiltro = parseInt(mesStr, 10);
-      const ultimoDia = new Date(anoFiltro, mesFiltro, 0).getDate();
-      const ultimoDiaPad = String(ultimoDia).padStart(2, '0');
-      const mesPad = String(mesFiltro).padStart(2, '0');
-
-      const dataInicioBrasilia = `${anoFiltro}-${mesPad}-01T00:00:00-03:00`;
-      const dataFimBrasilia = `${anoFiltro}-${mesPad}-${ultimoDiaPad}T23:59:59.999-03:00`;
-
-      // 1. Consulta de vendas no Supabase
-      let query = supabase
-        .from('vendas')
-        .select(`
-          id,
-          created_at,
-          valor_total,
-          metodo_pagamento,
-          forma_pagamento,
-          categoria,
-          comissao,
-          comissao_vendedor,
-          vendedor_id,
-          vendedor_nome,
-          produto_nome,
-          imei,
-          teve_participacao_trainee,
-          comissao_trainee,
-          treener_id,
-          trainee_id,
-          trainee_nome,
-          financeira,
-          financeira_parceira,
-          observacoes,
-          itens_venda (
-            id,
-            produto_nome,
-            quantidade,
-            preco_unitario,
-            valor_total,
-            comissao
-          )
-        `)
-        .gte('created_at', dataInicioBrasilia)
-        .lte('created_at', dataFimBrasilia)
-        .order('created_at', { ascending: false });
-
-      // Filtrar pelo ID do colaborador selecionado ou pelo nome dele (incluindo vendas como titular ou trainee)
-      const isUuid = (str: string | number) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str));
-      const isColabTrainee = Boolean(
-        colaborador?.role === 'TRAINEE' ||
-        colaborador?.is_treinner ||
-        (colaborador?.cargo || '').toLowerCase().includes('trainee')
-      );
-      const primeiroNome = vendedorNome ? vendedorNome.trim().split(' ')[0] : '';
-      const nomeCompleto = (vendedorNome || '').trim();
-
-      if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
-        if (isUuid(vendedorId)) {
-          // Inclui vendas onde o colaborador é titular (vendedor_id/vendedor_nome) ou trainee (treener_id/trainee_id)
-          query = query.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
-        } else if (primeiroNome) {
-          query = query.ilike('vendedor_nome', `%${primeiroNome}%`);
-        }
-      } else if (primeiroNome) {
-        query = query.ilike('vendedor_nome', `%${primeiroNome}%`);
-      }
-
-      let vendasModal: Venda[] | null = null;
-      const { data: vendasData, error } = await query;
-      if (vendasData) {
-        vendasModal = vendasData as Venda[];
-      }
-
-      if (error) {
-        console.warn('[ModalDesempenhoVendedor] Fallback na busca sem itens_venda:', error);
-        let fbQuery = supabase
-          .from('vendas')
-          .select('id, created_at, valor_total, metodo_pagamento, forma_pagamento, categoria, comissao, vendedor_id, vendedor_nome, produto_nome, imei, teve_participacao_trainee, comissao_trainee, treener_id, trainee_id, trainee_nome, financeira, financeira_parceira, observacoes')
-          .gte('created_at', dataInicioBrasilia)
-          .lte('created_at', dataFimBrasilia)
-          .order('created_at', { ascending: false });
-
-        if (vendedorId && vendedorId !== '' && vendedorId !== 'sem_vendedor' && !String(vendedorId).startsWith('nome_')) {
-          if (isUuid(vendedorId)) {
-            fbQuery = fbQuery.or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}${primeiroNome ? `,vendedor_nome.ilike.%${primeiroNome}%` : ''}`);
-          } else if (primeiroNome) {
-            fbQuery = fbQuery.ilike('vendedor_nome', `%${primeiroNome}%`);
+      // Carregar meta individual do banco em paralelo rápido
+      supabase
+        .from('metas')
+        .select('*')
+        .eq('vendedor_id', vendedorId)
+        .or(`mes_ano.eq.${competencia},mes_referencia.eq.${competencia}`)
+        .maybeSingle()
+        .then(({ data: mData }) => {
+          if (mData) {
+            setMetaIndividual(mData);
+          } else if (colaboradorFilialId) {
+            supabase
+              .from('configuracoes_metas_filial')
+              .select('*')
+              .eq('filial_id', colaboradorFilialId)
+              .eq('mes_ano', competencia)
+              .maybeSingle()
+              .then(({ data: cData }) => {
+                if (cData) setMetaIndividual(cData);
+              });
           }
-        } else if (primeiroNome) {
-          fbQuery = fbQuery.ilike('vendedor_nome', `%${primeiroNome}%`);
-        }
+        })
+        .catch(() => {});
 
-        const fbRes = await fbQuery;
-        if (!fbRes.error && fbRes.data) {
-          vendasModal = fbRes.data as Venda[];
-        }
-      }
-
-      // Validação estrita de pertencimento ao mês considerando o fuso horário local de Brasília (-03:00)
-      const pertenceAoMes = (rawDate: any) => {
-        if (!rawDate) return false;
-        const dataVenda = new Date(rawDate);
-        if (isNaN(dataVenda.getTime())) return false;
-        // Obter ano e mês ajustados no fuso local (-03:00)
-        const dStr = dataVenda.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
-        const dObj = new Date(dStr);
-        const ano = dObj.getFullYear();
-        const mes = dObj.getMonth() + 1; // 1-12
-        return ano === anoFiltro && mes === mesFiltro;
-      };
-
-      const cleanStr = (s: any) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
-      const normNomeColab = cleanStr(nomeCompleto);
-      const normPrimeiroNome = cleanStr(primeiroNome);
-
-      // Fallback em cache se a consulta não retornar vendas
-      if ((!vendasModal || vendasModal.length === 0) && Array.isArray(vendasCache) && vendasCache.length > 0) {
-        const cachedVendas = (vendasCache as Venda[]).filter(v => {
-          if (!pertenceAoMes(v.created_at || (v as any).data || (v as any).date)) return false;
-          const matchId = vendedorId && (String(v.vendedor_id) === String(vendedorId) || String(v.trainee_id) === String(vendedorId) || String(v.treener_id) === String(vendedorId));
-          const rawNome = cleanStr(v.vendedor_nome);
-          const matchNome = (normPrimeiroNome && rawNome.includes(normPrimeiroNome)) || (normNomeColab && rawNome.includes(normNomeColab));
-          return matchId || matchNome;
-        });
-        if (cachedVendas.length > 0) {
-          vendasModal = cachedVendas;
-        }
-      }
-
-      // Aplica a validação estrita de mês local e remoção de duplicatas também sobre vendasModal
-      const vistos = new Set<string>();
-      const vendasFiltradas = (vendasModal || []).filter(v => {
-        const rawDate = v.created_at || (v as any).data || (v as any).date;
-        if (rawDate && !pertenceAoMes(rawDate)) {
-          return false;
-        }
-
-        const matchId = vendedorId && (
-          String(v.vendedor_id) === String(vendedorId) || 
-          String(v.trainee_id) === String(vendedorId) || 
-          String(v.treener_id) === String(vendedorId)
-        );
-        const rawNome = cleanStr(v.vendedor_nome);
-        const matchNome = (normPrimeiroNome && rawNome.includes(normPrimeiroNome)) || (normNomeColab && rawNome.includes(normNomeColab));
-        if (!matchId && !matchNome) {
-          return false;
-        }
-
-        const chave = String(v.id || `${v.created_at}_${v.valor_total}_${v.vendedor_nome || v.vendedor_id}`);
-        if (vistos.has(chave)) return false;
-        vistos.add(chave);
-        return true;
+      // 2. TENTA USAR A RPC OTIMIZADA PRIMEIRO (1 única chamada ao banco):
+      const { data: rpcData, error: rpcError } = await supabase.rpc('obter_resumo_metas_vendedor', {
+        p_vendedor_id: vendedorId,
+        p_data_inicio: dataInicio,
+        p_data_fim: dataFim,
       });
 
-      setVendasColaborador(vendasFiltradas);
+      if (!rpcError && rpcData) {
+        setTotalVendas(Number(rpcData.total_vendas || 0));
+        setQtdVendas(Number(rpcData.qtd_vendas || 0));
+        setTicketMedio(Number(rpcData.ticket_medio || 0));
+        setComissoesAcumuladas(Number(rpcData.total_comissao || 0));
+        setRealizadoBoletos(Number(rpcData.realizado_boletos || 0));
+        setRealizadoAcessorios(Number(rpcData.realizado_acessorios || 0));
 
-      // 2. Consulta de Metas configuradas para o vendedor no mês na tabela 'metas'
-      let metaEncontrada: MetaBanco | null = null;
-      if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
-        try {
-          const { data: mData } = await supabase
-            .from('metas')
-            .select('*')
-            .eq('vendedor_id', colaboradorId)
-            .or(`mes_ano.eq.${mesAtivo},mes_referencia.eq.${mesAtivo}`)
-            .maybeSingle();
+        // Carrega vendas apenas para o histórico da tabela sem sobrecarga
+        const { data: vendasHist } = await supabase
+          .from('vendas')
+          .select('id, created_at, valor_total, comissao_vendedor, comissao, forma_pagamento, metodo_pagamento, financeira, itens_venda(produto_nome, valor_total)')
+          .or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`)
+          .gte('created_at', dataInicio)
+          .lte('created_at', dataFim)
+          .order('created_at', { ascending: false });
 
-          if (mData) {
-            metaEncontrada = mData;
-          }
-        } catch (e) {
-          console.warn('[ModalDesempenhoVendedor] Erro ao consultar metas do vendedor:', e);
+        if (vendasHist) {
+          setVendasColaborador(vendasHist as Venda[]);
         }
+        return;
       }
 
-      // Fallback para metas da filial
-      if (!metaEncontrada && colaboradorFilialId) {
-        try {
-          const { data: cData } = await supabase
-            .from('configuracoes_metas_filial')
-            .select('*')
-            .eq('filial_id', colaboradorFilialId)
-            .eq('mes_ano', mesAtivo)
-            .maybeSingle();
-          if (cData) metaEncontrada = cData;
-        } catch (e) {}
-      }
+      // 3. SE A RPC FALHAR, EXECUTE ESTA QUERY ÚNICA OTIMIZADA (SEM FAZER LOOPS N+1):
+      const { data: vendas, error: vendasError } = await supabase
+        .from('vendas')
+        .select('id, created_at, valor_total, comissao_vendedor, comissao, forma_pagamento, metodo_pagamento, financeira, itens_venda(produto_nome, valor_total)')
+        .or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`)
+        .gte('created_at', dataInicio)
+        .lte('created_at', dataFim)
+        .order('created_at', { ascending: false });
 
-      setMetaIndividual(metaEncontrada);
+      if (vendasError) throw vendasError;
+
+      if (vendas) {
+        const qtd = vendas.length;
+        const total = vendas.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
+        const comissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
+        
+        const boletos = vendas.reduce((acc, v) => {
+          const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase();
+          return pgto.includes('BOLETO') || pgto.includes('PAYJOY') || pgto.includes('WATU') || pgto.includes('UME') || pgto.includes('AIVA') || pgto.includes('CREDIARIO') ? acc + Number(v.valor_total || 0) : acc;
+        }, 0);
+
+        const acessorios = vendas.reduce((acc, v) => {
+          const itens = (v as any).itens_venda || [];
+          const totalItensAcess = itens.reduce((accItem: number, item: any) => {
+            const nome = String(item.produto_nome || '').toUpperCase();
+            const ehAcess = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE'].some(termo => nome.includes(termo));
+            return ehAcess ? accItem + Number(item.valor_total || 0) : accItem;
+          }, 0);
+          return acc + totalItensAcess;
+        }, 0);
+
+        setTotalVendas(total);
+        setQtdVendas(qtd);
+        setTicketMedio(qtd > 0 ? total / qtd : 0);
+        setComissoesAcumuladas(comissao);
+        setRealizadoBoletos(boletos);
+        setRealizadoAcessorios(acessorios);
+        setVendasColaborador(vendas as Venda[]);
+      }
     } catch (err) {
-      console.error('[ModalDesempenhoVendedor] Erro ao carregar dados:', err);
+      console.error('Erro ao buscar metas:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [colaboradorId, colaboradorNome, colaboradorFilialId, mesAtivo, mesCompetencia, vendasCacheLength]);
+  }, [colaboradorId, mesAtivo, mesCompetencia, mounted, colaboradorFilialId]);
 
+  // 4. CERTIFIQUE-SE DE QUE O USEEFFECT SÓ CHAME A FUNÇÃO QUANDO O MODAL ESTIVER ABERTO:
   useEffect(() => {
-    const key = `${colaboradorId}_${mesAtivo}`;
-    if (colaboradorId && lastLoadedVendedorRef.current !== key) {
-      lastLoadedVendedorRef.current = key;
-      carregarDadosVendedor();
+    if (mounted && colaboradorId) {
+      carregarDadosMetas();
     }
-  }, [colaboradorId, mesAtivo]);
+  }, [mounted, colaboradorId, mesAtivo, carregarDadosMetas]);
 
   // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'metas'
   const dashboardInfo = useMemo(() => {
@@ -585,10 +498,18 @@ export default function ModalDesempenhoVendedor({
     const rawSalesCount = sales.length;
     const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
     
-    // Se a view consolidada estiver disponível para o colaborador, utiliza os dados oficiais do banco de dados
-    const totalVendasGeral = dadosViewConsolidada?.volume_total_participado ?? (rawTotalVendasGeral > 0 ? rawTotalVendasGeral : 0);
-    const salesCount = dadosViewConsolidada?.total_transacoes ?? rawSalesCount;
-    const ticketMedio = dadosViewConsolidada?.ticket_medio ?? (salesCount > 0 ? totalVendasGeral / salesCount : 0);
+    // Prioriza dados da view consolidada ou dos estados calculados da RPC/query direta otimizada
+    const totalVendasGeral = Number(dadosViewConsolidada?.volume_total_participado || 0) > 0
+      ? Number(dadosViewConsolidada?.volume_total_participado)
+      : (totalVendas > 0 ? totalVendas : (rawTotalVendasGeral > 0 ? rawTotalVendasGeral : 0));
+
+    const salesCount = Number(dadosViewConsolidada?.total_transacoes || 0) > 0
+      ? Number(dadosViewConsolidada?.total_transacoes)
+      : (qtdVendas > 0 ? qtdVendas : rawSalesCount);
+
+    const ticketMedioCalc = Number(dadosViewConsolidada?.ticket_medio || 0) > 0
+      ? Number(dadosViewConsolidada?.ticket_medio)
+      : (ticketMedio > 0 ? ticketMedio : (salesCount > 0 ? totalVendasGeral / salesCount : 0));
     const faturadoTitularView = dadosViewConsolidada?.faturado_titular ?? 0;
     const faturadoTraineeView = dadosViewConsolidada?.faturado_trainee ?? 0;
 
@@ -658,9 +579,11 @@ export default function ModalDesempenhoVendedor({
       }
     });
 
-    const totalAcessorios = totalAcessoriosCalc > 0 
-      ? totalAcessoriosCalc 
-      : (isIslayne && isSetembro2026 ? 6519.76 : 0);
+    const totalAcessorios = realizadoAcessorios > 0 
+      ? realizadoAcessorios 
+      : (totalAcessoriosCalc > 0 
+        ? totalAcessoriosCalc 
+        : (isIslayne && isSetembro2026 ? 6519.76 : 0));
 
     // Boletos / Financiamentos (PayJoy, Watu, Ume, Aiva, Crediário, Boleto, Financiamento)
     const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'FINANCIAMENTO', 'FINAN'];
@@ -686,9 +609,11 @@ export default function ModalDesempenhoVendedor({
       }
     });
 
-    const totalBoletos = totalBoletosCalc > 0 
-      ? totalBoletosCalc 
-      : (isIslayne && isSetembro2026 ? 76601.66 : 0);
+    const totalBoletos = realizadoBoletos > 0 
+      ? realizadoBoletos 
+      : (totalBoletosCalc > 0 
+        ? totalBoletosCalc 
+        : (isIslayne && isSetembro2026 ? 76601.66 : 0));
 
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 
@@ -818,7 +743,7 @@ export default function ModalDesempenhoVendedor({
       mesReferencia: mesAtivo,
       isTrainee,
       totalVendasGeral,
-      ticketMedio,
+      ticketMedio: ticketMedioCalc,
       totalComissoes,
       totalComissaoComoTitular,
       totalComissaoComoTrainee,
@@ -846,7 +771,24 @@ export default function ModalDesempenhoVendedor({
       evolucaoDiaria,
       historico: sales
     };
-  }, [metaIndividual, vendasColaborador, dadosViewConsolidada, colaboradorId, colaborador?.nome, colaborador?.cargo, colaborador?.role, colaborador?.is_treinner, mesAtivo, mesCompetencia]);
+  }, [
+    metaIndividual, 
+    vendasColaborador, 
+    dadosViewConsolidada, 
+    colaboradorId, 
+    colaborador?.nome, 
+    colaborador?.cargo, 
+    colaborador?.role, 
+    colaborador?.is_treinner, 
+    mesAtivo, 
+    mesCompetencia,
+    totalVendas,
+    qtdVendas,
+    ticketMedio,
+    comissoesAcumuladas,
+    realizadoBoletos,
+    realizadoAcessorios
+  ]);
 
   // Identificação da filial
   const filialDoColaborador = filiais.find(f => String(f.id) === String(colaborador?.filial_id)) || null;
@@ -929,7 +871,7 @@ export default function ModalDesempenhoVendedor({
               type="button"
               onClick={() => {
                 invalidarCacheERecarregar();
-                carregarDadosVendedor();
+                carregarDadosMetas();
               }}
               disabled={isLoading}
               className="p-2 rounded-lg bg-black border border-[#222222] hover:border-[#6A0DAD]/50 text-gray-300 hover:text-white transition-colors cursor-pointer"
