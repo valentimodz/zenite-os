@@ -334,25 +334,20 @@ export default function ModalDesempenhoVendedor({
     });
   }, [mesAtivo, queryClient]);
 
-  // Função única de carregamento de dados e metas (eliminação total de N+1 queries)
-  const carregarDadosMetas = useCallback(async () => {
+  // Função de carregamento com uma única requisição direta ao Supabase
+  const carregarDadosVendedor = useCallback(async () => {
     const vendedorId = colaboradorId;
     const competencia = mesAtivo || mesCompetencia || '2026-10';
-    if (!vendedorId || !mounted) return;
-
-    // 4. EXIBIR LOG NO CONSOLE PARA MONITORAMENTO DE DISPAROS
-    console.log("BUSCANDO DADOS METAS:", { vendedorId, competencia });
-
+    if (!vendedorId) return;
     setIsLoading(true);
-    try {
-      // 1. Define início e fim do mês (ex: 2026-10)
-      const [anoStr, mesStr] = (competencia || '2026-10').split('-');
-      const ano = parseInt(anoStr, 10);
-      const mes = parseInt(mesStr, 10);
-      const dataInicio = new Date(Date.UTC(ano, mes - 1, 1, 0, 0, 0)).toISOString();
-      const dataFim = new Date(Date.UTC(ano, mes, 0, 23, 59, 59, 999)).toISOString();
 
-      // Carregar meta individual do banco em paralelo rápido
+    try {
+      // 1. Período do mês atual selecionado (ex: '2026-10')
+      const [ano, mes] = (competencia || '2026-10').split('-');
+      const inicioMes = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
+      const fimMes = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
+
+      // Busca meta individual rápida em paralelo
       supabase
         .from('metas')
         .select('*')
@@ -376,89 +371,79 @@ export default function ModalDesempenhoVendedor({
         })
         .catch(() => {});
 
-      // 2. TENTA USAR A RPC OTIMIZADA PRIMEIRO (1 única chamada ao banco):
-      const { data: rpcData, error: rpcError } = await supabase.rpc('obter_resumo_metas_vendedor', {
-        p_vendedor_id: vendedorId,
-        p_data_inicio: dataInicio,
-        p_data_fim: dataFim,
-      });
-
-      if (!rpcError && rpcData) {
-        setTotalVendas(Number(rpcData.total_vendas || 0));
-        setQtdVendas(Number(rpcData.qtd_vendas || 0));
-        setTicketMedio(Number(rpcData.ticket_medio || 0));
-        setComissoesAcumuladas(Number(rpcData.total_comissao || 0));
-        setRealizadoBoletos(Number(rpcData.realizado_boletos || 0));
-        setRealizadoAcessorios(Number(rpcData.realizado_acessorios || 0));
-
-        // Carrega vendas apenas para o histórico da tabela sem sobrecarga
-        const { data: vendasHist } = await supabase
-          .from('vendas')
-          .select('id, created_at, valor_total, comissao_vendedor, comissao, forma_pagamento, metodo_pagamento, financeira, itens_venda(produto_nome, valor_total)')
-          .or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`)
-          .gte('created_at', dataInicio)
-          .lte('created_at', dataFim)
-          .order('created_at', { ascending: false });
-
-        if (vendasHist) {
-          setVendasColaborador(vendasHist as Venda[]);
-        }
-        return;
-      }
-
-      // 3. SE A RPC FALHAR, EXECUTE ESTA QUERY ÚNICA OTIMIZADA (SEM FAZER LOOPS N+1):
-      const { data: vendas, error: vendasError } = await supabase
+      // 2. Busca única trazendo as vendas e os itens da venda via join
+      const { data: vendas, error } = await supabase
         .from('vendas')
-        .select('id, created_at, valor_total, comissao_vendedor, comissao, forma_pagamento, metodo_pagamento, financeira, itens_venda(produto_nome, valor_total)')
-        .or(`vendedor_id.eq.${vendedorId},treener_id.eq.${vendedorId},trainee_id.eq.${vendedorId}`)
-        .gte('created_at', dataInicio)
-        .lte('created_at', dataFim)
+        .select(`
+          id,
+          created_at,
+          valor_total,
+          comissao_vendedor,
+          forma_pagamento,
+          metodo_pagamento,
+          financeira,
+          itens_venda (
+            produto_nome,
+            valor_total
+          )
+        `)
+        .eq('vendedor_id', vendedorId)
+        .gte('created_at', inicioMes)
+        .lte('created_at', fimMes)
         .order('created_at', { ascending: false });
 
-      if (vendasError) throw vendasError;
+      if (error) throw error;
 
       if (vendas) {
-        const qtd = vendas.length;
-        const total = vendas.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
-        const comissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
-        
+        const totalFaturado = vendas.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
+        const totalComissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || 0), 0);
+        const totalQtd = vendas.length;
+        const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
+
+        // Realizado Boletos / Financiadoras
         const boletos = vendas.reduce((acc, v) => {
           const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase();
-          return pgto.includes('BOLETO') || pgto.includes('PAYJOY') || pgto.includes('WATU') || pgto.includes('UME') || pgto.includes('AIVA') || pgto.includes('CREDIARIO') ? acc + Number(v.valor_total || 0) : acc;
+          return pgto.includes('BOLETO') || pgto.includes('PAYJOY') || pgto.includes('WATU') || pgto.includes('UME') || pgto.includes('AIVA') || pgto.includes('CREDIARIO')
+            ? acc + Number(v.valor_total || 0)
+            : acc;
         }, 0);
 
-        const acessorios = vendas.reduce((acc, v) => {
-          const itens = (v as any).itens_venda || [];
-          const totalItensAcess = itens.reduce((accItem: number, item: any) => {
+        // Realizado Acessórios
+        const termosAcessorios = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ'];
+        const acessorios = vendas.reduce((accVenda, v) => {
+          const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
+          const somaItens = itens.reduce((accItem: number, item: any) => {
             const nome = String(item.produto_nome || '').toUpperCase();
-            const ehAcess = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE'].some(termo => nome.includes(termo));
-            return ehAcess ? accItem + Number(item.valor_total || 0) : accItem;
+            const ehAcessorio = termosAcessorios.some(termo => nome.includes(termo));
+            return ehAcessorio ? accItem + Number(item.valor_total || 0) : accItem;
           }, 0);
-          return acc + totalItensAcess;
+          return accVenda + somaItens;
         }, 0);
 
-        setTotalVendas(total);
-        setQtdVendas(qtd);
-        setTicketMedio(qtd > 0 ? total / qtd : 0);
-        setComissoesAcumuladas(comissao);
+        // Atualiza os estados da tela
+        setTotalVendas(totalFaturado);
+        setQtdVendas(totalQtd);
+        setTicketMedio(mediaTicket);
+        setComissoesAcumuladas(totalComissao);
         setRealizadoBoletos(boletos);
         setRealizadoAcessorios(acessorios);
         setVendasColaborador(vendas as Venda[]);
       }
     } catch (err) {
-      console.error('Erro ao buscar metas:', err);
+      console.error('Erro ao calcular metas do vendedor:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [colaboradorId, mesAtivo, mesCompetencia, mounted, colaboradorFilialId]);
+  }, [colaboradorId, mesAtivo, mesCompetencia, colaboradorFilialId]);
 
-  // 3. CORRIGIR POSSÍVEL LOOP INFINITO:
-  // Usa apenas tipos primitivos (boolean, string/id) para evitar recriação de efeito em cada render
+  const carregarDadosMetas = carregarDadosVendedor;
+
+  // Executa busca apenas quando o modal estiver montado e com vendedor válido
   useEffect(() => {
     if (mounted && colaboradorId) {
-      carregarDadosMetas();
+      carregarDadosVendedor();
     }
-  }, [mounted, colaboradorId, mesAtivo]);
+  }, [mounted, colaboradorId, mesAtivo, carregarDadosVendedor]);
 
   // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'metas'
   const dashboardInfo = useMemo(() => {
