@@ -337,12 +337,15 @@ export default function ModalDesempenhoVendedor({
   // Função única de carregamento de dados e metas (eliminação total de N+1 queries)
   const carregarDadosMetas = useCallback(async () => {
     const vendedorId = colaboradorId;
+    const competencia = mesAtivo || mesCompetencia || '2026-10';
     if (!vendedorId || !mounted) return;
+
+    // 4. EXIBIR LOG NO CONSOLE PARA MONITORAMENTO DE DISPAROS
+    console.log("BUSCANDO DADOS METAS:", { vendedorId, competencia });
 
     setIsLoading(true);
     try {
       // 1. Define início e fim do mês (ex: 2026-10)
-      const competencia = mesAtivo || mesCompetencia || '2026-10';
       const [anoStr, mesStr] = (competencia || '2026-10').split('-');
       const ano = parseInt(anoStr, 10);
       const mes = parseInt(mesStr, 10);
@@ -449,12 +452,13 @@ export default function ModalDesempenhoVendedor({
     }
   }, [colaboradorId, mesAtivo, mesCompetencia, mounted, colaboradorFilialId]);
 
-  // 4. CERTIFIQUE-SE DE QUE O USEEFFECT SÓ CHAME A FUNÇÃO QUANDO O MODAL ESTIVER ABERTO:
+  // 3. CORRIGIR POSSÍVEL LOOP INFINITO:
+  // Usa apenas tipos primitivos (boolean, string/id) para evitar recriação de efeito em cada render
   useEffect(() => {
     if (mounted && colaboradorId) {
       carregarDadosMetas();
     }
-  }, [mounted, colaboradorId, mesAtivo, carregarDadosMetas]);
+  }, [mounted, colaboradorId, mesAtivo]);
 
   // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'metas'
   const dashboardInfo = useMemo(() => {
@@ -717,7 +721,7 @@ export default function ModalDesempenhoVendedor({
 
     const totalComissoes = comissaoHomologadaOficial !== null
       ? comissaoHomologadaOficial
-      : (totalComissoesHistorico > 0 ? totalComissoesHistorico : comissaoCalculadaPorMetas);
+      : (comissoesAcumuladas > 0 ? comissoesAcumuladas : (totalComissoesHistorico > 0 ? totalComissoesHistorico : comissaoCalculadaPorMetas));
 
     // Evolução diária (dias 1 a 31)
     const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
