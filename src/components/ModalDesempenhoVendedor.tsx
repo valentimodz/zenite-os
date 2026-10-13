@@ -314,13 +314,20 @@ export default function ModalDesempenhoVendedor({
     enabled: Boolean(colaboradorId)
   });
 
-  // Estados alimentados diretamente pela RPC 'obter_resumo_metas_vendedor'
+  // Estados alimentados diretamente pela RPC 'obter_resumo_metas_vendedor' ou cálculo de vendas
   const [totalVendas, setTotalVendas] = useState<number>(0);
   const [qtdVendas, setQtdVendas] = useState<number>(0);
   const [ticketMedio, setTicketMedio] = useState<number>(0);
   const [comissoesAcumuladas, setComissoesAcumuladas] = useState<number>(0);
   const [realizadoBoletos, setRealizadoBoletos] = useState<number>(0);
   const [realizadoAcessorios, setRealizadoAcessorios] = useState<number>(0);
+
+  // Estados de Metas configuradas para a Filial (tabela 'regras_comissoes')
+  const [objetivoBoleto, setObjetivoBoleto] = useState<number>(67500);
+  const [superMetaBoletoState, setSuperMetaBoleto] = useState<number>(87000);
+  const [objetivoAcessorios, setObjetivoAcessorios] = useState<number>(10000);
+  const [superMetaAcessoriosState, setSuperMetaAcessorios] = useState<number>(15000);
+  const [metaTotalCombinada, setMetaTotalCombinada] = useState<number>(77500);
 
   // Invalidação de cache local e força de recarga
   const invalidarCacheERecarregar = useCallback((novoMes?: string) => {
@@ -333,6 +340,45 @@ export default function ModalDesempenhoVendedor({
       queryKey: ['ranking-colaboradores', mesAlvo]
     });
   }, [mesAtivo, queryClient]);
+
+  // 1. BUSCAR AS METAS DA FILIAL NA TABELA 'regras_comissoes'
+  const carregarRegrasMetas = useCallback(async () => {
+    const filialId = colaboradorFilialId;
+    if (!filialId) return;
+
+    const mesAtual = mesAtivo || mesCompetencia || '2026-10';
+
+    try {
+      const { data: regra, error } = await supabase
+        .from('regras_comissoes')
+        .select('*')
+        .eq('filial_id', filialId)
+        .eq('mes_referencia', mesAtual)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.warn('Erro ao consultar regras_comissoes da filial:', error);
+      }
+
+      if (regra) {
+        // Alimenta os objetivos e super metas configurados para a filial:
+        const objBoleto = Number(regra.meta_loja_boleto || 67500);
+        const superBoleto = Number(regra.super_meta || 87000);
+        const objAcessorios = Number(regra.meta_loja_acessorios || 10000);
+        const superAcessorios = Number((regra as any).super_meta_acessorios || 15000);
+
+        setObjetivoBoleto(objBoleto);
+        setSuperMetaBoleto(superBoleto);
+        setObjetivoAcessorios(objAcessorios);
+        setSuperMetaAcessorios(superAcessorios);
+        setMetaTotalCombinada(objBoleto + objAcessorios);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar regras de metas da filial:', err);
+    }
+  }, [colaboradorFilialId, mesAtivo, mesCompetencia]);
 
   // Função de carregamento com uma única requisição direta ao Supabase
   const carregarDadosVendedor = useCallback(async () => {
@@ -438,14 +484,20 @@ export default function ModalDesempenhoVendedor({
 
   const carregarDadosMetas = carregarDadosVendedor;
 
-  // Executa busca apenas quando o modal estiver montado e com vendedor válido
+  // 3. ATUALIZAR NO USEEFFECT:
+  // Executa carregarRegrasMetas() e carregarDadosVendedor() quando o modal for aberto ou filialId/mesAtivo mudarem
   useEffect(() => {
-    if (mounted && colaboradorId) {
-      carregarDadosVendedor();
+    if (mounted) {
+      if (colaboradorFilialId) {
+        carregarRegrasMetas();
+      }
+      if (colaboradorId) {
+        carregarDadosVendedor();
+      }
     }
-  }, [mounted, colaboradorId, mesAtivo, carregarDadosVendedor]);
+  }, [mounted, colaboradorFilialId, colaboradorId, mesAtivo, carregarRegrasMetas, carregarDadosVendedor]);
 
-  // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'metas'
+  // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'regras_comissoes' e 'metas'
   const dashboardInfo = useMemo(() => {
     const fTitularView = Number(dadosViewConsolidada?.faturado_titular || 0);
     const fTraineeView = Number(dadosViewConsolidada?.faturado_trainee || 0);
@@ -457,31 +509,36 @@ export default function ModalDesempenhoVendedor({
     );
     const isTrainee = fTraineeView > fTitularView || isOriginalTrainee || (fTitularView === 0 && fTraineeView > 0);
 
-    // Mapeamento oficial de metas:
-    // Trainee: metaBoleto = R$ 35.000, metaAcessorios = R$ 5.000
-    // Vendedor: metaBoleto = R$ 67.500, metaAcessorios = R$ 10.000
+    // Mapeamento oficial de metas com prioridade para regras_comissoes da filial
     const metaBanco = metaIndividual;
 
-    // Respeitar valores numéricos de meta_boleto e meta_acessorios da tabela 'metas'
+    // Prioriza meta individual se existir e for maior que 0, senão utiliza a meta de regras_comissoes
     const metaBoleto = Number(metaBanco?.meta_boleto) > 0 
       ? Number(metaBanco?.meta_boleto) 
-      : (isTrainee ? (Number(metaBanco?.meta_trainee_boleto) || 35000) : 67500);
+      : (isTrainee 
+        ? (Number(metaBanco?.meta_trainee_boleto) || 35000) 
+        : (objetivoBoleto > 0 ? objetivoBoleto : 67500));
 
     const metaAcessorios = Number(metaBanco?.meta_acessorios) > 0 
       ? Number(metaBanco?.meta_acessorios) 
-      : (isTrainee ? 5000 : 10000);
+      : (isTrainee 
+        ? 5000 
+        : (objetivoAcessorios > 0 ? objetivoAcessorios : 10000));
 
-    // META TOTAL COMBINADA: estritamente a soma de meta_boleto + meta_acessorios
-    // Evita ler campos de percentual ou indevidos como valor_meta incorreto
-    const metaTotal = metaBoleto + metaAcessorios;
+    // META TOTAL COMBINADA: soma de meta_boleto + meta_acessorios (ou metaTotalCombinada calculada)
+    const metaTotal = metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios);
 
     const superMetaBoleto = Number(metaBanco?.super_meta_boleto) > 0 
       ? Number(metaBanco?.super_meta_boleto) 
-      : (isTrainee ? 45000 : 87000);
+      : (isTrainee 
+        ? 45000 
+        : (superMetaBoletoState > 0 ? superMetaBoletoState : 87000));
 
     const superMetaAcessorios = Number(metaBanco?.super_meta_acessorios) > 0 
       ? Number(metaBanco?.super_meta_acessorios) 
-      : (isTrainee ? 7500 : 15000);
+      : (isTrainee 
+        ? 7500 
+        : (superMetaAcessoriosState > 0 ? superMetaAcessoriosState : 15000));
 
     const sales = vendasColaborador || [];
     const rawSalesCount = sales.length;
@@ -776,7 +833,12 @@ export default function ModalDesempenhoVendedor({
     ticketMedio,
     comissoesAcumuladas,
     realizadoBoletos,
-    realizadoAcessorios
+    realizadoAcessorios,
+    objetivoBoleto,
+    superMetaBoletoState,
+    objetivoAcessorios,
+    superMetaAcessoriosState,
+    metaTotalCombinada
   ]);
 
   // Identificação da filial
@@ -860,7 +922,8 @@ export default function ModalDesempenhoVendedor({
               type="button"
               onClick={() => {
                 invalidarCacheERecarregar();
-                carregarDadosMetas();
+                carregarRegrasMetas();
+                carregarDadosVendedor();
               }}
               disabled={isLoading}
               className="p-2 rounded-lg bg-black border border-[#222222] hover:border-[#6A0DAD]/50 text-gray-300 hover:text-white transition-colors cursor-pointer"
