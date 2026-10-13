@@ -9139,36 +9139,61 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   // Cadastrar nova categoria dinamicamente
   const handleCreateCategoria = async (e) => {
     if (e) e.preventDefault();
-    const nome = novaCategoriaNome.trim();
+    const nome = (novaCategoriaNome || '').trim();
     if (!nome) {
       alert('Por favor, informe o nome da categoria.');
       return;
     }
 
-    if (categorias.some(c => c.nome.toLowerCase() === nome.toLowerCase())) {
+    if (categorias.some(c => (c.nome || '').toLowerCase() === nome.toLowerCase())) {
       alert('Esta categoria já existe.');
       return;
     }
 
     try {
+      // 1. Obtém o usuário autenticado de forma garantida
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert('Sessão expirada. Faça login novamente.');
+        return;
+      }
+
+      // 2. Obtém a empresa_id com segurança caso company não esteja no contexto
+      let targetEmpresaId = company?.id || profile?.empresa_id;
+      if (!targetEmpresaId) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('empresa_id')
+          .eq('id', user.id)
+          .maybeSingle();
+        targetEmpresaId = profileData?.empresa_id;
+      }
+
+      // 3. Monta o payload seguro
+      const payload = {
+        nome: nome
+      };
+      if (targetEmpresaId) {
+        payload.empresa_id = targetEmpresaId;
+      }
+
       const { data, error } = await supabase
         .from('categorias')
-        .insert({
-          empresa_id: company.id,
-          nome: nome
-        })
+        .insert(payload)
         .select('id, empresa_id, nome, created_at')
         .single();
 
       if (error) throw error;
 
-      invalidateCache(`categorias_${company.id}`);
+      if (targetEmpresaId) {
+        invalidateCache(`categorias_${targetEmpresaId}`);
+      }
       alert('Categoria adicionada com sucesso!');
-      setCategorias(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome)));
+      setCategorias(prev => [...prev, data].sort((a, b) => (a.nome || '').localeCompare(b.nome || '')));
       setNovaCategoriaNome('');
     } catch (err) {
-      console.error(err);
-      alert('Erro ao adicionar categoria: ' + err.message);
+      console.error('Erro ao salvar categoria:', err);
+      alert('Erro ao adicionar categoria: ' + (err.message || 'Erro desconhecido'));
     }
   };
 
@@ -9184,8 +9209,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       if (error) throw error;
 
-      if (company?.id) {
-        invalidateCache(`categorias_${company.id}`);
+      const targetEmpresaId = company?.id || profile?.empresa_id;
+      if (targetEmpresaId) {
+        invalidateCache(`categorias_${targetEmpresaId}`);
       }
       alert('Categoria excluída com sucesso!');
       setCategorias(prev => prev.filter(c => c.id !== id));
