@@ -64,7 +64,7 @@ export const parseNumber = (val: number | string | null | undefined): number => 
 };
 
 /**
- * Função de busca que consome diretamente a view `view_ranking_colaboradores_mensal`
+ * Função de busca de ranking com VÍNCULO DUPLO (ID ou NOME) para garantir que nenhuma venda seja descartada
  */
 export async function fetchRankingColaboradoresMensal({
   competencia = getCompetenciaAtual(),
@@ -75,64 +75,129 @@ export async function fetchRankingColaboradoresMensal({
   filialId?: string;
   colaboradorId?: string;
 }): Promise<RankingColaborador[]> {
-  let query = supabase
-    .from('view_ranking_colaboradores_mensal')
-    .select('*')
-    .eq('competencia', competencia);
+  try {
+    // 1. Define início e fim do mês da competência (UTC seguro)
+    const [anoStr, mesStr] = (competencia || getCompetenciaAtual()).split('-');
+    const ano = parseInt(anoStr, 10);
+    const mes = parseInt(mesStr, 10);
+    const dataInicio = new Date(Date.UTC(ano, mes - 1, 1, 0, 0, 0)).toISOString();
+    const dataFim = new Date(Date.UTC(ano, mes, 0, 23, 59, 59, 999)).toISOString();
 
-  // Filtro de filial se informado e diferente de 'todas'
-  if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
-    query = query.eq('filial_id', filialId);
-  }
+    // 2. Busca lista de colaboradores cadastrados
+    let profilesQuery = supabase
+      .from('profiles')
+      .select('id, nome, role, is_treinner, filial_id');
 
-  // Filtro de colaborador específico (para "Minhas Metas" ou Modal individual)
-  if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
-    query = query.eq('colaborador_id', colaboradorId);
-  }
+    if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
+      profilesQuery = profilesQuery.eq('filial_id', filialId);
+    }
+    if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
+      profilesQuery = profilesQuery.eq('id', colaboradorId);
+    }
 
-  // Ordenação principal por faturamento titular decrescente
-  query = query.order('faturado_titular', { ascending: false });
+    const { data: colaboradores, error: colabError } = await profilesQuery;
+    if (colabError) throw colabError;
 
-  const { data, error } = await query;
+    // 3. Busca de vendas da competência com vínculo duplo
+    let vendasQuery = supabase
+      .from('vendas')
+      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee')
+      .gte('created_at', dataInicio)
+      .lte('created_at', dataFim);
 
-  if (error) {
-    console.error('[useMetasRankings] Erro ao consultar view_ranking_colaboradores_mensal:', error);
-    throw error;
-  }
+    if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
+      vendasQuery = vendasQuery.eq('filial_id', filialId);
+    }
 
-  const rows = (data || []) as RankingColaboradorRow[];
+    const { data: vendas, error: vendasError } = await vendasQuery;
+    if (vendasError) throw vendasError;
 
-  return rows.map((r): RankingColaborador => {
-    const faturadoTitular = parseNumber(r.faturado_titular);
-    const faturadoTrainee = parseNumber(r.faturado_trainee);
-    const volumeTotal = parseNumber(r.volume_total_participado);
-    const transacoes = parseInt(String(r.total_transacoes || 0), 10);
-    const validTransacoes = isNaN(transacoes) ? 0 : transacoes;
+    const vendasLista = vendas || [];
+    const colabsLista = colaboradores || [];
 
-    // Regra inteligente de Trainee: apoio maior que titular ou apoio exclusivo
-    const isTrainee = faturadoTrainee > faturadoTitular || (faturadoTitular === 0 && faturadoTrainee > 0);
-    // Para quem é Trainee: o volume em destaque é o volume_total_participado (ou faturado_trainee se volumeTotal for 0)
-    const volumeExibicao = isTrainee
-      ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
-      : (faturadoTitular > 0 ? faturadoTitular : volumeTotal);
+    // Mapeamento com VÍNCULO DUPLO (ID ou NOME):
+    const resultado: RankingColaborador[] = colabsLista.map(colab => {
+      const colabId = String(colab.id || '').trim();
+      const colabNome = String(colab.nome || '').trim().toLowerCase();
 
-    // Ticket Médio consistente: Volume Exibido em Destaque ÷ total_transacoes
-    const ticketMedio = validTransacoes > 0 ? (volumeExibicao / validTransacoes) : parseNumber(r.ticket_medio);
+      // Vendas como titular (por ID ou por Nome normalizado)
+      const vendasDoColaborador = vendasLista.filter(v => {
+        const vId = v.vendedor_id ? String(v.vendedor_id).trim() : null;
+        const vNome = v.vendedor_nome ? String(v.vendedor_nome).trim().toLowerCase() : null;
+        return (vId && vId === colabId) || (vNome && (vNome === colabNome || (colabNome && vNome.includes(colabNome))));
+      });
 
-    return {
+      // Vendas com participação trainee
+      const vendasComoTrainee = vendasLista.filter(v => {
+        const tId = v.trainee_id || v.treener_id ? String(v.trainee_id || v.treener_id).trim() : null;
+        const tNome = v.trainee_nome ? String(v.trainee_nome).trim().toLowerCase() : null;
+        return (tId && tId === colabId) || (tNome && (tNome === colabNome || (colabNome && tNome.includes(colabNome))));
+      });
+
+      const volumeTitular = vendasDoColaborador.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
+      const transacoesTitular = vendasDoColaborador.length;
+      const faturadoTrainee = vendasComoTrainee.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
+      const transacoesTrainee = vendasComoTrainee.length;
+
+      const isOriginalTrainee = colab.role === 'TRAINEE' || Boolean(colab.is_treinner);
+      const isTrainee = faturadoTrainee > volumeTitular || isOriginalTrainee || (volumeTitular === 0 && faturadoTrainee > 0);
+
+      const volumeTotal = volumeTitular + faturadoTrainee;
+      const transacoes = transacoesTitular + (isTrainee ? transacoesTrainee : 0);
+
+      const volumeExibicao = isTrainee
+        ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
+        : (volumeTitular > 0 ? volumeTitular : volumeTotal);
+
+      const ticketMedio = transacoes > 0 ? volumeExibicao / transacoes : 0;
+
+      return {
+        colaborador_id: colab.id,
+        colaborador: colab.nome || 'Sem Nome',
+        filial_id: colab.filial_id,
+        competencia,
+        total_transacoes: transacoes,
+        faturado_titular: volumeTitular,
+        faturado_trainee: faturadoTrainee,
+        volume_total_participado: volumeTotal,
+        ticket_medio: ticketMedio,
+        is_trainee: isTrainee,
+        volume_exibicao: volumeExibicao
+      };
+    });
+
+    // Ordena do maior para o menor faturamento
+    return resultado.sort((a, b) => b.volume_exibicao - a.volume_exibicao);
+  } catch (err) {
+    console.warn('[useMetasRankings] Fallback para view_ranking_colaboradores_mensal devido a:', err);
+    // Fallback gracioso na view caso haja erro
+    let query = supabase
+      .from('view_ranking_colaboradores_mensal')
+      .select('*')
+      .eq('competencia', competencia);
+
+    if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
+      query = query.eq('filial_id', filialId);
+    }
+    if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
+      query = query.eq('colaborador_id', colaboradorId);
+    }
+    const { data: rows } = await query.order('faturado_titular', { ascending: false });
+
+    return ((rows || []) as RankingColaboradorRow[]).map(r => ({
       colaborador_id: r.colaborador_id,
       colaborador: r.colaborador || 'Sem Nome',
       filial_id: r.filial_id,
       competencia: r.competencia,
-      total_transacoes: validTransacoes,
-      faturado_titular: faturadoTitular,
-      faturado_trainee: faturadoTrainee,
-      volume_total_participado: volumeTotal,
-      ticket_medio: ticketMedio,
-      is_trainee: isTrainee,
-      volume_exibicao: volumeExibicao
-    };
-  });
+      total_transacoes: parseInt(String(r.total_transacoes || 0), 10) || 0,
+      faturado_titular: parseNumber(r.faturado_titular),
+      faturado_trainee: parseNumber(r.faturado_trainee),
+      volume_total_participado: parseNumber(r.volume_total_participado),
+      ticket_medio: parseNumber(r.ticket_medio),
+      is_trainee: parseNumber(r.faturado_trainee) > parseNumber(r.faturado_titular),
+      volume_exibicao: parseNumber(r.faturado_titular) > 0 ? parseNumber(r.faturado_titular) : parseNumber(r.volume_total_participado)
+    }));
+  }
 }
 
 /**
