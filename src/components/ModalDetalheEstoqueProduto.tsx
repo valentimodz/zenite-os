@@ -101,11 +101,22 @@ export default function ModalDetalheEstoqueProduto({
   const corAtual = produto?.cor || produto?.cor_nome || 'Padrão';
   const precoBaseVenda = Number(produto?.preco_venda || produto?.preco || 0);
 
-  const isCelular = (categoria || '').toUpperCase().includes('CELULAR') || 
-                    (categoria || '').toUpperCase().includes('IOS') || 
-                    (categoria || '').toUpperCase().includes('ANDROID') ||
-                    Boolean(produto?.imei) || 
-                    (Array.isArray(produto?.imeis) && produto.imeis.length > 0);
+  const categoriaNome = String(produto?.categoria || produto?.categoria_nome || categoria || '').toUpperCase();
+  const ehCelularOuSerial = categoriaNome.includes('CELULAR') || 
+                            categoriaNome.includes('SMARTPHONE') || 
+                            categoriaNome.includes('IOS') || 
+                            categoriaNome.includes('ANDROID') || 
+                            produto?.controla_imei === true ||
+                            Boolean(produto?.imei) ||
+                            (Array.isArray(produto?.imeis) && produto.imeis.length > 0);
+
+  const isCelular = ehCelularOuSerial;
+
+  // Estado para Adicionar Novo IMEI por Item/Filial
+  const [itemParaAdicionarImei, setItemParaAdicionarImei] = useState<ItemProdutoDetalhado | null>(null);
+  const [novoImeiInput, setNovoImeiInput] = useState('');
+  const [salvandoNovoImei, setSalvandoNovoImei] = useState(false);
+  const [erroNovoImei, setErroNovoImei] = useState<string | null>(null);
 
   // Mapeamento de Filiais por ID para lookup rápido
   const mapaFiliaisNome = useMemo(() => {
@@ -373,8 +384,9 @@ export default function ModalDetalheEstoqueProduto({
     }
   };
 
-  // 3. AÇÃO: Alterar Quantidade Rápida (+1 ou -1)
+  // 3. AÇÃO: Alterar Quantidade Rápida (+1 ou -1) - Bloqueado se ehCelularOuSerial
   const ajustarQuantidadeRapida = async (item: ItemProdutoDetalhado, delta: number) => {
+    if (ehCelularOuSerial) return;
     const novaQtd = Math.max(0, item.quantidade + delta);
     try {
       if (onUpdateProdutoField) {
@@ -386,6 +398,72 @@ export default function ModalDetalheEstoqueProduto({
       if (onRefresh) onRefresh();
     } catch (err) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao ajustar quantidade rápida:', err);
+    }
+  };
+
+  // 3.1 AÇÃO: Adicionar Novo IMEI a um Item/Filial (Entrada de serial individual)
+  const handleAdicionarImei = async () => {
+    if (!itemParaAdicionarImei) return;
+    const imeiLimpo = novoImeiInput.trim();
+    if (!imeiLimpo) {
+      setErroNovoImei('Informe o número do serial/IMEI');
+      return;
+    }
+
+    setSalvandoNovoImei(true);
+    setErroNovoImei(null);
+    try {
+      // 1. Inserir na tabela 'imeis'
+      const { data: novoImeiDb, error: insertError } = await supabase
+        .from('imeis')
+        .insert({
+          imei: imeiLimpo,
+          produto_id: itemParaAdicionarImei.id,
+          filial_id: itemParaAdicionarImei.filial_id && itemParaAdicionarImei.filial_id !== 'sem_filial' ? itemParaAdicionarImei.filial_id : null,
+          cor: itemParaAdicionarImei.cor || 'Padrão',
+          status: 'DISPONÍVEL',
+          vendido: false
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        if (insertError.message?.includes('unique') || insertError.code === '23505') {
+          setErroNovoImei('Este IMEI/Serial já se encontra cadastrado no sistema!');
+        } else {
+          setErroNovoImei(insertError.message || 'Erro ao registrar IMEI');
+        }
+        setSalvandoNovoImei(false);
+        return;
+      }
+
+      // 2. Incrementar a quantidade do produto para refletir o total de seriais
+      const novaQtd = itemParaAdicionarImei.imeis.length + 1;
+      await supabase
+        .from('produtos')
+        .update({ quantidade: novaQtd })
+        .eq('id', itemParaAdicionarImei.id);
+
+      // 3. Atualizar estado local
+      setProdutosIrmaos(prev => prev.map(p => {
+        if (p.id === itemParaAdicionarImei.id) {
+          return {
+            ...p,
+            quantidade: novaQtd,
+            imeis: [...p.imeis, imeiLimpo]
+          };
+        }
+        return p;
+      }));
+
+      setNovoImeiInput('');
+      setItemParaAdicionarImei(null);
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      console.error('[ModalDetalheEstoqueProduto] Erro ao cadastrar novo IMEI:', err);
+      setErroNovoImei(err?.message || 'Erro inesperado ao cadastrar IMEI.');
+    } finally {
+      setSalvandoNovoImei(false);
     }
   };
 
@@ -730,9 +808,16 @@ export default function ModalDetalheEstoqueProduto({
                                   )}
                                 </td>
 
-                                {/* Quantidade com Ajuste Rápido (+ / -) */}
+                                {/* Quantidade: Bloqueada para celular (estritamente seriais) / manual para acessórios */}
                                 <td className="py-2.5 px-3 text-center align-middle">
-                                  {isEditandoQtd ? (
+                                  {ehCelularOuSerial ? (
+                                    <div className="flex flex-col items-center justify-center">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-semibold text-zinc-100 font-mono text-xs">{item.imeis.length} unids</span>
+                                        <span className="text-[10px] text-purple-300 font-medium bg-purple-950/40 border border-purple-800/40 px-1 rounded">(Via IMEI)</span>
+                                      </div>
+                                    </div>
+                                  ) : isEditandoQtd ? (
                                     <div className="inline-flex items-center justify-center gap-1">
                                       <input
                                         type="number"
@@ -785,22 +870,40 @@ export default function ModalDetalheEstoqueProduto({
 
                                 {/* Seriais/IMEIs */}
                                 <td className="py-2.5 px-3 align-middle">
-                                  {item.imeis.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1 max-w-[200px]">
-                                      {item.imeis.slice(0, 2).map((im, idx) => (
-                                        <span key={idx} className="font-mono text-[9px] bg-zinc-900 border border-zinc-800 text-zinc-300 px-1.5 py-0.2 rounded truncate max-w-[90px]" title={im}>
-                                          {im}
-                                        </span>
-                                      ))}
-                                      {item.imeis.length > 2 && (
-                                        <span className="text-[9px] text-purple-400 font-mono font-bold">
-                                          +{item.imeis.length - 2} mais
-                                        </span>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <span className="text-[10px] text-zinc-600 font-mono">Sem seriais</span>
-                                  )}
+                                  <div className="flex flex-col gap-1.5">
+                                    {item.imeis.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1 max-w-[200px]">
+                                        {item.imeis.slice(0, 2).map((im, idx) => (
+                                          <span key={idx} className="font-mono text-[9px] bg-zinc-900 border border-zinc-800 text-zinc-300 px-1.5 py-0.2 rounded truncate max-w-[90px]" title={im}>
+                                            {im}
+                                          </span>
+                                        ))}
+                                        {item.imeis.length > 2 && (
+                                          <span className="text-[9px] text-purple-400 font-mono font-bold">
+                                            +{item.imeis.length - 2} mais
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-[10px] text-zinc-600 font-mono italic">Sem seriais</span>
+                                    )}
+
+                                    {ehCelularOuSerial && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setItemParaAdicionarImei(item);
+                                          setNovoImeiInput('');
+                                          setErroNovoImei(null);
+                                        }}
+                                        className="inline-flex items-center gap-1 text-[10px] text-purple-400 hover:text-purple-300 font-bold transition-colors cursor-pointer w-fit"
+                                        title="Registrar novo serial/IMEI para esta filial e cor"
+                                      >
+                                        <Plus size={11} />
+                                        <span>Adicionar IMEI</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
 
                                 {/* Ações: Lixeira de Exclusão */}
@@ -928,6 +1031,75 @@ export default function ModalDetalheEstoqueProduto({
                 >
                   {excluindoId === itemParaExcluir.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                   Confirmar Exclusão
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL / DIALOG PARA ADICIONAR NOVO SERIAL/IMEI */}
+        {itemParaAdicionarImei && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-[#18181b] border border-purple-800/60 rounded-xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-left">
+              <div className="flex items-center gap-2.5 text-purple-400">
+                <Barcode size={20} />
+                <h4 className="text-sm font-bold text-white">Cadastrar Novo IMEI / Serial</h4>
+              </div>
+
+              <div className="space-y-1.5 text-xs text-zinc-300">
+                <p>
+                  Produto: <strong className="text-white">{itemParaAdicionarImei.nome}</strong>
+                </p>
+                <div className="flex items-center gap-3 text-[11px] text-zinc-400">
+                  <span>Filial: <strong className="text-purple-300">{itemParaAdicionarImei.filial_nome}</strong></span>
+                  <span>Cor: <strong className="text-zinc-200">{itemParaAdicionarImei.cor}</strong></span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-zinc-400 mb-1">
+                  Número do Serial / IMEI (15 dígitos):
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={novoImeiInput}
+                  onChange={(e) => {
+                    setNovoImeiInput(e.target.value);
+                    if (erroNovoImei) setErroNovoImei(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAdicionarImei();
+                    if (e.key === 'Escape') setItemParaAdicionarImei(null);
+                  }}
+                  placeholder="Ex: 356891091234567"
+                  className="w-full bg-black border border-zinc-700 focus:border-purple-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none"
+                  disabled={salvandoNovoImei}
+                />
+                {erroNovoImei && (
+                  <p className="mt-1.5 text-[11px] text-red-400 font-medium">
+                    {erroNovoImei}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setItemParaAdicionarImei(null)}
+                  disabled={salvandoNovoImei}
+                  className="px-3 py-1.5 text-xs text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAdicionarImei}
+                  disabled={salvandoNovoImei || !novoImeiInput.trim()}
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-lg flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  {salvandoNovoImei ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                  Salvar IMEI
                 </button>
               </div>
             </div>
