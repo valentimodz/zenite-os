@@ -286,7 +286,12 @@ export default function ModalDesempenhoVendedor({
 }: ModalDesempenhoVendedorProps) {
   const mesCompetencia = propMesAno || filtroMes || new Date().toISOString().slice(0, 7);
   const [mesAtivo, setMesAtivo] = useState<string>(() => mesCompetencia);
-  const [vendasColaborador, setVendasColaborador] = useState<Venda[]>([]);
+  const [vendasColaborador, setVendasColaborador] = useState<Venda[]>(() => {
+    return Array.isArray(vendasCache) && vendasCache.length > 0 ? (vendasCache as Venda[]) : [];
+  });
+  const [vendasLocais, setVendasLocais] = useState<any[]>(() => {
+    return Array.isArray(vendasCache) && vendasCache.length > 0 ? (vendasCache as any[]) : [];
+  });
   const [metaIndividual, setMetaIndividual] = useState<MetaBanco | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
@@ -534,6 +539,7 @@ export default function ModalDesempenhoVendedor({
         setRealizadoBoletos(boletos);
         setRealizadoAcessorios(acessorios);
         setVendasColaborador(vendas as Venda[]);
+        setVendasLocais(vendas as any[]);
       }
     } catch (err) {
       console.error('Erro ao calcular metas do vendedor:', err);
@@ -543,6 +549,84 @@ export default function ModalDesempenhoVendedor({
   }, [targetVendedorId, targetVendedorNome, mesAtivo, mesCompetencia, colaboradorFilialId]);
 
   const carregarDadosMetas = carregarDadosVendedor;
+
+  // 1. IDENTIFICAR SE 'vendasColaborador' ESTÁ VAZIO E CARREGAR AUTOMATICAMENTE
+  useEffect(() => {
+    const carregarVendasSeVazio = async () => {
+      // Se já recebeu vendas por props/cache ou vendasColaborador já tem itens, aproveita-as
+      if (vendasColaborador && vendasColaborador.length > 0) {
+        setVendasLocais(vendasColaborador);
+        return;
+      }
+      if (Array.isArray(vendasCache) && vendasCache.length > 0) {
+        setVendasLocais(vendasCache);
+        setVendasColaborador(vendasCache as Venda[]);
+        return;
+      }
+
+      const idAlvo = colaboradorId || (colaborador as any)?.id || (colaborador as any)?.vendedorId || (colaborador as any)?.vendedor_id;
+      const nomeAlvo = colaborador?.nome || (colaborador as any)?.vendedorNome || (colaborador as any)?.vendedor_nome;
+
+      if (!idAlvo && !nomeAlvo) return;
+
+      const [ano, mes] = (mesAtivo || mesCompetencia || '2026-10').split('-');
+      const inicio = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
+      const fim = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
+
+      try {
+        let query = supabase
+          .from('vendas')
+          .select(`
+            id,
+            created_at,
+            data,
+            valor_total,
+            valor,
+            categoria,
+            produto_nome,
+            comissao,
+            comissao_vendedor,
+            forma_pagamento,
+            metodo_pagamento,
+            financeira,
+            financeira_parceira,
+            vendedor_id,
+            vendedor_nome,
+            trainee_id,
+            treener_id,
+            itens_venda (
+              id,
+              produto_nome,
+              categoria,
+              quantidade,
+              preco_unitario,
+              valor_total
+            )
+          `)
+          .gte('created_at', inicio)
+          .lte('created_at', fim)
+          .order('created_at', { ascending: false });
+
+        if (idAlvo) {
+          query = query.or(`vendedor_id.eq.${idAlvo},trainee_id.eq.${idAlvo},treener_id.eq.${idAlvo}`);
+        } else if (nomeAlvo) {
+          query = query.ilike('vendedor_nome', `%${nomeAlvo}%`);
+        }
+
+        const { data, error } = await query;
+        if (!error && data) {
+          setVendasLocais(data);
+          setVendasColaborador(data as Venda[]);
+        }
+      } catch (err) {
+        console.error('Erro ao carregar vendas se vazio:', err);
+      }
+    };
+
+    if (mounted) {
+      carregarVendasSeVazio();
+    }
+  }, [mounted, colaboradorId, colaborador, mesAtivo, mesCompetencia, vendasColaborador.length, vendasCache]);
 
   // 3. ATUALIZAR NO USEEFFECT:
   // Executa carregarRegrasMetas() e carregarDadosVendedor() quando o modal for aberto ou filialId/mesAtivo mudarem
@@ -600,7 +684,8 @@ export default function ModalDesempenhoVendedor({
         ? 7500 
         : (superMetaAcessoriosState > 0 ? superMetaAcessoriosState : 15000));
 
-    const sales = vendasColaborador || [];
+    const listaVendasCalculo = (vendasColaborador && vendasColaborador.length > 0) ? vendasColaborador : vendasLocais;
+    const sales = listaVendasCalculo || [];
     const rawSalesCount = sales.length;
     const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
     
@@ -883,6 +968,7 @@ export default function ModalDesempenhoVendedor({
   }, [
     metaIndividual, 
     vendasColaborador, 
+    vendasLocais,
     dadosViewConsolidada, 
     colaboradorId, 
     colaborador?.nome, 
