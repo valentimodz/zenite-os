@@ -219,80 +219,6 @@ function ProductTableRow({
   onRowClick,
   userRole
 }) {
-  const [editingField, setEditingField] = useState(null);
-  const [editValue, setEditValue] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  const startEdit = (e, field, initialVal) => {
-    e.stopPropagation();
-    setEditingField(field);
-    setEditValue(initialVal !== undefined && initialVal !== null ? String(initialVal) : '');
-  };
-
-  const cancelEdit = (e) => {
-    if (e) e.stopPropagation();
-    setEditingField(null);
-    setEditValue('');
-  };
-
-  const saveEdit = async (e) => {
-    if (e) e.stopPropagation();
-    if (!editingField || isSaving) return;
-
-    if (editingField === 'preco') {
-      const novoValor = parseFloat(String(editValue).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
-      if (isNaN(novoValor) || novoValor < 0) {
-        return;
-      }
-      setIsSaving(true);
-      try {
-        await onUpdateProdutoField(p.id, p.nome, 'preco', novoValor, p.filial_id);
-        p.preco = novoValor;
-        p.preco_venda = novoValor;
-        setEditingField(null);
-        setEditValue('');
-      } catch (err) {
-        console.error('Erro ao salvar preço no componente:', err);
-      } finally {
-        setIsSaving(false);
-      }
-      return;
-    }
-
-    if (editingField === 'quantidade') {
-      const novaQtd = parseInt(editValue, 10);
-      if (isNaN(novaQtd) || novaQtd < 0) return;
-      setIsSaving(true);
-      try {
-        await onUpdateProdutoField(p.id, p.nome, 'quantidade', novaQtd, p.filial_id);
-        setEditingField(null);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsSaving(false);
-      }
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      await onUpdateProdutoField(p.id, p.nome, editingField, editValue, p.filial_id);
-      if (editingField === 'cor') {
-        p.cor = editValue;
-      }
-      setEditingField(null);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') saveEdit(e);
-    else if (e.key === 'Escape') cancelEdit(e);
-  };
 
   const [copiedImeiMap, setCopiedImeiMap] = useState({});
 
@@ -469,14 +395,14 @@ function ProductTableRow({
         </td>
 
         {/* 2. FILIAL */}
-        <td className="w-[14%] min-w-[110px] px-3 py-3 whitespace-nowrap text-zinc-400 text-xs font-medium align-middle">
-          <span className="truncate block max-w-[130px]" title={filiais.find(f => f.id === p.filial_id)?.nome || '-'}>
+        <td className="w-[18%] px-3 py-3 whitespace-nowrap text-zinc-400 text-xs font-medium align-middle">
+          <span className="truncate block max-w-[150px]" title={filiais.find(f => f.id === p.filial_id)?.nome || '-'}>
             {filiais.find(f => f.id === p.filial_id)?.nome || '-'}
           </span>
         </td>
 
         {/* 3. CATEGORIA */}
-        <td className="w-[12%] min-w-[100px] px-3 py-3 whitespace-nowrap align-middle">
+        <td className="w-[15%] px-3 py-3 whitespace-nowrap align-middle">
           <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${
             p.categoria === 'IOS'
               ? 'bg-blue-950/30 text-blue-300 border border-blue-800/30'
@@ -487,163 +413,53 @@ function ProductTableRow({
         </td>
 
         {/* 4. COR */}
-        <td className="w-[12%] min-w-[100px] px-3 py-3 whitespace-nowrap align-middle">
-          {editingField === 'cor' ? (
-            <div className="inline-flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-              <input
-                type="text"
-                autoFocus
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSaving}
-                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-xs text-white outline-none font-medium"
-              />
-              <button type="button" onClick={saveEdit} disabled={isSaving} className="text-emerald-400 hover:text-emerald-300">
-                <Check size={13} />
-              </button>
-            </div>
-          ) : (
-            <div className="inline-flex items-center gap-1.5">
-              <ColorBadge cor={p.cor} />
-              <button
-                type="button"
-                onClick={e => startEdit(e, 'cor', p.cor)}
-                className="text-gray-500 hover:text-[#6A0DAD] p-0.5 transition-colors cursor-pointer"
-                title="Editar Cor"
-              >
-                <Edit2 size={12} />
-              </button>
-            </div>
-          )}
+        <td className="w-[13%] px-3 py-3 whitespace-nowrap align-middle">
+          <ColorBadge cor={p.cor} />
         </td>
 
         {/* 5. PREÇO */}
-        <td className="w-[12%] min-w-[110px] px-3 py-3 whitespace-nowrap font-medium text-right pr-4 align-middle">
-          {editingField === 'preco' ? (
-            <div className="inline-flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
-              <input
-                type="text"
-                autoFocus
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="0,00"
-                className="w-20 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-xs text-white outline-none font-mono text-right"
-              />
-              <button
-                type="button"
-                onClick={saveEdit}
-                disabled={isSaving}
-                className="text-emerald-400 hover:text-emerald-300 p-0.5 transition-colors cursor-pointer"
-                title="Confirmar novo preço"
-              >
-                <Check size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={cancelEdit}
-                disabled={isSaving}
-                className="text-gray-500 hover:text-gray-400 p-0.5 transition-colors cursor-pointer"
-                title="Cancelar"
-              >
-                <X size={13} />
-              </button>
-            </div>
-          ) : (
-            <div className="inline-flex items-center justify-end gap-1.5 text-white font-mono font-bold text-xs sm:text-sm">
-              <span>R$ {parseFloat(p.preco || p.preco_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-              <button
-                type="button"
-                onClick={e => startEdit(e, 'preco', p.preco ?? p.preco_venda)}
-                className="text-gray-500 hover:text-[#6A0DAD] transition-colors cursor-pointer p-0.5"
-                title="Editar Preço"
-              >
-                <Edit2 size={12} />
-              </button>
-            </div>
-          )}
+        <td className="w-[10%] px-3 py-3 whitespace-nowrap font-medium text-right pr-4 align-middle">
+          <span className="text-white font-mono font-bold text-xs sm:text-sm">
+            R$ {parseFloat(p.preco || p.preco_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </span>
         </td>
 
         {/* 6. QTD */}
-        <td className="w-[10%] min-w-[90px] px-3 py-3 whitespace-nowrap text-center align-middle">
-          {editingField === 'quantidade' && !isCelular ? (
-            <div className="inline-flex items-center justify-center gap-1" onClick={e => e.stopPropagation()}>
-              <input
-                type="number"
-                step="1"
-                autoFocus
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="w-14 bg-black border border-[#6A0DAD] rounded px-1.5 py-0.5 text-xs text-white outline-none text-center"
-              />
-              <button type="button" onClick={saveEdit} className="text-emerald-400 hover:text-emerald-300">
-                <Check size={13} />
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center leading-tight">
-              {isCelular ? (() => {
-                const totalExibido = listaImeisExtraidos.length > 0
-                  ? listaImeisExtraidos.length
-                  : (p.imeis_count !== undefined && p.imeis_count !== null && p.imeis_count > 0 ? p.imeis_count : (p.quantidade || 1));
+        <td className="w-[8%] px-3 py-3 whitespace-nowrap text-center align-middle">
+          <div className="flex flex-col items-center justify-center leading-tight">
+            {isCelular ? (() => {
+              const totalExibido = listaImeisExtraidos.length > 0
+                ? listaImeisExtraidos.length
+                : (p.imeis_count !== undefined && p.imeis_count !== null && p.imeis_count > 0 ? p.imeis_count : (p.quantidade || 1));
 
-                if (totalExibido > 1) {
-                  return (
-                    <button
-                      type="button"
-                      onClick={e => { e.stopPropagation(); if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id); }}
-                      className="text-[#6A0DAD] hover:text-purple-300 font-bold underline cursor-pointer inline-flex items-center gap-1 text-xs"
-                      title="Ver todos os seriais/IMEIs deste aparelho"
-                    >
-                      <span>{totalExibido} unids</span>
-                      <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                    </button>
-                  );
-                }
-
+              if (totalExibido > 1) {
                 return (
-                  <span className="font-bold text-purple-300 font-mono bg-purple-950/30 border border-purple-800/30 px-2 py-0.5 rounded text-[10px]">
-                    1 unid
-                  </span>
+                  <button
+                    type="button"
+                    onClick={e => { e.stopPropagation(); if (toggleVerImeis) toggleVerImeis(p.id, p.filial_id); }}
+                    className="text-[#6A0DAD] hover:text-purple-300 font-bold underline cursor-pointer inline-flex items-center gap-1 text-xs"
+                    title="Ver todos os seriais/IMEIs deste aparelho"
+                  >
+                    <span>{totalExibido} unids</span>
+                    <ChevronDown size={12} className={expandedProductImeis[p.id] ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                  </button>
                 );
-              })() : (
-                <div className="inline-flex items-center justify-center gap-1.5">
-                  <span className="font-bold text-gray-300 text-xs sm:text-sm">{p.quantidade || 0} unids</span>
-                  {!isCelular && (
-                    <button
-                      type="button"
-                      onClick={e => startEdit(e, 'quantidade', p.quantidade)}
-                      className="text-gray-500 hover:text-[#6A0DAD] p-0.5 transition-colors cursor-pointer"
-                      title="Editar Quantidade"
-                    >
-                      <Edit2 size={11} />
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </td>
+              }
 
-        {/* 7. AÇÕES */}
-        <td className="w-[8%] min-w-[70px] px-3 py-3 whitespace-nowrap text-right pr-2 align-middle">
-          {['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO'].includes((userRole || '').toUpperCase()) && (
-            <button
-              type="button"
-              onClick={async (e) => { e.stopPropagation(); await onDeleteProduto(p); }}
-              className="text-gray-600 hover:text-red-400 p-1 rounded hover:bg-red-950/20 transition-colors cursor-pointer"
-              title="Excluir Produto"
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
+              return (
+                <span className="font-bold text-purple-300 font-mono bg-purple-950/30 border border-purple-800/30 px-2 py-0.5 rounded text-[10px]">
+                  1 unid
+                </span>
+              );
+            })() : (
+              <span className="font-bold text-gray-300 text-xs sm:text-sm">{p.quantidade || 0} unids</span>
+            )}
+          </div>
         </td>
       </tr>
       {expandedProductImeis[p.id] && (
         <tr className="bg-black">
-          <td colSpan="7" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
+          <td colSpan="6" className="py-3 px-4 border-l-2 border-l-[#6A0DAD]">
             {(() => {
               const obterImeisDoProduto = (prod) => {
                 // Caso 0: lista de IMEIs normalizados extraídos do componente
@@ -22120,16 +21936,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                     return (
                       <div className="w-full overflow-x-auto max-h-96 custom-scrollbar">
-                        <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                        <table className="w-full border-collapse text-left text-sm">
                           <thead>
                             <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase text-[11px] tracking-wider bg-black/40">
-                              <th className="w-[32%] min-w-[220px] px-3 py-3">PRODUTO</th>
-                              <th className="w-[14%] min-w-[110px] whitespace-nowrap px-3 py-3">FILIAL</th>
-                              <th className="w-[12%] min-w-[100px] whitespace-nowrap px-3 py-3">CATEGORIA</th>
-                              <th className="w-[12%] min-w-[100px] whitespace-nowrap px-3 py-3">COR</th>
-                              <th className="w-[12%] min-w-[110px] whitespace-nowrap text-right pr-4 px-3 py-3">PREÇO</th>
-                              <th className="w-[10%] min-w-[90px] whitespace-nowrap text-center px-3 py-3">QTD</th>
-                              <th className="w-[8%] min-w-[70px] whitespace-nowrap text-right pr-2 px-3 py-3">AÇÕES</th>
+                              <th className="w-[36%] px-3 py-3">PRODUTO</th>
+                              <th className="w-[18%] px-3 py-3">FILIAL</th>
+                              <th className="w-[15%] px-3 py-3">CATEGORIA</th>
+                              <th className="w-[13%] px-3 py-3">COR</th>
+                              <th className="w-[10%] px-3 py-3 text-right pr-4">PREÇO</th>
+                              <th className="w-[8%] px-3 py-3 text-center">QTD</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#111111]">
