@@ -363,17 +363,17 @@ export default function ModalDesempenhoVendedor({
       }
 
       if (regra) {
-        // Alimenta os objetivos e super metas configurados para a filial:
-        const objBoleto = Number(regra.meta_loja_boleto || 67500);
-        const superBoleto = Number(regra.super_meta || 87000);
-        const objAcessorios = Number(regra.meta_loja_acessorios || 10000);
-        const superAcessorios = Number((regra as any).super_meta_acessorios || 15000);
+        // Alimenta os objetivos e super metas configurados para o VENDEDOR (nunca o total da loja):
+        const metaBoletoVendedor = Number(regra.meta_vendedor_boleto || 67500);
+        const metaAcessoriosVendedor = Number(regra.meta_vendedor_acessorios || 10000);
+        const superMetaBoleto = Number(regra.super_meta_boleto || regra.super_meta || 87000);
+        const superMetaAcessorios = Number(regra.super_meta_acessorios || 15000);
 
-        setObjetivoBoleto(objBoleto);
-        setSuperMetaBoleto(superBoleto);
-        setObjetivoAcessorios(objAcessorios);
-        setSuperMetaAcessorios(superAcessorios);
-        setMetaTotalCombinada(objBoleto + objAcessorios);
+        setObjetivoBoleto(metaBoletoVendedor);
+        setSuperMetaBoleto(superMetaBoleto);
+        setObjetivoAcessorios(metaAcessoriosVendedor);
+        setSuperMetaAcessorios(superMetaAcessorios);
+        setMetaTotalCombinada(metaBoletoVendedor + metaAcessoriosVendedor);
       }
     } catch (err) {
       console.error('Erro ao carregar regras de metas da filial:', err);
@@ -420,23 +420,46 @@ export default function ModalDesempenhoVendedor({
         }
       })();
 
-      // 2. Busca única trazendo as vendas e os itens da venda via join
+      // 2. Busca única trazendo as vendas e os itens da venda via join (mesma query de Minhas Metas)
+      const orClauses = [
+        `vendedor_id.eq.${vendedorId}`,
+        `trainee_id.eq.${vendedorId}`,
+        `treener_id.eq.${vendedorId}`
+      ];
+      if (colaborador?.nome) {
+        orClauses.push(`vendedor_nome.ilike.%${colaborador.nome.trim()}%`);
+      }
+
       const { data: vendas, error } = await supabase
         .from('vendas')
         .select(`
           id,
           created_at,
+          data,
           valor_total,
+          valor,
+          categoria,
+          produto_nome,
+          comissao,
           comissao_vendedor,
           forma_pagamento,
           metodo_pagamento,
           financeira,
+          financeira_parceira,
+          vendedor_id,
+          vendedor_nome,
+          trainee_id,
+          treener_id,
           itens_venda (
+            id,
             produto_nome,
+            categoria,
+            quantidade,
+            preco_unitario,
             valor_total
           )
         `)
-        .eq('vendedor_id', vendedorId)
+        .or(orClauses.join(','))
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
         .order('created_at', { ascending: false });
@@ -444,29 +467,51 @@ export default function ModalDesempenhoVendedor({
       if (error) throw error;
 
       if (vendas) {
-        const totalFaturado = vendas.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
-        const totalComissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || 0), 0);
+        const totalFaturado = vendas.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
+        const totalComissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
         const totalQtd = vendas.length;
         const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
 
         // Realizado Boletos / Financiadoras
+        const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'FINANCIAMENTO', 'FINAN'];
         const boletos = vendas.reduce((acc, v) => {
-          const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase();
-          return pgto.includes('BOLETO') || pgto.includes('PAYJOY') || pgto.includes('WATU') || pgto.includes('UME') || pgto.includes('AIVA') || pgto.includes('CREDIARIO')
-            ? acc + Number(v.valor_total || 0)
-            : acc;
+          const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase();
+          const ehBoleto = termosBoleto.some(termo => pgto.includes(termo));
+          return ehBoleto ? acc + Number(v.valor_total || v.valor || 0) : acc;
         }, 0);
 
-        // Realizado Acessórios
-        const termosAcessorios = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ'];
+        // Realizado Acessórios: Unificado com Minhas Metas
+        // a) Categoria da venda ou nome do produto
+        // b) Itens de venda vinculados que sejam acessórios
+        const termosAcessorios = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'IWILL', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
+
+        const checarEhAcessorio = (nome: string, cat: string) => {
+          const catUpper = String(cat || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+          const nomeUpper = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+          if (catUpper.includes('ACESS') || catUpper.includes('FONE') || catUpper.includes('CABO') || catUpper.includes('PELIC') || catUpper.includes('CARREGADOR')) return true;
+          return termosAcessorios.some(termo => nomeUpper.includes(termo));
+        };
+
         const acessorios = vendas.reduce((accVenda, v) => {
           const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-          const somaItens = itens.reduce((accItem: number, item: any) => {
-            const nome = String(item.produto_nome || '').toUpperCase();
-            const ehAcessorio = termosAcessorios.some(termo => nome.includes(termo));
-            return ehAcessorio ? accItem + Number(item.valor_total || 0) : accItem;
-          }, 0);
-          return accVenda + somaItens;
+          if (itens.length > 0) {
+            let somaItens = 0;
+            let teveItemAcessorio = false;
+            itens.forEach((it: any) => {
+              if (checarEhAcessorio(it.produto_nome, it.categoria)) {
+                teveItemAcessorio = true;
+                const vItem = Number(it.valor_total || (Number(it.preco_unitario || 0) * Number(it.quantidade || 1)) || 0);
+                somaItens += vItem;
+              }
+            });
+            if (teveItemAcessorio && somaItens > 0) {
+              return accVenda + somaItens;
+            }
+          }
+          if (checarEhAcessorio(v.produto_nome || (v as any).nome, v.categoria)) {
+            return accVenda + Number(v.valor_total || v.valor || 0);
+          }
+          return accVenda;
         }, 0);
 
         // Atualiza os estados da tela
@@ -603,36 +648,39 @@ export default function ModalDesempenhoVendedor({
       ? faturadoTitularSoloCalc 
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
-    // Detecção de Acessórios com helper isAcessorio robusto
+    // Detecção de Acessórios com helper robusto unificado com Minhas Metas
+    const termosAcessoriosTodos = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'IWILL', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
+    const checarAcessorioItemOuVenda = (nome: string, cat: string) => {
+      const catUpper = String(cat || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      const nomeUpper = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      if (catUpper.includes('ACESS') || catUpper.includes('FONE') || catUpper.includes('CABO') || catUpper.includes('PELIC') || catUpper.includes('CARREGADOR')) return true;
+      return termosAcessoriosTodos.some(termo => nomeUpper.includes(termo));
+    };
+
     let totalAcessoriosCalc = 0;
     sales.forEach(sale => {
       if (Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0) {
         let somouItem = false;
         sale.itens_venda.forEach((it: any) => {
-          const iCat = (it.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-          const iProd = (it.produto_nome || it.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-          const termos = ['ACESSORIO', 'ACESSORIOS', 'CAPA', 'CAPAS', 'PELICULA', 'PELICULAS', 'FONE', 'FONES', 'CABO', 'CABOS', 'FONTE', 'FONTES', 'CARREGADOR', 'CARREGADORES'];
-          if (termos.some(t => iCat.includes(t) || iProd.includes(t))) {
-            const vItem = (Number(it.preco_unitario || it.valor_unitario || 0) * Number(it.quantidade || 1));
+          if (checarAcessorioItemOuVenda(it.produto_nome || it.nome, it.categoria)) {
+            const vItem = Number(it.valor_total || (Number(it.preco_unitario || it.valor_unitario || 0) * Number(it.quantidade || 1)) || 0);
             if (vItem > 0) {
               totalAcessoriosCalc += vItem;
               somouItem = true;
             }
           }
         });
-        if (!somouItem && isAcessorio(sale)) {
+        if (!somouItem && checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome, sale.categoria)) {
           totalAcessoriosCalc += Number(sale.valor_total || sale.valor || 0);
         }
-      } else if (isAcessorio(sale)) {
+      } else if (checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome, sale.categoria)) {
         totalAcessoriosCalc += Number(sale.valor_total || sale.valor || 0);
       }
     });
 
     const totalAcessorios = realizadoAcessorios > 0 
       ? realizadoAcessorios 
-      : (totalAcessoriosCalc > 0 
-        ? totalAcessoriosCalc 
-        : (isIslayne && isSetembro2026 ? 6519.76 : 0));
+      : (totalAcessoriosCalc > 0 ? totalAcessoriosCalc : 0);
 
     // Boletos / Financiamentos (PayJoy, Watu, Ume, Aiva, Crediário, Boleto, Financiamento)
     const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'FINANCIAMENTO', 'FINAN'];
