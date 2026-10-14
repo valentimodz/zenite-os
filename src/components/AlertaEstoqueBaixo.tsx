@@ -34,7 +34,8 @@ interface AlertaEstoqueBaixoProps {
   onNavegarEstoque?: (item?: AlertaEstoqueItem) => void;
 }
 
-const STORAGE_KEY_DESCARTADOS = 'zenite_alertas_estoque_descartados';
+const STORAGE_KEY_DESCARTADOS = 'alertas_stock_descartados';
+const OITO_HORAS_MS = 8 * 60 * 60 * 1000;
 
 export default function AlertaEstoqueBaixo({
   limiteMinimo = 3,
@@ -43,12 +44,12 @@ export default function AlertaEstoqueBaixo({
   onNavegarEstoque
 }: AlertaEstoqueBaixoProps) {
   const [alertas, setAlertas] = useState<AlertaEstoqueItem[]>([]);
-  const [descartados, setDescartados] = useState<string[]>(() => {
+  const [descartadosMap, setDescartadosMap] = useState<{ [chave: string]: number }>(() => {
     try {
-      const salvo = sessionStorage.getItem(STORAGE_KEY_DESCARTADOS);
-      return salvo ? JSON.parse(salvo) : [];
+      const salvo = localStorage.getItem(STORAGE_KEY_DESCARTADOS);
+      return salvo ? JSON.parse(salvo) : {};
     } catch {
-      return [];
+      return {};
     }
   });
   const [loading, setLoading] = useState(false);
@@ -154,33 +155,49 @@ export default function AlertaEstoqueBaixo({
     return () => clearInterval(interval);
   }, [verificarEstoqueBaixo]);
 
-  // Descartar/fechar uma notificação específica
-  const descartarAlerta = (itemKey: string) => {
-    setDescartados(prev => {
-      const novos = [...prev, itemKey];
+  // Descartar/fechar uma notificação específica salvando no localStorage com timestamp
+  const descartarAlerta = (produtoIdOuKey: string) => {
+    const agora = Date.now();
+    setAlertas(prev => prev.filter(item => {
+      const pId = String(item.produto_id || item.id);
+      const key = `${pId}_${item.filial_id || 'all'}`;
+      return pId !== produtoIdOuKey && key !== produtoIdOuKey;
+    }));
+
+    setDescartadosMap(prev => {
+      const novos = { ...prev, [produtoIdOuKey]: agora };
       try {
-        sessionStorage.setItem(STORAGE_KEY_DESCARTADOS, JSON.stringify(novos));
+        localStorage.setItem(STORAGE_KEY_DESCARTADOS, JSON.stringify(novos));
       } catch (e) {
-        console.warn('[AlertaEstoqueBaixo] Erro no sessionStorage:', e);
+        console.warn('[AlertaEstoqueBaixo] Erro ao salvar descartes no localStorage:', e);
       }
       return novos;
     });
   };
 
-  // Filtrar apenas alertas não descartados na sessão atual
+  // Filtrar itens que foram descartados há menos de 8 horas
   const alertasVisiveis = useMemo(() => {
+    const agora = Date.now();
+
     return alertas.filter(item => {
-      const key = `${item.produto_id || item.id}_${item.filial_id || 'all'}`;
-      return !descartados.includes(key);
+      const pId = String(item.produto_id || item.id);
+      const key = `${pId}_${item.filial_id || 'all'}`;
+
+      // Checa se foi descartado por ID ou por Key composta
+      const dataDescarte = descartadosMap[pId] || descartadosMap[key];
+      if (!dataDescarte) return true;
+
+      // Se foi descartado há menos de 8 horas, não exibir
+      return (agora - dataDescarte) > OITO_HORAS_MS;
     });
-  }, [alertas, descartados]);
+  }, [alertas, descartadosMap]);
 
   // Se não houver alertas visíveis, não renderiza nada
   if (alertasVisiveis.length === 0) {
     return null;
   }
 
-  // Exibir no máximo os 2 alertas mais críticos para não poluir a tela
+  // Apresentar no máximo 2 ou 3 cartões em simultâneo no ecrã para evitar obstrução visual
   const alertasParaExibir = alertasVisiveis.slice(0, 2);
   const totalRestantes = alertasVisiveis.length - alertasParaExibir.length;
 
