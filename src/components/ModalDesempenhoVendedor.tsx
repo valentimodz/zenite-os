@@ -650,7 +650,7 @@ export default function ModalDesempenhoVendedor({
 
     // Detecção de Acessórios com helper robusto unificado com Minhas Metas
     const termosAcessoriosTodos = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'IWILL', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
-    const checarAcessorioItemOuVenda = (nome: string, cat: string) => {
+    const checarAcessorioItemOuVenda = (nome?: string | null, cat?: string | null) => {
       const catUpper = String(cat || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
       const nomeUpper = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
       if (catUpper.includes('ACESS') || catUpper.includes('FONE') || catUpper.includes('CABO') || catUpper.includes('PELIC') || catUpper.includes('CARREGADOR')) return true;
@@ -662,7 +662,7 @@ export default function ModalDesempenhoVendedor({
       if (Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0) {
         let somouItem = false;
         sale.itens_venda.forEach((it: any) => {
-          if (checarAcessorioItemOuVenda(it.produto_nome || it.nome, it.categoria)) {
+          if (checarAcessorioItemOuVenda(it.produto_nome || it.nome || '', it.categoria || '')) {
             const vItem = Number(it.valor_total || (Number(it.preco_unitario || it.valor_unitario || 0) * Number(it.quantidade || 1)) || 0);
             if (vItem > 0) {
               totalAcessoriosCalc += vItem;
@@ -670,10 +670,10 @@ export default function ModalDesempenhoVendedor({
             }
           }
         });
-        if (!somouItem && checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome, sale.categoria)) {
+        if (!somouItem && checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome || '', sale.categoria || '')) {
           totalAcessoriosCalc += Number(sale.valor_total || sale.valor || 0);
         }
-      } else if (checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome, sale.categoria)) {
+      } else if (checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome || '', sale.categoria || '')) {
         totalAcessoriosCalc += Number(sale.valor_total || sale.valor || 0);
       }
     });
