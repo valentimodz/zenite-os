@@ -22180,6 +22180,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           handleOpenAjusteSaldoModal(prod);
                         }
                       }}
+                      onUpdateProdutoField={handleUpdateProdutoField}
+                      onDeleteProduto={handleDeleteProduto}
+                      onRefresh={() => {
+                        const filialParaRecarregar = filtroFilialEstoque || activeFilialId;
+                        fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque);
+                      }}
                     />
                   )}
                 </div>
