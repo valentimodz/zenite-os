@@ -628,6 +628,47 @@ export default function ModalDesempenhoVendedor({
     }
   }, [mounted, colaboradorId, colaborador, mesAtivo, mesCompetencia, vendasColaborador, vendasCache]);
 
+  // 2. CONECTAR RPC 'obter_resumo_metas_vendedor' PARA METAS EXATAS
+  useEffect(() => {
+    const carregarDadosRPC = async () => {
+      const targetId = targetVendedorId || colaboradorId || (colaborador as any)?.id || (colaborador as any)?.vendedorId;
+      if (!targetId || !mounted) return;
+
+      const [ano, mes] = (mesAtivo || mesCompetencia || '2026-10').split('-');
+      const dtInicio = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
+      const dtFim = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
+
+      try {
+        const { data, error } = await supabase.rpc('obter_resumo_metas_vendedor', {
+          p_vendedor_id: targetId,
+          p_data_inicio: dtInicio,
+          p_data_fim: dtFim
+        });
+
+        if (!error && data) {
+          if (data.realizado_boletos !== undefined && data.realizado_boletos !== null) {
+            setRealizadoBoletos(Number(data.realizado_boletos || 0));
+          }
+          if (data.realizado_acessorios !== undefined && data.realizado_acessorios !== null) {
+            setRealizadoAcessorios(Number(data.realizado_acessorios || 0));
+          }
+          if (data.total_vendas !== undefined && data.total_vendas !== null && Number(data.total_vendas) > 0) {
+            setTotalVendas(Number(data.total_vendas || 0));
+          }
+          if (data.total_comissao !== undefined && data.total_comissao !== null && Number(data.total_comissao) > 0) {
+            setComissoesAcumuladas(Number(data.total_comissao || 0));
+          }
+        }
+      } catch (err) {
+        console.warn('[ModalDesempenhoVendedor] Aviso ao chamar RPC obter_resumo_metas_vendedor:', err);
+      }
+    };
+
+    if (mounted) {
+      carregarDadosRPC();
+    }
+  }, [mounted, targetVendedorId, colaboradorId, colaborador, mesAtivo, mesCompetencia]);
+
   // 3. ATUALIZAR NO USEEFFECT:
   // Executa carregarRegrasMetas() e carregarDadosVendedor() quando o modal for aberto ou filialId/mesAtivo mudarem
   useEffect(() => {
@@ -798,9 +839,9 @@ export default function ModalDesempenhoVendedor({
       }
     });
 
-    const totalAcessorios = totalAcessoriosCalculado > 0 
-      ? totalAcessoriosCalculado 
-      : (realizadoAcessorios > 0 ? realizadoAcessorios : 0);
+    const totalAcessorios = realizadoAcessorios > 0 
+      ? realizadoAcessorios 
+      : (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : 0);
 
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 
