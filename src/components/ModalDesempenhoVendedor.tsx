@@ -97,12 +97,15 @@ export type IVenda = Venda;
 
 export interface ModalDesempenhoVendedorProps {
   colaborador: ColaboradorDesempenho;
+  colaboradorId?: string | null;
+  competencia?: string;
   mesAno?: string;
   filtroMes?: string;
   dataInicio?: string;
   dataFim?: string;
   filiais?: any[];
   vendasCache?: Venda[] | any[];
+  vendasColaborador?: Venda[] | any[];
   onClose: () => void;
 }
 
@@ -278,20 +281,23 @@ export const isAcessorio = (venda: any): boolean => {
 
 export default function ModalDesempenhoVendedor({
   colaborador,
+  colaboradorId: propColaboradorId,
+  competencia: propCompetencia,
   mesAno: propMesAno,
   filtroMes,
   filiais = [],
   vendasCache = [],
+  vendasColaborador: propVendasColaborador = [],
   onClose
 }: ModalDesempenhoVendedorProps) {
-  const mesCompetencia = propMesAno || filtroMes || new Date().toISOString().slice(0, 7);
+  const mesCompetencia = propCompetencia || propMesAno || filtroMes || new Date().toISOString().slice(0, 7);
   const [mesAtivo, setMesAtivo] = useState<string>(() => mesCompetencia);
-  const [vendasColaborador, setVendasColaborador] = useState<Venda[]>(() => {
-    return Array.isArray(vendasCache) && vendasCache.length > 0 ? (vendasCache as Venda[]) : [];
-  });
-  const [vendasLocais, setVendasLocais] = useState<any[]>(() => {
-    return Array.isArray(vendasCache) && vendasCache.length > 0 ? (vendasCache as any[]) : [];
-  });
+  const initialVendas = Array.isArray(propVendasColaborador) && propVendasColaborador.length > 0
+    ? propVendasColaborador
+    : (Array.isArray(vendasCache) && vendasCache.length > 0 ? vendasCache : []);
+
+  const [vendasColaborador, setVendasColaborador] = useState<Venda[]>(() => initialVendas as Venda[]);
+  const [vendasLocais, setVendasLocais] = useState<any[]>(() => initialVendas as any[]);
   const [metaIndividual, setMetaIndividual] = useState<MetaBanco | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
@@ -301,7 +307,7 @@ export default function ModalDesempenhoVendedor({
   }, []);
 
   // 1. EXTRAÇÃO ROBUSTA DO ID E NOME DO VENDEDOR (nunca confundir com o usuário autenticado)
-  const colaboradorId = (colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || (colaborador as any)?.colaboradorId || null) ? String(colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || (colaborador as any)?.colaboradorId) : null;
+  const colaboradorId = propColaboradorId || (colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || (colaborador as any)?.colaboradorId || null) ? String(propColaboradorId || colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || (colaborador as any)?.colaboradorId) : null;
   const targetVendedorId = colaboradorId || '';
   const targetVendedorNome = String(colaborador?.nome || colaborador?.colaborador || colaborador?.vendedor_nome || '').trim();
   const colaboradorFilialId = colaborador?.filial_id;

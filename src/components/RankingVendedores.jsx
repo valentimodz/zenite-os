@@ -616,7 +616,19 @@ export default function RankingVendedores({
       {/* 3. MODAL DE DESEMPENHO E METAS INDIVIDUAL DO COLABORADOR */}
       {vendedorSelecionadoModal && (
         <ModalDesempenhoVendedor
+          colaboradorId={vendedorSelecionadoModal.id || vendedorSelecionadoModal.vendedor_id}
           colaborador={vendedorSelecionadoModal}
+          vendasColaborador={
+            Array.isArray(initialVendas) && initialVendas.length > 0
+              ? initialVendas.filter(v => 
+                  String(v.vendedor_id) === String(vendedorSelecionadoModal.id) ||
+                  String(v.trainee_id) === String(vendedorSelecionadoModal.id) ||
+                  String(v.treener_id) === String(vendedorSelecionadoModal.id) ||
+                  (v.vendedor_nome && vendedorSelecionadoModal.nome && String(v.vendedor_nome).toLowerCase().includes(String(vendedorSelecionadoModal.nome).toLowerCase()))
+                )
+              : []
+          }
+          competencia={filtroMes || currentMonthStr || '2026-10'}
           mesAno={filtroMes}
           filtroMes={filtroMes}
           dataInicio={periodoData.inicio}
