@@ -33,6 +33,7 @@ import ModalDetalheRelatorio from './ModalDetalheRelatorio';
 import ModalEntradaEstoqueRapida from './ModalEntradaEstoqueRapida';
 import ModalMetasFilial from './ModalMetasFilial';
 import ModalMetasVendedor from './ModalMetasVendedor';
+import ModalDetalheEstoqueProduto from './ModalDetalheEstoqueProduto';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
@@ -214,6 +215,7 @@ function ProductTableRow({
   onUpdateProdutoField,
   onDeleteProduto,
   onOpenEditImeiModal,
+  onRowClick,
   userRole
 }) {
   const [editingField, setEditingField] = useState(null);
@@ -380,7 +382,12 @@ function ProductTableRow({
 
   return (
     <React.Fragment>
-      <tr className="hover:bg-[#6A0DAD]/5 border-b border-[#1A1A1A] transition-colors">
+      <tr 
+        onClick={() => {
+          if (onRowClick) onRowClick(p);
+        }}
+        className="cursor-pointer hover:bg-zinc-800/60 border-b border-[#1A1A1A] transition-colors group"
+      >
         {/* 1. PRODUTO */}
         <td className="w-[32%] min-w-[220px] px-3 py-3 font-semibold text-white align-middle">
           <div className="flex flex-col gap-1">
@@ -946,6 +953,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [produtos, setProdutos] = useState([]);
   const [estoqueConsolidadoLista, setEstoqueConsolidadoLista] = useState([]);
   const [loadingProdutos, setLoadingProdutos] = useState(false);
+  const [produtoSelecionadoEstoque, setProdutoSelecionadoEstoque] = useState(null);
+  const [modalDetalhesEstoqueAberto, setModalDetalhesEstoqueAberto] = useState(false);
   const [nomeProduto, setNomeProduto] = useState('');
   const [tipoProduto, setTipoProduto] = useState('CELULAR'); // 'CELULAR' | 'ACESSORIO'
   const [codigoBarras, setCodigoBarras] = useState('');
@@ -22135,6 +22144,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 onUpdateProdutoField={handleUpdateProdutoField}
                                 onDeleteProduto={handleDeleteProduto}
                                 onOpenEditImeiModal={handleOpenEditImeiModal}
+                                onRowClick={(prod) => {
+                                  setProdutoSelecionadoEstoque(prod);
+                                  setModalDetalhesEstoqueAberto(true);
+                                }}
                                 userRole={profile?.role}
                               />
                             ))}
@@ -22143,6 +22156,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       </div>
                     );
                   })()}
+
+                  {/* MODAL DETALHE DE ESTOQUE / PRODUTO */}
+                  {modalDetalhesEstoqueAberto && produtoSelecionadoEstoque && (
+                    <ModalDetalheEstoqueProduto
+                      isOpen={modalDetalhesEstoqueAberto}
+                      onClose={() => {
+                        setModalDetalhesEstoqueAberto(false);
+                        setProdutoSelecionadoEstoque(null);
+                      }}
+                      produto={produtoSelecionadoEstoque}
+                      filiais={filiais}
+                      onTransferir={(prod) => {
+                        setModalDetalhesEstoqueAberto(false);
+                        setProdutoSelecionadoEstoque(null);
+                        setActiveTab('transferencias');
+                      }}
+                      onAjustarSaldo={(prod) => {
+                        setModalDetalhesEstoqueAberto(false);
+                        setProdutoSelecionadoEstoque(null);
+                        if (typeof handleOpenAjusteSaldoModal === 'function') {
+                          handleOpenAjusteSaldoModal(prod);
+                        }
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
