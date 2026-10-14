@@ -458,6 +458,8 @@ export default function ModalDesempenhoVendedor({
           valor,
           categoria,
           produto_nome,
+          produtos_descricao,
+          descricao,
           comissao,
           comissao_vendedor,
           forma_pagamento,
@@ -504,38 +506,31 @@ export default function ModalDesempenhoVendedor({
         }, 0);
 
         // Realizado Acessórios: Unificado com Minhas Metas
-        // a) Categoria da venda ou nome do produto
-        // b) Itens de venda vinculados que sejam acessórios
-        const termosAcessorios = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'IWILL', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
+        const termosAcessorios = [
+          'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
+          'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 
+          'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
+        ];
 
-        const checarEhAcessorio = (nome: string, cat: string) => {
-          const catUpper = String(cat || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-          const nomeUpper = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-          if (catUpper.includes('ACESS') || catUpper.includes('FONE') || catUpper.includes('CABO') || catUpper.includes('PELIC') || catUpper.includes('CARREGADOR')) return true;
-          return termosAcessorios.some(termo => nomeUpper.includes(termo));
-        };
-
-        const acessorios = vendas.reduce((accVenda, v) => {
+        let acessorios = 0;
+        vendas.forEach((v) => {
           const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
           if (itens.length > 0) {
-            let somaItens = 0;
-            let teveItemAcessorio = false;
-            itens.forEach((it: any) => {
-              if (checarEhAcessorio(it.produto_nome, it.categoria)) {
-                teveItemAcessorio = true;
-                const vItem = Number(it.valor_total || (Number(it.preco_unitario || 0) * Number(it.quantidade || 1)) || 0);
-                somaItens += vItem;
+            itens.forEach((item: any) => {
+              const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase();
+              const catItem = String(item.categoria || '').toUpperCase();
+              if (termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
+                acessorios += Number(item.valor_total || (Number(item.preco_unitario || 0) * Number(item.quantidade || 1)) || 0);
               }
             });
-            if (teveItemAcessorio && somaItens > 0) {
-              return accVenda + somaItens;
+          } else {
+            const cat = String(v.categoria || '').toUpperCase();
+            const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase();
+            if (termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
+              acessorios += Number(v.valor_total || v.valor || 0);
             }
           }
-          if (checarEhAcessorio(v.produto_nome || (v as any).nome, v.categoria)) {
-            return accVenda + Number(v.valor_total || v.valor || 0);
-          }
-          return accVenda;
-        }, 0);
+        });
 
         // Atualiza os estados da tela
         setTotalVendas(totalFaturado);
@@ -774,41 +769,34 @@ export default function ModalDesempenhoVendedor({
       ? totalBoletosCalculado 
       : (realizadoBoletos > 0 ? realizadoBoletos : (isIslayne && isSetembro2026 ? 76601.66 : 0));
 
-    // 4. CÁLCULO DE ACESSÓRIOS ANTI-DUPLICAÇÃO:
+    // 4. CÁLCULO DE ACESSÓRIOS IDÊNTICO A MINHAS METAS:
     const termosAcessorios = [
       'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
       'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 
       'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
     ];
 
-    const totalAcessoriosCalculado = vendasParaCalculo.reduce((acc, venda) => {
-      const itens = Array.isArray(venda.itens_venda) ? venda.itens_venda : [];
+    let totalAcessoriosCalculado = 0;
 
-      // CASO 1: A venda possui itens filhos registrados na tabela itens_venda
+    vendasParaCalculo.forEach((v) => {
+      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
+      
       if (itens.length > 0) {
-        const somaItens = itens.reduce((somaFilho: number, item: any) => {
+        itens.forEach((item: any) => {
           const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase();
           const catItem = String(item.categoria || '').toUpperCase();
-          const ehAcessorio = termosAcessorios.some(termo => nomeItem.includes(termo) || catItem.includes(termo));
-          return ehAcessorio ? somaFilho + Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0) : somaFilho;
-        }, 0);
-        return acc + somaItens;
+          if (termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
+            totalAcessoriosCalculado += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
+          }
+        });
+      } else {
+        const cat = String(v.categoria || '').toUpperCase();
+        const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase();
+        if (termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
+          totalAcessoriosCalculado += Number(v.valor_total || v.valor || 0);
+        }
       }
-
-      // CASO 2: Venda direta sem itens_venda (o produto está na própria linha de vendas)
-      const categoriaVenda = String(venda.categoria || '').toUpperCase();
-      const nomeProdutoVenda = String(venda.produto_nome || (venda as any).produtos_descricao || venda.descricao || (venda as any).nome || '').toUpperCase();
-
-      const ehVendaAcessorio = termosAcessorios.some(termo => 
-        categoriaVenda.includes(termo) || nomeProdutoVenda.includes(termo)
-      );
-
-      if (ehVendaAcessorio) {
-        return acc + Number(venda.valor_total || venda.valor || 0);
-      }
-
-      return acc;
-    }, 0);
+    });
 
     const totalAcessorios = totalAcessoriosCalculado > 0 
       ? totalAcessoriosCalculado 
@@ -819,7 +807,7 @@ export default function ModalDesempenhoVendedor({
     // Recálculo do Progresso (%) Proporcional
     const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((totalVendasGeral / metaTotal) * 100)) : 0;
     const progressoBoleto = metaBoleto > 0 ? Math.round((totalBoletos / metaBoleto) * 100) : 0;
-    const progressoAcessorios = metaAcessorios > 0 ? Math.round((totalAcessorios / metaAcessorios) * 100) : 0;
+    const progressoAcessorios = metaAcessorios > 0 ? Number(((totalAcessorios / metaAcessorios) * 100).toFixed(1)) : 0;
 
     // Badges Boletos
     let taxaBoletoNum = 0.01;
@@ -956,6 +944,7 @@ export default function ModalDesempenhoVendedor({
       badgeBoleto,
       // Acessórios
       totalAcessorios,
+      realizadoAcessorios: totalAcessorios,
       metaAcessorios,
       superMetaAcessorios,
       progressoAcessorios,
@@ -1269,7 +1258,7 @@ export default function ModalDesempenhoVendedor({
                 <div>
                   <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
                   <span className="text-sm sm:text-base font-black text-pink-400 mt-0.5 block">
-                    R$ {dashboardInfo.totalAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dashboardInfo.totalAcessorios || dashboardInfo.realizadoAcessorios || 0)}
                   </span>
                 </div>
                 <div className="border-x border-[#222222]">
@@ -1292,13 +1281,17 @@ export default function ModalDesempenhoVendedor({
                 <div className="flex justify-between text-xs font-bold">
                   <span className="text-gray-400">Progresso do Objetivo</span>
                   <span className="text-pink-400 font-mono">
-                    {dashboardInfo.progressoAcessorios}% atingido
+                    {(() => {
+                      const metaAcess = dashboardInfo.metaAcessorios || 10000;
+                      const percAcess = metaAcess > 0 ? ((dashboardInfo.totalAcessorios / metaAcess) * 100).toFixed(1) : '0';
+                      return `${percAcess}% atingido`;
+                    })()}
                   </span>
                 </div>
                 <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
                   <div
                     className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-pink-600 via-pink-500 to-rose-400 shadow-[0_0_10px_#ec4899]"
-                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.progressoAcessorios))}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.metaAcessorios > 0 ? (dashboardInfo.totalAcessorios / dashboardInfo.metaAcessorios) * 100 : 0))}%` }}
                   ></div>
                 </div>
               </div>
