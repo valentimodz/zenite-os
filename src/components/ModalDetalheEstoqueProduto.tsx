@@ -8,7 +8,6 @@ import {
   Store,
   Layers,
   ArrowRightLeft,
-  Sliders,
   AlertCircle,
   Loader2,
   Calendar,
@@ -30,7 +29,6 @@ interface ModalDetalheEstoqueProdutoProps {
   produto: any;
   filiais?: Array<{ id: string | number; nome: string }>;
   onTransferir?: (produto: any) => void;
-  onAjustarSaldo?: (produto: any) => void;
   onUpdateProdutoField?: (produtoId: any, nome: string, field: string, value: any, itemFilialId?: any) => Promise<any>;
   onDeleteProduto?: (produto: any) => Promise<any>;
   onRefresh?: () => void;
@@ -73,7 +71,6 @@ export default function ModalDetalheEstoqueProduto({
   produto,
   filiais = [],
   onTransferir,
-  onAjustarSaldo,
   onUpdateProdutoField,
   onDeleteProduto,
   onRefresh
@@ -951,17 +948,6 @@ export default function ModalDetalheEstoqueProduto({
               >
                 <ArrowRightLeft size={13} />
                 Transferir Estoque
-              </button>
-            )}
-
-            {onAjustarSaldo && (
-              <button
-                type="button"
-                onClick={() => onAjustarSaldo(produto)}
-                className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
-              >
-                <Sliders size={13} />
-                Ajustar Saldo
               </button>
             )}
 

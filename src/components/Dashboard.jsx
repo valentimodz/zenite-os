@@ -21988,13 +21988,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         setProdutoSelecionadoEstoque(null);
                         setActiveTab('transferencias');
                       }}
-                      onAjustarSaldo={(prod) => {
-                        setModalDetalhesEstoqueAberto(false);
-                        setProdutoSelecionadoEstoque(null);
-                        if (typeof handleOpenAjusteSaldoModal === 'function') {
-                          handleOpenAjusteSaldoModal(prod);
-                        }
-                      }}
                       onUpdateProdutoField={handleUpdateProdutoField}
                       onDeleteProduto={handleDeleteProduto}
                       onRefresh={() => {
