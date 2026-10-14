@@ -420,6 +420,8 @@ export default function RankingVendedores({
         faturadoTitular,
         faturadoTrainee,
         ticketMedio: ticketMedioConsistente,
+        totalBoletos: Number(vr.totalBoletos || vr.total_boletos || 0),
+        total_boletos: Number(vr.total_boletos || vr.totalBoletos || 0),
         comissaoAcumulada: comissaoTotal,
         comissaoTitular,
         comissaoTrainee,
@@ -440,7 +442,7 @@ export default function RankingVendedores({
             Classificação de Vendedores &amp; Trainees
           </span>
           <p className="text-[11px] text-gray-400 mt-0.5">
-            Acompanhamento em tempo real de transações, volume faturado, ticket médio e comissões.
+            Acompanhamento em tempo real de transações, volume faturado, boletos e comissões.
           </p>
         </div>
 
@@ -502,7 +504,7 @@ export default function RankingVendedores({
               <th className="py-3 px-4">Cargo</th>
               <th className="py-3 px-4 text-center">Transações</th>
               <th className="py-3 px-4 text-right">Volume</th>
-              <th className="py-3 px-4 text-right">Ticket Médio</th>
+              <th className="py-3 px-4 text-right text-cyan-400">Total Boletos</th>
               <th className="py-3 px-4 text-right text-emerald-400">Comissão Acumulada</th>
               <th className="py-3 px-4 text-center">Ações</th>
             </tr>
@@ -567,8 +569,8 @@ export default function RankingVendedores({
                     )}
                   </div>
                 </td>
-                <td className="py-3 px-4 text-right font-mono text-blue-400 align-middle">
-                  {colab.ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                <td className="py-3 px-4 text-right font-mono text-cyan-400 font-medium align-middle">
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(colab.totalBoletos || 0)}
                 </td>
                 <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipComissao}>
                   <div className="inline-flex items-center justify-end gap-1.5 font-bold text-emerald-400">

@@ -14,6 +14,7 @@ export interface RankingColaboradorRow {
   faturado_trainee: number | string;
   volume_total_participado: number | string;
   ticket_medio: number | string;
+  total_boletos?: number | string;
 }
 
 /**
@@ -29,6 +30,8 @@ export interface RankingColaborador {
   faturado_trainee: number;
   volume_total_participado: number;
   ticket_medio: number;
+  total_boletos: number;
+  totalBoletos?: number;
   // Campos derivados para exibição e badges de perfil
   is_trainee: boolean;
   volume_exibicao: number;
@@ -101,7 +104,7 @@ export async function fetchRankingColaboradoresMensal({
     // 3. Busca de vendas da competência com vínculo duplo
     let vendasQuery = supabase
       .from('vendas')
-      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee')
+      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee, forma_pagamento, metodo_pagamento, financeira')
       .gte('created_at', dataInicio)
       .lte('created_at', dataFim);
 
@@ -112,8 +115,10 @@ export async function fetchRankingColaboradoresMensal({
     const { data: vendas, error: vendasError } = await vendasQuery;
     if (vendasError) throw vendasError;
 
-    const vendasLista = vendas || [];
+    const vendasLista = (vendas || []) as any[];
     const colabsLista = colaboradores || [];
+
+    const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO'];
 
     // Mapeamento com VÍNCULO DUPLO (ID ou NOME):
     const resultado: RankingColaborador[] = colabsLista.map(colab => {
@@ -151,6 +156,14 @@ export async function fetchRankingColaboradoresMensal({
 
       const ticketMedio = transacoes > 0 ? volumeExibicao / transacoes : 0;
 
+      // Cálculo do total de boletos / financiadoras
+      const vendasTotais = isTrainee ? [...vendasDoColaborador, ...vendasComoTrainee] : vendasDoColaborador;
+      const totalBoletos = vendasTotais.reduce((acc, venda) => {
+        const pgto = String(venda.forma_pagamento || venda.metodo_pagamento || venda.financeira || '').toUpperCase();
+        const ehBoleto = termosBoleto.some(termo => pgto.includes(termo));
+        return ehBoleto ? acc + Number(venda.valor_total || 0) : acc;
+      }, 0);
+
       return {
         colaborador_id: colab.id,
         colaborador: colab.nome || 'Sem Nome',
@@ -161,6 +174,8 @@ export async function fetchRankingColaboradoresMensal({
         faturado_trainee: faturadoTrainee,
         volume_total_participado: volumeTotal,
         ticket_medio: ticketMedio,
+        total_boletos: totalBoletos,
+        totalBoletos: totalBoletos,
         is_trainee: isTrainee,
         volume_exibicao: volumeExibicao
       };
@@ -194,6 +209,8 @@ export async function fetchRankingColaboradoresMensal({
       faturado_trainee: parseNumber(r.faturado_trainee),
       volume_total_participado: parseNumber(r.volume_total_participado),
       ticket_medio: parseNumber(r.ticket_medio),
+      total_boletos: parseNumber(r.total_boletos),
+      totalBoletos: parseNumber(r.total_boletos),
       is_trainee: parseNumber(r.faturado_trainee) > parseNumber(r.faturado_titular),
       volume_exibicao: parseNumber(r.faturado_titular) > 0 ? parseNumber(r.faturado_titular) : parseNumber(r.volume_total_participado)
     }));
