@@ -181,7 +181,7 @@ export default function AlertaEstoqueBaixo({
           const qtdReal = imeisAtivos.length > 0 ? imeisAtivos.length : Number(p.quantidade || 0);
 
           if (qtdReal <= limiteMinimo && qtdReal >= 0) {
-            const filialNome = p.filiais?.nome || mapaFiliaisNome[String(p.filial_id)] || 'Loja Principal';
+            const filialNome = (Array.isArray(p.filiais) ? p.filiais[0]?.nome : (p.filiais as any)?.nome) || mapaFiliaisNome[String(p.filial_id)] || 'Loja Principal';
             itensAlerta.push({
               id: p.id,
               produto_id: p.id,
