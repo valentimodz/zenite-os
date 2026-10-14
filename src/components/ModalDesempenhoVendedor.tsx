@@ -295,8 +295,9 @@ export default function ModalDesempenhoVendedor({
     setMounted(true);
   }, []);
 
-  const colaboradorId = colaborador?.id;
-  const colaboradorNome = colaborador?.nome;
+  // 1. EXTRAÇÃO ROBUSTA DO ID E NOME DO VENDEDOR (nunca confundir com o usuário autenticado)
+  const targetVendedorId = (colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || '') ? String(colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id) : '';
+  const targetVendedorNome = String(colaborador?.nome || colaborador?.colaborador || colaborador?.vendedor_nome || '').trim();
   const colaboradorFilialId = colaborador?.filial_id;
   const vendasCacheLength = Array.isArray(vendasCache) ? vendasCache.length : 0;
   const lastLoadedVendedorRef = useRef<string | null>(null);
@@ -309,9 +310,9 @@ export default function ModalDesempenhoVendedor({
     isLoading: isLoadingView, 
     refetch: refetchViewConsolidada 
   } = useMinhasMetasIndividual({
-    colaboradorId,
+    colaboradorId: targetVendedorId,
     competencia: mesAtivo,
-    enabled: Boolean(colaboradorId)
+    enabled: Boolean(targetVendedorId)
   });
 
   // Estados alimentados diretamente pela RPC 'obter_resumo_metas_vendedor' ou cálculo de vendas
@@ -382,9 +383,10 @@ export default function ModalDesempenhoVendedor({
 
   // Função de carregamento com uma única requisição direta ao Supabase
   const carregarDadosVendedor = useCallback(async () => {
-    const vendedorId = colaboradorId;
+    const vendedorId = targetVendedorId;
+    const vendedorNome = targetVendedorNome;
     const competencia = mesAtivo || mesCompetencia || '2026-10';
-    if (!vendedorId) return;
+    if (!vendedorId && !vendedorNome) return;
     setIsLoading(true);
 
     try {
@@ -396,10 +398,13 @@ export default function ModalDesempenhoVendedor({
       // Busca meta individual rápida em paralelo
       (async () => {
         try {
-          const { data: mData } = await supabase
-            .from('metas')
-            .select('*')
-            .eq('vendedor_id', vendedorId)
+          let mQuery = supabase.from('metas').select('*');
+          if (vendedorId) {
+            mQuery = mQuery.eq('vendedor_id', vendedorId);
+          } else if (vendedorNome) {
+            mQuery = mQuery.ilike('vendedor_nome', `%${vendedorNome}%`);
+          }
+          const { data: mData } = await mQuery
             .or(`mes_ano.eq.${competencia},mes_referencia.eq.${competencia}`)
             .maybeSingle();
 
@@ -421,16 +426,17 @@ export default function ModalDesempenhoVendedor({
       })();
 
       // 2. Busca única trazendo as vendas e os itens da venda via join (mesma query de Minhas Metas)
-      const orClauses = [
-        `vendedor_id.eq.${vendedorId}`,
-        `trainee_id.eq.${vendedorId}`,
-        `treener_id.eq.${vendedorId}`
-      ];
-      if (colaborador?.nome) {
-        orClauses.push(`vendedor_nome.ilike.%${colaborador.nome.trim()}%`);
+      const orClauses: string[] = [];
+      if (vendedorId) {
+        orClauses.push(`vendedor_id.eq.${vendedorId}`);
+        orClauses.push(`trainee_id.eq.${vendedorId}`);
+        orClauses.push(`treener_id.eq.${vendedorId}`);
+      }
+      if (vendedorNome) {
+        orClauses.push(`vendedor_nome.ilike.%${vendedorNome}%`);
       }
 
-      const { data: vendas, error } = await supabase
+      let query = supabase
         .from('vendas')
         .select(`
           id,
@@ -459,10 +465,15 @@ export default function ModalDesempenhoVendedor({
             valor_total
           )
         `)
-        .or(orClauses.join(','))
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
         .order('created_at', { ascending: false });
+
+      if (orClauses.length > 0) {
+        query = query.or(orClauses.join(','));
+      }
+
+      const { data: vendas, error } = await query;
 
       if (error) throw error;
 
@@ -528,7 +539,7 @@ export default function ModalDesempenhoVendedor({
     } finally {
       setIsLoading(false);
     }
-  }, [colaboradorId, mesAtivo, mesCompetencia, colaboradorFilialId]);
+  }, [targetVendedorId, targetVendedorNome, mesAtivo, mesCompetencia, colaboradorFilialId]);
 
   const carregarDadosMetas = carregarDadosVendedor;
 
@@ -539,11 +550,11 @@ export default function ModalDesempenhoVendedor({
       if (colaboradorFilialId) {
         carregarRegrasMetas();
       }
-      if (colaboradorId) {
+      if (targetVendedorId || targetVendedorNome) {
         carregarDadosVendedor();
       }
     }
-  }, [mounted, colaboradorFilialId, colaboradorId, mesAtivo, carregarRegrasMetas, carregarDadosVendedor]);
+  }, [mounted, colaboradorFilialId, targetVendedorId, targetVendedorNome, mesAtivo, carregarRegrasMetas, carregarDadosVendedor]);
 
   // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'regras_comissoes' e 'metas'
   const dashboardInfo = useMemo(() => {
