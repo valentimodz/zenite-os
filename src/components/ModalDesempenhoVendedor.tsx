@@ -296,7 +296,8 @@ export default function ModalDesempenhoVendedor({
   }, []);
 
   // 1. EXTRAÇÃO ROBUSTA DO ID E NOME DO VENDEDOR (nunca confundir com o usuário autenticado)
-  const targetVendedorId = (colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || '') ? String(colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id) : '';
+  const colaboradorId = (colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || (colaborador as any)?.colaboradorId || null) ? String(colaborador?.id || colaborador?.vendedor_id || colaborador?.colaborador_id || (colaborador as any)?.colaboradorId) : null;
+  const targetVendedorId = colaboradorId || '';
   const targetVendedorNome = String(colaborador?.nome || colaborador?.colaborador || colaborador?.vendedor_nome || '').trim();
   const colaboradorFilialId = colaborador?.filial_id;
   const vendasCacheLength = Array.isArray(vendasCache) ? vendasCache.length : 0;
