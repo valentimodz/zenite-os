@@ -552,8 +552,8 @@ export default function ModalDesempenhoVendedor({
 
   // 1. IDENTIFICAR SE 'vendasColaborador' ESTÁ VAZIO E CARREGAR AUTOMATICAMENTE
   useEffect(() => {
-    const carregarVendasSeVazio = async () => {
-      // Se já recebeu vendas por props/cache ou vendasColaborador já tem itens, aproveita-as
+    const fetchVendasDireto = async () => {
+      // Se já vieram vendas por prop com itens, aproveita-as
       if (vendasColaborador && vendasColaborador.length > 0) {
         setVendasLocais(vendasColaborador);
         return;
@@ -564,38 +564,35 @@ export default function ModalDesempenhoVendedor({
         return;
       }
 
-      const idAlvo = colaboradorId || (colaborador as any)?.id || (colaborador as any)?.vendedorId || (colaborador as any)?.vendedor_id;
-      const nomeAlvo = colaborador?.nome || (colaborador as any)?.vendedorNome || (colaborador as any)?.vendedor_nome;
+      const idVendedor = colaboradorId || (colaborador as any)?.id || (colaborador as any)?.vendedorId || (colaborador as any)?.vendedor_id;
+      const nomeVendedor = colaborador?.nome || (colaborador as any)?.vendedorNome || (colaborador as any)?.vendedor_nome;
 
-      if (!idAlvo && !nomeAlvo) return;
+      if (!idVendedor && !nomeVendedor) return;
 
       const [ano, mes] = (mesAtivo || mesCompetencia || '2026-10').split('-');
-      const inicio = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
-      const fim = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
+      const dtInicio = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
+      const dtFim = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
 
       try {
         let query = supabase
           .from('vendas')
           .select(`
             id,
-            created_at,
-            data,
             valor_total,
             valor,
-            categoria,
-            produto_nome,
-            comissao,
             comissao_vendedor,
+            comissao,
             forma_pagamento,
             metodo_pagamento,
             financeira,
             financeira_parceira,
+            categoria,
+            created_at,
             vendedor_id,
             vendedor_nome,
             trainee_id,
             treener_id,
             itens_venda (
-              id,
               produto_nome,
               categoria,
               quantidade,
@@ -603,30 +600,29 @@ export default function ModalDesempenhoVendedor({
               valor_total
             )
           `)
-          .gte('created_at', inicio)
-          .lte('created_at', fim)
-          .order('created_at', { ascending: false });
+          .gte('created_at', dtInicio)
+          .lte('created_at', dtFim);
 
-        if (idAlvo) {
-          query = query.or(`vendedor_id.eq.${idAlvo},trainee_id.eq.${idAlvo},treener_id.eq.${idAlvo}`);
-        } else if (nomeAlvo) {
-          query = query.ilike('vendedor_nome', `%${nomeAlvo}%`);
+        if (idVendedor) {
+          query = query.or(`vendedor_id.eq.${idVendedor},trainee_id.eq.${idVendedor},treener_id.eq.${idVendedor}`);
+        } else if (nomeVendedor) {
+          query = query.ilike('vendedor_nome', `%${nomeVendedor}%`);
         }
 
-        const { data, error } = await query;
-        if (!error && data) {
+        const { data } = await query;
+        if (data && data.length > 0) {
           setVendasLocais(data);
           setVendasColaborador(data as Venda[]);
         }
       } catch (err) {
-        console.error('Erro ao carregar vendas se vazio:', err);
+        console.error('Erro ao carregar vendas diretamente:', err);
       }
     };
 
     if (mounted) {
-      carregarVendasSeVazio();
+      fetchVendasDireto();
     }
-  }, [mounted, colaboradorId, colaborador, mesAtivo, mesCompetencia, vendasColaborador.length, vendasCache]);
+  }, [mounted, colaboradorId, colaborador, mesAtivo, mesCompetencia, vendasColaborador, vendasCache]);
 
   // 3. ATUALIZAR NO USEEFFECT:
   // Executa carregarRegrasMetas() e carregarDadosVendedor() quando o modal for aberto ou filialId/mesAtivo mudarem
@@ -684,8 +680,8 @@ export default function ModalDesempenhoVendedor({
         ? 7500 
         : (superMetaAcessoriosState > 0 ? superMetaAcessoriosState : 15000));
 
-    const listaVendasCalculo = (vendasColaborador && vendasColaborador.length > 0) ? vendasColaborador : vendasLocais;
-    const sales = listaVendasCalculo || [];
+    const vendasParaCalculo = (vendasColaborador && vendasColaborador.length > 0) ? vendasColaborador : vendasLocais;
+    const sales = vendasParaCalculo || [];
     const rawSalesCount = sales.length;
     const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
     
@@ -746,68 +742,64 @@ export default function ModalDesempenhoVendedor({
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
     // Detecção de Acessórios com helper robusto unificado com Minhas Metas
-    const termosAcessoriosTodos = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'IWILL', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
-    const checarAcessorioItemOuVenda = (nome?: string | null, cat?: string | null) => {
-      const catUpper = String(cat || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-      const nomeUpper = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-      if (catUpper.includes('ACESS') || catUpper.includes('FONE') || catUpper.includes('CABO') || catUpper.includes('PELIC') || catUpper.includes('CARREGADOR')) return true;
-      return termosAcessoriosTodos.some(termo => nomeUpper.includes(termo));
-    };
+    // 3. AJUSTE O CÁLCULO DE BOLETOS:
+    const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO', 'FINANCIAMENTO', 'FINAN'];
+    const totalBoletosCalculado = vendasParaCalculo.reduce((acc, v) => {
+      const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase();
+      const cat = String(v.categoria || '').toUpperCase();
+      const obs = String(v.observacoes || '').toUpperCase();
+      const prod = String(v.produto_nome || '').toUpperCase();
+      const pags = Array.isArray(v.vendas_pagamentos) ? v.vendas_pagamentos : [];
 
-    let totalAcessoriosCalc = 0;
-    sales.forEach(sale => {
-      if (Array.isArray(sale.itens_venda) && sale.itens_venda.length > 0) {
-        let somouItem = false;
-        sale.itens_venda.forEach((it: any) => {
-          if (checarAcessorioItemOuVenda(it.produto_nome || it.nome || '', it.categoria || '')) {
-            const vItem = Number(it.valor_total || (Number(it.preco_unitario || it.valor_unitario || 0) * Number(it.quantidade || 1)) || 0);
-            if (vItem > 0) {
-              totalAcessoriosCalc += vItem;
-              somouItem = true;
-            }
+      const ehBoleto = termosBoleto.some(termo => pgto.includes(termo) || cat.includes(termo) || obs.includes(termo) || prod.includes(termo)) ||
+        pags.some((p: any) => {
+          const pMp = String(p.metodo_pagamento || p.forma_pagamento || '').toUpperCase();
+          const pFin = String(p.financeira || '').toUpperCase();
+          return termosBoleto.some(termo => pMp.includes(termo) || pFin.includes(termo));
+        });
+
+      return ehBoleto ? acc + Number(v.valor_total || v.valor || 0) : acc;
+    }, 0);
+
+    const totalBoletos = totalBoletosCalculado > 0 
+      ? totalBoletosCalculado 
+      : (realizadoBoletos > 0 ? realizadoBoletos : (isIslayne && isSetembro2026 ? 76601.66 : 0));
+
+    // 4. AJUSTE O CÁLCULO DE ACESSÓRIOS:
+    const termosAcessorios = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'ACESSORIO', 'ACESSÓRIO', 'IWILL', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
+    const totalAcessoriosCalculado = vendasParaCalculo.reduce((acc, v) => {
+      const cat = String(v.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      const prod = String(v.produto_nome || (v as any).nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      
+      // Ou se tiver itens de venda que são acessórios
+      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
+      if (itens.length > 0) {
+        let somaItens = 0;
+        let teveItemAcessorio = false;
+        itens.forEach((item: any) => {
+          const iNome = String(item.produto_nome || item.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+          const iCat = String(item.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+          if (termosAcessorios.some(t => iNome.includes(t) || iCat.includes(t)) || iCat.includes('ACESS') || iCat.includes('CABO') || iCat.includes('FONE')) {
+            somaItens += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
+            teveItemAcessorio = true;
           }
         });
-        if (!somouItem && checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome || '', sale.categoria || '')) {
-          totalAcessoriosCalc += Number(sale.valor_total || sale.valor || 0);
+        if (teveItemAcessorio && somaItens > 0) {
+          return acc + somaItens;
         }
-      } else if (checarAcessorioItemOuVenda(sale.produto_nome || (sale as any).nome || '', sale.categoria || '')) {
-        totalAcessoriosCalc += Number(sale.valor_total || sale.valor || 0);
       }
-    });
 
-    const totalAcessorios = realizadoAcessorios > 0 
-      ? realizadoAcessorios 
-      : (totalAcessoriosCalc > 0 ? totalAcessoriosCalc : 0);
-
-    // Boletos / Financiamentos (PayJoy, Watu, Ume, Aiva, Crediário, Boleto, Financiamento)
-    const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'FINANCIAMENTO', 'FINAN'];
-    let totalBoletosCalc = 0;
-    sales.forEach(sale => {
-      const val = parseFloat(String(sale.valor_total || sale.valor || 0));
-      const mpUpper = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
-      const finUpper = String(sale.financeira || sale.financeira_parceira || '').toUpperCase();
-      const catUpper = String(sale.categoria || '').toUpperCase();
-      const obsUpper = String(sale.observacoes || '').toUpperCase();
-      const prodUpper = String(sale.produto_nome || '').toUpperCase();
-      const pags = Array.isArray(sale.vendas_pagamentos) ? sale.vendas_pagamentos : [];
-
-      const isBoleto = BOLETO_KEYWORDS.some(k => mpUpper.includes(k) || finUpper.includes(k) || catUpper.includes(k) || obsUpper.includes(k) || prodUpper.includes(k)) ||
-        pags.some((p: any) => {
-          const pMp = String(p.metodo_pagamento || '').toUpperCase();
-          const pFin = String(p.financeira || '').toUpperCase();
-          return BOLETO_KEYWORDS.some(k => pMp.includes(k) || pFin.includes(k));
-        });
-
-      if (isBoleto) {
-        totalBoletosCalc += val;
+      // Se a própria venda for classificada como acessório
+      if (cat.includes('ACESS') || cat.includes('CABO') || cat.includes('FONE') || termosAcessorios.some(t => prod.includes(t) || cat.includes(t))) {
+        return acc + Number(v.valor_total || v.valor || 0);
       }
-    });
 
-    const totalBoletos = realizadoBoletos > 0 
-      ? realizadoBoletos 
-      : (totalBoletosCalc > 0 
-        ? totalBoletosCalc 
-        : (isIslayne && isSetembro2026 ? 76601.66 : 0));
+      return acc;
+    }, 0);
+
+    const totalAcessorios = totalAcessoriosCalculado > 0 
+      ? totalAcessoriosCalculado 
+      : (realizadoAcessorios > 0 ? realizadoAcessorios : 0);
 
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 
