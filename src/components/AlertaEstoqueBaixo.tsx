@@ -31,6 +31,7 @@ interface AlertaEstoqueBaixoProps {
   limiteMinimo?: number;
   filialAtivaId?: string | null;
   filiais?: Array<{ id: string | number; nome: string }>;
+  userRole?: string | null;
   onNavegarEstoque?: (item?: AlertaEstoqueItem) => void;
 }
 
@@ -41,8 +42,11 @@ export default function AlertaEstoqueBaixo({
   limiteMinimo = 3,
   filialAtivaId,
   filiais = [],
+  userRole: userRoleProp,
   onNavegarEstoque
 }: AlertaEstoqueBaixoProps) {
+  const [roleUsuario, setRoleUsuario] = useState<string | null>(userRoleProp || null);
+  const [checandoPerfil, setChecandoPerfil] = useState(!userRoleProp);
   const [alertas, setAlertas] = useState<AlertaEstoqueItem[]>([]);
   const [descartadosMap, setDescartadosMap] = useState<{ [chave: string]: number }>(() => {
     try {
@@ -55,6 +59,63 @@ export default function AlertaEstoqueBaixo({
   const [loading, setLoading] = useState(false);
   const [produtoModalSelecionado, setProdutoModalSelecionado] = useState<any | null>(null);
 
+  // Sincronizar role se recebida via prop ou buscar via Supabase se não fornecida
+  useEffect(() => {
+    if (userRoleProp) {
+      setRoleUsuario(userRoleProp);
+      setChecandoPerfil(false);
+      return;
+    }
+
+    let isMounted = true;
+    const buscarPerfil = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) {
+          if (isMounted) setChecandoPerfil(false);
+          return;
+        }
+
+        const email = String(session.user.email || '').toLowerCase().trim();
+        // Super admins / admins via e-mail direto
+        if (email === 'valentimodz@gmail.com' || email === 'valentimodz2@gmail.com') {
+          if (isMounted) {
+            setRoleUsuario('ADMIN');
+            setChecandoPerfil(false);
+          }
+          return;
+        }
+
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (isMounted) {
+          const role = profileData?.role || session.user.user_metadata?.role || '';
+          setRoleUsuario(role);
+          setChecandoPerfil(false);
+        }
+      } catch (err) {
+        console.warn('[AlertaEstoqueBaixo] Erro ao carregar perfil:', err);
+        if (isMounted) setChecandoPerfil(false);
+      }
+    };
+
+    buscarPerfil();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userRoleProp]);
+
+  // Verificar se o usuário autenticado possui role de ADMIN
+  const ehAdmin = useMemo(() => {
+    const roleUpper = String(roleUsuario || '').toUpperCase();
+    return ['ADMIN', 'ADMINISTRADOR', 'SUPER_ADMIN', 'OWNER', 'DONO', 'MASTER'].includes(roleUpper);
+  }, [roleUsuario]);
+
   // Mapa de filiais para lookup de nome
   const mapaFiliaisNome = useMemo(() => {
     const mapa: { [key: string]: string } = {};
@@ -66,6 +127,9 @@ export default function AlertaEstoqueBaixo({
 
   // Função para verificar estoque baixo
   const verificarEstoqueBaixo = useCallback(async () => {
+    // Se não for admin, não busca nada no Supabase
+    if (!ehAdmin) return;
+
     setLoading(true);
     try {
       // 1. Tentar chamar a RPC dedicada 'obter_alertas_estoque_baixo'
@@ -191,6 +255,11 @@ export default function AlertaEstoqueBaixo({
       return (agora - dataDescarte) > OITO_HORAS_MS;
     });
   }, [alertas, descartadosMap]);
+
+  // Se ainda estiver checando ou se NÃO for admin, não exibe absolutamente nada
+  if (checandoPerfil || !ehAdmin) {
+    return null;
+  }
 
   // Se não houver alertas visíveis, não renderiza nada
   if (alertasVisiveis.length === 0) {

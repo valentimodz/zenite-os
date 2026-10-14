@@ -34259,11 +34259,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           </div>
         )}
 
-        {/* Notificação Flutuante de Estoque Baixo (Bottom-Right) */}
+        {/* Notificação Flutuante de Estoque Baixo (Bottom-Right) - Apenas Admin */}
         <AlertaEstoqueBaixo
           limiteMinimo={3}
           filialAtivaId={activeFilialId || profile?.filial_id}
           filiais={filiais}
+          userRole={profile?.role || userRole}
           onNavegarEstoque={(item) => {
             if (!isGerente) {
               handleNavigate('estoque');
