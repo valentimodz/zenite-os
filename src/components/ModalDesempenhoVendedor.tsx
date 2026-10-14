@@ -593,6 +593,9 @@ export default function ModalDesempenhoVendedor({
             financeira,
             financeira_parceira,
             categoria,
+            produto_nome,
+            produtos_descricao,
+            descricao,
             created_at,
             vendedor_id,
             vendedor_nome,
@@ -771,33 +774,37 @@ export default function ModalDesempenhoVendedor({
       ? totalBoletosCalculado 
       : (realizadoBoletos > 0 ? realizadoBoletos : (isIslayne && isSetembro2026 ? 76601.66 : 0));
 
-    // 4. AJUSTE O CÁLCULO DE ACESSÓRIOS:
-    const termosAcessorios = ['CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'ACESSORIO', 'ACESSÓRIO', 'IWILL', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
-    const totalAcessoriosCalculado = vendasParaCalculo.reduce((acc, v) => {
-      const cat = String(v.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-      const prod = String(v.produto_nome || (v as any).nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-      
-      // Ou se tiver itens de venda que são acessórios
-      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
+    // 4. CÁLCULO DE ACESSÓRIOS ANTI-DUPLICAÇÃO:
+    const termosAcessorios = [
+      'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
+      'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 
+      'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
+    ];
+
+    const totalAcessoriosCalculado = vendasParaCalculo.reduce((acc, venda) => {
+      const itens = Array.isArray(venda.itens_venda) ? venda.itens_venda : [];
+
+      // CASO 1: A venda possui itens filhos registrados na tabela itens_venda
       if (itens.length > 0) {
-        let somaItens = 0;
-        let teveItemAcessorio = false;
-        itens.forEach((item: any) => {
-          const iNome = String(item.produto_nome || item.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-          const iCat = String(item.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-          if (termosAcessorios.some(t => iNome.includes(t) || iCat.includes(t)) || iCat.includes('ACESS') || iCat.includes('CABO') || iCat.includes('FONE')) {
-            somaItens += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
-            teveItemAcessorio = true;
-          }
-        });
-        if (teveItemAcessorio && somaItens > 0) {
-          return acc + somaItens;
-        }
+        const somaItens = itens.reduce((somaFilho: number, item: any) => {
+          const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase();
+          const catItem = String(item.categoria || '').toUpperCase();
+          const ehAcessorio = termosAcessorios.some(termo => nomeItem.includes(termo) || catItem.includes(termo));
+          return ehAcessorio ? somaFilho + Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0) : somaFilho;
+        }, 0);
+        return acc + somaItens;
       }
 
-      // Se a própria venda for classificada como acessório
-      if (cat.includes('ACESS') || cat.includes('CABO') || cat.includes('FONE') || termosAcessorios.some(t => prod.includes(t) || cat.includes(t))) {
-        return acc + Number(v.valor_total || v.valor || 0);
+      // CASO 2: Venda direta sem itens_venda (o produto está na própria linha de vendas)
+      const categoriaVenda = String(venda.categoria || '').toUpperCase();
+      const nomeProdutoVenda = String(venda.produto_nome || (venda as any).produtos_descricao || venda.descricao || (venda as any).nome || '').toUpperCase();
+
+      const ehVendaAcessorio = termosAcessorios.some(termo => 
+        categoriaVenda.includes(termo) || nomeProdutoVenda.includes(termo)
+      );
+
+      if (ehVendaAcessorio) {
+        return acc + Number(venda.valor_total || venda.valor || 0);
       }
 
       return acc;
