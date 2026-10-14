@@ -34,6 +34,7 @@ import ModalEntradaEstoqueRapida from './ModalEntradaEstoqueRapida';
 import ModalMetasFilial from './ModalMetasFilial';
 import ModalMetasVendedor from './ModalMetasVendedor';
 import ModalDetalheEstoqueProduto from './ModalDetalheEstoqueProduto';
+import AlertaEstoqueBaixo from './AlertaEstoqueBaixo';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
@@ -34443,6 +34444,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             </div>
           </div>
         )}
+
+        {/* Notificação Flutuante de Estoque Baixo (Bottom-Right) */}
+        <AlertaEstoqueBaixo
+          limiteMinimo={3}
+          filialAtivaId={activeFilialId || profile?.filial_id}
+          filiais={filiais}
+          onNavegarEstoque={(item) => {
+            if (!isGerente) {
+              handleNavigate('estoque');
+            } else {
+              showToast('Para gerenciar o estoque, contate a administração central.', 'info');
+            }
+          }}
+        />
       </div>
     </div>
   );
