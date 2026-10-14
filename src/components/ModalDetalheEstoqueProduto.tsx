@@ -102,15 +102,12 @@ export default function ModalDetalheEstoqueProduto({
   const precoBaseVenda = Number(produto?.preco_venda || produto?.preco || 0);
 
   const categoriaNome = String(produto?.categoria || produto?.categoria_nome || categoria || '').toUpperCase();
-  const ehCelularOuSerial = categoriaNome.includes('CELULAR') || 
-                            categoriaNome.includes('SMARTPHONE') || 
-                            categoriaNome.includes('IOS') || 
-                            categoriaNome.includes('ANDROID') || 
-                            produto?.controla_imei === true ||
-                            Boolean(produto?.imei) ||
-                            (Array.isArray(produto?.imeis) && produto.imeis.length > 0);
+  const ehCelular = categoriaNome.includes('CELULAR') || 
+                    categoriaNome.includes('SMARTPHONE') || 
+                    produto?.controla_imei === true;
 
-  const isCelular = ehCelularOuSerial;
+  const ehCelularOuSerial = ehCelular;
+  const isCelular = ehCelular;
 
   // Estado para Adicionar Novo IMEI por Item/Filial
   const [itemParaAdicionarImei, setItemParaAdicionarImei] = useState<ItemProdutoDetalhado | null>(null);
@@ -711,7 +708,7 @@ export default function ModalDetalheEstoqueProduto({
                             <th className="py-2.5 px-3">Cor / Variação</th>
                             <th className="py-2.5 px-3">Preço Unitário</th>
                             <th className="py-2.5 px-3 text-center">Quantidade</th>
-                            <th className="py-2.5 px-3">IMEIs / Seriais</th>
+                            {ehCelular && <th className="py-2.5 px-3">IMEIs / Seriais</th>}
                             <th className="py-2.5 px-3 text-right">Ações</th>
                           </tr>
                         </thead>
@@ -868,27 +865,27 @@ export default function ModalDetalheEstoqueProduto({
                                   )}
                                 </td>
 
-                                {/* Seriais/IMEIs */}
-                                <td className="py-2.5 px-3 align-middle">
-                                  <div className="flex flex-col gap-1.5">
-                                    {item.imeis.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1 max-w-[200px]">
-                                        {item.imeis.slice(0, 2).map((im, idx) => (
-                                          <span key={idx} className="font-mono text-[9px] bg-zinc-900 border border-zinc-800 text-zinc-300 px-1.5 py-0.2 rounded truncate max-w-[90px]" title={im}>
-                                            {im}
-                                          </span>
-                                        ))}
-                                        {item.imeis.length > 2 && (
-                                          <span className="text-[9px] text-purple-400 font-mono font-bold">
-                                            +{item.imeis.length - 2} mais
-                                          </span>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="text-[10px] text-zinc-600 font-mono italic">Sem seriais</span>
-                                    )}
+                                {/* Seriais/IMEIs (Apenas para celulares) */}
+                                {ehCelular && (
+                                  <td className="py-2.5 px-3 align-middle">
+                                    <div className="flex flex-col gap-1.5">
+                                      {item.imeis.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1 max-w-[200px]">
+                                          {item.imeis.slice(0, 2).map((im, idx) => (
+                                            <span key={idx} className="font-mono text-[9px] bg-zinc-900 border border-zinc-800 text-zinc-300 px-1.5 py-0.2 rounded truncate max-w-[90px]" title={im}>
+                                              {im}
+                                            </span>
+                                          ))}
+                                          {item.imeis.length > 2 && (
+                                            <span className="text-[9px] text-purple-400 font-mono font-bold">
+                                              +{item.imeis.length - 2} mais
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-[10px] text-zinc-600 font-mono italic">Sem seriais</span>
+                                      )}
 
-                                    {ehCelularOuSerial && (
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -902,9 +899,9 @@ export default function ModalDetalheEstoqueProduto({
                                         <Plus size={11} />
                                         <span>Adicionar IMEI</span>
                                       </button>
-                                    )}
-                                  </div>
-                                </td>
+                                    </div>
+                                  </td>
+                                )}
 
                                 {/* Ações: Lixeira de Exclusão */}
                                 <td className="py-2.5 px-3 text-right align-middle">
