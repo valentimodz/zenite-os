@@ -394,28 +394,31 @@ export default function ModalDesempenhoVendedor({
       const fimMes = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
 
       // Busca meta individual rápida em paralelo
-      supabase
-        .from('metas')
-        .select('*')
-        .eq('vendedor_id', vendedorId)
-        .or(`mes_ano.eq.${competencia},mes_referencia.eq.${competencia}`)
-        .maybeSingle()
-        .then(({ data: mData }) => {
+      (async () => {
+        try {
+          const { data: mData } = await supabase
+            .from('metas')
+            .select('*')
+            .eq('vendedor_id', vendedorId)
+            .or(`mes_ano.eq.${competencia},mes_referencia.eq.${competencia}`)
+            .maybeSingle();
+
           if (mData) {
             setMetaIndividual(mData);
           } else if (colaboradorFilialId) {
-            supabase
+            const { data: cData } = await supabase
               .from('configuracoes_metas_filial')
               .select('*')
               .eq('filial_id', colaboradorFilialId)
               .eq('mes_ano', competencia)
-              .maybeSingle()
-              .then(({ data: cData }) => {
-                if (cData) setMetaIndividual(cData);
-              });
+              .maybeSingle();
+
+            if (cData) setMetaIndividual(cData);
           }
-        })
-        .catch(() => {});
+        } catch {
+          // Erro silencioso ao carregar meta individual
+        }
+      })();
 
       // 2. Busca única trazendo as vendas e os itens da venda via join
       const { data: vendas, error } = await supabase
