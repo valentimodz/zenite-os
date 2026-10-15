@@ -1378,7 +1378,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [transferencias, setTransferencias] = useState([]);
   const [cargasPendentes, setCargasPendentes] = useState([]);
   const [loadingTransferencias, setLoadingTransferencias] = useState(false);
-  const [transfOrigemId, setTransfOrigemId] = useState(''); // Autodetectado para ADMINs
+  const [transfOrigemId, setTransfOrigemId] = useState(() => {
+    return profile?.filial_id || profile?.filiais?.id || activeFilialId || '';
+  });
   const [transfDestinoId, setTransfDestinoId] = useState('');
   const [transfItens, setTransfItens] = useState([]);
   const [transfQtdInput, setTransfQtdInput] = useState('1');
@@ -1391,13 +1393,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [transfSubTab, setTransfSubTab] = useState('enviar'); // 'enviar' | 'receber'
   const [transfObs, setTransfObs] = useState('');
 
+  // Sincronizar Filial de Origem obrigatoriamente com o Perfil / Filial Ativa do Colaborador Logado
+  useEffect(() => {
+    const filialDoUsuario = profile?.filial_id || profile?.filiais?.id || activeFilialId;
+    if (filialDoUsuario && (!transfOrigemId || transfItens.length === 0)) {
+      setTransfOrigemId(filialDoUsuario);
+    }
+  }, [profile?.filial_id, profile?.filiais?.id, activeFilialId, transfItens.length]);
+
   // Garantir que a Filial Destino nunca seja igual à Filial Origem
   useEffect(() => {
-    const origemAtual = transfOrigemId || activeFilialId;
+    const origemAtual = transfOrigemId || profile?.filial_id || activeFilialId;
     if (origemAtual && transfDestinoId && transfDestinoId === origemAtual) {
       setTransfDestinoId('');
     }
-  }, [transfOrigemId, activeFilialId, transfDestinoId]);
+  }, [transfOrigemId, profile?.filial_id, activeFilialId, transfDestinoId]);
 
   // Estado para visualização de comprovante em Modal (Gerente)
   const [modalComprovante, setModalComprovante] = useState(null);
@@ -15475,7 +15485,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     e.preventDefault();
     const term = transfImeiBusca.replace(/[\r\n]/g, '').trim();
     if (!term) return;
-    const origemId = transfOrigemId || activeFilialId;
+    const origemId = transfOrigemId || profile?.filial_id || profile?.filiais?.id || activeFilialId;
 
     if (!origemId) {
       alert('Por favor, selecione a Filial de Origem.');
@@ -15616,7 +15626,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   const handleSubmeterTransferencia = async () => {
-    const finalOrigemId = transfOrigemId || activeFilialId;
+    const finalOrigemId = transfOrigemId || profile?.filial_id || profile?.filiais?.id || activeFilialId;
 
     if (!finalOrigemId) {
       alert('Selecione uma Filial de Origem.');
@@ -17984,7 +17994,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
   // --- VISÃO DE TRANSFERÊNCIAS (COMPARTILHADA) ---
   const renderTransferencias = () => {
-    const finalOrigemId = transfOrigemId || activeFilialId;
+    const finalOrigemId = transfOrigemId || profile?.filial_id || profile?.filiais?.id || activeFilialId;
     const isSameFilial = transfDestinoId && finalOrigemId && transfDestinoId === finalOrigemId;
 
     return (
