@@ -16195,15 +16195,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   // 1. Consulta dos Valores do Sistema para o Dia Corrente (Auditoria de Caixa)
   const carregarVendasDiaAuditoria = React.useCallback(async () => {
     const filialAtivaId = activeFilialId || caixaAtual?.filial_id || profile?.filial_id;
-    if (!filialAtivaId) return;
 
     setCarregandoAuditoriaDia(true);
     try {
-      const inicioDia = new Date();
-      inicioDia.setHours(0, 0, 0, 0);
+      // Ajuste estrito do intervalo de datas abrangendo o dia civil atual no horário local
+      const inicioDoDia = new Date();
+      inicioDoDia.setHours(0, 0, 0, 0);
 
-      // Consulta de vendas do dia incluindo suporte a múltiplos pagamentos (vendas_pagamentos)
-      let { data: vendasDia, error } = await supabase
+      const fimDoDia = new Date();
+      fimDoDia.setHours(23, 59, 59, 999);
+
+      // Consulta abrangente incluindo vendas_pagamentos e campos oficiais
+      let query = supabase
         .from('vendas')
         .select(`
           id,
@@ -16211,28 +16214,47 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           valor,
           metodo_pagamento,
           forma_pagamento,
+          pagamentos,
           financeira,
           financeira_parceira,
           created_at,
+          status,
           filial_id,
+          vendedor_id,
           vendas_pagamentos (
             id,
             valor_pago,
+            valor,
             metodo_pagamento,
+            forma_pagamento,
             financeira,
             metodo_detalhe
           )
         `)
-        .eq('filial_id', filialAtivaId)
-        .gte('created_at', inicioDia.toISOString());
+        .gte('created_at', inicioDoDia.toISOString())
+        .lte('created_at', fimDoDia.toISOString())
+        .neq('status', 'CANCELADA');
+
+      if (filialAtivaId) {
+        query = query.eq('filial_id', filialAtivaId);
+      }
+
+      let { data: vendasDia, error } = await query;
 
       if (error) {
         console.warn('Aviso ao consultar vendas com vendas_pagamentos, tentando consulta simplificada:', error);
-        const { data: vFallback, error: errFallback } = await supabase
+        let queryFallback = supabase
           .from('vendas')
-          .select('id, valor_total, valor, metodo_pagamento, forma_pagamento, financeira, financeira_parceira, created_at, filial_id')
-          .eq('filial_id', filialAtivaId)
-          .gte('created_at', inicioDia.toISOString());
+          .select('id, valor_total, valor, metodo_pagamento, forma_pagamento, pagamentos, financeira, financeira_parceira, created_at, status, filial_id, vendedor_id')
+          .gte('created_at', inicioDoDia.toISOString())
+          .lte('created_at', fimDoDia.toISOString())
+          .neq('status', 'CANCELADA');
+
+        if (filialAtivaId) {
+          queryFallback = queryFallback.eq('filial_id', filialAtivaId);
+        }
+
+        const { data: vFallback, error: errFallback } = await queryFallback;
 
         if (!errFallback && Array.isArray(vFallback)) {
           vendasDia = vFallback;
@@ -16242,12 +16264,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       if (!error && Array.isArray(vendasDia)) {
         setVendasDiaAuditoria(vendasDia);
-        const vendasTurno = vendasDia || [];
-        console.log('Vendas do turno para fechamento:', vendasTurno.map(v => ({
-          id: v.id,
-          total: v.valor_total ?? v.valor,
-          metodo: v.forma_pagamento || v.metodo_pagamento || v.vendas_pagamentos || v.pagamentos
-        })));
+        console.log('📊 [GUIA DO SISTEMA] Vendas registradas hoje para fechamento:', vendasDia.length);
       }
     } catch (err) {
       console.error('Erro ao consultar vendas do dia para auditoria:', err);
@@ -16262,108 +16279,109 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [activeSellerTab, carregarVendasDiaAuditoria]);
 
-  useEffect(() => {
-    if (vendasDiaAuditoria && vendasDiaAuditoria.length > 0) {
-      const vendasTurno = vendasDiaAuditoria;
-      console.log('Vendas do turno para fechamento:', vendasTurno.map(v => ({
-        id: v.id,
-        total: v.valor_total ?? v.valor,
-        metodo: v.forma_pagamento || v.metodo_pagamento || v.vendas_pagamentos || v.pagamentos
-      })));
-    }
-  }, [vendasDiaAuditoria]);
-
-  // Somatório dos valores por método de pagamento para o Painel Guia
+  // Somatório dos valores por método de pagamento para o Painel Guia (Normalização Robusta)
   const auditoriaSistema = React.useMemo(() => {
-    let pixSistema = 0;
-    let cartaoSistema = 0;
-    let dinheiroSistema = 0;
-    let financiadoraSistema = 0;
-    let trocaSistema = 0;
-    let totalEsperadoSistema = 0;
+    let totalPix = 0;
+    let totalCartao = 0;
+    let totalDinheiro = 0;
+    let totalFinanciadoras = 0;
+    let totalTroca = 0;
 
-    const listaParaCalcular = (vendasDiaAuditoria && vendasDiaAuditoria.length > 0)
+    const vendasHoje = (vendasDiaAuditoria && vendasDiaAuditoria.length > 0)
       ? vendasDiaAuditoria
       : null;
 
-    if (listaParaCalcular) {
-      listaParaCalcular.forEach(v => {
-        const pagamentos = (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0)
-          ? v.vendas_pagamentos
-          : (Array.isArray(v.pagamentos) && v.pagamentos.length > 0 ? v.pagamentos : null);
+    if (vendasHoje && vendasHoje.length > 0) {
+      vendasHoje.forEach((venda) => {
+        // Ignora status de cancelamento defensivamente
+        const statusUpper = String(venda.status || '').toUpperCase();
+        if (statusUpper === 'CANCELADA') return;
 
-        const descTroca = parseFloat(v.valor_desconto_troca || v.used_valor_avaliacao || 0);
+        const pagamentosArray = (Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
+          ? venda.vendas_pagamentos
+          : (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0 ? venda.pagamentos : null);
 
-        if (pagamentos && pagamentos.length > 0) {
-          pagamentos.forEach(p => {
-            const valPago = parseFloat(p.valor_pago ?? p.valor ?? 0);
-            if (valPago <= 0) return;
-            const cat = normalizarMetodo(
-              p.metodo_pagamento || p.forma_pagamento || p.metodo,
-              p.financeira || p.metodo_detalhe || v.financeira
-            );
-            if (cat === 'pix') {
-              pixSistema += valPago;
-            } else if (cat === 'cartao') {
-              cartaoSistema += valPago;
-            } else if (cat === 'dinheiro') {
-              dinheiroSistema += valPago;
-            } else if (cat === 'financiadora') {
-              financiadoraSistema += valPago;
-            } else if (cat === 'troca') {
-              trocaSistema += valPago;
+        const descTroca = parseFloat(venda.valor_desconto_troca || venda.used_valor_avaliacao || 0);
+
+        if (pagamentosArray && pagamentosArray.length > 0) {
+          pagamentosArray.forEach((p) => {
+            const pForma = String(p.forma_pagamento || p.metodo_pagamento || p.forma || p.metodo || '').toUpperCase();
+            const pValor = Number(p.valor_pago ?? p.valor ?? 0);
+            if (pValor <= 0) return;
+
+            if (pForma.includes('PIX')) {
+              totalPix += pValor;
+            } else if (pForma.includes('CART') || pForma.includes('CRED') || pForma.includes('DEB')) {
+              totalCartao += pValor;
+            } else if (pForma.includes('DINHEIRO') || pForma.includes('VISTA') || pForma.includes('ESPÉCIE') || pForma.includes('ESPECIE')) {
+              totalDinheiro += pValor;
+            } else if (pForma.includes('BOLETO') || pForma.includes('FINANC') || pForma.includes('CARNE') || pForma.includes('PAYJOY') || pForma.includes('AIVA') || pForma.includes('WATU') || pForma.includes('UME')) {
+              totalFinanciadoras += pValor;
+            } else if (pForma.includes('TROCA')) {
+              totalTroca += pValor;
             } else {
-              cartaoSistema += valPago;
+              totalCartao += pValor;
             }
           });
           if (descTroca > 0) {
-            trocaSistema += descTroca;
+            totalTroca += descTroca;
           }
         } else {
-          const val = parseFloat(v.valor_total ?? v.valor ?? 0);
-          const cat = normalizarMetodo(
-            v.forma_pagamento || v.metodo_pagamento,
-            v.financeira || v.financeira_parceira || v.metodo_detalhe
-          );
+          const forma = String(venda.forma_pagamento || venda.metodo_pagamento || '').toUpperCase();
+          const valor = Number(venda.valor_total ?? venda.valor ?? 0);
 
-          if (cat === 'pix') {
-            pixSistema += val;
-          } else if (cat === 'cartao') {
-            cartaoSistema += val;
-          } else if (cat === 'dinheiro') {
-            dinheiroSistema += val;
-          } else if (cat === 'financiadora') {
-            financiadoraSistema += val;
-          } else if (cat === 'troca') {
-            trocaSistema += val;
+          if (forma.includes('PIX')) {
+            totalPix += valor;
+          } else if (forma.includes('CART') || forma.includes('CRED') || forma.includes('DEB')) {
+            totalCartao += valor;
+          } else if (forma.includes('DINHEIRO') || forma.includes('VISTA') || forma.includes('ESPÉCIE') || forma.includes('ESPECIE')) {
+            totalDinheiro += valor;
+          } else if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CARNE') || forma.includes('PAYJOY') || forma.includes('AIVA') || forma.includes('WATU') || forma.includes('UME')) {
+            totalFinanciadoras += valor;
+          } else if (forma.includes('TROCA')) {
+            totalTroca += valor;
           } else {
-            cartaoSistema += val;
+            // Caso caia numa categoria mista ou array de pagamentos múltiplos:
+            if (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0) {
+              venda.pagamentos.forEach((p) => {
+                const pForma = String(p.forma || p.metodo || p.forma_pagamento || '').toUpperCase();
+                const pValor = Number(p.valor || p.valor_pago || 0);
+                if (pForma.includes('PIX')) totalPix += pValor;
+                else if (pForma.includes('CART') || pForma.includes('CRED') || pForma.includes('DEB')) totalCartao += pValor;
+                else if (pForma.includes('DINHEIRO') || pForma.includes('VISTA') || pForma.includes('ESPÉCIE') || pForma.includes('ESPECIE')) totalDinheiro += pValor;
+                else if (pForma.includes('BOLETO') || pForma.includes('FINANC') || pForma.includes('CARNE')) totalFinanciadoras += pValor;
+                else if (pForma.includes('TROCA')) totalTroca += pValor;
+                else totalCartao += pValor;
+              });
+            } else {
+              totalCartao += valor;
+            }
           }
 
-          if (descTroca > 0 && cat !== 'troca') {
-            trocaSistema += descTroca;
+          if (descTroca > 0 && !forma.includes('TROCA')) {
+            totalTroca += descTroca;
           }
         }
       });
-      totalEsperadoSistema = pixSistema + cartaoSistema + dinheiroSistema + financiadoraSistema + trocaSistema;
     } else {
-      pixSistema = vendasEsperadasHoje.pix;
-      cartaoSistema = vendasEsperadasHoje.cartao;
-      dinheiroSistema = vendasEsperadasHoje.especie;
-      financiadoraSistema = vendasEsperadasHoje.boleto;
-      trocaSistema = vendasEsperadasHoje.troca;
-      totalEsperadoSistema = vendasEsperadasHoje.total;
+      totalPix = vendasEsperadasHoje.pix;
+      totalCartao = vendasEsperadasHoje.cartao;
+      totalDinheiro = vendasEsperadasHoje.especie;
+      totalFinanciadoras = vendasEsperadasHoje.boleto;
+      totalTroca = vendasEsperadasHoje.troca;
     }
 
+    const totalEsperadoSistema = totalPix + totalCartao + totalDinheiro + totalFinanciadoras + totalTroca;
+
     return {
-      pixSistema: Number(pixSistema.toFixed(2)),
-      cartaoSistema: Number(cartaoSistema.toFixed(2)),
-      dinheiroSistema: Number(dinheiroSistema.toFixed(2)),
-      financiadoraSistema: Number(financiadoraSistema.toFixed(2)),
-      trocaSistema: Number(trocaSistema.toFixed(2)),
+      pixSistema: Number(totalPix.toFixed(2)),
+      cartaoSistema: Number(totalCartao.toFixed(2)),
+      dinheiroSistema: Number(totalDinheiro.toFixed(2)),
+      financiadoraSistema: Number(totalFinanciadoras.toFixed(2)),
+      trocaSistema: Number(totalTroca.toFixed(2)),
       totalEsperadoSistema: Number(totalEsperadoSistema.toFixed(2))
     };
-  }, [vendasDiaAuditoria, vendasEsperadasHoje, normalizarMetodo]);
+  }, [vendasDiaAuditoria, vendasEsperadasHoje]);
 
   // Recálculo em tempo real do total digitado e da divergência
   const totalDigitado = React.useMemo(() => {
