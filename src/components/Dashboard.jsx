@@ -11363,45 +11363,43 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     let filtrados = catalogoCompleto.filter((produto) => {
       if (!produto) return false;
-      const catProd = String(produto.categoria || produto.categoria_nome || produto.category || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const tipoProd = String(produto.tipo || produto.tipo_produto || produto.type || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const nomeProd = String(produto.nome || produto.name || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const catProd = String(produto.categoria || produto.categoria_nome || produto.category || '').toLowerCase().trim();
+      const tipoProd = String(produto.tipo || produto.tipo_produto || produto.type || '').toLowerCase().trim();
+      const nomeProd = String(produto.nome || produto.name || '').toLowerCase().trim();
 
-      // Caso especial: SUPORTE (ex: "Suporte de celular")
+      // 1. CASO SEJA SUPORTE DE CELULAR:
       if (filtroNorm.includes('suporte')) {
-        // NUNCA incluir aparelhos reais (celulares/smartphones)
-        const isAparelhoReal = (tipoProd.includes('celul') || tipoProd.includes('smart') || tipoProd.includes('aparelho')) &&
-          !nomeProd.includes('suporte') && !catProd.includes('suporte');
-        if (isAparelhoReal) return false;
+        // REGRA OBRIGATÓRIA: Deve conter explicitamente "suporte" no nome ou na categoria
+        const ehSuporte = nomeProd.includes('suporte') || catProd.includes('suporte');
 
-        return (
-          catProd.includes('suporte') ||
-          nomeProd.includes('suporte') ||
-          catProd.includes('acess') ||
-          tipoProd.includes('acess')
-        );
+        // TRAVA DE SEGURANÇA: Não pode ser cabo, adaptador, fone, caixa de som ou aparelho
+        const ehOutroAcessorio =
+          nomeProd.includes('cabo') ||
+          nomeProd.includes('adaptador') ||
+          nomeProd.includes('fone') ||
+          nomeProd.includes('boombox') ||
+          nomeProd.includes('airpods') ||
+          nomeProd.includes('caixa de som') ||
+          nomeProd.includes('carregador') ||
+          tipoProd.includes('celul') ||
+          tipoProd.includes('smart') ||
+          tipoProd === 'aparelho';
+
+        return ehSuporte && !ehOutroAcessorio;
       }
 
-      // Caso especial: CELULAR / SMARTPHONE (APARELHOS REAIS)
-      // Não deve capturar suportes, capas, películas, etc.
+      // 2. CASO SEJA CELULARES / SMARTPHONES:
       if (filtroNorm === 'celular' || filtroNorm === 'celulares' || filtroNorm === 'smartphone' || filtroNorm === 'smartphones' || catObjNorm === 'celulares' || catObjNorm === 'celular' || catObjNorm === 'smartphones') {
         const isAcessorio = ehAcessorioEstoque(produto.nome, produto.categoria);
         if (isAcessorio) return false;
 
         return (
-          catProd.includes('celul') ||
-          catProd.includes('smart') ||
-          tipoProd.includes('celul') ||
-          tipoProd.includes('smart') ||
-          tipoProd === 'aparelho' ||
-          catProd === 'ios' ||
-          catProd === 'android' ||
-          produto.exige_imei === true ||
-          produto.is_celular === true
+          (catProd === 'celulares' || catProd === 'celular' || catProd === 'smartphones' || catProd === 'smartphone' || tipoProd === 'aparelho' || tipoProd.includes('celul') || tipoProd.includes('smart')) &&
+          !nomeProd.includes('suporte')
         );
       }
 
-      // Caso especial: IOS
+      // 3. CASO ESPECIAL: IOS
       if (filtroNorm === 'ios') {
         const isAcessorio = ehAcessorioEstoque(produto.nome, produto.categoria);
         if (isAcessorio) return false;
@@ -11415,7 +11413,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         );
       }
 
-      // Caso especial: ANDROID
+      // 4. CASO ESPECIAL: ANDROID
       if (filtroNorm === 'android') {
         const isAcessorio = ehAcessorioEstoque(produto.nome, produto.categoria);
         if (isAcessorio) return false;
@@ -11425,25 +11423,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return isCelular && !isIphone;
       }
 
-      // Caso especial: ACESSORIO
+      // 5. CASO ESPECIAL: ACESSORIO
       if (filtroNorm === 'acessorio' || filtroNorm.includes('acess')) {
         return catProd.includes('acess') || tipoProd.includes('acess') || ehAcessorioEstoque(produto.nome, produto.categoria);
       }
 
-      // Caso especial: APPLE_JBL_CONSOLE
-      if (filtroNorm === 'apple_jbl_console') {
-        return (
-          catProd.includes('apple') || catProd.includes('jbl') || catProd.includes('console') || catProd.includes('game') ||
-          nomeProd.includes('jbl') || nomeProd.includes('playstation') || nomeProd.includes('xbox') || nomeProd.includes('nintendo')
-        );
-      }
-
-      // Caso especial: SERVICO
+      // 6. CASO ESPECIAL: SERVICO
       if (filtroNorm === 'servico' || filtroNorm.includes('servic')) {
         return catProd.includes('servic') || tipoProd.includes('servic');
       }
 
-      // Correspondência estrita para a categoria cadastrada selecionada
+      // 7. DEMAIS CATEGORIAS (Cabos, Caixas de Som, Fones, etc.):
       const catObjNomeNorm = catObj ? String(catObj.nome || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
       const catObjIdNorm = catObj ? String(catObj.id || '').toLowerCase().trim() : '';
       const prodCatId = String(produto.categoria_id || '').toLowerCase().trim();
@@ -11457,10 +11447,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       return (
         catProd === filtroNorm ||
+        catProd.includes(filtroNorm) ||
         tipoProd === filtroNorm ||
-        (catObjNomeNorm && (catProd === catObjNomeNorm || tipoProd === catObjNomeNorm)) ||
-        (catObjIdNorm && (prodCatId === catObjIdNorm || catProd === catObjIdNorm)) ||
-        catProd.includes(filtroNorm)
+        (catObjNomeNorm && (catProd === catObjNomeNorm || catProd.includes(catObjNomeNorm) || tipoProd === catObjNomeNorm)) ||
+        (catObjIdNorm && (prodCatId === catObjIdNorm || catProd === catObjIdNorm))
       );
     });
 
