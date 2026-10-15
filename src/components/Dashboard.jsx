@@ -1409,6 +1409,43 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [transfOrigemId, profile?.filial_id, activeFilialId, transfDestinoId]);
 
+  // Regra de Negócio: Abatimento por Entrada de Aparelho (Troca) permitido EXCLUSIVAMENTE para compra de iPhone
+  const temIphoneNoCarrinho = useMemo(() => {
+    if (!pdvCart || pdvCart.length === 0) return false;
+    return pdvCart.some((item) => {
+      const prod = item.produto || item;
+      const nome = String(prod.nome || item.nome || item.produto_nome || '').toUpperCase();
+      return nome.includes('IPHONE');
+    });
+  }, [pdvCart]);
+
+  // Se o iPhone for removido do carrinho, limpar qualquer abatimento ou dados de troca de aparelho
+  useEffect(() => {
+    if (!temIphoneNoCarrinho) {
+      if (pdvUsadoList.length > 0) {
+        setPdvUsadoList([]);
+        setPdvUsadoProdutoSelecionado(null);
+        setPdvUsadoNomeProduto('');
+        setPdvUsadoImei('');
+        setPdvUsadoValor('');
+      }
+      if (pdvListaPagamentos.some(p => p.metodo === 'troca')) {
+        setPdvListaPagamentos(prev => prev.filter(p => p.metodo !== 'troca'));
+      }
+      if (pdvNovoMetodo === 'troca') {
+        setPdvNovoMetodo('pix');
+      }
+      if (pdvMetodoPagamento === 'troca') {
+        setPdvMetodoPagamento('pix');
+      }
+      setPdvTrocaModelo('');
+      setPdvTrocaCapacidade('');
+      setPdvTrocaCor('');
+      setPdvTrocaImei('');
+      setPdvTrocaValor('');
+    }
+  }, [temIphoneNoCarrinho, pdvUsadoList.length, pdvListaPagamentos, pdvNovoMetodo, pdvMetodoPagamento]);
+
   // Estado para visualização de comprovante em Modal (Gerente)
   const [modalComprovante, setModalComprovante] = useState(null);
   const [modalRelatorioAberto, setModalRelatorioAberto] = useState(false);
@@ -14198,6 +14235,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     const isTrocaAtiva = pdvMetodoPagamento === 'troca';
+    const temPagamentoTroca = isTrocaAtiva || (pdvListaPagamentos && pdvListaPagamentos.some(p => p.metodo === 'troca')) || pdvUsadoList.length > 0;
+    if (temPagamentoTroca && !temIphoneNoCarrinho) {
+      alert('A forma de pagamento "Entrada de Aparelho" é permitida exclusivamente na compra de um iPhone.');
+      return;
+    }
+
     if (isTrocaAtiva && pdvUsadoList.length === 0) {
       alert('Método de pagamento por Troca selecionado, mas nenhum aparelho usado foi adicionado.');
       return;
@@ -19839,7 +19882,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               { value: 'cartao_debito', label: '💳 Débito' },
                               { value: 'dinheiro', label: '💵 Dinheiro' },
                               ...(eElegivelBoleto ? [{ value: 'boleto', label: '📄 Boleto' }] : []),
-                              { value: 'troca', label: '📱 ENTRADA DE APARELHO' }
+                              ...(temIphoneNoCarrinho ? [{ value: 'troca', label: '📱 ENTRADA DE APARELHO' }] : [])
                             ];
 
                             return (
