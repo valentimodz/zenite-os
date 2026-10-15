@@ -11556,16 +11556,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       let finalQty = qtyToAdd;
 
       if (!existingProd) {
-        // Se NÃO existir na filial selecionada: criar primeiro a linha na tabela produtos com a filial_id de destino
+        const tipoCalculado = selectedProdutoMestre.tipo ||
+          (isCelular ? 'CELULAR' : (ehAcessorioEstoque(selectedProdutoMestre.nome, selectedProdutoMestre.categoria) ? 'ACESSORIO' : 'PRODUTO'));
+
+        const precoUnitario = parseFloat(selectedProdutoMestre.preco || selectedProdutoMestre.preco_venda || 0);
+
         const prodPayload = {
           empresa_id: targetEmpresaId,
           filial_id: selectedFilialDestino,
           nome: selectedProdutoMestre.nome,
-          tipo: selectedProdutoMestre.tipo,
-          categoria: selectedProdutoMestre.categoria,
-          cor: targetCor,
+          categoria: selectedProdutoMestre.categoria || 'Geral',
+          tipo: tipoCalculado,
+          cor: targetCor || 'Sem cor',
           codigo_barras: codigoBarrasFinal,
-          preco: parseFloat(selectedProdutoMestre.preco || 0),
+          preco: precoUnitario,
+          preco_venda: parseFloat(selectedProdutoMestre.preco_venda || precoUnitario),
+          preco_custo: parseFloat(selectedProdutoMestre.preco_custo || 0),
           quantidade: qtyToAdd
         };
 
@@ -11854,8 +11860,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             empresa_id: company.id,
             filial_id: entradaFilial,
             nome: entradaProdutoSelecionado.nome,
-            tipo: entradaProdutoSelecionado.tipo,
-            categoria: entradaProdutoSelecionado.categoria,
+            tipo: entradaProdutoSelecionado.tipo || (isCelular ? 'CELULAR' : 'PRODUTO'),
+            categoria: entradaProdutoSelecionado.categoria || 'Geral',
             preco: preco,
             quantidade: qtd
           })
