@@ -1017,10 +1017,58 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [estoqueSubMenuOpen, setEstoqueSubMenuOpen] = useState(true);
 
   // --- Tenant Configurations & SaaS Faturas ---
-  const [tenantSettings, setTenantSettings] = useState({ enable_troca: true, enable_imei: true });
+  const [tenantSettings, setTenantSettings] = useState({ enable_troca: true, enable_imei: true, limite_desconto_ativo: false });
+  const [limiteDescontoAtivo, setLimiteDescontoAtivo] = useState(false);
   const [tenantFaturas, setTenantFaturas] = useState([]);
   const [isLoadingFaturas, setIsLoadingFaturas] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+
+  // Sincronizar limiteDescontoAtivo com company e tenantSettings
+  useEffect(() => {
+    const ativo = company?.limite_desconto_ativo ?? tenantSettings?.limite_desconto_ativo ?? false;
+    setLimiteDescontoAtivo(Boolean(ativo));
+  }, [company?.limite_desconto_ativo, tenantSettings?.limite_desconto_ativo]);
+
+  // Ao alternar o switch de limite de desconto no PDV
+  const handleToggleLimiteDesconto = async (novoValor) => {
+    setLimiteDescontoAtivo(novoValor);
+    setTenantSettings(prev => ({ ...prev, limite_desconto_ativo: novoValor }));
+    setCompany(prev => prev ? { ...prev, limite_desconto_ativo: novoValor } : prev);
+
+    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    let updateError = null;
+
+    if (targetEmpresaId) {
+      try {
+        const { error: errEmpresas } = await supabase
+          .from('empresas')
+          .update({ limite_desconto_ativo: novoValor })
+          .eq('id', targetEmpresaId);
+
+        if (errEmpresas) {
+          // Fallback para tabela companies caso o schema utilize 'companies'
+          const { error: errCompanies } = await supabase
+            .from('companies')
+            .update({ limite_desconto_ativo: novoValor })
+            .eq('id', targetEmpresaId);
+
+          if (errCompanies) updateError = errCompanies;
+        }
+      } catch (err) {
+        updateError = err;
+      }
+    }
+
+    if (updateError) {
+      console.warn('Erro ao atualizar limite_desconto_ativo no banco:', updateError);
+      showToast("Erro ao atualizar configuração.", 'error');
+      setLimiteDescontoAtivo(!novoValor);
+      setTenantSettings(prev => ({ ...prev, limite_desconto_ativo: !novoValor }));
+      setCompany(prev => prev ? { ...prev, limite_desconto_ativo: !novoValor } : prev);
+    } else {
+      showToast(novoValor ? "Limite de desconto ATIVADO." : "Desconto livre LIBERADO.", 'success');
+    }
+  };
 
   // --- Gestão de Equipe (Tenant Owner RBAC) ---
   const [teamMembers, setTeamMembers] = useState([]);
@@ -13740,51 +13788,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const item = pdvCart.find(i => i.cartId === cartId);
     if (!item) return;
 
-    const precoOriginal = Number(item.produto?.preco) || 0;
+    const precoBase = Number(item.produto?.preco || item.produto?.preco_tabela || item.valorUnitario || 0);
     let precoNovo = parseFloat(item.valorUnitario);
 
     // Se o valor digitado estiver vazio ou for inválido (NaN), restaura o preço original
     if (isNaN(precoNovo) || item.valorUnitario === '' || item.valorUnitario === null || item.valorUnitario === undefined) {
-      setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoOriginal } : i));
+      setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoBase } : i));
       return;
     }
 
     if (precoNovo < 0) precoNovo = 0;
 
-    const roleUsuario = profile?.role;
-    const descontoMaximoPermitido = calcularDescontoMaximo(item.produto, roleUsuario);
-    const precoMinimoPermitido = Math.max(0, precoOriginal - descontoMaximoPermitido);
+    const roleUpper = String(profile?.role || '').toUpperCase();
+    const ehAdmin = roleUpper === 'ADMIN' || roleUpper === 'ADMINISTRADOR' || ['SUPER_ADMIN', 'OWNER', 'DONO', 'MASTER'].includes(roleUpper);
+    const limiteAtivo = company?.limite_desconto_ativo ?? tenantSettings?.limite_desconto_ativo ?? limiteDescontoAtivo ?? false;
 
-    // Bloqueia SOMENTE se o valor inserido for estritamente MENOR que o preço mínimo (Valor Inserido < Preço Mínimo)
-    if (precoNovo < (precoMinimoPermitido - 0.001)) {
-      const tipo = (item.produto?.tipo || '').toUpperCase();
-      const catLower = (item.produto?.categoria || '').toLowerCase();
-      const nomeLower = (item.produto?.nome || '').toLowerCase();
-      const isAparelho = tipo === 'APARELHO' || tipo === 'CELULAR' || catLower.includes('celular') || catLower.includes('smartphone') || catLower.includes('aparelho');
-      const isAppleAparelho = isAparelho && (nomeLower.includes('iphone') || nomeLower.includes('apple') || catLower.includes('ios'));
-
-      if (isAppleAparelho) {
-        showToast('Desconto Bloqueado: Aparelhos iPhone possuem 0% de desconto permitido para vendedores.', 'error');
-      } else {
-        const percMax = Math.round((descontoMaximoPermitido / (precoOriginal || 1)) * 100);
-        showToast(`Desconto Bloqueado: O desconto máximo permitido para este item é ${percMax}% (Preço mínimo: R$ ${precoMinimoPermitido.toFixed(2)}).`, 'error');
-      }
-
-      // Reverte e trava no preço mínimo permitido
-      setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoMinimoPermitido } : i));
+    // REGRA 1: Se for ADMIN, NUNCA bloqueia desconto
+    // REGRA 2: Se a trava estiver desativada na empresa, NUNCA bloqueia (libera negociação livre)
+    if (ehAdmin || !limiteAtivo) {
+      setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoNovo } : i));
       return;
     }
 
-    const custo = Number(item.produto?.preco_custo) || 0;
-    if (custo > 0 && precoNovo < custo) {
-      if (!['GERENTE', 'ADMIN', 'SUPER_ADMIN', 'DONO', 'OWNER'].includes(profile?.role)) {
-        showToast('Desconto bloqueado: Somente administradores ou gerentes podem conceder descontos abaixo do preço de custo.', 'error');
-        setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoOriginal } : i));
-        return;
-      }
+    // REGRA 3: Aplica a validação apenas para vendedores comuns quando o toggle estiver ligado:
+    const precoMinimo = precoBase * 0.95; // 5% de margem
+
+    if (precoNovo < (precoMinimo - 0.001)) {
+      showToast(`Desconto Bloqueado: O desconto máximo permitido para este item é 5% (Preço mínimo: R$ ${precoMinimo.toFixed(2)}).`, 'error');
+      // Reverte e trava no preço mínimo permitido
+      setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoMinimo } : i));
+      return;
     }
 
-    // Se Valor Inserido >= Preço Mínimo, aceita livremente o valor
+    // Se passou na validação do limite de 5%, aceita o valor digitado
     setPdvCart(prev => prev.map(i => i.cartId === cartId ? { ...i, valorUnitario: precoNovo } : i));
   };
 
@@ -26293,6 +26329,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   })}
                                   disabled={isSavingSettings}
                                   className={`w-12 h-6 flex items-center rounded-full p-1 transition-all duration-300 ${tenantSettings.enable_imei ? 'bg-[#6A0DAD] justify-end' : 'bg-gray-800 justify-start'
+                                    }`}
+                                >
+                                  <span className="bg-white w-4 h-4 rounded-full shadow-md"></span>
+                                </button>
+                              </div>
+
+                              {/* Alternador de Limite Rígido de Desconto no PDV */}
+                              <div className="flex items-center justify-between p-4 bg-black border border-[#222] rounded-lg">
+                                <div>
+                                  <span className="block font-bold text-white text-sm">Limite Rígido de Desconto no PDV</span>
+                                  <span className="text-[11px] text-gray-500 block mt-0.5">Quando ativado, bloqueia vendas com desconto superior a 5% para operadores comuns. Desative para liberar negociação livre.</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleLimiteDesconto(!limiteDescontoAtivo)}
+                                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-all duration-300 ${limiteDescontoAtivo ? 'bg-[#6A0DAD] justify-end' : 'bg-gray-800 justify-start'
                                     }`}
                                 >
                                   <span className="bg-white w-4 h-4 rounded-full shadow-md"></span>
