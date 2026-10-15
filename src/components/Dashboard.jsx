@@ -20089,14 +20089,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </div>
 
                         {permiteParticipacaoTreener(pdvCart) && (
-                          <div>
-                            <label htmlFor="pdvTreenerSelect" className="block text-xs font-bold text-primary uppercase tracking-wide flex items-center justify-between mb-1">
-                              <span>Trainee Bonificado (1% em Boletos / Financiadoras)</span>
-                              {selectedTreenerId && (
-                                <span className="text-[10px] text-primary bg-primary/10 px-1.5 py-0.5 rounded-lg border border-primary/20 font-mono">
-                                  Bonificação Ativa
-                                </span>
-                              )}
+                          <div className="mt-3">
+                            <label className="text-xs font-semibold text-purple-400 uppercase tracking-wider block mb-1">
+                              Selecionar Trainee
                             </label>
                             <select
                               id="pdvTreenerSelect"
@@ -20107,7 +20102,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 setPdvVendaTrainee(Boolean(id));
                                 if (!id) setPdvComissaoTraineeInput('');
                               }}
-                              className="w-full bg-surface border border-border focus:border-primary rounded-lg px-3 py-2 text-xs text-foreground outline-none cursor-pointer font-bold"
+                              className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-white text-sm focus:border-purple-500 focus:outline-none cursor-pointer"
                             >
                               <option value="">Nenhum / Venda Solo</option>
                               {treenersFilial.map((t) => (
@@ -20116,23 +20111,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 </option>
                               ))}
                             </select>
-
-                            {selectedTreenerId && (
-                              <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between gap-3 animate-fadeIn">
-                                <label className="text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
-                                  Comissão Trainee (R$):
-                                </label>
-                                <div className="flex-1 max-w-[160px]">
-                                  <input
-                                    type="text"
-                                    value={pdvComissaoTraineeInput}
-                                    onChange={(e) => setPdvComissaoTraineeInput(e.target.value)}
-                                    placeholder="Ex: 5,00 ou 10,00"
-                                    className="w-full bg-surface border border-border focus:border-primary rounded-lg px-2.5 py-1 text-xs text-foreground font-mono outline-none text-right"
-                                  />
-                                </div>
-                              </div>
-                            )}
                           </div>
                         )}
                       </div>
