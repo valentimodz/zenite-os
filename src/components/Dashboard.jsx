@@ -150,6 +150,46 @@ const permiteParticipacaoTreener = (carrinho) => {
   return Boolean(carrinho && carrinho.length > 0);
 };
 
+// Checagem rigorosa de acessório para evitar falso positivo de IMEI (ex: "Suporte de celular")
+const ehAcessorioEstoque = (nome, cat) => {
+  const termosAcessorios = [
+    'SUPORTE', 'CAPA', 'CASE', 'PELIC', 'CABO', 'FONE', 
+    'CARREGADOR', 'FONTE', 'ADAPTADOR', 'CHIP', 'BRINDE', 
+    'POWER BANK', 'FILME', 'BRACADEIRA', 'BRAÇADEIRA'
+  ];
+  const texto = `${nome || ''} ${cat || ''}`.toUpperCase();
+  return termosAcessorios.some(termo => texto.includes(termo));
+};
+
+// Define se o produto realmente exige IMEI na Entrada / Reposição Física
+const checarRequerImeiEstoqueFisico = (produto, categoriaFiltro) => {
+  const categoriaTexto = String(produto?.categoria || produto?.tipo || categoriaFiltro || '').trim().toUpperCase();
+  const nomeProduto = String(produto?.nome || '').trim().toUpperCase();
+
+  // Se for qualquer tipo de acessório (ex: Suporte de celular, Capas, Cabos), NUNCA exige IMEI
+  if (ehAcessorioEstoque(nomeProduto, categoriaTexto)) {
+    return false;
+  }
+
+  // Se tiver flag explícita de controle de IMEI ou tipo/categoria de aparelho
+  return (
+    produto?.controla_imei === true ||
+    produto?.exige_imei === true ||
+    produto?.is_celular === true ||
+    produto?.tipo === 'APARELHO' ||
+    produto?.tipo === 'CELULAR' ||
+    produto?.tipo === 'SMARTPHONE' ||
+    categoriaTexto === 'CELULARES' ||
+    categoriaTexto === 'CELULAR' ||
+    categoriaTexto === 'SMARTPHONES' ||
+    categoriaTexto === 'SMARTPHONE' ||
+    categoriaTexto === 'APARELHOS' ||
+    categoriaTexto === 'APARELHO' ||
+    categoriaTexto === 'IOS' ||
+    categoriaTexto === 'ANDROID'
+  );
+};
+
 // Categorias Críticas que exigem cadastro e identificação completa do cliente no PDV (Regra das Duas Esteiras)
 const CATEGORIAS_CRITICAS = ['CELULARES', 'VIDEOGAMES', 'CAIXAS DE SOM', 'TABLETS'];
 
@@ -11426,7 +11466,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       return;
     }
 
-    const isCelular = selectedProdutoMestre.tipo === 'CELULAR' || selectedProdutoMestre.tipo === 'Celular';
+    const isCelular = checarRequerImeiEstoqueFisico(selectedProdutoMestre, entradaFiltroCategoria);
     const imei = isCelular ? entradaImei.trim() : null;
 
     if (isCelular) {
@@ -12077,15 +12117,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       for (const item of entradaLoteItens) {
         try {
           const isCelular = Boolean(
-            item.isCelular ||
-            item.tipo?.toLowerCase().includes('celular') ||
-            item.tipo?.toLowerCase().includes('smartphone') ||
-            item.categoria?.toLowerCase().includes('celular') ||
-            item.categoria?.toLowerCase().includes('smartphone') ||
-            item.categoria?.toLowerCase().includes('ios') ||
-            item.categoria?.toLowerCase().includes('android') ||
-            item.exige_imei === true ||
-            item.is_celular === true
+            item.isCelular !== undefined
+              ? item.isCelular
+              : checarRequerImeiEstoqueFisico(item, item.categoria)
           );
 
           const imei = isCelular ? String(item.imei || '').trim() : null;
@@ -21546,26 +21580,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                   {/* Campos Dinâmicos (Celular vs Acessório) */}
                   {(() => {
-                    const isCelularForm = Boolean(
-                      (selectedProdutoMestre && (
-                        selectedProdutoMestre.tipo?.toLowerCase().includes('celular') ||
-                        selectedProdutoMestre.tipo?.toLowerCase().includes('smartphone') ||
-                        selectedProdutoMestre.categoria?.toLowerCase().includes('celular') ||
-                        selectedProdutoMestre.categoria?.toLowerCase().includes('smartphone') ||
-                        selectedProdutoMestre.categoria?.toLowerCase().includes('ios') ||
-                        selectedProdutoMestre.categoria?.toLowerCase().includes('android') ||
-                        selectedProdutoMestre.exige_imei === true ||
-                        selectedProdutoMestre.is_celular === true
-                      )) ||
-                      (!selectedProdutoMestre && entradaFiltroCategoria && (
-                        entradaFiltroCategoria.toLowerCase().includes('celular') ||
-                        entradaFiltroCategoria.toLowerCase().includes('smartphone') ||
-                        entradaFiltroCategoria.toLowerCase().includes('ios') ||
-                        entradaFiltroCategoria.toLowerCase().includes('android')
-                      ))
-                    );
+                    const requerImei = checarRequerImeiEstoqueFisico(selectedProdutoMestre, entradaFiltroCategoria);
 
-                    if (isCelularForm) {
+                    if (requerImei) {
                       return (
                         <>
                           <div>
@@ -21630,7 +21647,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       <div className="space-y-4">
                         <div>
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                            Código de Barras (EAN / Barcode) *
+                            Código de Barras (EAN / Barcode)
                           </label>
                           <input
                             type="text"
@@ -21651,6 +21668,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             onChange={(e) => setEntradaQtdAcessorio(e.target.value)}
                             className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all font-bold text-center"
                             placeholder="1"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                            Cor / Variação (Opcional)
+                          </label>
+                          <input
+                            type="text"
+                            value={entradaCorDispositivo}
+                            onChange={(e) => setEntradaCorDispositivo(e.target.value)}
+                            placeholder="Ex: Preto, Branco, Transparente..."
+                            list="lista-cores-sugeridas-estoque"
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all"
                           />
                         </div>
                       </div>
@@ -21683,14 +21713,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           showToast('Selecione um Produto Mestre antes.', 'error');
                           return;
                         }
-                        const isCel = Boolean(
-                          selectedProdutoMestre.tipo?.toLowerCase().includes('celular') ||
-                          selectedProdutoMestre.tipo?.toLowerCase().includes('smartphone') ||
-                          selectedProdutoMestre.categoria?.toLowerCase().includes('celular') ||
-                          selectedProdutoMestre.categoria?.toLowerCase().includes('smartphone') ||
-                          selectedProdutoMestre.exige_imei === true ||
-                          selectedProdutoMestre.is_celular === true
-                        );
+                        const isCel = checarRequerImeiEstoqueFisico(selectedProdutoMestre, entradaFiltroCategoria);
                         if (isCel) {
                           if (!entradaImei || entradaImei.length !== 15) {
                             showToast('Informe os 15 dígitos numéricos do IMEI.', 'error');
@@ -21714,7 +21737,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           preco_venda: selectedProdutoMestre.preco_venda,
                           codigo_barras: entradaCodigoBarras || selectedProdutoMestre.codigo_barras,
                           imei: isCel ? entradaImei : null,
-                          cor: isCel ? (entradaCorDispositivo || 'Preto') : null,
+                          cor: entradaCorDispositivo || (isCel ? 'Preto' : null),
                           quantidade: isCel ? 1 : (parseInt(entradaQtdAcessorio, 10) || 1),
                           isCelular: isCel
                         });
@@ -21736,7 +21759,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     <button
                       type="button"
                       onClick={handleSalvarEstoqueFisico}
-                      disabled={loadingEntrada || !selectedProdutoMestre || !(selectedFilialDestino || activeFilialId || profile?.filial_id) || ((selectedProdutoMestre?.tipo === 'CELULAR' || selectedProdutoMestre?.tipo === 'Celular') && !entradaImei)}
+                      disabled={
+                        loadingEntrada ||
+                        !selectedProdutoMestre ||
+                        !(selectedFilialDestino || activeFilialId || profile?.filial_id) ||
+                        (checarRequerImeiEstoqueFisico(selectedProdutoMestre, entradaFiltroCategoria) && !entradaImei)
+                      }
                       className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-[#111111] disabled:text-gray-600 disabled:cursor-not-allowed text-white font-bold py-2.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs shadow-md shadow-[#6A0DAD]/20 cursor-pointer"
                     >
                       {loadingEntrada ? (
