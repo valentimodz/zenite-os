@@ -15109,6 +15109,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           }
 
           // Registrar item_venda para auditoria detalhada com validação estrita e log agressivo
+          // Garante que trainee_id seja um UUID válido vindo de profiles ou null
+          const traineeIdValido = (resolvedTraineeId && isValidUuid(resolvedTraineeId)) ? resolvedTraineeId : null;
+
           const itemVendaPayload = {
             venda_id: obterUuidPuro(rpcRes.venda_id),
             empresa_id: obterUuidPuro(empresaId),
@@ -15127,13 +15130,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             valor_total: valorTotalNovo,
             comissao: comissaoCalculada,
             comissao_trainee: comissaoTraineeCalculada,
-            trainee_id: resolvedTraineeId
+            trainee_id: traineeIdValido
           };
 
           console.log("🛒 [ITENS_VENDA PAYLOAD] Gravando item no Supabase:", itemVendaPayload);
-          const { error: itemInsertErr } = await supabase
+          let { error: itemInsertErr } = await supabase
             .from('itens_venda')
             .insert(itemVendaPayload);
+
+          // Fallback resiliente: se der violação de chave estrangeira em trainee_id (ou constraint de chave externa), grava com trainee_id: null
+          if (itemInsertErr && (itemInsertErr.code === '23503' || String(itemInsertErr.message).includes('trainee_id') || String(itemInsertErr.message).includes('foreign key'))) {
+            console.warn("⚠️ [ITENS_VENDA] Violação de foreign key em trainee_id detectada. Tentando fallback com trainee_id: null...", itemInsertErr);
+            const { error: retryErr } = await supabase
+              .from('itens_venda')
+              .insert({
+                ...itemVendaPayload,
+                trainee_id: null
+              });
+            itemInsertErr = retryErr;
+          }
 
           if (itemInsertErr) {
             console.error("🚨 [ERRO CRÍTICO AO GRAVAR EM ITENS_VENDA]:", itemInsertErr, "\n📦 Payload enviado:", itemVendaPayload);
