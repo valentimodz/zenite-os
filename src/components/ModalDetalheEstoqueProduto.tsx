@@ -102,9 +102,26 @@ export default function ModalDetalheEstoqueProduto({
   const precoBaseVenda = Number(produto?.preco_venda || produto?.preco || 0);
 
   const categoriaNome = String(produto?.categoria || produto?.categoria_nome || categoria || '').toUpperCase();
-  const ehCelular = categoriaNome.includes('CELULAR') || 
-                    categoriaNome.includes('SMARTPHONE') || 
-                    produto?.controla_imei === true;
+  const nomeProdutoTexto = String(produtoNome || '').toUpperCase();
+
+  const ehAcessorioGarantido = (nome: string, cat: string) => {
+    const termos = [
+      'SUPORTE', 'CAPA', 'CASE', 'PELIC', 'CABO', 'FONE', 
+      'CARREGADOR', 'FONTE', 'ADAPTADOR', 'CHIP', 'BRINDE', 
+      'POWER BANK', 'FILME', 'BRACADEIRA'
+    ];
+    const str = `${nome || ''} ${cat || ''}`.toUpperCase();
+    return termos.some(termo => str.includes(termo));
+  };
+
+  // Se tiver palavras como SUPORTE, CAPA, CABO etc., NUNCA será celular e NUNCA pedirá IMEI:
+  const ehCelular = !ehAcessorioGarantido(nomeProdutoTexto, categoriaNome) && (
+    produto?.controla_imei === true ||
+    String(produto?.tipo || '').toUpperCase() === 'APARELHO' ||
+    categoriaNome === 'CELULARES' ||
+    categoriaNome === 'SMARTPHONES' ||
+    categoriaNome === 'APARELHOS'
+  );
 
   const ehCelularOuSerial = ehCelular;
   const isCelular = ehCelular;
