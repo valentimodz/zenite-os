@@ -339,13 +339,34 @@ function ProductTableRow({
   const hasImeiProp = Boolean(p.imei && String(p.imei).trim() !== '');
   const hasImeisList = listaImeisExtraidos.length > 0;
 
-  const isCelular = (
-    p.tipo === 'CELULAR' ||
-    String(p.categoria || '').toLowerCase().includes('celular') ||
-    ['IOS', 'ANDROID'].includes(String(p.categoria || '').toUpperCase()) ||
-    hasImeiProp ||
-    hasImeisList
-  );
+  const ehAparelhoReal = (item) => {
+    const cat = String(item.categoria || '').toUpperCase();
+    const nome = String(item.nome || item.produto || '').toUpperCase();
+
+    // Se tiver palavras de acessórios ou suportes, NUNCA é aparelho e NUNCA pede IMEI:
+    if (
+      nome.includes('SUPORTE') || cat.includes('SUPORTE') ||
+      nome.includes('CAPA') || cat.includes('CAPA') ||
+      nome.includes('CABO') || cat.includes('CABO') ||
+      nome.includes('FONE') || cat.includes('FONE') ||
+      cat.includes('RING LIGHT') || cat.includes('ACESSÓRIO') || cat.includes('ACESSORIO')
+    ) {
+      return false;
+    }
+
+    // É aparelho apenas se for explicitamente categoria de Celulares/Smartphones ou tiver controle de IMEI ativo:
+    return (
+      cat === 'CELULARES' || 
+      cat === 'SMARTPHONES' || 
+      item.tipo === 'APARELHO' || 
+      item.tipo === 'CELULAR' ||
+      item.controla_imei === true ||
+      Boolean(item.imei) ||
+      listaImeisExtraidos.length > 0
+    );
+  };
+
+  const isCelular = ehAparelhoReal(p);
 
   return (
     <React.Fragment>
