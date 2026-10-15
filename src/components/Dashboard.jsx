@@ -2005,70 +2005,43 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [categorias, categoriaProduto]);
 
-  // Busca dos Treeners/Trainees da Empresa (Sem filtro de filial_id para permitir atuação itinerante/multi-loja)
+  // Busca dos Treeners/Trainees da Empresa (Query ampla em profiles sem filtro de filial, aceitando role TRAINEE ou is_treinner)
   useEffect(() => {
-    const fetchTreeners = async () => {
+    const carregarListaTrainees = async () => {
       try {
-        const empId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
-        let traineesEncontrados = [];
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, nome, role, is_treinner, filial_id')
+          .or('role.ilike.%TRAINEE%,is_treinner.eq.true')
+          .order('nome', { ascending: true });
 
-        // 1. Tentar busca na tabela 'profiles'
-        try {
-          let profQuery = supabase
-            .from('profiles')
-            .select('id, nome, email, role, cargo, filial_id, is_treinner, ativo')
-            .order('nome', { ascending: true });
-
-          if (empId && empId !== 'MASTER' && empId !== 'all') {
-            profQuery = profQuery.or(`empresa_id.eq.${empId},empresa_id.is.null`);
+        if (error) {
+          console.error("Erro ao listar trainees:", error);
+          // Fallback resiliente caso haja erro de RLS ou filtro na view
+          const fallback = (teamMembers || []).filter(u => {
+            const r = String(u.role || u.cargo || '').toUpperCase();
+            return r.includes('TRAINEE') || Boolean(u.is_treinner);
+          });
+          if (fallback.length > 0) {
+            const unicosFallback = Array.from(new Map(fallback.map(item => [item.id, item])).values());
+            setTreenersFilial(unicosFallback);
           }
-
-          const { data: profsData, error: profsErr } = await profQuery;
-          if (!profsErr && Array.isArray(profsData) && profsData.length > 0) {
-            traineesEncontrados = profsData.filter(u => {
-              if (u.ativo === false || u.status === 'INATIVO') return false;
-              const roleUpper = String(u.role || u.cargo || u.perfil || '').toUpperCase();
-              return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER') || Boolean(u.is_treinner);
-            });
-          }
-        } catch (errP) {
-          console.warn('Aviso ao consultar trainees em profiles:', errP);
+          return;
         }
 
-        // 2. Se não encontrou ou como fallback/complemento, verificar também na tabela 'usuarios'
-        if (traineesEncontrados.length === 0) {
-          try {
-            let userQuery = supabase
-              .from('usuarios')
-              .select('id, nome, role, cargo, filial_id, ativo')
-              .order('nome', { ascending: true });
-
-            if (empId && empId !== 'MASTER' && empId !== 'all') {
-              userQuery = userQuery.or(`empresa_id.eq.${empId},empresa_id.is.null`);
-            }
-
-            const { data: usersData, error: usersErr } = await userQuery;
-            if (!usersErr && Array.isArray(usersData) && usersData.length > 0) {
-              traineesEncontrados = usersData.filter(u => {
-                if (u.ativo === false) return false;
-                const roleUpper = String(u.role || u.cargo || '').toUpperCase();
-                return roleUpper.includes('TRAINEE') || roleUpper.includes('TREENER') || roleUpper.includes('TREINER');
-              });
-            }
-          } catch (errU) {
-            console.warn('Aviso ao consultar trainees na tabela usuarios:', errU);
-          }
+        if (data) {
+          // Remove duplicados pelo ID se houver
+          const unicos = Array.from(new Map(data.map(item => [item.id, item])).values());
+          console.log("🔥 [FETCH TRAINEES] Trainees da base carregados:", unicos.length);
+          setTreenersFilial(unicos);
         }
-
-        console.log("🔥 [FETCH TRAINEES] Trainees itinerantes elegíveis carregados:", traineesEncontrados.length);
-        setTreenersFilial(traineesEncontrados);
       } catch (err) {
-        console.error('Erro ao carregar trainees da empresa:', err);
+        console.error("Falha ao buscar trainees:", err);
       }
     };
 
-    fetchTreeners();
-  }, [empresaId, activeEmpresaId, company?.id, profile?.empresa_id]);
+    carregarListaTrainees();
+  }, [teamMembers]);
 
   // Trava de Trainee: Se o carrinho for esvaziado, limpa a seleção de Treener Responsável
   useEffect(() => {
@@ -20093,19 +20066,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </label>
                             <select
                               id="pdvTreenerSelect"
-                              value={selectedTreenerId}
+                              value={selectedTreenerId || ''}
                               onChange={(e) => {
-                                const val = e.target.value;
-                                setSelectedTreenerId(val);
-                                setPdvVendaTrainee(!!val);
-                                if (!val) setPdvComissaoTraineeInput('');
+                                const id = e.target.value;
+                                setSelectedTreenerId(id || '');
+                                setPdvVendaTrainee(Boolean(id));
+                                if (!id) setPdvComissaoTraineeInput('');
                               }}
                               className="w-full bg-surface border border-border focus:border-primary rounded-lg px-3 py-2 text-xs text-foreground outline-none cursor-pointer font-bold"
                             >
                               <option value="">Nenhum / Venda Solo</option>
                               {treenersFilial.map((t) => (
                                 <option key={t.id} value={t.id}>
-                                  {t.nome} {t.role ? `(${t.role})` : (t.cargo ? `(${t.cargo})` : '')}
+                                  {t.nome}
                                 </option>
                               ))}
                             </select>
