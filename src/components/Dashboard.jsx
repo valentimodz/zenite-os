@@ -11210,36 +11210,44 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   };
 
-  // 1. Fetch de Produtos Mestres do Catálogo Geral (sem restrições fixas a celulares):
+  // 1. Fetch de Produtos Mestres do Catálogo Geral (produtos_catalogo + produtos):
   useEffect(() => {
     let isMounted = true;
     const fetchProdutosMestres = async () => {
       try {
-        let query = supabase
+        const empresaAlvo = profile?.empresa_id || session?.user?.user_metadata?.empresa_id;
+
+        // 1.1 Buscar produtos_catalogo
+        let catQuery = supabase
+          .from('produtos_catalogo')
+          .select('id, nome, categoria, tipo, codigo_barras, sku, preco, preco_custo');
+        if (empresaAlvo) {
+          catQuery = catQuery.eq('empresa_id', empresaAlvo);
+        }
+        const { data: catData } = await catQuery.order('nome', { ascending: true });
+
+        // 1.2 Buscar produtos
+        let prodQuery = supabase
           .from('produtos')
           .select('id, nome, categoria, tipo, codigo_barras, sku, preco, preco_custo');
-
-        const empresaAlvo = profile?.empresa_id || session?.user?.user_metadata?.empresa_id;
         if (empresaAlvo) {
-          query = query.eq('empresa_id', empresaAlvo);
+          prodQuery = prodQuery.eq('empresa_id', empresaAlvo);
         }
+        let { data: prodsData, error: prodErr } = await prodQuery.order('nome', { ascending: true });
 
-        let { data: prodsMestres, error } = await query.order('nome', { ascending: true });
-
-        // Fallback resiliente caso não encontre com empresa_id ou se a tabela exigir colunas básicas
-        if (error || !prodsMestres || prodsMestres.length === 0) {
+        if (prodErr || !prodsData || prodsData.length === 0) {
           const fb = await supabase
             .from('produtos')
             .select('id, nome, categoria, codigo_barras, sku')
             .order('nome', { ascending: true });
           if (fb.data && fb.data.length > 0) {
-            prodsMestres = fb.data;
+            prodsData = fb.data;
           }
         }
 
-        if (prodsMestres && isMounted) {
-          setProdutosMestres(prodsMestres);
-          console.log('Catalogo completo carregado:', (prodsMestres || []).map(p => ({ nome: p.nome, tipo: p.tipo, categoria: p.categoria })));
+        const todos = [...(catData || []), ...(prodsData || [])];
+        if (todos.length > 0 && isMounted) {
+          setProdutosMestres(todos);
         }
       } catch (err) {
         console.warn('Erro ao buscar produtos mestres do catálogo geral:', err);
@@ -11312,13 +11320,33 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const tipoProd = String(produto.tipo || produto.tipo_produto || produto.type || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       const nomeProd = String(produto.nome || produto.name || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-      // Caso especial: CELULAR / SMARTPHONE
-      if (filtroNorm === 'celular' || filtroNorm.includes('celul') || filtroNorm.includes('smart') || catObjNorm.includes('celul')) {
+      // Caso especial: SUPORTE (ex: "Suporte de celular")
+      if (filtroNorm.includes('suporte')) {
+        // NUNCA incluir aparelhos reais (celulares/smartphones)
+        const isAparelhoReal = (tipoProd.includes('celul') || tipoProd.includes('smart') || tipoProd.includes('aparelho')) &&
+          !nomeProd.includes('suporte') && !catProd.includes('suporte');
+        if (isAparelhoReal) return false;
+
+        return (
+          catProd.includes('suporte') ||
+          nomeProd.includes('suporte') ||
+          catProd.includes('acess') ||
+          tipoProd.includes('acess')
+        );
+      }
+
+      // Caso especial: CELULAR / SMARTPHONE (APARELHOS REAIS)
+      // Não deve capturar suportes, capas, películas, etc.
+      if (filtroNorm === 'celular' || filtroNorm === 'celulares' || filtroNorm === 'smartphone' || filtroNorm === 'smartphones' || catObjNorm === 'celulares' || catObjNorm === 'celular' || catObjNorm === 'smartphones') {
+        const isAcessorio = ehAcessorioEstoque(produto.nome, produto.categoria);
+        if (isAcessorio) return false;
+
         return (
           catProd.includes('celul') ||
           catProd.includes('smart') ||
           tipoProd.includes('celul') ||
           tipoProd.includes('smart') ||
+          tipoProd === 'aparelho' ||
           catProd === 'ios' ||
           catProd === 'android' ||
           produto.exige_imei === true ||
@@ -11328,6 +11356,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // Caso especial: IOS
       if (filtroNorm === 'ios') {
+        const isAcessorio = ehAcessorioEstoque(produto.nome, produto.categoria);
+        if (isAcessorio) return false;
+
         return (
           catProd.includes('ios') ||
           catProd.includes('iphone') ||
@@ -11339,6 +11370,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // Caso especial: ANDROID
       if (filtroNorm === 'android') {
+        const isAcessorio = ehAcessorioEstoque(produto.nome, produto.categoria);
+        if (isAcessorio) return false;
+
         const isIphone = catProd.includes('ios') || catProd.includes('iphone') || catProd.includes('apple') || nomeProd.includes('iphone');
         const isCelular = catProd.includes('celul') || catProd.includes('smart') || tipoProd.includes('celul') || tipoProd.includes('smart') || produto.exige_imei === true;
         return isCelular && !isIphone;
@@ -11346,7 +11380,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // Caso especial: ACESSORIO
       if (filtroNorm === 'acessorio' || filtroNorm.includes('acess')) {
-        return catProd.includes('acess') || tipoProd.includes('acess');
+        return catProd.includes('acess') || tipoProd.includes('acess') || ehAcessorioEstoque(produto.nome, produto.categoria);
       }
 
       // Caso especial: APPLE_JBL_CONSOLE
@@ -11367,11 +11401,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const catObjIdNorm = catObj ? String(catObj.id || '').toLowerCase().trim() : '';
       const prodCatId = String(produto.categoria_id || '').toLowerCase().trim();
 
+      // Se a categoria selecionada for um acessório, evitar aparelhos celulares
+      if (ehAcessorioEstoque('', filtroNorm) || ehAcessorioEstoque('', catObjNomeNorm)) {
+        if (!ehAcessorioEstoque(produto.nome, produto.categoria) && (produto.exige_imei === true || tipoProd.includes('celul') || tipoProd.includes('smart'))) {
+          return false;
+        }
+      }
+
       return (
         catProd === filtroNorm ||
         tipoProd === filtroNorm ||
         (catObjNomeNorm && (catProd === catObjNomeNorm || tipoProd === catObjNomeNorm)) ||
-        (catObjIdNorm && (prodCatId === catObjIdNorm || catProd === catObjIdNorm))
+        (catObjIdNorm && (prodCatId === catObjIdNorm || catProd === catObjIdNorm)) ||
+        catProd.includes(filtroNorm)
       );
     });
 
