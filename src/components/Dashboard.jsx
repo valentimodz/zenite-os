@@ -14910,19 +14910,40 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             throw new Error("Tentativa de venda sem vendedor logado.");
           }
 
-          // Resolução explícita do cliente selecionado no checkout
+          // Resolução explícita e prioritária do cliente selecionado no checkout (PDV)
           const clienteSelecionadoObj = selectedPdvCliente || clienteResolvido || null;
-          const finalClienteId = clienteSelecionadoObj?.id
-            ? clienteSelecionadoObj.id
-            : (cliente_id || (isConsumidorFinal ? '3788fcc4-423c-46ce-a02e-5906d805925d' : (idPadraoConsumidor || '3788fcc4-423c-46ce-a02e-5906d805925d')));
 
-          const finalClienteNome = (
-            clienteSelecionadoObj?.nome ||
+          // Se tiver cliente real selecionado/cadastrado, usa seu ID diretamente; fallback apenas se venda avulsa / consumidor final
+          const finalClienteId = (clienteSelecionadoObj?.id && isValidUuid(clienteSelecionadoObj.id) && clienteSelecionadoObj.id !== CONSUMIDOR_FINAL_UUID && clienteSelecionadoObj.id !== GENERIC_CONSUMIDOR_UUID)
+            ? clienteSelecionadoObj.id
+            : (cliente_id && isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID && cliente_id !== GENERIC_CONSUMIDOR_UUID
+              ? cliente_id
+              : (isConsumidorFinal ? (idPadraoConsumidor || '3788fcc4-423c-46ce-a02e-5906d805925d') : (clienteIdBanco || idPadraoConsumidor || '3788fcc4-423c-46ce-a02e-5906d805925d')));
+
+          // Salvar o nome textual diretamente na coluna cliente_nome (prioriza nome do cliente selecionado)
+          const rawNomeCliente = clienteSelecionadoObj?.nome ||
             clienteSelecionadoObj?.razao_social ||
             (pdvClienteNome && pdvClienteNome.trim() && !['consumidor final', 'consumidor balcão', 'consumidor balcao', 'consumidor'].includes(pdvClienteNome.trim().toLowerCase()) ? pdvClienteNome.trim() : null) ||
             (nomeClienteFinal && !['consumidor final', 'consumidor balcão', 'consumidor balcao', 'consumidor'].includes(nomeClienteFinal.toLowerCase()) ? nomeClienteFinal : null) ||
-            'Consumidor Final'
-          ).trim();
+            null;
+          const finalClienteNome = rawNomeCliente ? rawNomeCliente.trim() : 'Consumidor Final';
+
+          const finalClienteCpfCnpj = clienteSelecionadoObj?.cpf ||
+            clienteSelecionadoObj?.cpf_cnpj ||
+            clienteSelecionadoObj?.cnpj ||
+            resolvedClienteCpf ||
+            (pdvClienteCpfCnpj && pdvClienteCpfCnpj.trim() && pdvClienteCpfCnpj.trim() !== '000.000.000-01' ? pdvClienteCpfCnpj.trim() : null) ||
+            null;
+
+          const finalClienteTelefone = clienteSelecionadoObj?.telefone ||
+            resolvedClienteTelefone ||
+            (pdvClienteTelefone && pdvClienteTelefone.trim() ? pdvClienteTelefone.trim() : null) ||
+            null;
+
+          const finalClienteEmail = clienteSelecionadoObj?.email ||
+            resolvedClienteEmail ||
+            (pdvClienteEmail && pdvClienteEmail.trim() ? pdvClienteEmail.trim() : null) ||
+            null;
 
           const payloadVendaUpdate = {
             empresa_id: obterUuidPuro(empresaId),
@@ -14932,11 +14953,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             imei_novo: item.imei || null,
             imei: item.imei || null,
             cliente_nome: finalClienteNome,
-            cliente_cpf_cnpj: resolvedClienteCpf,
-            cliente_cpf: resolvedClienteCpf,
-            cpf_cliente: resolvedClienteCpf,
-            cliente_email: resolvedClienteEmail,
-            cliente_telefone: resolvedClienteTelefone,
+            cliente_cpf_cnpj: finalClienteCpfCnpj,
+            cliente_cpf: finalClienteCpfCnpj,
+            cpf_cliente: finalClienteCpfCnpj,
+            cliente_email: finalClienteEmail,
+            cliente_telefone: finalClienteTelefone,
             cliente_id: finalClienteId,
             vendedor_id: finalVendedorId,
             usuario_id: finalVendedorId,
@@ -14969,8 +14990,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
           console.log('🚨 [PAYLOAD VENDA PDV]:', {
             clienteSelecionado: clienteSelecionadoObj,
-            cliente_id: clienteSelecionadoObj?.id || finalClienteId,
-            cliente_nome: clienteSelecionadoObj?.nome || finalClienteNome,
+            cliente_id: payloadVendaUpdate.cliente_id,
+            cliente_nome: payloadVendaUpdate.cliente_nome,
+            cliente_cpf_cnpj: payloadVendaUpdate.cliente_cpf_cnpj,
+            cliente_telefone: payloadVendaUpdate.cliente_telefone,
             vendedor: finalVendedorNome,
             forma_pagamento: metodoEfetivo,
             payloadCompleto: payloadVendaUpdate
@@ -14985,9 +15008,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
           if (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
-            // Se falhar a atualização com cliente_id (violação foreign key), tenta fallback com cliente padrão real ou null
+            // Se falhar a atualização com cliente_id (violação foreign key), tenta fallback com cliente padrão real ou null, mas PRESERVA cliente_nome textual e dados do cliente
             if (updateVendaErr.code === '23503' || String(updateVendaErr.message).includes('foreign key')) {
-              console.warn("⚠️ Tentando fallback de cliente_id na venda com cliente padrão ou null...");
+              console.warn("⚠️ Tentando fallback de cliente_id na venda com cliente padrão ou null preservando cliente_nome textual...");
               await supabase
                 .from('vendas')
                 .update({ ...payloadVendaUpdate, cliente_id: (DEFAULT_CONSUMIDOR_FINAL_ID ? obterUuidPuro(DEFAULT_CONSUMIDOR_FINAL_ID) : null) })
