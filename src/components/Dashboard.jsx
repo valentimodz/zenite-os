@@ -10886,8 +10886,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         valor_total: valorTotalNum,
         total: valorTotalNum,
         valor_pago: valorTotalNum,
-        forma_pagamento: novaVendaFormaPagamento,
-        metodo_pagamento: novaVendaFormaPagamento,
+        forma_pagamento: String(novaVendaFormaPagamento || 'DINHEIRO').toUpperCase().trim(),
+        metodo_pagamento: String(novaVendaFormaPagamento || 'DINHEIRO').toUpperCase().trim(),
         comissao: comissaoVendNum,
         comissao_vendedor: comissaoVendNum,
         teve_participacao_trainee: Boolean(novaVendaHasTrainee),
@@ -14435,12 +14435,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const valorUsadoTotal = isTrocaAtiva ? pdvUsadoList.reduce((acc, item) => acc + item.valor, 0) : 0;
 
     // Identificar método de pagamento principal e dados de parcelamento
+    const pagamentosAdicionados = pdvListaPagamentos || [];
+    const formaPagamentoSelecionada = isTrocaAtiva ? 'troca' : pdvMetodoPagamento;
+    const formaFinal = 
+      formaPagamentoSelecionada || 
+      (pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].forma || pagamentosAdicionados[0].metodo : null) || 
+      'DINHEIRO';
+    const formaPagamentoFinal = String(formaFinal).toUpperCase().trim();
+
     const metodoEfetivo = isTrocaAtiva
       ? 'troca'
-      : (pdvListaPagamentos.length > 0 ? pdvListaPagamentos[0].metodo : pdvMetodoPagamento);
-    const isCartaoEfetivo = metodoEfetivo === 'cartao_credito' || metodoEfetivo === 'cartao';
+      : (pagamentosAdicionados.length > 0 ? (pagamentosAdicionados[0].forma || pagamentosAdicionados[0].metodo) : (pdvMetodoPagamento || 'DINHEIRO'));
+    const isCartaoEfetivo = String(metodoEfetivo).toLowerCase() === 'cartao_credito' || String(metodoEfetivo).toLowerCase() === 'cartao';
     const parcelasEfetivo = isCartaoEfetivo
-      ? ((pdvListaPagamentos.length > 0 ? pdvListaPagamentos[0].parcelas : pdvCartaoParcelas) || 1)
+      ? ((pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].parcelas : pdvCartaoParcelas) || 1)
       : 1;
 
     // Calcular juros/taxas do cartão se aplicável
@@ -15060,8 +15068,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao_vendedor: comissaoCalculada,
             comissao_trainee: comissaoTraineeCalculada,
             teve_participacao_trainee: teveParticipacaoTraineeFinal,
-            metodo_pagamento: metodoEfetivo,
-            forma_pagamento: metodoEfetivo,
+            metodo_pagamento: formaPagamentoFinal,
+            forma_pagamento: formaPagamentoFinal, // OBRIGATÓRIO (não pode ir null)
             parcelas: parcelasEfetivo,
             financeira: (metodoEfetivo?.toLowerCase() === 'boleto' || metodoEfetivo?.toLowerCase() === 'crediario') ? resolvedFinanceira : null,
             financeira_parceira: resolvedFinanceira,
@@ -15085,7 +15093,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             cliente_cpf_cnpj: payloadVendaUpdate.cliente_cpf_cnpj,
             cliente_telefone: payloadVendaUpdate.cliente_telefone,
             vendedor: finalVendedorNome,
-            forma_pagamento: metodoEfetivo,
+            forma_pagamento: formaPagamentoFinal,
             payloadCompleto: payloadVendaUpdate
           });
           console.log('[DEBUG PDV PAYLOAD VENDA]:', { cliente_id: payloadVendaUpdate.cliente_id, cliente_nome: payloadVendaUpdate.cliente_nome });
