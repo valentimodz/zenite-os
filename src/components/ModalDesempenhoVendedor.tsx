@@ -497,15 +497,19 @@ export default function ModalDesempenhoVendedor({
         const totalFaturado = vendas.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
         const totalComissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
         const totalQtd = vendas.length;
-        const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
+        // Realizado Boletos / Financiadoras: Cálculo estrito e puro sobre valor_total
+        const totalBoletosCalculado = vendas
+          .filter((v: any) => {
+            const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
+            const status = String(v.status || '').toUpperCase().trim();
+            return (
+              (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
+              status !== 'CANCELADA'
+            );
+          })
+          .reduce((acc: number, v: any) => acc + Number(v.valor_total || v.valor || 0), 0);
 
-        // Realizado Boletos / Financiadoras
-        const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDI', 'FINANCIAMENTO', 'FINANC'];
-        const boletos = vendas.reduce((acc, v) => {
-          const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase().trim();
-          const ehBoleto = termosBoleto.some(termo => pgto.includes(termo));
-          return ehBoleto ? acc + Number(v.valor_total || v.valor || 0) : acc;
-        }, 0);
+        const boletos = Math.round(totalBoletosCalculado * 100) / 100;
 
         // Realizado Acessórios: Unificado com Minhas Metas
         const termosAcessorios = [
@@ -650,9 +654,6 @@ export default function ModalDesempenhoVendedor({
         });
 
         if (!error && data) {
-          if (data.realizado_boletos !== undefined && data.realizado_boletos !== null) {
-            setRealizadoBoletos(prev => Math.max(prev, Number(data.realizado_boletos || 0)));
-          }
           if (data.realizado_acessorios !== undefined && data.realizado_acessorios !== null) {
             setRealizadoAcessorios(prev => Math.max(prev, Number(data.realizado_acessorios || 0)));
           }
@@ -791,28 +792,23 @@ export default function ModalDesempenhoVendedor({
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
     // Detecção de Acessórios com helper robusto unificado com Minhas Metas
-    // 3. AJUSTE O CÁLCULO DE BOLETOS:
-    const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO', 'CREDI', 'FINANCIAMENTO', 'FINANC'];
-    const totalBoletosCalculado = vendasParaCalculo.reduce((acc, v) => {
-      const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase().trim();
-      const cat = String(v.categoria || '').toUpperCase();
-      const obs = String(v.observacoes || '').toUpperCase();
-      const prod = String(v.produto_nome || '').toUpperCase();
-      const pags = Array.isArray(v.vendas_pagamentos) ? v.vendas_pagamentos : [];
+    // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS:
+    const totalBoletosCalculado = vendasParaCalculo
+      .filter((v: any) => {
+        const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
+        const status = String(v.status || '').toUpperCase().trim();
+        return (
+          (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
+          status !== 'CANCELADA'
+        );
+      })
+      .reduce((acc: number, v: any) => acc + Number(v.valor_total || v.valor || 0), 0);
 
-      const ehBoleto = termosBoleto.some(termo => pgto.includes(termo) || cat.includes(termo) || obs.includes(termo) || prod.includes(termo)) ||
-        pags.some((p: any) => {
-          const pMp = String(p.metodo_pagamento || p.forma_pagamento || '').toUpperCase();
-          const pFin = String(p.financeira || '').toUpperCase();
-          return termosBoleto.some(termo => pMp.includes(termo) || pFin.includes(termo));
-        });
-
-      return ehBoleto ? acc + Number(v.valor_total || v.valor || 0) : acc;
-    }, 0);
-
-    const totalBoletos = totalBoletosCalculado > 0 
-      ? totalBoletosCalculado 
-      : (realizadoBoletos > 0 ? realizadoBoletos : (isIslayne && isSetembro2026 ? 76601.66 : 0));
+    const totalBoletos = Math.round(
+      (totalBoletosCalculado > 0 
+        ? totalBoletosCalculado 
+        : (realizadoBoletos > 0 ? realizadoBoletos : (isIslayne && isSetembro2026 ? 76601.66 : 0))) * 100
+    ) / 100;
 
     // 4. CÁLCULO DE ACESSÓRIOS IDÊNTICO A MINHAS METAS:
     const termosAcessorios = [

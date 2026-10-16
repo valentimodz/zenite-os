@@ -17233,27 +17233,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       .filter(isAcessorio)
       .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
 
-    // Somar apenas vendas onde metodo_pagamento ou financeira pertence a financiamentos/boletos: ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDI', 'FINANC']
-    const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO', 'CREDI', 'FINANCIAMENTO', 'FINANC', 'FINAN'];
-    let totalBoletos = 0;
+    // Somar apenas vendas onde forma_pagamento/metodo_pagamento/financeira pertence a boleto ou financiadora
+    const totalBoletosCalculado = listaVendas
+      .filter((v) => {
+        const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
+        const status = String(v.status || '').toUpperCase().trim();
+        return (
+          (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
+          status !== 'CANCELADA'
+        );
+      })
+      .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
 
-    listaVendas.forEach(sale => {
-      const val = parseFloat(sale.valor_total || sale.valor || 0);
-      const mpUpper = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase().trim();
-      const finUpper = String(sale.financeira || sale.financeira_parceira || '').toUpperCase().trim();
-      const pags = Array.isArray(sale.vendas_pagamentos) ? sale.vendas_pagamentos : [];
-
-      const isBoleto = BOLETO_KEYWORDS.some(k => mpUpper.includes(k) || finUpper.includes(k)) ||
-        pags.some(p => {
-          const pMp = String(p.metodo_pagamento || '').toUpperCase();
-          const pFin = String(p.financeira || '').toUpperCase();
-          return BOLETO_KEYWORDS.some(k => pMp.includes(k) || pFin.includes(k));
-        });
-
-      if (isBoleto) {
-        totalBoletos += val;
-      }
-    });
+    const totalBoletos = Math.round(totalBoletosCalculado * 100) / 100;
 
     const totalVendasGeral = listaVendas.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
     const salesCount = listaVendas.length;

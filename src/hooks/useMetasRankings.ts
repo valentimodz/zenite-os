@@ -158,14 +158,20 @@ export async function fetchRankingColaboradoresMensal({
 
       const ticketMedio = transacoes > 0 ? volumeExibicao / transacoes : 0;
 
-      // 3. Soma das formas de boleto / financiadora
+      // 3. Soma estrita das formas de boleto / financiadora (valor_total puro)
       const vendasTotais = isTrainee ? [...vendasDoColaborador, ...vendasComoTrainee] : vendasDoColaborador;
-      const totalBoletos = vendasTotais
+      const totalBoletosCalculado = vendasTotais
         .filter((v: any) => {
           const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
-          return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI') || forma.includes('PAYJOY') || forma.includes('WATU') || forma.includes('UME') || forma.includes('AIVA');
+          const status = String(v.status || '').toUpperCase().trim();
+          return (
+            (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
+            status !== 'CANCELADA'
+          );
         })
         .reduce((acc: number, v: any) => acc + Number(v.valor_total || 0), 0);
+
+      const totalBoletos = Math.round(totalBoletosCalculado * 100) / 100;
 
       return {
         colaborador_id: colab.id,
