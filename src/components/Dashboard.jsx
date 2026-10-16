@@ -5164,6 +5164,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           created_at,
           valor_total,
           metodo_pagamento,
+          forma_pagamento,
+          status,
           financeira,
           financeira_parceira,
           categoria,
@@ -5197,7 +5199,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           )
         `)
         .gte('created_at', dataInicio)
-        .lte('created_at', dataFim);
+        .lte('created_at', dataFim)
+        .neq('status', 'CANCELADA')
+        .neq('status', 'cancelada');
 
       if (currentUserId) {
         const orClauses = [
@@ -17229,14 +17233,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       .filter(isAcessorio)
       .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
 
-    // Somar apenas vendas onde metodo_pagamento ou financeira pertence a financiamentos/boletos: ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO']
-    const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO'];
+    // Somar apenas vendas onde metodo_pagamento ou financeira pertence a financiamentos/boletos: ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDI', 'FINANC']
+    const BOLETO_KEYWORDS = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO', 'CREDI', 'FINANCIAMENTO', 'FINANC', 'FINAN'];
     let totalBoletos = 0;
 
     listaVendas.forEach(sale => {
       const val = parseFloat(sale.valor_total || sale.valor || 0);
-      const mpUpper = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase();
-      const finUpper = String(sale.financeira || sale.financeira_parceira || '').toUpperCase();
+      const mpUpper = String(sale.metodo_pagamento || sale.forma_pagamento || '').toUpperCase().trim();
+      const finUpper = String(sale.financeira || sale.financeira_parceira || '').toUpperCase().trim();
       const pags = Array.isArray(sale.vendas_pagamentos) ? sale.vendas_pagamentos : [];
 
       const isBoleto = BOLETO_KEYWORDS.some(k => mpUpper.includes(k) || finUpper.includes(k)) ||

@@ -79,36 +79,40 @@ export async function fetchRankingColaboradoresMensal({
   colaboradorId?: string;
 }): Promise<RankingColaborador[]> {
   try {
-    // 1. Define início e fim do mês da competência (UTC seguro)
+    // 1. Define início e fim do mês da competência (Mês civil completo)
     const [anoStr, mesStr] = (competencia || getCompetenciaAtual()).split('-');
-    const ano = parseInt(anoStr, 10);
-    const mes = parseInt(mesStr, 10);
-    const dataInicio = new Date(Date.UTC(ano, mes - 1, 1, 0, 0, 0)).toISOString();
-    const dataFim = new Date(Date.UTC(ano, mes, 0, 23, 59, 59, 999)).toISOString();
+    const anoAtual = parseInt(anoStr, 10);
+    const mesAtual = parseInt(mesStr, 10);
+    const inicioMes = new Date(anoAtual, mesAtual - 1, 1, 0, 0, 0).toISOString();
+    const fimMes = new Date(anoAtual, mesAtual, 0, 23, 59, 59, 999).toISOString();
 
-    // 2. Busca lista de colaboradores cadastrados
+    // 2. Busca lista de colaboradores cadastrados (Se colaboradorId informado, busca diretamente sem travar por filial)
     let profilesQuery = supabase
       .from('profiles')
       .select('id, nome, role, is_treinner, filial_id');
 
-    if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
-      profilesQuery = profilesQuery.eq('filial_id', filialId);
-    }
     if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
       profilesQuery = profilesQuery.eq('id', colaboradorId);
+    } else if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
+      profilesQuery = profilesQuery.eq('filial_id', filialId);
     }
 
     const { data: colaboradores, error: colabError } = await profilesQuery;
     if (colabError) throw colabError;
 
-    // 3. Busca de vendas da competência com vínculo duplo
+    // 3. Busca de vendas da competência (REMOVIDA restrição de filial na consulta individual do colaborador)
     let vendasQuery = supabase
       .from('vendas')
-      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee, forma_pagamento, metodo_pagamento, financeira')
-      .gte('created_at', dataInicio)
-      .lte('created_at', dataFim);
+      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, status, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee, forma_pagamento, metodo_pagamento, financeira')
+      .gte('created_at', inicioMes)
+      .lte('created_at', fimMes)
+      .neq('status', 'CANCELADA')
+      .neq('status', 'cancelada');
 
-    if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
+    if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
+      // As metas pertencem ao vendedor e não a uma filial isolada: filtra unicamente pelo vendedor (ou como titular ou trainee)
+      vendasQuery = vendasQuery.or(`vendedor_id.eq.${colaboradorId},trainee_id.eq.${colaboradorId},treener_id.eq.${colaboradorId}`);
+    } else if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
       vendasQuery = vendasQuery.eq('filial_id', filialId);
     }
 
@@ -117,8 +121,6 @@ export async function fetchRankingColaboradoresMensal({
 
     const vendasLista = (vendas || []) as any[];
     const colabsLista = colaboradores || [];
-
-    const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO'];
 
     // Mapeamento com VÍNCULO DUPLO (ID ou NOME):
     const resultado: RankingColaborador[] = colabsLista.map(colab => {
@@ -156,13 +158,14 @@ export async function fetchRankingColaboradoresMensal({
 
       const ticketMedio = transacoes > 0 ? volumeExibicao / transacoes : 0;
 
-      // Cálculo do total de boletos / financiadoras
+      // 3. Soma das formas de boleto / financiadora
       const vendasTotais = isTrainee ? [...vendasDoColaborador, ...vendasComoTrainee] : vendasDoColaborador;
-      const totalBoletos = vendasTotais.reduce((acc, venda) => {
-        const pgto = String(venda.forma_pagamento || venda.metodo_pagamento || venda.financeira || '').toUpperCase();
-        const ehBoleto = termosBoleto.some(termo => pgto.includes(termo));
-        return ehBoleto ? acc + Number(venda.valor_total || 0) : acc;
-      }, 0);
+      const totalBoletos = vendasTotais
+        .filter((v: any) => {
+          const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
+          return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI') || forma.includes('PAYJOY') || forma.includes('WATU') || forma.includes('UME') || forma.includes('AIVA');
+        })
+        .reduce((acc: number, v: any) => acc + Number(v.valor_total || 0), 0);
 
       return {
         colaborador_id: colab.id,
@@ -269,11 +272,28 @@ export function useMinhasMetasIndividual({
   competencia?: string;
   enabled?: boolean;
 }) {
-  const { data, isLoading, isError, error, refetch, invalidarERefetch } = useMetasRankings({
+  const queryClient = useQueryClient();
+
+  const queryKey = [
+    'ranking-colaboradores',
     competencia,
-    colaboradorId,
-    enabled: Boolean(colaboradorId && enabled)
+    'todas',
+    colaboradorId || 'todos'
+  ];
+
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey,
+    queryFn: () => fetchRankingColaboradoresMensal({ competencia, colaboradorId }),
+    enabled: Boolean(colaboradorId && enabled),
+    staleTime: 0, // Sem cache obsoleto para consulta de metas individuais do colaborador
   });
+
+  const invalidarERefetch = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: ['ranking-colaboradores', competencia]
+    });
+    return refetch();
+  };
 
   const colaboradorMetas = data?.[0] || null;
 

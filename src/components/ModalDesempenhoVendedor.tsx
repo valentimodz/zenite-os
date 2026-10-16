@@ -481,6 +481,8 @@ export default function ModalDesempenhoVendedor({
         `)
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
+        .neq('status', 'CANCELADA')
+        .neq('status', 'cancelada')
         .order('created_at', { ascending: false });
 
       if (orClauses.length > 0) {
@@ -498,9 +500,9 @@ export default function ModalDesempenhoVendedor({
         const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
 
         // Realizado Boletos / Financiadoras
-        const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'FINANCIAMENTO', 'FINAN'];
+        const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDI', 'FINANCIAMENTO', 'FINANC'];
         const boletos = vendas.reduce((acc, v) => {
-          const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase();
+          const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase().trim();
           const ehBoleto = termosBoleto.some(termo => pgto.includes(termo));
           return ehBoleto ? acc + Number(v.valor_total || v.valor || 0) : acc;
         }, 0);
@@ -605,7 +607,9 @@ export default function ModalDesempenhoVendedor({
             )
           `)
           .gte('created_at', dtInicio)
-          .lte('created_at', dtFim);
+          .lte('created_at', dtFim)
+          .neq('status', 'CANCELADA')
+          .neq('status', 'cancelada');
 
         if (idVendedor) {
           query = query.or(`vendedor_id.eq.${idVendedor},trainee_id.eq.${idVendedor},treener_id.eq.${idVendedor}`);
@@ -647,16 +651,16 @@ export default function ModalDesempenhoVendedor({
 
         if (!error && data) {
           if (data.realizado_boletos !== undefined && data.realizado_boletos !== null) {
-            setRealizadoBoletos(Number(data.realizado_boletos || 0));
+            setRealizadoBoletos(prev => Math.max(prev, Number(data.realizado_boletos || 0)));
           }
           if (data.realizado_acessorios !== undefined && data.realizado_acessorios !== null) {
-            setRealizadoAcessorios(Number(data.realizado_acessorios || 0));
+            setRealizadoAcessorios(prev => Math.max(prev, Number(data.realizado_acessorios || 0)));
           }
           if (data.total_vendas !== undefined && data.total_vendas !== null && Number(data.total_vendas) > 0) {
-            setTotalVendas(Number(data.total_vendas || 0));
+            setTotalVendas(prev => Math.max(prev, Number(data.total_vendas || 0)));
           }
           if (data.total_comissao !== undefined && data.total_comissao !== null && Number(data.total_comissao) > 0) {
-            setComissoesAcumuladas(Number(data.total_comissao || 0));
+            setComissoesAcumuladas(prev => Math.max(prev, Number(data.total_comissao || 0)));
           }
         }
       } catch (err) {
@@ -788,9 +792,9 @@ export default function ModalDesempenhoVendedor({
 
     // Detecção de Acessórios com helper robusto unificado com Minhas Metas
     // 3. AJUSTE O CÁLCULO DE BOLETOS:
-    const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO', 'FINANCIAMENTO', 'FINAN'];
+    const termosBoleto = ['BOLETO', 'PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'CREDIÁRIO', 'CREDI', 'FINANCIAMENTO', 'FINANC'];
     const totalBoletosCalculado = vendasParaCalculo.reduce((acc, v) => {
-      const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase();
+      const pgto = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || (v as any).financeira_parceira || '').toUpperCase().trim();
       const cat = String(v.categoria || '').toUpperCase();
       const obs = String(v.observacoes || '').toUpperCase();
       const prod = String(v.produto_nome || '').toUpperCase();
