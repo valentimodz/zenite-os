@@ -165,8 +165,8 @@ export async function fetchRankingColaboradoresMensal({
           const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
           const status = String(v.status || '').toUpperCase().trim();
           return (
-            (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
-            status !== 'CANCELADA'
+            (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) &&
+            status !== 'CANCELADA' && status !== 'CANCELADO'
           );
         })
         .reduce((acc: number, v: any) => acc + Number(v.valor_total || 0), 0);

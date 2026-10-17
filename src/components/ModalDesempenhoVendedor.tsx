@@ -403,9 +403,11 @@ export default function ModalDesempenhoVendedor({
 
     try {
       // 1. Período do mês atual selecionado (ex: '2026-10')
-      const [ano, mes] = (competencia || '2026-10').split('-');
-      const inicioMes = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
-      const fimMes = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
+      const [anoStr, mesStr] = (competencia || '2026-10').split('-');
+      const ano = parseInt(anoStr, 10);
+      const mes = parseInt(mesStr, 10);
+      const inicioMes = new Date(ano, mes - 1, 1, 0, 0, 0).toISOString();
+      const fimMes = new Date(ano, mes, 0, 23, 59, 59, 999).toISOString();
 
       // Busca meta individual rápida em paralelo
       (async () => {
@@ -470,6 +472,7 @@ export default function ModalDesempenhoVendedor({
           vendedor_nome,
           trainee_id,
           treener_id,
+          status,
           itens_venda (
             id,
             produto_nome,
@@ -481,8 +484,6 @@ export default function ModalDesempenhoVendedor({
         `)
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
-        .neq('status', 'CANCELADA')
-        .neq('status', 'cancelada')
         .order('created_at', { ascending: false });
 
       if (orClauses.length > 0) {
@@ -494,23 +495,30 @@ export default function ModalDesempenhoVendedor({
       if (error) throw error;
 
       if (vendas) {
-        const totalFaturado = vendas.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
-        const totalComissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
-        const totalQtd = vendas.length;
+        // Filtrar apenas se não estiver cancelada (insensível a maiúsculas/minúsculas)
+        const vendasValidas = vendas.filter((v: any) => {
+          const statusLimpo = String(v.status || '').toUpperCase().trim();
+          return statusLimpo !== 'CANCELADA' && statusLimpo !== 'CANCELADO';
+        });
+
+        const totalFaturado = vendasValidas.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
+        const totalComissao = vendasValidas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
+        const totalQtd = vendasValidas.length;
         const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
-        // Realizado Boletos / Financiadoras: Cálculo estrito e puro sobre valor_total
-        const totalBoletosCalculado = vendas
+
+        // Soma direta de Boletos / Financiadoras:
+        const totalBoletos = vendasValidas
           .filter((v: any) => {
             const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
             const status = String(v.status || '').toUpperCase().trim();
             return (
-              (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
-              status !== 'CANCELADA'
+              (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) &&
+              status !== 'CANCELADA' && status !== 'CANCELADO'
             );
           })
           .reduce((acc: number, v: any) => acc + Number(v.valor_total || v.valor || 0), 0);
 
-        const boletos = Math.round(totalBoletosCalculado * 100) / 100;
+        setRealizadoBoletos(Math.round(totalBoletos * 100) / 100);
 
         // Realizado Acessórios: Unificado com Minhas Metas
         const termosAcessorios = [
@@ -544,10 +552,10 @@ export default function ModalDesempenhoVendedor({
         setQtdVendas(totalQtd);
         setTicketMedio(mediaTicket);
         setComissoesAcumuladas(totalComissao);
-        setRealizadoBoletos(boletos);
+        setRealizadoBoletos(Math.round(totalBoletos * 100) / 100);
         setRealizadoAcessorios(acessorios);
-        setVendasColaborador(vendas as Venda[]);
-        setVendasLocais(vendas as any[]);
+        setVendasColaborador(vendasValidas as Venda[]);
+        setVendasLocais(vendasValidas as any[]);
       }
     } catch (err) {
       console.error('Erro ao calcular metas do vendedor:', err);
@@ -799,16 +807,16 @@ export default function ModalDesempenhoVendedor({
         const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
         const status = String(v.status || '').toUpperCase().trim();
         return (
-          (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
-          status !== 'CANCELADA'
+          (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) &&
+          status !== 'CANCELADA' && status !== 'CANCELADO'
         );
       })
       .reduce((acc: number, v: any) => acc + Number(v.valor_total || v.valor || 0), 0);
 
     const totalBoletos = Math.round(
-      (totalBoletosCalculado > 0 
-        ? totalBoletosCalculado 
-        : (realizadoBoletos > 0 ? realizadoBoletos : (isIslayne && isSetembro2026 ? 76601.66 : 0))) * 100
+      (realizadoBoletos > 0
+        ? realizadoBoletos
+        : (totalBoletosCalculado > 0 ? totalBoletosCalculado : 0)) * 100
     ) / 100;
 
     // 4. CÁLCULO DE ACESSÓRIOS IDÊNTICO A MINHAS METAS:
