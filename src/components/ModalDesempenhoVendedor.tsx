@@ -497,6 +497,7 @@ export default function ModalDesempenhoVendedor({
         const totalFaturado = vendas.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
         const totalComissao = vendas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
         const totalQtd = vendas.length;
+        const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
         // Realizado Boletos / Financiadoras: Cálculo estrito e puro sobre valor_total
         const totalBoletosCalculado = vendas
           .filter((v: any) => {
