@@ -3073,20 +3073,34 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [activeTab, filtroFilialCaixa, filtroStatusCaixa, filtroMes, profile?.empresa_id, company?.id, activeEmpresaId]);
 
-  const fetchTenantSettings = async () => {
+  const fetchTenantSettings = async (empresaIdParam = null) => {
     try {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      const token = currentSession?.access_token;
-      if (!token) return;
+      const targetEmpresaId = empresaIdParam || profile?.empresa_id || profile?.filiais?.empresa_id || company?.id || activeEmpresaId;
+      if (!targetEmpresaId || targetEmpresaId === 'MASTER') return;
 
-      const { ok, data: resData } = await safeFetchJson('/api/tenant/settings', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (ok && resData?.success && resData?.settings) {
-        setTenantSettings(resData.settings);
+      const { data, error } = await supabase
+        .from('empresas')
+        .select('id, nome, limite_desconto_ativo, enable_troca, enable_imei')
+        .eq('id', targetEmpresaId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn('Aviso ao carregar configurações da empresa via Supabase:', error.message || error);
+        return;
+      }
+
+      if (data) {
+        const settingsObj = {
+          enable_troca: data.enable_troca !== undefined ? Boolean(data.enable_troca) : true,
+          enable_imei: data.enable_imei !== undefined ? Boolean(data.enable_imei) : true,
+          limite_desconto_ativo: Boolean(data.limite_desconto_ativo)
+        };
+        setTenantSettings(prev => ({ ...prev, ...settingsObj }));
+        setLimiteDescontoAtivo(Boolean(data.limite_desconto_ativo));
+        setCompany(prev => prev ? { ...prev, limite_desconto_ativo: Boolean(data.limite_desconto_ativo) } : prev);
       }
     } catch (err) {
-      console.warn('Aviso ao buscar configurações do tenant:', err.message || err);
+      console.error("Erro ao carregar configurações via Supabase:", err);
     }
   };
 
@@ -3113,27 +3127,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const handleSaveTenantSettings = async (newSettings) => {
     setIsSavingSettings(true);
     try {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      const token = currentSession?.access_token;
-      if (!token) return;
-
-      const { ok, data: resData, error: fetchErr } = await safeFetchJson('/api/tenant/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ settings: newSettings })
-      });
-      if (ok && resData?.success && resData?.settings) {
-        setTenantSettings(resData.settings);
-        alert('Configurações de recursos salvas com sucesso!');
-      } else {
-        console.warn('Aviso ao salvar configurações:', fetchErr);
-        alert('Recurso salvo localmente (servidor backend indisponível).');
+      const targetEmpresaId = profile?.empresa_id || profile?.filiais?.empresa_id || company?.id || activeEmpresaId;
+      if (!targetEmpresaId || targetEmpresaId === 'MASTER') {
+        setTenantSettings(newSettings);
+        showToast('Configurações salvas localmente.', 'info');
+        return;
       }
+
+      const updatePayload = {};
+      if (newSettings.enable_troca !== undefined) updatePayload.enable_troca = Boolean(newSettings.enable_troca);
+      if (newSettings.enable_imei !== undefined) updatePayload.enable_imei = Boolean(newSettings.enable_imei);
+      if (newSettings.limite_desconto_ativo !== undefined) updatePayload.limite_desconto_ativo = Boolean(newSettings.limite_desconto_ativo);
+
+      const { error: errEmpresas } = await supabase
+        .from('empresas')
+        .update(updatePayload)
+        .eq('id', targetEmpresaId);
+
+      if (errEmpresas) {
+        console.warn('Erro ao atualizar empresas, tentando fallback companies:', errEmpresas);
+        await supabase
+          .from('companies')
+          .update(updatePayload)
+          .eq('id', targetEmpresaId);
+      }
+
+      setTenantSettings(prev => ({ ...prev, ...newSettings }));
+      if (newSettings.limite_desconto_ativo !== undefined) {
+        setLimiteDescontoAtivo(Boolean(newSettings.limite_desconto_ativo));
+      }
+      showToast('Configurações salvas com sucesso!', 'success');
     } catch (err) {
       console.error('Erro ao salvar configurações do tenant:', err);
+      showToast('Erro ao atualizar configurações.', 'error');
     } finally {
       setIsSavingSettings(false);
     }
@@ -26119,7 +26145,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
 
                 {/* CONFIGURAÇÕES DO SISTEMA */}
-                {(activeTab === 'configuracoes' || currentView === 'configuracoes') && company?.id && company.id !== 'MASTER' && (
+                {(activeTab === 'configuracoes' || currentView === 'configuracoes') && (
                   <div className="space-y-8 animate-fadeIn">
                     <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl">
                       <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
@@ -26227,7 +26253,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </div>
 
                         {/* CARD DE TAXAS DE CARTÃO */}
-                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(profile?.role) && company?.id && company.id !== 'MASTER' && (
+                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id) && company?.id !== 'MASTER' && (
                           <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
                             <div>
                               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -26319,7 +26345,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         )}
 
                         {/* CARD DE CONFIGURAÇÕES DE RECURSOS (NICHO) */}
-                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(profile?.role) && company?.id && company.id !== 'MASTER' && (
+                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id) && company?.id !== 'MASTER' && (
                           <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
                             <div>
                               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -26392,7 +26418,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         )}
 
                         {/* CARD DE GESTÃO DE FUNCIONÁRIOS E PERMISSÕES */}
-                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE', 'RH', 'RH_ADMIN'].includes(profile?.role) && company?.id && company.id !== 'MASTER' && (
+                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'GERENTE', 'RH', 'RH_ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id) && company?.id !== 'MASTER' && (
                           <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
                             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-[#222] pb-4">
                               <div>
