@@ -14,6 +14,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { emitirNfseStub } from '../services/fiscal';
 import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
+import { atualizarVendaAposCriacao } from '../services/vendasService';
 import { hasFeature } from '../utils/featureFlags';
 import SaasDashboard from '../pages/SaaS/SaasDashboard';
 import SaasTenants from '../pages/SaaS/SaasTenants';
@@ -153,8 +154,8 @@ const permiteParticipacaoTreener = (carrinho) => {
 // Checagem rigorosa de acessório para evitar falso positivo de IMEI (ex: "Suporte de celular")
 const ehAcessorioEstoque = (nome, cat) => {
   const termosAcessorios = [
-    'SUPORTE', 'CAPA', 'CASE', 'PELIC', 'CABO', 'FONE', 
-    'CARREGADOR', 'FONTE', 'ADAPTADOR', 'CHIP', 'BRINDE', 
+    'SUPORTE', 'CAPA', 'CASE', 'PELIC', 'CABO', 'FONE',
+    'CARREGADOR', 'FONTE', 'ADAPTADOR', 'CHIP', 'BRINDE',
     'POWER BANK', 'FILME', 'BRACADEIRA', 'BRAÇADEIRA'
   ];
   const texto = `${nome || ''} ${cat || ''}`.toUpperCase();
@@ -356,9 +357,9 @@ function ProductTableRow({
 
     // É aparelho apenas se for explicitamente categoria de Celulares/Smartphones ou tiver controle de IMEI ativo:
     return (
-      cat === 'CELULARES' || 
-      cat === 'SMARTPHONES' || 
-      item.tipo === 'APARELHO' || 
+      cat === 'CELULARES' ||
+      cat === 'SMARTPHONES' ||
+      item.tipo === 'APARELHO' ||
       item.tipo === 'CELULAR' ||
       item.controla_imei === true ||
       Boolean(item.imei) ||
@@ -370,7 +371,7 @@ function ProductTableRow({
 
   return (
     <React.Fragment>
-      <tr 
+      <tr
         onClick={() => {
           if (onRowClick) onRowClick(p);
         }}
@@ -464,11 +465,10 @@ function ProductTableRow({
 
         {/* 3. CATEGORIA */}
         <td className="w-[15%] px-3 py-3 whitespace-nowrap align-middle">
-          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${
-            p.categoria === 'IOS'
+          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${p.categoria === 'IOS'
               ? 'bg-blue-950/30 text-blue-300 border border-blue-800/30'
               : 'bg-purple-950/30 text-purple-300 border border-purple-800/30'
-          }`}>
+            }`}>
             {p.categoria || p.tipo || 'GERAL'}
           </span>
         </td>
@@ -536,17 +536,17 @@ function ProductTableRow({
                 if (Array.isArray(prod?.imeis_db) && prod.imeis_db.length > 0) return prod.imeis_db;
                 if (Array.isArray(prod?.lista_imeis) && prod.lista_imeis.length > 0) return prod.lista_imeis;
                 if (Array.isArray(prod?.produtos_imeis) && prod.produtos_imeis.length > 0) return prod.produtos_imeis;
-                
+
                 // Caso 3: coluna única 'imei' na própria linha do produto
                 if (prod?.imei) {
                   return [{ imei: prod.imei, cor: prod.cor, status: prod.status || 'DISPONÍVEL' }];
                 }
-                
+
                 return [];
               };
 
               const imeisParaExibir = obterImeisDoProduto(p);
-              
+
               if (imeisParaExibir.length === 0) {
                 return (
                   <div className="py-2 px-4 text-xs text-zinc-500 italic">
@@ -562,8 +562,8 @@ function ProductTableRow({
                     const statusImei = item.status || 'DISPONÍVEL';
                     const corImei = typeof item === 'object' ? (item.cor || p.cor) : p.cor;
                     return (
-                      <div 
-                        key={item.id || valorImei || idx} 
+                      <div
+                        key={item.id || valorImei || idx}
                         className="inline-flex items-center gap-2 bg-[#121218] border border-purple-800/40 px-3 py-1.5 rounded text-xs"
                       >
                         <span className="text-zinc-400 font-mono">IMEI:</span>
@@ -2915,7 +2915,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     fetchCategorias(targetEmpresaId).catch(e => console.warn('Aviso ao carregar categorias:', e));
 
     const isAbaGestao = ['gestao', 'relatorios', 'ranking', 'fechamentos'].includes(activeTab) ||
-                        ['gestao', 'relatorios', 'ranking', 'fechamentos'].includes(currentView);
+      ['gestao', 'relatorios', 'ranking', 'fechamentos'].includes(currentView);
 
     if ((podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) && isAbaGestao) {
       fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
@@ -4639,8 +4639,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
 
       if (Array.isArray(listaCaixas)) {
-        const todasFiliais = Array.isArray(filiaisData) && filiaisData.length > 0 
-          ? filiaisData 
+        const todasFiliais = Array.isArray(filiaisData) && filiaisData.length > 0
+          ? filiaisData
           : (Array.isArray(filiais) ? filiais : []);
 
         const todosProfiles = Array.isArray(profilesData) && profilesData.length > 0
@@ -7047,14 +7047,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const isAdmin = userRole === 'admin' || userRole === 'administrador' || isSuperAdmin;
 
       // Se for Super Admin, permitir sempre a alteração em qualquer filial
-      const isAuthorized = 
+      const isAuthorized =
         Boolean(usuario) ||
         isSuperAdmin ||
         isAdmin ||
-        userRole.includes('gerente') || 
-        userRole.includes('owner') || 
-        userRole.includes('dono') || 
-        userRole.includes('master') || 
+        userRole.includes('gerente') ||
+        userRole.includes('owner') ||
+        userRole.includes('dono') ||
+        userRole.includes('master') ||
         usuario?.is_super_admin === true;
 
       if (!isAuthorized) {
@@ -8540,18 +8540,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const userRole = (profile?.role || '').toUpperCase();
       const userCargo = (profile?.cargo || '').toUpperCase();
       const canEditPrecoCusto = ['OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN'].includes(userRole) ||
-                                ['OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN'].includes(userCargo);
+        ['OWNER', 'ADMIN', 'SOCIO', 'DONO', 'SUPER_ADMIN'].includes(userCargo);
 
       // Checagem de alteração de Preço de Custo no modo edição
       let precoCustoAlterado = false;
       if (isEditMode) {
-        const custoOriginalDetectado = editingCatalogoProduto?.preco_custo ?? 
-                                       editingCatalogoProduto?.custo ?? 
-                                       editingCatalogoProduto?.valor_custo ?? 
-                                       editingCatalogoProduto?.preco_compra ?? 
-                                       formData.preco_custo ?? 
-                                       formData.valor_custo ?? 
-                                       0;
+        const custoOriginalDetectado = editingCatalogoProduto?.preco_custo ??
+          editingCatalogoProduto?.custo ??
+          editingCatalogoProduto?.valor_custo ??
+          editingCatalogoProduto?.preco_compra ??
+          formData.preco_custo ??
+          formData.valor_custo ??
+          0;
         const custoOriginalNum = extrairNumero(custoOriginalDetectado);
         precoCustoAlterado = Math.abs(custoNumerico - custoOriginalNum) > 0.001;
       } else {
@@ -10290,7 +10290,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       : (Array.isArray(venda.itens) && venda.itens.length > 0 ? venda.itens[0] : null);
 
     const prodCatalog = (produtos || []).find(p => String(p.id) === String(venda.produto_id)) ||
-                        (catalogoProdutos || []).find(cp => String(cp.id) === String(venda.produto_id));
+      (catalogoProdutos || []).find(cp => String(cp.id) === String(venda.produto_id));
 
     const extrairNomeProdutoVenda = (v) => {
       if (!v) return '';
@@ -10487,9 +10487,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const novaComissao = comissaoTratada;
     const novoMetodo = vendaNewMetodoPagamento || 'PIX';
     const isBoleto = novoMetodo?.toLowerCase() === 'boleto' ||
-                     novoMetodo?.toLowerCase() === 'financiadora' ||
-                     novoMetodo?.toLowerCase().includes('boleto') ||
-                     novoMetodo?.toLowerCase().includes('finan');
+      novoMetodo?.toLowerCase() === 'financiadora' ||
+      novoMetodo?.toLowerCase().includes('boleto') ||
+      novoMetodo?.toLowerCase().includes('finan');
 
     let resolvedFinanceira = null;
     if (isBoleto) {
@@ -10513,7 +10513,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // Obter Vendedor e Filial selecionados
     const vendedorEncontrado = (vendedores || []).find(v => String(v.id) === String(vendaNewVendedorId) || (v.nome && v.nome === vendaNewVendedorNome)) ||
       (teamMembers || []).find(m => String(m.id) === String(vendaNewVendedorId) || (m.nome && m.nome === vendaNewVendedorNome));
-    
+
     const novoVendedorId = vendaNewVendedorId || vendedorEncontrado?.id || editingVenda.vendedor_id || editingVenda.usuario_id || null;
     const novoVendedorNome = vendaNewVendedorNome || vendedorEncontrado?.nome || vendedorEncontrado?.name || vendedorEncontrado?.email || editingVenda.vendedor_nome || 'Vendedor';
 
@@ -10740,13 +10740,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao_trainee: resolvedComissaoTrainee,
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
               ? v.itens_venda.map((it, idx) => idx === 0 ? {
-                  ...it,
-                  produto_nome: novoNome,
-                  preco_unitario: precoUnitario,
-                  valor_total: novoValor,
-                  comissao: comissaoTratada,
-                  comissao_trainee: resolvedComissaoTrainee
-                } : it)
+                ...it,
+                produto_nome: novoNome,
+                preco_unitario: precoUnitario,
+                valor_total: novoValor,
+                comissao: comissaoTratada,
+                comissao_trainee: resolvedComissaoTrainee
+              } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
@@ -10778,13 +10778,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao_trainee: resolvedComissaoTrainee,
             itens_venda: Array.isArray(v.itens_venda) && v.itens_venda.length > 0
               ? v.itens_venda.map((it, idx) => idx === 0 ? {
-                  ...it,
-                  produto_nome: novoNome,
-                  preco_unitario: precoUnitario,
-                  valor_total: novoValor,
-                  comissao: comissaoTratada,
-                  comissao_trainee: resolvedComissaoTrainee
-                } : it)
+                ...it,
+                produto_nome: novoNome,
+                preco_unitario: precoUnitario,
+                valor_total: novoValor,
+                comissao: comissaoTratada,
+                comissao_trainee: resolvedComissaoTrainee
+              } : it)
               : v.itens_venda,
             forma_pagamento: novoMetodo,
             produtos: {
@@ -10801,7 +10801,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       try {
         window.dispatchEvent(new CustomEvent('vendas_updated', { detail: { vendaId, updatePayload } }));
         window.dispatchEvent(new Event('estoque_updated'));
-      } catch (_) {}
+      } catch (_) { }
 
       // 7. Revalidação completa das queries da listagem de vendas (refetch)
       const targetEmpresaId = company?.id || profile?.empresa_id;
@@ -10826,9 +10826,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const initialFilialId = activeFilialId || (filiais && filiais.length > 0 ? String(filiais[0].id) : '');
     const currentUserId = session?.user?.id || profile?.id || '';
     const initialVendedor = (vendedores || []).find(v => String(v.id) === String(currentUserId)) ||
-                            (teamMembers || []).find(m => String(m.id) === String(currentUserId)) ||
-                            (vendedores && vendedores.length > 0 ? vendedores[0] : null) ||
-                            (teamMembers && teamMembers.length > 0 ? teamMembers[0] : null);
+      (teamMembers || []).find(m => String(m.id) === String(currentUserId)) ||
+      (vendedores && vendedores.length > 0 ? vendedores[0] : null) ||
+      (teamMembers && teamMembers.length > 0 ? teamMembers[0] : null);
 
     setNovaVendaData(hoje);
     setNovaVendaFilialId(initialFilialId);
@@ -11019,7 +11019,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       try {
         window.dispatchEvent(new CustomEvent('venda_criada', { detail: { vendaId, venda: vendaCompleta } }));
         window.dispatchEvent(new Event('estoque_updated'));
-      } catch (_) {}
+      } catch (_) { }
 
       // 6. Recarregar dados das vendas / dashboard
       if (typeof fetchGerenteData === 'function' && targetEmpresaId) {
@@ -13102,7 +13102,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     if (!produto) return false;
     const cat = String(produto.categoria || produto.tipo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     const nome = String(produto.nome || produto.produto_nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-    
+
     if (
       cat.includes('ACESSORIO') ||
       cat.includes('PELICULA') ||
@@ -14402,8 +14402,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // REGRA DAS DUAS ESTEIRAS: Verificação de Itens Críticos vs Acessórios Comuns
     const carrinhoTemCritico = carrinhoPossuiItemCritico(pdvCart);
     const nomeClienteRaw = (pdvClienteNome || pdvClienteSearchInput || '').trim();
-    const isConsumidorBalcao = !nomeClienteRaw || 
-      nomeClienteRaw.toLowerCase() === 'consumidor balcão' || 
+    const isConsumidorBalcao = !nomeClienteRaw ||
+      nomeClienteRaw.toLowerCase() === 'consumidor balcão' ||
       nomeClienteRaw.toLowerCase() === 'consumidor balcao' ||
       nomeClienteRaw.toLowerCase() === 'consumidor final' ||
       nomeClienteRaw.toLowerCase() === 'consumidor' ||
@@ -14550,10 +14550,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
       const hasValidSelectedClient = !!clienteIdBanco && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID;
       const isConsumidorFinal = !hasValidSelectedClient && (
-        !nomeClienteFinal || 
+        !nomeClienteFinal ||
         nomeClienteFinal.toLowerCase() === 'consumidor balcão' ||
         nomeClienteFinal.toLowerCase() === 'consumidor balcao' ||
-        nomeClienteFinal.toLowerCase() === 'consumidor final' || 
+        nomeClienteFinal.toLowerCase() === 'consumidor final' ||
         nomeClienteFinal.toLowerCase() === 'consumidor' ||
         nomeClienteFinal.toLowerCase() === 'cliente balcão' ||
         nomeClienteFinal.toLowerCase() === 'cliente balcao' ||
@@ -14863,9 +14863,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const hasTraineeSelecionado = Boolean(selectedTreenerId && String(selectedTreenerId).trim() !== '');
       const selectedTraineeObj = hasTraineeSelecionado
         ? ((treenersFilial || []).find(t => String(t.id) === String(selectedTreenerId)) ||
-           (teamMembers || []).find(m => String(m.id) === String(selectedTreenerId)) ||
-           (vendedores || []).find(v => String(v.id) === String(selectedTreenerId)) ||
-           null)
+          (teamMembers || []).find(m => String(m.id) === String(selectedTreenerId)) ||
+          (vendedores || []).find(v => String(v.id) === String(selectedTreenerId)) ||
+          null)
         : null;
       const resolvedTraineeId = hasTraineeSelecionado ? (obterUuidPuro(selectedTreenerId) || null) : null;
       const resolvedTraineeNome = resolvedTraineeId ? (selectedTraineeObj?.nome || selectedTraineeObj?.name || selectedTraineeObj?.nome_completo || null) : null;
@@ -15106,42 +15106,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             (pdvClienteEmail && pdvClienteEmail.trim() ? pdvClienteEmail.trim() : null) ||
             null;
 
-          const payloadVendaUpdate = {
-            empresa_id: obterUuidPuro(empresaId),
-            filial_id: obterUuidPuro(activeFilialId),
-            caixa_id: obterUuidPuro(caixaAtual?.id) || null,
-            produto_nome: item.produto?.nome || item.nome || 'Produto',
-            imei: item.imei || null,
-            
-            // Cliente Real
-            cliente_id: finalClienteId,
-            cliente_nome: finalClienteNome,
-            cliente_cpf_cnpj: finalClienteCpfCnpj || null,
-            cliente_telefone: finalClienteTelefone || null,
-            cliente_email: finalClienteEmail || null,
-
-            // Vendedor
-            vendedor_id: finalVendedorId,
-            usuario_id: finalVendedorId,
-            criado_por: finalVendedorId,
-            vendedor_nome: finalVendedorNome,
-
-            // Pagamento (Garante que não fique NULL)
-            forma_pagamento: String(formaPagamentoFinal || 'DINHEIRO').toUpperCase().trim(),
-            metodo_pagamento: String(formaPagamentoFinal || 'DINHEIRO').toUpperCase().trim(),
-
-            // Trainee
-            trainee_id: resolvedTraineeId || null,
-            trainee_nome: resolvedTraineeNome || null,
-            teve_participacao_trainee: Boolean(resolvedTraineeId)
-          };
-
-          const { error: updateVendaErr } = await supabase
-            .from('vendas')
-            .update(payloadVendaUpdate)
-            .eq('id', obterUuidPuro(rpcRes.venda_id));
-
-          if (updateVendaErr) {
+          try {
+            await atualizarVendaAposCriacao({
+              vendaId: obterUuidPuro(rpcRes.venda_id),
+              empresaId: obterUuidPuro(empresaId),
+              filialId: obterUuidPuro(activeFilialId),
+              caixaId: obterUuidPuro(caixaAtual?.id),
+              item,
+              cliente: {
+                id: finalClienteId,
+                nome: finalClienteNome,
+                cpfCnpj: finalClienteCpfCnpj,
+                telefone: finalClienteTelefone,
+                email: finalClienteEmail
+              },
+              vendedor: {
+                id: finalVendedorId,
+                nome: finalVendedorNome
+              },
+              formaPagamento: formaPagamentoFinal,
+              trainee: {
+                id: resolvedTraineeId,
+                nome: resolvedTraineeNome
+              }
+            });
+          } catch (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA]:", updateVendaErr);
             if (typeof showToast === 'function') {
               showToast(`Erro ao atualizar venda: ${updateVendaErr.message}`, 'error');
@@ -15271,7 +15260,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           // GATILHO AUTOMÁTICO: Repasses de Financeiras & Contas a Receber
           try {
             const financeirasAlvo = ['PAYJOY', 'AIVA', 'UME', 'WATU', 'BOLETO', 'CREDIARIO', 'CARTAO_CREDITO', 'CARTAO', 'CARTAO_DEBITO'];
-            
+
             const calcularDataPrevisao = (finOuMetodo) => {
               const norm = String(finOuMetodo || '').toUpperCase().trim();
               const hoje = new Date();
@@ -15289,11 +15278,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             const pagamentosParaRepasse = (pdvListaPagamentos && pdvListaPagamentos.length > 0)
               ? pdvListaPagamentos
               : [{
-                  metodo: metodoEfetivo,
-                  valor: actualValorPago || valorTotalNovo,
-                  financeira: resolvedFinanceira,
-                  parcelas: parcelasEfetivo
-                }];
+                metodo: metodoEfetivo,
+                valor: actualValorPago || valorTotalNovo,
+                financeira: resolvedFinanceira,
+                parcelas: parcelasEfetivo
+              }];
 
             for (const pag of pagamentosParaRepasse) {
               const finNome = String(pag.financeira || pag.metodo_detalhe || pdvNovoFinanceira || pdvFinanceiraParceira || pag.metodo || metodoEfetivo || '').toUpperCase().trim();
@@ -16748,16 +16737,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     const sellerObj = teamMembers.find(m => String(m.id) === String(venda.vendedor_id || venda.usuario_id));
-    const vendedorNome = 
-      venda.vendedor_nome || 
-      venda.vendedor?.nome || 
-      (typeof venda.vendedor === 'string' ? venda.vendedor : null) || 
-      venda.usuario_nome || 
-      venda.usuario?.nome || 
-      venda.operador_nome || 
-      venda.profiles?.nome || 
-      sellerObj?.nome || 
-      (profile?.id === venda.vendedor_id ? profile?.nome : null) || 
+    const vendedorNome =
+      venda.vendedor_nome ||
+      venda.vendedor?.nome ||
+      (typeof venda.vendedor === 'string' ? venda.vendedor : null) ||
+      venda.usuario_nome ||
+      venda.usuario?.nome ||
+      venda.operador_nome ||
+      venda.profiles?.nome ||
+      sellerObj?.nome ||
+      (profile?.id === venda.vendedor_id ? profile?.nome : null) ||
       'Vendedor';
 
     const prodObj = produtos.find(p => String(p.id) === String(venda.produto_id)) || catalogoProdutos.find(cp => String(cp.id) === String(venda.produto_id));
@@ -16884,7 +16873,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     const clienteObj = clientes.find(c => String(c.id) === String(venda.cliente_id)) || null;
 
-    const clienteNomeFinal = 
+    const clienteNomeFinal =
       venda.clientes?.nome ||
       venda.cliente?.nome ||
       (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) ||
@@ -16894,17 +16883,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       venda.cliente_nome ||
       'Consumidor Final';
 
-    const clienteCpfCnpjFinal = 
-      venda.cliente_cpf || 
-      venda.cliente?.cpf || 
-      venda.cliente?.cpf_cnpj || 
-      venda.cliente_cpf_cnpj || 
-      venda.cpf || 
-      venda.cpf_cliente || 
-      venda.clientes?.cpf_cnpj || 
-      venda.clientes?.cpf || 
-      clienteObj?.cpf_cnpj || 
-      clienteObj?.cpf || 
+    const clienteCpfCnpjFinal =
+      venda.cliente_cpf ||
+      venda.cliente?.cpf ||
+      venda.cliente?.cpf_cnpj ||
+      venda.cliente_cpf_cnpj ||
+      venda.cpf ||
+      venda.cpf_cliente ||
+      venda.clientes?.cpf_cnpj ||
+      venda.clientes?.cpf ||
+      clienteObj?.cpf_cnpj ||
+      clienteObj?.cpf ||
       '';
 
     const dadosRecibo = {
@@ -16944,11 +16933,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         ? venda.pagamentos
         : ((Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
           ? venda.vendas_pagamentos.map(p => ({
-              forma: p.forma || p.metodo_pagamento || p.metodo || metodoPag,
-              metodo: p.metodo_pagamento || p.metodo || metodoPag,
-              valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
-              parcelas: p.parcelas || venda.parcelas || 1
-            }))
+            forma: p.forma || p.metodo_pagamento || p.metodo || metodoPag,
+            metodo: p.metodo_pagamento || p.metodo || metodoPag,
+            valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
+            parcelas: p.parcelas || venda.parcelas || 1
+          }))
           : [{ forma: metodoPag, metodo: metodoPag, valor: valorTotalNum, parcelas: venda.parcelas || 1 }]),
       financeiro: {
         total_novo: valorTotalNum,
@@ -16962,10 +16951,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           ? venda.pagamentos
           : ((Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
             ? venda.vendas_pagamentos.map(p => ({
-                metodo: p.metodo_pagamento || p.metodo || metodoPag,
-                valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
-                parcelas: p.parcelas || venda.parcelas || 1
-              }))
+              metodo: p.metodo_pagamento || p.metodo || metodoPag,
+              valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
+              parcelas: p.parcelas || venda.parcelas || 1
+            }))
             : [
               {
                 metodo: metodoPag,
@@ -16987,7 +16976,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   // --- CALCULADOR DE COMISSÃO DINÂMICA POR ITEM ---
   const calcularComissaoItem = (sale) => {
     if (!sale) return 0;
-    
+
     // 1. Se já estiver gravada no banco na coluna 'comissao' (ou variantes), prioriza o valor gravado
     if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
       const val = parseFloat(sale.comissao_vendedor);
@@ -17010,7 +16999,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const item = sale.itens_venda?.[0] || {};
     const produtoNome = String(sale.produto_nome || item.produto_nome || sale.nome || item.nome || sale.produtos?.nome || sale.descricao || '').toUpperCase();
     const categoria = String(sale.categoria || item.categoria || sale.produtos?.categoria || '').toUpperCase();
-    
+
     // A FORMA DE PAGAMENTO DEVE VIR DA VENDA PRINCIPAL
     const formaPgto = String(sale.forma_pagamento || sale.metodo_pagamento || sale.pagamento || item.forma_pagamento || item.metodo_pagamento || '').toUpperCase();
     const valor = Number(sale.valor_total || item.valor_total || item.preco_unitario || sale.valor || sale.preco || 0);
@@ -17018,7 +17007,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     if (valor <= 0) return 0;
 
     // REGRA 1: ACESSÓRIOS (2,5%)
-    const isAcessorio = 
+    const isAcessorio =
       categoria.includes('ACESS') ||
       categoria.includes('CARREGADOR') ||
       categoria.includes('CABO') ||
@@ -17169,9 +17158,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const mesAlvoIdx = parseInt(mesAlvoStr, 10) - 1; // 0-indexed
 
     // Priorizar meta encontrada dinamicamente para o mês ou buscar no array metas
-    const m = metaVendedorLogado || metas.find(x => 
+    const m = metaVendedorLogado || metas.find(x =>
       ((userAuthId && (x.vendedor_id === userAuthId || x.usuario_id === userAuthId)) ||
-       (profileId && (x.vendedor_id === profileId || x.usuario_id === profileId))) && 
+        (profileId && (x.vendedor_id === profileId || x.usuario_id === profileId))) &&
       (x.mes_ano === mesAlvo || x.mes_referencia === mesAlvo)
     );
 
@@ -17180,24 +17169,24 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // Metas configuradas com mapeamento oficial da tabela 'metas':
     // Trainee: metaTotal = R$ 40.000, metaBoleto = R$ 35.000, metaAcessorios = R$ 5.000
     // Vendedor: metaTotal = R$ 77.500, metaBoleto = R$ 67.500, metaAcessorios = R$ 10.000
-    const metaTotal = Number(m?.valor_meta) > 0 
-      ? Number(m.valor_meta) 
+    const metaTotal = Number(m?.valor_meta) > 0
+      ? Number(m.valor_meta)
       : (isTrainee ? 40000 : 77500);
 
-    const metaBoleto = Number(m?.meta_boleto) > 0 
-      ? Number(m.meta_boleto) 
+    const metaBoleto = Number(m?.meta_boleto) > 0
+      ? Number(m.meta_boleto)
       : (isTrainee ? (Number(m?.meta_trainee_boleto) || 35000) : 67500);
 
-    const superMetaBoleto = Number(m?.super_meta_boleto) > 0 
-      ? Number(m.super_meta_boleto) 
+    const superMetaBoleto = Number(m?.super_meta_boleto) > 0
+      ? Number(m.super_meta_boleto)
       : (isTrainee ? 45000 : 87000);
 
-    const metaAcessorios = Number(m?.meta_acessorios) > 0 
-      ? Number(m.meta_acessorios) 
+    const metaAcessorios = Number(m?.meta_acessorios) > 0
+      ? Number(m.meta_acessorios)
       : (isTrainee ? 5000 : 10000);
 
-    const superMetaAcessorios = Number(m?.super_meta_acessorios) > 0 
-      ? Number(m.super_meta_acessorios) 
+    const superMetaAcessorios = Number(m?.super_meta_acessorios) > 0
+      ? Number(m.super_meta_acessorios)
       : (isTrainee ? 7500 : 15000);
 
     // Todas as vendas do mês corrente/filtrado deste vendedor/trainee (resiliente a fuso horário e nulos)
@@ -17251,7 +17240,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const isAcessorio = (venda) => {
       const cat = (venda.categoria || venda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
       const prod = (venda.produto_nome || venda.produtos?.nome || venda.descricao || venda.produtos_descricao || venda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-      
+
       // Checa se a categoria é ACESSORIO(S)
       if (cat.includes('ACESSORIO')) return true;
 
@@ -18248,241 +18237,241 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 <Truck size={18} className="text-[#6A0DAD]" /> Dados da Transferência
               </h3>
 
-                <div className="space-y-4">
-                  {/* Seletor de Filial Origem e Destino */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center justify-between">
-                        <span>Filial Origem (Fixa) <span className="text-red-500">*</span></span>
-                        <span className="text-[10px] text-[#6A0DAD] lowercase font-normal">(filial de operação atual)</span>
-                      </label>
-                      <select
-                        value={finalOrigemId}
-                        onChange={(e) => setTransfOrigemId(e.target.value)}
-                        className="w-full bg-[#111111] border border-[#222222] text-gray-300 rounded px-3 py-2 text-sm outline-none font-semibold cursor-not-allowed opacity-80"
-                        disabled={true}
-                      >
-                        <option value="">Selecione a Origem...</option>
-                        {filiais.map(f => (
-                          <option key={f.id} value={f.id}>
-                            {f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}
-                          </option>
-                        ))}
-                      </select>
-                      {transfItens.length > 0 && (
-                        <p className="text-[10px] text-gray-500 mt-1">Origem bloqueada durante o lote atual.</p>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Filial Destino <span className="text-red-500">*</span></label>
-                      <select
-                        value={transfDestinoId}
-                        onChange={(e) => setTransfDestinoId(e.target.value)}
-                        className={`w-full bg-black border rounded px-3 py-2 text-sm text-white outline-none transition-all cursor-pointer font-semibold ${isSameFilial ? 'border-red-500 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
-                          }`}
-                      >
-                        <option value="">Selecione a Filial Destino...</option>
-                        {filiais.map(f => (
-                          <option key={f.id} value={f.id} disabled={f.id === finalOrigemId}>
-                            {f.nome} {f.id === finalOrigemId ? '(Mesma Origem)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      {isSameFilial && (
-                        <p className="text-[10px] text-red-500 mt-1 font-semibold">
-                          ⚠️ A Filial de Destino deve ser diferente da Filial de Origem.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Bipagem e Quantidade */}
-                  <form onSubmit={handleTransfItemAdd} className="space-y-3 pt-2 border-t border-[#222222]">
-                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
-                      Bipar IMEI (Celulares) ou Código de Barras / Nome (Acessórios)
+              <div className="space-y-4">
+                {/* Seletor de Filial Origem e Destino */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center justify-between">
+                      <span>Filial Origem (Fixa) <span className="text-red-500">*</span></span>
+                      <span className="text-[10px] text-[#6A0DAD] lowercase font-normal">(filial de operação atual)</span>
                     </label>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          value={transfImeiBusca}
-                          onChange={(e) => setTransfImeiBusca(e.target.value)}
-                          placeholder="Bipe o IMEI, Código de Barras ou Nome..."
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2.5 text-sm text-white outline-none font-mono placeholder-gray-600 transition-all"
-                        />
-                      </div>
-
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          min="1"
-                          value={transfQtdInput}
-                          onChange={(e) => setTransfQtdInput(e.target.value)}
-                          placeholder="Qtd (Acessórios)"
-                          title="Quantidade a transferir (para acessórios sem IMEI)"
-                          className="w-20 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-2.5 text-sm text-white text-center outline-none font-mono"
-                        />
-                        <button
-                          type="submit"
-                          disabled={!transfImeiBusca.trim() || isSameFilial}
-                          className="flex-1 bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-40 text-white font-bold px-3 py-2.5 rounded transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-1"
-                        >
-                          Adicionar
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-[10px] text-gray-500 font-sans">
-                      Dica: Para celulares com IMEI a quantidade é fixa em 1 unidade por IMEI. Para acessórios, defina a quantidade antes de adicionar.
-                    </p>
-                  </form>
+                    <select
+                      value={finalOrigemId}
+                      onChange={(e) => setTransfOrigemId(e.target.value)}
+                      className="w-full bg-[#111111] border border-[#222222] text-gray-300 rounded px-3 py-2 text-sm outline-none font-semibold cursor-not-allowed opacity-80"
+                      disabled={true}
+                    >
+                      <option value="">Selecione a Origem...</option>
+                      {filiais.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.nome} {f.tipo === 'ESTOQUE' ? '📦' : '🏪'}
+                        </option>
+                      ))}
+                    </select>
+                    {transfItens.length > 0 && (
+                      <p className="text-[10px] text-gray-500 mt-1">Origem bloqueada durante o lote atual.</p>
+                    )}
+                  </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Observações / Motivo (Opcional)</label>
-                    <textarea
-                      value={transfObs}
-                      onChange={(e) => setTransfObs(e.target.value)}
-                      className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[50px] placeholder-gray-600"
-                      placeholder="Ex: Realocação de vitrine, solicitação do gerente, portador..."
-                    ></textarea>
+                    <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Filial Destino <span className="text-red-500">*</span></label>
+                    <select
+                      value={transfDestinoId}
+                      onChange={(e) => setTransfDestinoId(e.target.value)}
+                      className={`w-full bg-black border rounded px-3 py-2 text-sm text-white outline-none transition-all cursor-pointer font-semibold ${isSameFilial ? 'border-red-500 focus:border-red-500' : 'border-[#222222] focus:border-[#6A0DAD]'
+                        }`}
+                    >
+                      <option value="">Selecione a Filial Destino...</option>
+                      {filiais.map(f => (
+                        <option key={f.id} value={f.id} disabled={f.id === finalOrigemId}>
+                          {f.nome} {f.id === finalOrigemId ? '(Mesma Origem)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {isSameFilial && (
+                      <p className="text-[10px] text-red-500 mt-1 font-semibold">
+                        ⚠️ A Filial de Destino deve ser diferente da Filial de Origem.
+                      </p>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* Card 2: Resumo e Itens no Lote */}
-              <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 flex flex-col justify-between">
+                {/* Bipagem e Quantidade */}
+                <form onSubmit={handleTransfItemAdd} className="space-y-3 pt-2 border-t border-[#222222]">
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
+                    Bipar IMEI (Celulares) ou Código de Barras / Nome (Acessórios)
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-2">
+                      <input
+                        type="text"
+                        value={transfImeiBusca}
+                        onChange={(e) => setTransfImeiBusca(e.target.value)}
+                        placeholder="Bipe o IMEI, Código de Barras ou Nome..."
+                        className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2.5 text-sm text-white outline-none font-mono placeholder-gray-600 transition-all"
+                      />
+                    </div>
+
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        value={transfQtdInput}
+                        onChange={(e) => setTransfQtdInput(e.target.value)}
+                        placeholder="Qtd (Acessórios)"
+                        title="Quantidade a transferir (para acessórios sem IMEI)"
+                        className="w-20 bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-2 py-2.5 text-sm text-white text-center outline-none font-mono"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!transfImeiBusca.trim() || isSameFilial}
+                        className="flex-1 bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-40 text-white font-bold px-3 py-2.5 rounded transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-1"
+                      >
+                        Adicionar
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-gray-500 font-sans">
+                    Dica: Para celulares com IMEI a quantidade é fixa em 1 unidade por IMEI. Para acessórios, defina a quantidade antes de adicionar.
+                  </p>
+                </form>
+
                 <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                      <Package size={18} className="text-[#6A0DAD]" /> Lote de Transferência ({transfItens.length})
-                    </h3>
-                    {transfItens.length > 0 && (
-                      <span className="text-xs bg-[#6A0DAD]/20 text-[#6A0DAD] border border-[#6A0DAD]/30 px-2.5 py-1 rounded-full font-bold">
-                        {transfItens.reduce((acc, i) => acc + (i.quantidade || 1), 0)} unidade(s)
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="max-h-[260px] overflow-y-auto space-y-2 pr-1 mb-4">
-                    {transfItens.length === 0 ? (
-                      <div className="text-center text-gray-500 py-12 border border-dashed border-[#222222] rounded-lg">
-                        <p className="text-xs font-semibold">Nenhum item adicionado ao lote.</p>
-                        <p className="text-[11px] text-gray-600 mt-1">Bipe um IMEI ou código de barras acima para começar.</p>
-                      </div>
-                    ) : (
-                      transfItens.map((item, idx) => (
-                        <div key={idx} className="bg-black border border-[#222222] p-3 rounded-lg flex justify-between items-center transition-all hover:border-[#333333]">
-                          <div>
-                            <p className="text-sm font-bold text-white">{item.nome}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              {item.imei ? (
-                                <span className="text-xs text-gray-400 font-mono bg-[#111111] px-2 py-0.5 rounded border border-[#222222]">
-                                  IMEI: {item.imei}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-purple-400 font-mono bg-purple-950/20 px-2 py-0.5 rounded border border-purple-900/30 font-semibold">
-                                  Qtd: {item.quantidade} un.
-                                </span>
-                              )}
-                              {item.codigo_barras && (
-                                <span className="text-[10px] text-gray-500 font-mono">EAN: {item.codigo_barras}</span>
-                              )}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => handleTransfItemRemove(item.imei || item.produto_id)}
-                            className="text-red-500 hover:text-red-400 p-1.5 rounded hover:bg-red-950/20 transition-colors"
-                            title="Remover item"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-1.5">Observações / Motivo (Opcional)</label>
+                  <textarea
+                    value={transfObs}
+                    onChange={(e) => setTransfObs(e.target.value)}
+                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-2 text-xs text-white outline-none min-h-[50px] placeholder-gray-600"
+                    placeholder="Ex: Realocação de vitrine, solicitação do gerente, portador..."
+                  ></textarea>
                 </div>
-
-                <button
-                  onClick={handleSubmeterTransferencia}
-                  disabled={loadingTransferencias || transfItens.length === 0 || isSameFilial}
-                  className="w-full bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-40 text-white font-black uppercase tracking-wider py-3 rounded-lg flex justify-center items-center gap-2 transition-all cursor-pointer shadow-lg"
-                >
-                  {loadingTransferencias ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
-                  Confirmar e Concluir Realocação
-                </button>
               </div>
             </div>
 
-            {/* Tabela de Audit: Últimas Transferências Realizadas */}
-            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden mt-6">
-              <div className="p-4 border-b border-[#222222] flex justify-between items-center">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <BarChart3 size={18} className="text-[#6A0DAD]" />
-                  Últimas Transferências Realizadas (Auditoria de Movimentação)
-                </h3>
-                <span className="text-xs text-gray-500 font-mono">
-                  {historicoRealocacoes.length} registro(s) recente(s)
-                </span>
+            {/* Card 2: Resumo e Itens no Lote */}
+            <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6 flex flex-col justify-between">
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Package size={18} className="text-[#6A0DAD]" /> Lote de Transferência ({transfItens.length})
+                  </h3>
+                  {transfItens.length > 0 && (
+                    <span className="text-xs bg-[#6A0DAD]/20 text-[#6A0DAD] border border-[#6A0DAD]/30 px-2.5 py-1 rounded-full font-bold">
+                      {transfItens.reduce((acc, i) => acc + (i.quantidade || 1), 0)} unidade(s)
+                    </span>
+                  )}
+                </div>
+
+                <div className="max-h-[260px] overflow-y-auto space-y-2 pr-1 mb-4">
+                  {transfItens.length === 0 ? (
+                    <div className="text-center text-gray-500 py-12 border border-dashed border-[#222222] rounded-lg">
+                      <p className="text-xs font-semibold">Nenhum item adicionado ao lote.</p>
+                      <p className="text-[11px] text-gray-600 mt-1">Bipe um IMEI ou código de barras acima para começar.</p>
+                    </div>
+                  ) : (
+                    transfItens.map((item, idx) => (
+                      <div key={idx} className="bg-black border border-[#222222] p-3 rounded-lg flex justify-between items-center transition-all hover:border-[#333333]">
+                        <div>
+                          <p className="text-sm font-bold text-white">{item.nome}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {item.imei ? (
+                              <span className="text-xs text-gray-400 font-mono bg-[#111111] px-2 py-0.5 rounded border border-[#222222]">
+                                IMEI: {item.imei}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-purple-400 font-mono bg-purple-950/20 px-2 py-0.5 rounded border border-purple-900/30 font-semibold">
+                                Qtd: {item.quantidade} un.
+                              </span>
+                            )}
+                            {item.codigo_barras && (
+                              <span className="text-[10px] text-gray-500 font-mono">EAN: {item.codigo_barras}</span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleTransfItemRemove(item.imei || item.produto_id)}
+                          className="text-red-500 hover:text-red-400 p-1.5 rounded hover:bg-red-950/20 transition-colors"
+                          title="Remover item"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
 
-              {historicoRealocacoes.length === 0 ? (
-                <div className="p-8 text-center text-gray-500 text-xs italic">
-                  Nenhuma transferências recente gravada nesta sessão. As movimentações efetuadas aparecerão listadas aqui em tempo real.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-[#111111] text-gray-400 uppercase tracking-wider border-b border-[#222222] text-[10px]">
-                        <th className="p-3 font-bold">Data / Hora</th>
-                        <th className="p-3 font-bold">Itens / Identificador</th>
-                        <th className="p-3 font-bold">Trajeto (Origem ➔ Destino)</th>
-                        <th className="p-3 font-bold text-center">Total Qtd</th>
-                        <th className="p-3 font-bold">Responsável</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#222222]">
-                      {historicoRealocacoes.map((log) => (
-                        <tr key={log.id} className="hover:bg-[#111111] transition-colors">
-                          <td className="p-3 text-gray-400 font-mono whitespace-nowrap">
-                            {new Date(log.created_at).toLocaleString('pt-BR')}
-                          </td>
-                          <td className="p-3 font-semibold text-white">
-                            {log.itens ? (
-                              <div className="space-y-1">
-                                {log.itens.map((it, i) => (
-                                  <div key={i} className="flex items-center gap-1.5">
-                                    <span className="text-white font-bold">{it.nome}</span>
-                                    {it.imei && <span className="text-[10px] text-gray-400 font-mono bg-black px-1.5 py-0.5 rounded border border-[#222222]">IMEI: {it.imei}</span>}
-                                    {it.quantidade > 1 && <span className="text-[10px] text-purple-400 font-bold">x{it.quantidade}</span>}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span>{log.itens_resumo || 'Mercadorias variadas'}</span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            <span className="text-gray-300 font-bold">{log.origem}</span>
-                            <span className="text-[#6A0DAD] mx-1.5 font-bold">➔</span>
-                            <span className="text-green-400 font-bold">{log.destino}</span>
-                          </td>
-                          <td className="p-3 text-center font-bold text-white font-mono">
-                            {log.qtd} un.
-                          </td>
-                          <td className="p-3 text-gray-400">
-                            {log.usuario}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <button
+                onClick={handleSubmeterTransferencia}
+                disabled={loadingTransferencias || transfItens.length === 0 || isSameFilial}
+                className="w-full bg-[#6A0DAD] hover:bg-[#580b94] disabled:opacity-40 text-white font-black uppercase tracking-wider py-3 rounded-lg flex justify-center items-center gap-2 transition-all cursor-pointer shadow-lg"
+              >
+                {loadingTransferencias ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />}
+                Confirmar e Concluir Realocação
+              </button>
             </div>
           </div>
+
+          {/* Tabela de Audit: Últimas Transferências Realizadas */}
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden mt-6">
+            <div className="p-4 border-b border-[#222222] flex justify-between items-center">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <BarChart3 size={18} className="text-[#6A0DAD]" />
+                Últimas Transferências Realizadas (Auditoria de Movimentação)
+              </h3>
+              <span className="text-xs text-gray-500 font-mono">
+                {historicoRealocacoes.length} registro(s) recente(s)
+              </span>
+            </div>
+
+            {historicoRealocacoes.length === 0 ? (
+              <div className="p-8 text-center text-gray-500 text-xs italic">
+                Nenhuma transferências recente gravada nesta sessão. As movimentações efetuadas aparecerão listadas aqui em tempo real.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-[#111111] text-gray-400 uppercase tracking-wider border-b border-[#222222] text-[10px]">
+                      <th className="p-3 font-bold">Data / Hora</th>
+                      <th className="p-3 font-bold">Itens / Identificador</th>
+                      <th className="p-3 font-bold">Trajeto (Origem ➔ Destino)</th>
+                      <th className="p-3 font-bold text-center">Total Qtd</th>
+                      <th className="p-3 font-bold">Responsável</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#222222]">
+                    {historicoRealocacoes.map((log) => (
+                      <tr key={log.id} className="hover:bg-[#111111] transition-colors">
+                        <td className="p-3 text-gray-400 font-mono whitespace-nowrap">
+                          {new Date(log.created_at).toLocaleString('pt-BR')}
+                        </td>
+                        <td className="p-3 font-semibold text-white">
+                          {log.itens ? (
+                            <div className="space-y-1">
+                              {log.itens.map((it, i) => (
+                                <div key={i} className="flex items-center gap-1.5">
+                                  <span className="text-white font-bold">{it.nome}</span>
+                                  {it.imei && <span className="text-[10px] text-gray-400 font-mono bg-black px-1.5 py-0.5 rounded border border-[#222222]">IMEI: {it.imei}</span>}
+                                  {it.quantidade > 1 && <span className="text-[10px] text-purple-400 font-bold">x{it.quantidade}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span>{log.itens_resumo || 'Mercadorias variadas'}</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <span className="text-gray-300 font-bold">{log.origem}</span>
+                          <span className="text-[#6A0DAD] mx-1.5 font-bold">➔</span>
+                          <span className="text-green-400 font-bold">{log.destino}</span>
+                        </td>
+                        <td className="p-3 text-center font-bold text-white font-mono">
+                          {log.qtd} un.
+                        </td>
+                        <td className="p-3 text-gray-400">
+                          {log.usuario}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
+      </div>
     );
   };
 
@@ -20294,11 +20283,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     type="button"
                                     onClick={handleAdicionarPagamentoPdv}
                                     disabled={!isFormularioAparelhoValido}
-                                    className={`w-full py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md ${
-                                      isFormularioAparelhoValido
+                                    className={`w-full py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md ${isFormularioAparelhoValido
                                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-95'
                                         : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed opacity-60'
-                                    }`}
+                                      }`}
                                   >
                                     <Plus size={14} />
                                     <span>+ Adicionar Aparelho como Entrada ({valorAparelhoNumerico.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})</span>
@@ -21601,11 +21589,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           <button
             type="button"
             onClick={() => setEntradaSubTab('conferencia')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-              entradaSubTab === 'conferencia'
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${entradaSubTab === 'conferencia'
                 ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
                 : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
+              }`}
           >
             <CheckCircle2 size={15} />
             <span>Fila de Conferência & Entrada</span>
@@ -21622,11 +21609,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               setEntradaSubTab('movimentacoes');
               fetchEstoqueMovimentacoes();
             }}
-            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-              entradaSubTab === 'movimentacoes'
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${entradaSubTab === 'movimentacoes'
                 ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
                 : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
+              }`}
           >
             <ClipboardList size={15} />
             <span>Histórico de Movimentações (Logs)</span>
@@ -21808,7 +21794,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       onChange={(e) => {
                         const prodId = String(e.target.value || '');
                         const prod = produtosMestreFiltrados.find(p => String(p.id) === prodId) ||
-                                     (catalogoCompleto || []).find(p => String(p.id) === prodId);
+                          (catalogoCompleto || []).find(p => String(p.id) === prodId);
                         setSelectedProdutoMestre(prod || null);
                         if (prod) {
                           setEntradaCodigoBarras(prod.codigo_barras || prod.barcode || prod.ean || '');
@@ -22051,15 +22037,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   ) : (
                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                       {ultimosRecebidos.slice(0, 10).map((item, idx) => {
-                        const nomeModelo = 
-                          item.produtos?.nome || 
-                          item.produto_nome || 
-                          item.modelo || 
+                        const nomeModelo =
+                          item.produtos?.nome ||
+                          item.produto_nome ||
+                          item.modelo ||
                           'Modelo não identificado';
 
-                        const corAparelho = 
-                          item.cor || 
-                          item.cor_nome || 
+                        const corAparelho =
+                          item.cor ||
+                          item.cor_nome ||
                           'Sem cor';
 
                         return (
@@ -22088,11 +22074,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               </div>
                             </div>
                             <div>
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${
-                                String(item.status || '').toUpperCase() === 'VENDIDO'
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${String(item.status || '').toUpperCase() === 'VENDIDO'
                                   ? 'bg-red-950/20 text-red-400 border border-red-800/30'
                                   : 'bg-green-950/20 text-green-400 border border-green-800/30'
-                              }`}>
+                                }`}>
                                 {item.status || 'DISPONIVEL'}
                               </span>
                             </div>
@@ -22313,11 +22298,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             {mov.created_at ? new Date(mov.created_at).toLocaleString('pt-BR') : '-'}
                           </td>
                           <td className="py-3">
-                            <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${
-                              isEntrada
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${isEntrada
                                 ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/40'
                                 : 'bg-blue-950/30 text-blue-400 border border-blue-800/40'
-                            }`}>
+                              }`}>
                               {tipo}
                             </span>
                           </td>
@@ -24165,7 +24149,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             rankingVendedores = rankingViewColaboradores.map(row => {
                               const faturado = Number(row.faturado_titular || row.volume_total_participado || 0);
                               const qtdVendas = Number(row.qtd_titular || row.total_transacoes || 0);
-                              const calcObj = Object.values(vendedorMap).find(v => 
+                              const calcObj = Object.values(vendedorMap).find(v =>
                                 (row.colaborador_id && String(v.id) === String(row.colaborador_id)) ||
                                 (row.colaborador && v.nome && v.nome.toUpperCase().includes(String(row.colaborador).trim().toUpperCase())) ||
                                 (row.colaborador && v.nome && String(row.colaborador).trim().toUpperCase().includes(v.nome.toUpperCase()))
@@ -24199,7 +24183,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           vendasMes.forEach(s => {
                             const rawFilialId = s.filial_id ? String(s.filial_id) : '';
                             const nomeFilialVenda = (s.filiais?.nome || s.filial_nome || s.filial?.nome || '').trim().toLowerCase();
-                            
+
                             // 1. Tentar encontrar a filial no mapa por ID exato
                             let targetKey = rawFilialId && filialMap[rawFilialId] ? rawFilialId : null;
 
@@ -24337,7 +24321,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       </span>
                                     </div>
                                     {comparativoFiliais.length === 0 ? (
-                                        <p className="text-xs text-gray-500 italic py-6 text-center">Sem vendas registradas no mês.</p>
+                                      <p className="text-xs text-gray-500 italic py-6 text-center">Sem vendas registradas no mês.</p>
                                     ) : (
                                       <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                                         {comparativoFiliais.map((f, idx) => {
@@ -25463,21 +25447,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                                     {(['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'SOCIO', 'GERENTE'].includes(profile?.role?.toUpperCase()) ||
                                       ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'SOCIO'].includes(profile?.cargo?.toUpperCase())) && (
-                                      <div>
-                                        <label className="block text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1.5">Preço de Custo / Compra (R$)</label>
-                                        <div className="relative">
-                                          <span className="absolute left-3 top-2.5 text-xs text-amber-500/70 font-bold">R$</span>
-                                          <input
-                                            type="text"
-                                            inputMode="decimal"
-                                            value={precoCustoProduto}
-                                            onChange={(e) => setPrecoCustoProduto(e.target.value)}
-                                            className="w-full bg-black border border-amber-900/40 focus:border-amber-500 rounded-md text-amber-300 font-mono font-bold pl-9 pr-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
-                                            placeholder="0.00"
-                                          />
+                                        <div>
+                                          <label className="block text-[10px] font-semibold text-amber-400 uppercase tracking-wider mb-1.5">Preço de Custo / Compra (R$)</label>
+                                          <div className="relative">
+                                            <span className="absolute left-3 top-2.5 text-xs text-amber-500/70 font-bold">R$</span>
+                                            <input
+                                              type="text"
+                                              inputMode="decimal"
+                                              value={precoCustoProduto}
+                                              onChange={(e) => setPrecoCustoProduto(e.target.value)}
+                                              className="w-full bg-black border border-amber-900/40 focus:border-amber-500 rounded-md text-amber-300 font-mono font-bold pl-9 pr-3 py-2.5 text-sm placeholder-gray-600 outline-none transition-all"
+                                              placeholder="0.00"
+                                            />
+                                          </div>
                                         </div>
-                                      </div>
-                                    )}
+                                      )}
                                   </div>
 
                                   {/* Calculadora de Lucro Bruto Estimado por Unidade */}
@@ -27117,7 +27101,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           // Quando em "Todas as Filiais", traz tudo sem restrição.
                           // Quando uma filial específica está selecionada, compara com filial_id ou nome da filial.
                           const isTodasFiliais = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || filtroFilialCaixa === '';
-                          const matchFilial = isTodasFiliais || 
+                          const matchFilial = isTodasFiliais ||
                             String(cx.filial_id) === String(filtroFilialCaixa) ||
                             (cx.filial_nome && filiais.find(f => String(f.id) === String(filtroFilialCaixa))?.nome?.toLowerCase() === cx.filial_nome?.toLowerCase());
 
@@ -27204,7 +27188,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 }
 
                                 const isTodasFiliais = !filtroFilialCaixa || filtroFilialCaixa === 'todas' || filtroFilialCaixa === 'ALL' || filtroFilialCaixa === '';
-                                const matchFilial = isTodasFiliais || 
+                                const matchFilial = isTodasFiliais ||
                                   String(cx.filial_id) === String(filtroFilialCaixa) ||
                                   (cx.filial_nome && filiais.find(f => String(f.id) === String(filtroFilialCaixa))?.nome?.toLowerCase() === cx.filial_nome?.toLowerCase());
 
@@ -27647,7 +27631,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   const y = parseInt(yearStr, 10);
                                   const m = parseInt(monthStr, 10);
                                   return (d.getUTCFullYear() === y && (d.getUTCMonth() + 1) === m) ||
-                                         (d.getFullYear() === y && (d.getMonth() + 1) === m);
+                                    (d.getFullYear() === y && (d.getMonth() + 1) === m);
                                 })
                                 .filter(sale => {
                                   // Filtro por Vendedor
@@ -27732,11 +27716,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 // 3. Coluna FILIAL: exibir venda.filiais?.nome || 'Monkey Shop'
                                 const filialNome = sale.filiais?.nome || filiais.find(f => f.id === sale.filial_id)?.nome || 'Monkey Shop';
 
-                                 const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
-                                 // Extração do valor persistido no banco
-                                const comissaoGravada = 
-                                  sale.comissao_vendedor ?? 
-                                  sale.comissao ?? 
+                                const metodoPag = sale.metodo_pagamento || sale.forma_pagamento || 'N/A';
+                                // Extração do valor persistido no banco
+                                const comissaoGravada =
+                                  sale.comissao_vendedor ??
+                                  sale.comissao ??
                                   sale.valor_comissao ??
                                   sale.itens_venda?.[0]?.comissao_vendedor ??
                                   sale.itens_venda?.[0]?.comissao ??
@@ -27779,8 +27763,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                         <span className="font-semibold text-white print:text-black">{vendedorNome}</span>
                                         {(() => {
                                           const tNome = sale.trainee_nome ||
-                                                        (sale.trainee_id && (mapaFuncionarios[String(sale.trainee_id)]?.nome || mapaFuncionarios[String(sale.trainee_id)]?.name)) ||
-                                                        (sale.treener_id && (mapaFuncionarios[String(sale.treener_id)]?.nome || mapaFuncionarios[String(sale.treener_id)]?.name));
+                                            (sale.trainee_id && (mapaFuncionarios[String(sale.trainee_id)]?.nome || mapaFuncionarios[String(sale.trainee_id)]?.name)) ||
+                                            (sale.treener_id && (mapaFuncionarios[String(sale.treener_id)]?.nome || mapaFuncionarios[String(sale.treener_id)]?.name));
                                           const tComissao = Number(sale.comissao_trainee ?? 0);
                                           if (!tNome) return null;
                                           return (
@@ -28333,7 +28317,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 {(activeTab === 'contas_a_receber' || currentView === 'contas_a_receber') &&
                   ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'ADMINISTRADOR'].includes(String(profile?.role || '').toUpperCase()) && (
                     <ContasAReceber profile={profile} filiais={filiais} />
-                )}
+                  )}
               </div>
             ) : (
               /* PAINEL DE CONTROLE DO VENDEDOR */
@@ -28540,7 +28524,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                         {/* PARTE 2: 3. DIVISÃO EM DOIS MEDIDORES PRINCIPAIS COM INDICADOR DE COMISSÃO */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                          
+
                           {/* BLOCO A: META DE BOLETOS / FINANCIADORAS */}
                           <div className="bg-[#0A0A0A] border border-[#222222] hover:border-amber-500/40 p-6 rounded-xl space-y-4 shadow-xl shadow-amber-950/5 transition-all">
                             {/* Topo do Medidor A */}
@@ -28747,10 +28731,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       : (sale.categoria || sale.produtos?.categoria || 'Geral');
 
                                     // 3. Formatação da Comissão: 2 casas decimais com máscara monetária (ex.: R$ 104,42 em vez de R$ 104,415)
-                                    const valorComissaoSalvaHistorico = 
-                                      sale.comissao_vendedor ?? 
-                                      sale.comissao ?? 
-                                      sale.valor_comissao ?? 
+                                    const valorComissaoSalvaHistorico =
+                                      sale.comissao_vendedor ??
+                                      sale.comissao ??
+                                      sale.valor_comissao ??
                                       itens?.[0]?.comissao;
 
                                     const valorComissaoBruto = valorComissaoSalvaHistorico !== undefined && valorComissaoSalvaHistorico !== null && valorComissaoSalvaHistorico !== ''
@@ -29619,31 +29603,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   <div className="p-2.5 rounded-xl bg-primary/15 border border-primary/30 text-primary">
                     <Store size={22} />
                   </div>
-              {(() => {
-                const isDetalheFechado = !!(modalDetalheCaixa.data_fechamento || modalDetalheCaixa.fechado_em || String(modalDetalheCaixa.status || '').toUpperCase() === 'FECHADO');
-                const isDetalheAberto = !isDetalheFechado;
-                return (
-                  <>
-                    <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
-                      Sessão de Caixa
-                      {isDetalheAberto ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                          ABERTO
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border">
-                          <Lock size={10} />
-                          FECHADO
-                        </span>
-                      )}
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      {modalDetalheCaixa.filiais?.nome || modalDetalheCaixa.filial_nome || filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome || 'Filial'}
-                    </p>
-                  </>
-                );
-              })()}
+                  {(() => {
+                    const isDetalheFechado = !!(modalDetalheCaixa.data_fechamento || modalDetalheCaixa.fechado_em || String(modalDetalheCaixa.status || '').toUpperCase() === 'FECHADO');
+                    const isDetalheAberto = !isDetalheFechado;
+                    return (
+                      <>
+                        <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
+                          Sessão de Caixa
+                          {isDetalheAberto ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              ABERTO
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border">
+                              <Lock size={10} />
+                              FECHADO
+                            </span>
+                          )}
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          {modalDetalheCaixa.filiais?.nome || modalDetalheCaixa.filial_nome || filiais.find(f => String(f.id) === String(modalDetalheCaixa.filial_id))?.nome || 'Filial'}
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
                 <button
                   onClick={() => {
@@ -29898,102 +29882,102 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                     {/* Seção de Formulário de Encerramento Gerencial */}
                     {isDetalheAberto && isConfirmingFecharCaixaGerencial && (
-                <div className="bg-rose-950/20 border border-rose-800/40 rounded-xl p-4 space-y-3 animate-fadeIn">
-                  <div className="flex items-center gap-2 text-rose-400 font-extrabold text-xs">
-                    <AlertTriangle size={16} className="text-rose-400 shrink-0" />
-                    <span>Encerramento Gerencial / Forçado do Caixa</span>
-                  </div>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Utilize esta opção caso o vendedor esteja com dificuldades ou impossibilitado de fechar o caixa no PDV. Os totais abaixo foram pré-preenchidos com as vendas registradas e podem ser ajustados se necessário:
-                  </p>
+                      <div className="bg-rose-950/20 border border-rose-800/40 rounded-xl p-4 space-y-3 animate-fadeIn">
+                        <div className="flex items-center gap-2 text-rose-400 font-extrabold text-xs">
+                          <AlertTriangle size={16} className="text-rose-400 shrink-0" />
+                          <span>Encerramento Gerencial / Forçado do Caixa</span>
+                        </div>
+                        <p className="text-[11px] text-gray-400 leading-relaxed">
+                          Utilize esta opção caso o vendedor esteja com dificuldades ou impossibilitado de fechar o caixa no PDV. Os totais abaixo foram pré-preenchidos com as vendas registradas e podem ser ajustados se necessário:
+                        </p>
 
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-400 block mb-1">Dinheiro em Caixa (R$)</label>
-                      <input
-                        type="text"
-                        value={fechamentoGerencialValores.dinheiro}
-                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, dinheiro: e.target.value }))}
-                        placeholder="0,00"
-                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-400 block mb-1">Cartão (R$)</label>
-                      <input
-                        type="text"
-                        value={fechamentoGerencialValores.cartao}
-                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, cartao: e.target.value }))}
-                        placeholder="0,00"
-                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-400 block mb-1">PIX (R$)</label>
-                      <input
-                        type="text"
-                        value={fechamentoGerencialValores.pix}
-                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, pix: e.target.value }))}
-                        placeholder="0,00"
-                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-400 block mb-1">Outros / Boleto (R$)</label>
-                      <input
-                        type="text"
-                        value={fechamentoGerencialValores.outros}
-                        onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, outros: e.target.value }))}
-                        placeholder="0,00"
-                        className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-400 block mb-1">Dinheiro em Caixa (R$)</label>
+                            <input
+                              type="text"
+                              value={fechamentoGerencialValores.dinheiro}
+                              onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, dinheiro: e.target.value }))}
+                              placeholder="0,00"
+                              className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-400 block mb-1">Cartão (R$)</label>
+                            <input
+                              type="text"
+                              value={fechamentoGerencialValores.cartao}
+                              onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, cartao: e.target.value }))}
+                              placeholder="0,00"
+                              className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-400 block mb-1">PIX (R$)</label>
+                            <input
+                              type="text"
+                              value={fechamentoGerencialValores.pix}
+                              onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, pix: e.target.value }))}
+                              placeholder="0,00"
+                              className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-400 block mb-1">Outros / Boleto (R$)</label>
+                            <input
+                              type="text"
+                              value={fechamentoGerencialValores.outros}
+                              onChange={(e) => setFechamentoGerencialValores(prev => ({ ...prev, outros: e.target.value }))}
+                              placeholder="0,00"
+                              className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:border-rose-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
 
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-400 block mb-1">Motivo / Observação do Fechamento</label>
-                    <textarea
-                      rows={2}
-                      value={fechamentoGerencialObs}
-                      onChange={(e) => setFechamentoGerencialObs(e.target.value)}
-                      placeholder="Descreva o motivo do fechamento pela gerência..."
-                      className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:border-rose-500 focus:outline-none resize-none"
-                    />
-                  </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 block mb-1">Motivo / Observação do Fechamento</label>
+                          <textarea
+                            rows={2}
+                            value={fechamentoGerencialObs}
+                            onChange={(e) => setFechamentoGerencialObs(e.target.value)}
+                            placeholder="Descreva o motivo do fechamento pela gerência..."
+                            className="w-full bg-black/60 border border-[#333] rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-gray-600 focus:border-rose-500 focus:outline-none resize-none"
+                          />
+                        </div>
 
-                  <div className="flex items-center gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsConfirmingFecharCaixaGerencial(false)}
-                      disabled={loadingFecharCaixaGerencial}
-                      className="flex-1 py-2 bg-[#222] hover:bg-[#333] text-gray-300 font-bold rounded-lg text-xs transition-all cursor-pointer"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleFecharCaixaGerencial}
-                      disabled={loadingFecharCaixaGerencial}
-                      className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-rose-900/30 cursor-pointer disabled:opacity-50"
-                    >
-                      {loadingFecharCaixaGerencial ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" />
-                          Encerrando Caixa...
-                        </>
-                      ) : (
-                        <>
-                          <Lock size={14} />
-                          Confirmar Fechamento
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          );
-        })()}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setIsConfirmingFecharCaixaGerencial(false)}
+                            disabled={loadingFecharCaixaGerencial}
+                            className="flex-1 py-2 bg-[#222] hover:bg-[#333] text-gray-300 font-bold rounded-lg text-xs transition-all cursor-pointer"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleFecharCaixaGerencial}
+                            disabled={loadingFecharCaixaGerencial}
+                            className="flex-1 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-rose-900/30 cursor-pointer disabled:opacity-50"
+                          >
+                            {loadingFecharCaixaGerencial ? (
+                              <>
+                                <Loader2 size={14} className="animate-spin" />
+                                Encerrando Caixa...
+                              </>
+                            ) : (
+                              <>
+                                <Lock size={14} />
+                                Confirmar Fechamento
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {/* Seção de Comprovantes Anexados */}
               {(() => {
@@ -30482,11 +30466,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
             <div
               id="area-cupom-impressao"
-              className={`w-full space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:shadow-none transition-all ${
-                formatoImpressao === 'a4'
+              className={`w-full space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:shadow-none transition-all ${formatoImpressao === 'a4'
                   ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8'
                   : 'max-w-md modo-termica bg-card text-card-foreground border border-border rounded-2xl p-6'
-              }`}
+                }`}
             >
               {/* Barra Superior de Seleção de Formato e Fechar (Apenas na Tela) */}
               <div className="flex items-center justify-between pb-3 border-b border-border/60 print:hidden gap-2 flex-wrap">
@@ -30498,11 +30481,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     <button
                       type="button"
                       onClick={() => setFormatoImpressao('termica')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        formatoImpressao === 'termica'
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${formatoImpressao === 'termica'
                           ? 'bg-zinc-800 text-white shadow-sm'
                           : 'text-zinc-600 hover:text-black'
-                      }`}
+                        }`}
                     >
                       <Printer size={13} />
                       Térmica (80mm)
@@ -30510,11 +30492,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     <button
                       type="button"
                       onClick={() => setFormatoImpressao('a4')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                        formatoImpressao === 'a4'
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${formatoImpressao === 'a4'
                           ? 'bg-[#6A0DAD] text-white shadow-sm'
                           : 'text-zinc-600 hover:text-black'
-                      }`}
+                        }`}
                     >
                       <FileText size={13} />
                       Relatório / Termo (A4)
@@ -30525,11 +30506,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 <button
                   type="button"
                   onClick={() => setPdvReciboAtivo(false)}
-                  className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                    formatoImpressao === 'a4'
+                  className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${formatoImpressao === 'a4'
                       ? 'bg-zinc-100 border-zinc-300 hover:border-red-500 text-zinc-600 hover:text-red-600'
                       : 'bg-surface border-border hover:border-destructive text-muted-foreground hover:text-destructive'
-                  }`}
+                    }`}
                   title="Fechar"
                 >
                   <X size={16} />
@@ -30578,13 +30558,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       : [];
 
                 // Nome do Vendedor com fallback abrangente
-                const nomeVendedor = 
-                  venda.vendedor_nome || 
-                  venda.vendedor?.nome || 
-                  (typeof venda.vendedor === 'string' ? venda.vendedor : null) || 
-                  venda.usuario_nome || 
-                  venda.usuario?.nome || 
-                  venda.operador_nome || 
+                const nomeVendedor =
+                  venda.vendedor_nome ||
+                  venda.vendedor?.nome ||
+                  (typeof venda.vendedor === 'string' ? venda.vendedor : null) ||
+                  venda.usuario_nome ||
+                  venda.usuario?.nome ||
+                  venda.operador_nome ||
                   venda.profiles?.nome ||
                   venda.profile?.nome ||
                   (teamMembers || []).find(m => String(m.id) === String(venda.vendedor_id || venda.usuario_id))?.nome ||
@@ -30592,60 +30572,60 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   'Vendedor';
 
                 // Resolução segura e robusta do Cliente para o Recibo
-                const clienteObjRecibo = (clientes || []).find(c => 
+                const clienteObjRecibo = (clientes || []).find(c =>
                   (venda.cliente_id && String(c.id) === String(venda.cliente_id)) ||
                   (venda.cliente_cpf_cnpj && (c.cpf_cnpj === venda.cliente_cpf_cnpj || c.cpf === venda.cliente_cpf_cnpj))
                 );
 
-                const nomeCliente = 
-                  (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) || 
-                  venda.cliente?.nome || 
-                  venda.cliente?.razao_social || 
-                  (typeof venda.cliente === 'string' ? venda.cliente : null) || 
-                  venda.nome_cliente || 
-                  venda.clientes?.nome || 
-                  venda.clientes?.razao_social || 
+                const nomeCliente =
+                  (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) ||
+                  venda.cliente?.nome ||
+                  venda.cliente?.razao_social ||
+                  (typeof venda.cliente === 'string' ? venda.cliente : null) ||
+                  venda.nome_cliente ||
+                  venda.clientes?.nome ||
+                  venda.clientes?.razao_social ||
                   clienteObjRecibo?.nome ||
                   clienteObjRecibo?.razao_social ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.nome ||
-                  venda.cliente_nome || 
+                  venda.cliente_nome ||
                   'Consumidor Final';
 
-                const clienteCpfCnpj = 
-                  venda.cliente_cpf || 
-                  venda.cliente_cpf_cnpj || 
-                  venda.cliente?.cpf || 
-                  venda.cliente?.cnpj || 
-                  venda.cliente?.cpf_cnpj || 
-                  venda.cpf || 
-                  venda.cpf_cliente || 
-                  venda.clientes?.cpf_cnpj || 
-                  venda.clientes?.cpf || 
+                const clienteCpfCnpj =
+                  venda.cliente_cpf ||
+                  venda.cliente_cpf_cnpj ||
+                  venda.cliente?.cpf ||
+                  venda.cliente?.cnpj ||
+                  venda.cliente?.cpf_cnpj ||
+                  venda.cpf ||
+                  venda.cpf_cliente ||
+                  venda.clientes?.cpf_cnpj ||
+                  venda.clientes?.cpf ||
                   clienteObjRecibo?.cpf_cnpj ||
                   clienteObjRecibo?.cpf ||
                   clienteObjRecibo?.cnpj ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf_cnpj ||
-                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf || 
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf ||
                   '';
 
-                const clienteTelefone = 
-                  venda.cliente_telefone || 
-                  venda.telefone || 
-                  venda.telefone_cliente || 
-                  venda.cliente?.telefone || 
-                  venda.clientes?.telefone || 
+                const clienteTelefone =
+                  venda.cliente_telefone ||
+                  venda.telefone ||
+                  venda.telefone_cliente ||
+                  venda.cliente?.telefone ||
+                  venda.clientes?.telefone ||
                   clienteObjRecibo?.telefone ||
-                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.telefone || 
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.telefone ||
                   '';
 
-                const clienteEmail = 
-                  venda.cliente_email || 
-                  venda.email || 
-                  venda.email_cliente || 
-                  venda.cliente?.email || 
-                  venda.clientes?.email || 
+                const clienteEmail =
+                  venda.cliente_email ||
+                  venda.email ||
+                  venda.email_cliente ||
+                  venda.cliente?.email ||
+                  venda.clientes?.email ||
                   clienteObjRecibo?.email ||
-                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.email || 
+                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.email ||
                   '';
 
                 console.log('Objeto recebido para o Recibo:', { venda, nomeVendedor, nomeCliente });
@@ -30661,12 +30641,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                 const somaItens = itens.reduce((acc, it) => {
                   const p = Number(
-                    it.preco_unitario || 
-                    it.valor_unitario || 
-                    it.preco_venda || 
-                    it.preco || 
+                    it.preco_unitario ||
+                    it.valor_unitario ||
+                    it.preco_venda ||
+                    it.preco ||
                     it.valor ||
-                    (it.subtotal && it.quantidade ? it.subtotal / it.quantidade : 0) || 
+                    (it.subtotal && it.quantidade ? it.subtotal / it.quantidade : 0) ||
                     (it.valor_total && it.quantidade ? it.valor_total / it.quantidade : 0) ||
                     it.preco_unitario_vendido ||
                     it.preco_base ||
@@ -30679,10 +30659,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 }, 0);
 
                 const totalVenda = toNum(
-                  venda.valor_total ?? 
-                  venda.total ?? 
-                  venda.total_pago ?? 
-                  venda.valor ?? 
+                  venda.valor_total ??
+                  venda.total ??
+                  venda.total_pago ??
+                  venda.valor ??
                   (isAvista ? (fin.saldo_pagar_original ?? fin.total_novo_original) : (fin.saldo_pagar ?? fin.total_novo)) ??
                   somaItens
                 );
@@ -30690,9 +30670,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 const subtotalVenda = toNum(
                   (isAvista ? (fin.total_novo_original ?? fin.saldo_pagar_original) : (fin.total_novo ?? fin.saldo_pagar)) ??
                   venda.subtotal ??
-                  venda.valor_total ?? 
-                  venda.total ?? 
-                  venda.valor ?? 
+                  venda.valor_total ??
+                  venda.total ??
+                  venda.valor ??
                   somaItens
                 );
 
@@ -30777,11 +30757,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       <div className="space-y-4 text-xs font-mono text-zinc-200 print:text-black">
                         {/* 3. Cabeçalho no Modelo Térmico (80mm) */}
                         <div className="text-center space-y-1">
-                          <span className={`text-[10px] border px-2.5 py-0.5 rounded-full font-bold uppercase print:hidden ${
-                            isAvista
+                          <span className={`text-[10px] border px-2.5 py-0.5 rounded-full font-bold uppercase print:hidden ${isAvista
                               ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                               : 'bg-primary/15 text-primary border-primary/30'
-                          }`}>
+                            }`}>
                             {isAvista ? 'Recibo à Vista (80mm)' : 'Recibo Detalhado (80mm)'}
                           </span>
 
@@ -30862,13 +30841,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               const corProduto = item.cor || item.produto?.cor || null;
                               const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
                               const precoUnitario = Number(
-                                item.preco_unitario || 
-                                item.valor_unitario || 
-                                item.preco_venda || 
-                                item.preco || 
+                                item.preco_unitario ||
+                                item.valor_unitario ||
+                                item.preco_venda ||
+                                item.preco ||
                                 item.valor ||
                                 item.preco_unitario_vendido ||
-                                (item.subtotal && itemQtd ? item.subtotal / itemQtd : 0) || 
+                                (item.subtotal && itemQtd ? item.subtotal / itemQtd : 0) ||
                                 (item.valor_total && itemQtd ? item.valor_total / itemQtd : 0) ||
                                 (item.total && itemQtd ? item.total / itemQtd : 0) ||
                                 item.preco_base ||
@@ -30876,9 +30855,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 0
                               );
                               const subtotalItem = Number(
-                                item.subtotal || 
-                                item.total || 
-                                item.valor_total || 
+                                item.subtotal ||
+                                item.total ||
+                                item.valor_total ||
                                 (precoUnitario * itemQtd)
                               );
                               return (
@@ -30978,9 +30957,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         <div className="flex items-start justify-between border-b-2 border-black pb-4 mb-4">
                           <div className="flex items-center gap-4">
                             {logoLoja ? (
-                              <img 
-                                src={logoLoja} 
-                                alt={nomeLoja} 
+                              <img
+                                src={logoLoja}
+                                alt={nomeLoja}
                                 className="h-16 max-w-[160px] object-contain"
                                 crossOrigin="anonymous"
                               />
@@ -31070,13 +31049,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 const corProduto = item.cor || item.produto?.cor || null;
                                 const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
                                 const precoUnitario = Number(
-                                  item.preco_unitario || 
-                                  item.valor_unitario || 
-                                  item.preco_venda || 
-                                  item.preco || 
+                                  item.preco_unitario ||
+                                  item.valor_unitario ||
+                                  item.preco_venda ||
+                                  item.preco ||
                                   item.valor ||
                                   item.preco_unitario_vendido ||
-                                  (item.subtotal && itemQtd ? item.subtotal / itemQtd : 0) || 
+                                  (item.subtotal && itemQtd ? item.subtotal / itemQtd : 0) ||
                                   (item.valor_total && itemQtd ? item.valor_total / itemQtd : 0) ||
                                   (item.total && itemQtd ? item.total / itemQtd : 0) ||
                                   item.preco_base ||
@@ -31084,9 +31063,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   0
                                 );
                                 const subtotalItem = Number(
-                                  item.subtotal || 
-                                  item.total || 
-                                  item.valor_total || 
+                                  item.subtotal ||
+                                  item.total ||
+                                  item.valor_total ||
                                   (precoUnitario * itemQtd)
                                 );
                                 return (
@@ -31265,11 +31244,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   <button
                     type="button"
                     onClick={() => dispararImpressao('termica')}
-                    className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${
-                      formatoImpressao === 'termica'
+                    className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${formatoImpressao === 'termica'
                         ? 'bg-zinc-900 hover:bg-zinc-800 text-white border-zinc-600 shadow-md ring-1 ring-zinc-500'
                         : 'bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 border-zinc-800'
-                    }`}
+                      }`}
                   >
                     <Printer size={15} />
                     🖨️ Imprimir Térmica (80mm)
@@ -31278,11 +31256,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   <button
                     type="button"
                     onClick={() => dispararImpressao('a4')}
-                    className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${
-                      formatoImpressao === 'a4'
+                    className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${formatoImpressao === 'a4'
                         ? 'bg-[#6A0DAD] hover:bg-[#500885] text-white border-[#8B2BE2]/50 shadow-md shadow-[#6A0DAD]/20 ring-1 ring-[#8B2BE2]'
                         : 'bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#A78BFA] border-[#6A0DAD]/40'
-                    }`}
+                      }`}
                   >
                     <FileText size={15} />
                     📄 Imprimir Relatório / Termo (A4)
@@ -31306,7 +31283,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         {modalSucessoVenda && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn font-sans">
             <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-lg w-full p-6 sm:p-7 space-y-6 shadow-2xl relative animate-scaleIn">
-              
+
               {/* Botão de Fechar */}
               <button
                 onClick={() => setModalSucessoVenda(null)}
@@ -31331,7 +31308,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
               {/* Botões de Escolha de Recibo */}
               <div className="space-y-3 pt-2">
-                
+
                 {/* Botão 1: Recibo À Vista (Simplificado) */}
                 <button
                   type="button"
@@ -31401,7 +31378,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         {modalEscolhaRecibo && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn font-sans">
             <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl relative animate-scaleIn">
-              
+
               <button
                 onClick={() => setModalEscolhaRecibo(null)}
                 className="absolute right-4 top-4 p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
@@ -32301,66 +32278,66 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           />
                         </div>
 
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
-                          UF (Estado)
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteUf ?? ''}
-                          onChange={(e) => setClienteUf(e.target.value.toUpperCase())}
-                          placeholder="Ex: SP"
-                          maxLength="2"
-                          disabled={cepLookupLoading}
-                          required={!clienteIsZonaRural}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all disabled:opacity-50"
-                        />
-                      </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 font-mono">
+                            UF (Estado)
+                          </label>
+                          <input
+                            type="text"
+                            value={clienteUf ?? ''}
+                            onChange={(e) => setClienteUf(e.target.value.toUpperCase())}
+                            placeholder="Ex: SP"
+                            maxLength="2"
+                            disabled={cepLookupLoading}
+                            required={!clienteIsZonaRural}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none font-mono transition-all disabled:opacity-50"
+                          />
+                        </div>
 
-                      <div className="md:col-span-2">
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Logradouro (Rua)
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteLogradouro ?? ''}
-                          onChange={(e) => setClienteLogradouro(e.target.value)}
-                          placeholder="Rua, Avenida, Travessa..."
-                          disabled={cepLookupLoading}
-                          required={!clienteIsZonaRural}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
-                        />
-                      </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                            Logradouro (Rua)
+                          </label>
+                          <input
+                            type="text"
+                            value={clienteLogradouro ?? ''}
+                            onChange={(e) => setClienteLogradouro(e.target.value)}
+                            placeholder="Rua, Avenida, Travessa..."
+                            disabled={cepLookupLoading}
+                            required={!clienteIsZonaRural}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
+                          />
+                        </div>
 
-                      <div>
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Bairro
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteBairro ?? ''}
-                          onChange={(e) => setClienteBairro(e.target.value)}
-                          placeholder="Bairro..."
-                          disabled={cepLookupLoading}
-                          required={!clienteIsZonaRural}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
-                        />
-                      </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                            Bairro
+                          </label>
+                          <input
+                            type="text"
+                            value={clienteBairro ?? ''}
+                            onChange={(e) => setClienteBairro(e.target.value)}
+                            placeholder="Bairro..."
+                            disabled={cepLookupLoading}
+                            required={!clienteIsZonaRural}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
+                          />
+                        </div>
 
-                      <div className="md:col-span-2">
-                        <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                          Cidade
-                        </label>
-                        <input
-                          type="text"
-                          value={clienteCidade ?? ''}
-                          onChange={(e) => setClienteCidade(e.target.value)}
-                          placeholder="Cidade..."
-                          disabled={cepLookupLoading}
-                          required={!clienteIsZonaRural}
-                          className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
-                        />
-                      </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                            Cidade
+                          </label>
+                          <input
+                            type="text"
+                            value={clienteCidade ?? ''}
+                            onChange={(e) => setClienteCidade(e.target.value)}
+                            placeholder="Cidade..."
+                            disabled={cepLookupLoading}
+                            required={!clienteIsZonaRural}
+                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-4 py-2.5 text-sm outline-none transition-all disabled:opacity-50"
+                          />
+                        </div>
 
                         <div>
                           <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -32505,7 +32482,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           const chosenId = e.target.value;
                           setVendaNewVendedorId(chosenId);
                           const item = (vendedores || []).find(v => String(v.id) === String(chosenId)) ||
-                                       (teamMembers || []).find(m => String(m.id) === String(chosenId));
+                            (teamMembers || []).find(m => String(m.id) === String(chosenId));
                           if (item) {
                             const n = item.nome || item.name || item.email || '';
                             setVendaNewVendedorNome(n);
@@ -32714,36 +32691,36 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     vendaNewMetodoPagamento?.toLowerCase() === 'financiadora' ||
                     vendaNewMetodoPagamento?.toLowerCase().includes('boleto') ||
                     vendaNewMetodoPagamento?.toLowerCase().includes('finan')) && (
-                    <div className="space-y-1 col-span-2 animate-fadeIn">
-                      <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider block">
-                        Financeira do Boleto / Carnê *
-                      </label>
-                      <select
-                        value={vendaNewFinanceira || ''}
-                        onChange={(e) => setVendaNewFinanceira(e.target.value)}
-                        required
-                        className="w-full bg-[#18181f] border border-purple-500/40 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-purple-500 cursor-pointer"
-                      >
-                        <option value="">Selecione a financeira...</option>
-                        <option value="PayJoy">PayJoy</option>
-                        <option value="Watu">Watu</option>
-                        <option value="Ume">Ume</option>
-                        <option value="Aiva">Aiva</option>
-                        <option value="Outra">Outra</option>
-                      </select>
-
-                      {vendaNewFinanceira === 'Outra' && (
-                        <input
-                          type="text"
-                          placeholder="Digite o nome da financeira..."
-                          value={vendaNewOutraFinanceiraNome || ''}
-                          onChange={(e) => setVendaNewOutraFinanceiraNome(e.target.value)}
+                      <div className="space-y-1 col-span-2 animate-fadeIn">
+                        <label className="text-xs font-semibold text-purple-300 uppercase tracking-wider block">
+                          Financeira do Boleto / Carnê *
+                        </label>
+                        <select
+                          value={vendaNewFinanceira || ''}
+                          onChange={(e) => setVendaNewFinanceira(e.target.value)}
                           required
-                          className="w-full bg-[#18181f] border border-white/20 rounded-lg p-2.5 text-white text-sm mt-2 focus:outline-none focus:border-purple-500 placeholder:text-gray-500"
-                        />
-                      )}
-                    </div>
-                  )}
+                          className="w-full bg-[#18181f] border border-purple-500/40 rounded-lg p-2.5 text-white text-sm focus:outline-none focus:border-purple-500 cursor-pointer"
+                        >
+                          <option value="">Selecione a financeira...</option>
+                          <option value="PayJoy">PayJoy</option>
+                          <option value="Watu">Watu</option>
+                          <option value="Ume">Ume</option>
+                          <option value="Aiva">Aiva</option>
+                          <option value="Outra">Outra</option>
+                        </select>
+
+                        {vendaNewFinanceira === 'Outra' && (
+                          <input
+                            type="text"
+                            placeholder="Digite o nome da financeira..."
+                            value={vendaNewOutraFinanceiraNome || ''}
+                            onChange={(e) => setVendaNewOutraFinanceiraNome(e.target.value)}
+                            required
+                            className="w-full bg-[#18181f] border border-white/20 rounded-lg p-2.5 text-white text-sm mt-2 focus:outline-none focus:border-purple-500 placeholder:text-gray-500"
+                          />
+                        )}
+                      </div>
+                    )}
 
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -32812,8 +32789,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               {/* Corpo com scroll */}
               <form onSubmit={handleSalvarNovaVendaManual} className="flex flex-col flex-1 overflow-hidden">
                 <div className="p-5 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
-                  
-                    {/* Linha 1: Data, Filial e Vendedor Titular */}
+
+                  {/* Linha 1: Data, Filial e Vendedor Titular */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -32857,7 +32834,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           const vId = e.target.value;
                           setNovaVendaVendedorId(vId);
                           const found = (vendedores || []).find(v => String(v.id) === String(vId)) ||
-                                        (teamMembers || []).find(m => String(m.id) === String(vId));
+                            (teamMembers || []).find(m => String(m.id) === String(vId));
                           if (found) {
                             setNovaVendaVendedorNome(found.nome || found.name || found.email || 'Vendedor');
                           }
@@ -32973,8 +32950,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               const chosenId = e.target.value;
                               setNovaVendaTraineeId(chosenId);
                               const matchObj = (treenersFilial || []).find(t => String(t.id) === String(chosenId)) ||
-                                               (teamMembers || []).find(m => String(m.id) === String(chosenId)) ||
-                                               (vendedores || []).find(v => String(v.id) === String(chosenId));
+                                (teamMembers || []).find(m => String(m.id) === String(chosenId)) ||
+                                (vendedores || []).find(v => String(v.id) === String(chosenId));
                               if (matchObj) {
                                 setNovaVendaTraineeNome(matchObj.nome || matchObj.name || matchObj.email || '');
                               }
@@ -33244,9 +33221,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         placeholder="Ex: 2.500,00"
                         disabled={novaVendaFormaPagamento === 'BRINDE'}
                         required={novaVendaFormaPagamento !== 'BRINDE'}
-                        className={`w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono font-bold transition-all placeholder:text-gray-600 ${
-                          novaVendaFormaPagamento === 'BRINDE' ? 'opacity-60 cursor-not-allowed text-purple-400' : 'text-green-400'
-                        }`}
+                        className={`w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono font-bold transition-all placeholder:text-gray-600 ${novaVendaFormaPagamento === 'BRINDE' ? 'opacity-60 cursor-not-allowed text-purple-400' : 'text-green-400'
+                          }`}
                       />
                     </div>
                   </div>
@@ -33292,9 +33268,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         onChange={(e) => setNovaVendaComissaoVendedor(e.target.value)}
                         placeholder="Ex: 50,00"
                         disabled={novaVendaFormaPagamento === 'BRINDE'}
-                        className={`w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all placeholder:text-gray-600 ${
-                          novaVendaFormaPagamento === 'BRINDE' ? 'opacity-60 cursor-not-allowed text-gray-400' : ''
-                        }`}
+                        className={`w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-md text-white px-3 py-2 text-xs outline-none font-mono transition-all placeholder:text-gray-600 ${novaVendaFormaPagamento === 'BRINDE' ? 'opacity-60 cursor-not-allowed text-gray-400' : ''
+                          }`}
                       />
                     </div>
                   </div>
