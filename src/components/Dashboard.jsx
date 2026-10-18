@@ -15418,7 +15418,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           valor_total: valorTotalNovo,
           preco_original: itemPrecoOriginal,
           valor_total_original: valorTotalOriginal,
-          imei: item.imei
+          imei: item.imei,
+          cor: item.cor || item.produto?.cor || null
         });
       }
 
@@ -16873,6 +16874,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           produto_nome: nomeItem,
           imei: imeiItem,
           serial: imeiItem,
+          cor: it.cor || it.produto?.cor || null,
           quantidade: qtdItem,
           preco_unitario: precoItem,
           preco: precoItem,
@@ -16979,6 +16981,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       total_pago: valorTotalNum,
       valor: valorTotalNum,
       subtotal: valorTotalNum,
+      forma_pagamento: venda.forma_pagamento || metodoPag,
+      pagamentos: Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0
+        ? venda.pagamentos
+        : ((Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
+          ? venda.vendas_pagamentos.map(p => ({
+              forma: p.forma || p.metodo_pagamento || p.metodo || metodoPag,
+              metodo: p.metodo_pagamento || p.metodo || metodoPag,
+              valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
+              parcelas: p.parcelas || venda.parcelas || 1
+            }))
+          : [{ forma: metodoPag, metodo: metodoPag, valor: valorTotalNum, parcelas: venda.parcelas || 1 }]),
       financeiro: {
         total_novo: valorTotalNum,
         total_novo_original: precoOriginalNum,
@@ -16987,19 +17000,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         saldo_pagar_original: precoOriginalNum,
         metodo: metodoPag,
         parcelas: venda.parcelas || 1,
-        pagamentos: (Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
-          ? venda.vendas_pagamentos.map(p => ({
-              metodo: p.metodo_pagamento || p.metodo || metodoPag,
-              valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
-              parcelas: p.parcelas || venda.parcelas || 1
-            }))
-          : [
-            {
-              metodo: metodoPag,
-              valor: valorTotalNum,
-              parcelas: venda.parcelas || 1
-            }
-          ]
+        pagamentos: (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0)
+          ? venda.pagamentos
+          : ((Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
+            ? venda.vendas_pagamentos.map(p => ({
+                metodo: p.metodo_pagamento || p.metodo || metodoPag,
+                valor: parseMonetaryValue(p.valor_pago ?? p.valor ?? valorTotalNum),
+                parcelas: p.parcelas || venda.parcelas || 1
+              }))
+            : [
+              {
+                metodo: metodoPag,
+                valor: valorTotalNum,
+                parcelas: venda.parcelas || 1
+              }
+            ])
       },
       trocas: Array.isArray(venda.trocas) ? venda.trocas : []
     };
@@ -30687,24 +30702,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 const fin = venda.financeiro || {};
 
                 const somaItens = itens.reduce((acc, it) => {
-                  const p = toNum(
-                    (isAvista ? (it.preco_original ?? it.preco_base ?? it.valor_unitario_original) : null) ??
-                    it.preco_unitario ?? 
-                    it.preco ?? 
-                    it.valor ?? 
-                    it.valor_unitario ?? 
-                    it.subtotal ?? 
-                    it.preco_unitario_vendido ??
+                  const p = Number(
+                    it.preco_unitario || 
+                    it.valor_unitario || 
+                    it.preco_venda || 
+                    it.preco || 
+                    it.valor ||
+                    (it.subtotal && it.quantidade ? it.subtotal / it.quantidade : 0) || 
+                    (it.valor_total && it.quantidade ? it.valor_total / it.quantidade : 0) ||
+                    it.preco_unitario_vendido ||
+                    it.preco_base ||
+                    it.preco_original ||
                     0
                   );
                   const q = Number(it.quantidade ?? it.qtd ?? 1) || 1;
-                  const s = toNum(
-                    (isAvista ? it.valor_total_original : null) ??
-                    it.valor_total ??
-                    it.subtotal ??
-                    it.total ??
-                    (p * q)
-                  );
+                  const s = Number(it.subtotal || it.total || it.valor_total || (p * q) || 0);
                   return acc + (s > 0 ? s : (p * q));
                 }, 0);
 
@@ -30729,28 +30741,35 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 const subtotalExibido = subtotalVenda > 0 ? subtotalVenda : (totalVenda > 0 ? totalVenda : somaItens);
                 const totalGeral = totalVenda > 0 ? totalVenda : (subtotalExibido > 0 ? subtotalExibido : somaItens);
 
-                const mNorm = String(fin.metodo || '').toLowerCase();
-                const isDebito = mNorm === 'cartao_debito';
-                const isCredito = mNorm === 'cartao_credito' || mNorm === 'cartao';
-                const parcelasNum = fin.parcelas || 1;
+                const mNorm = String(fin.metodo || venda.forma_pagamento || venda.metodo_pagamento || '').toLowerCase();
+                const isDebito = mNorm.includes('debito') || mNorm === 'cartao_debito';
+                const isCredito = mNorm.includes('credito') || mNorm === 'cartao_credito' || mNorm === 'cartao';
+                const parcelasNum = fin.parcelas || venda.parcelas || 1;
                 const valorParcela = parcelasNum > 0 ? (totalGeral / parcelasNum) : totalGeral;
 
                 let descricaoPagamento = '';
                 let parcelamentoTexto = '';
 
-                if (isAvista) {
-                  descricaoPagamento = 'À VISTA (VALOR NOMINAL)';
-                } else if (isDebito) {
-                  descricaoPagamento = 'CARTÃO DE DÉBITO';
-                } else if (isCredito) {
-                  descricaoPagamento = 'CARTÃO DE CRÉDITO';
-                  parcelamentoTexto = `${parcelasNum}x de R$ ${valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                } else if (fin.pagamentos && fin.pagamentos.length > 1) {
-                  descricaoPagamento = fin.pagamentos.map(p => `${p.label || p.metodo} (R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`).join(' + ');
+                const listaPagsRecibo = (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0)
+                  ? venda.pagamentos
+                  : (Array.isArray(fin.pagamentos) && fin.pagamentos.length > 0)
+                    ? fin.pagamentos
+                    : (Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
+                      ? venda.vendas_pagamentos
+                      : [];
+
+                if (listaPagsRecibo.length > 1) {
+                  descricaoPagamento = listaPagsRecibo
+                    .map((p) => {
+                      const f = p.forma || p.metodo || p.metodo_pagamento || p.label || 'PAGAMENTO';
+                      const val = Number(p.valor || p.valor_pago || 0);
+                      return `${String(f).toUpperCase()}: R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                    })
+                    .join(' | ');
                   if (parcelasNum > 1) {
                     parcelamentoTexto = `${parcelasNum}x de R$ ${(totalGeral / parcelasNum).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
                   }
-                } else if (fin.metodo === 'troca') {
+                } else if (fin.metodo === 'troca' || mNorm.includes('troca')) {
                   if (fin.saldo_pagar > 0) {
                     const saldoMetodo = fin.metodo_saldo === 'cartao_credito' || fin.metodo_saldo === 'cartao'
                       ? `Cartão de Crédito (${fin.parcelas || 1}x)`
@@ -30765,17 +30784,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   } else {
                     descricaoPagamento = 'Troca (Totalmente Abatido)';
                   }
-                } else if (mNorm === 'pix') {
+                } else if (isDebito) {
+                  descricaoPagamento = 'CARTÃO DE DÉBITO';
+                } else if (isCredito) {
+                  descricaoPagamento = 'CARTÃO DE CRÉDITO';
+                  parcelamentoTexto = `${parcelasNum}x de R$ ${valorParcela.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                } else if (mNorm.includes('pix')) {
                   descricaoPagamento = 'PIX';
-                } else if (mNorm === 'dinheiro') {
+                } else if (mNorm.includes('dinheiro') || mNorm.includes('vista')) {
                   descricaoPagamento = 'DINHEIRO';
-                } else if (mNorm === 'boleto') {
+                } else if (mNorm.includes('boleto')) {
                   descricaoPagamento = 'BOLETO PARCELADO';
                   if (parcelasNum > 1) {
                     parcelamentoTexto = `${parcelasNum}x de R$ ${(totalGeral / parcelasNum).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
                   }
                 } else {
-                  descricaoPagamento = String(fin.metodo || 'DINHEIRO').toUpperCase();
+                  descricaoPagamento = String(venda.forma_pagamento || fin.metodo || 'À VISTA').toUpperCase();
                   if (parcelasNum > 1) {
                     parcelamentoTexto = `${parcelasNum}x de R$ ${(totalGeral / parcelasNum).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
                   }
@@ -30844,28 +30868,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">Vendedor:</span>
                             <span className="text-zinc-100 print:text-black font-semibold">{nomeVendedor}</span>
                           </div>
-                          {(nomeCliente || clienteCpfCnpj) && (
-                            <div className="pt-1 border-t border-dashed border-zinc-800 print:border-black">
-                              <div className="flex justify-between">
-                                <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">Cliente:</span>
-                                <span className="text-zinc-100 print:text-black font-semibold text-right max-w-[180px] truncate">
-                                  {nomeCliente}
-                                </span>
-                              </div>
-                              {clienteCpfCnpj && (
-                                <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
-                                  <span>CPF/CNPJ:</span>
-                                  <span>{clienteCpfCnpj}</span>
-                                </div>
-                              )}
-                              {clienteTelefone && (
-                                <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
-                                  <span>Tel:</span>
-                                  <span>{clienteTelefone}</span>
-                                </div>
-                              )}
+                          <div className="pt-1 border-t border-dashed border-zinc-800 print:border-black space-y-0.5">
+                            <div className="flex justify-between">
+                              <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">CLIENTE:</span>
+                              <span className="text-zinc-100 print:text-black font-bold uppercase text-right max-w-[180px] truncate">
+                                {venda.cliente_nome || venda.clientes?.nome || nomeCliente || 'Consumidor Final'}
+                              </span>
                             </div>
-                          )}
+                            {(clienteCpfCnpj || venda.cliente_cpf_cnpj || venda.clientes?.cpf_cnpj) && (
+                              <div className="flex justify-between text-[11px] text-zinc-400 print:text-black">
+                                <span>CPF/CNPJ:</span>
+                                <span>{venda.cliente_cpf_cnpj || venda.clientes?.cpf_cnpj || clienteCpfCnpj}</span>
+                              </div>
+                            )}
+                            {clienteTelefone && (
+                              <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
+                                <span>Tel:</span>
+                                <span>{clienteTelefone}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         <div className="border-t border-dashed border-zinc-700 print:border-black"></div>
@@ -30875,47 +30897,49 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           <span className="text-[9px] text-zinc-400 print:text-black font-bold uppercase tracking-wider block">
                             Itens de Venda (Saída)
                           </span>
-                          <div className="space-y-2 divide-y divide-dashed divide-zinc-800 print:divide-black">
+                          <div className="space-y-2 divide-y divide-dashed border-zinc-800 print:divide-black">
                             {itens.map((item, idx) => {
-                              const nomeProduto = item.produto_nome || item.nome || item.descricao || item.produto?.nome || venda.produto_nome || 'Produto';
+                              const nomeProduto = item.nome || item.produto_nome || item.descricao || item.produto?.nome || venda.produto_nome || 'Produto';
                               const imeiProduto = item.imei || item.serial || item.numero_serie || item.produto?.imei || venda.imei || null;
-                              const itemPrecoUnitario = toNum(
-                                (isAvista ? (item.preco_original ?? item.preco_base ?? item.valor_unitario_original) : null) ??
-                                item.preco_unitario ?? 
-                                item.preco ?? 
-                                item.valor ?? 
-                                item.valor_unitario ?? 
-                                item.subtotal ?? 
-                                item.preco_unitario_vendido ??
-                                item.preco_original ??
+                              const corProduto = item.cor || item.produto?.cor || null;
+                              const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
+                              const precoUnitario = Number(
+                                item.preco_unitario || 
+                                item.valor_unitario || 
+                                item.preco_venda || 
+                                item.preco || 
+                                item.valor ||
+                                item.preco_unitario_vendido ||
+                                (item.subtotal && itemQtd ? item.subtotal / itemQtd : 0) || 
+                                (item.valor_total && itemQtd ? item.valor_total / itemQtd : 0) ||
+                                (item.total && itemQtd ? item.total / itemQtd : 0) ||
+                                item.preco_base ||
+                                item.preco_original ||
                                 0
                               );
-                              const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
-                              const itemSubtotal = toNum(
-                                (isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * itemQtd)) : null) ??
-                                item.valor_total ??
-                                item.subtotal ??
-                                item.total ??
-                                (itemPrecoUnitario * itemQtd)
+                              const subtotalItem = Number(
+                                item.subtotal || 
+                                item.total || 
+                                item.valor_total || 
+                                (precoUnitario * itemQtd)
                               );
                               return (
                                 <div key={idx} className={`pt-1.5 ${idx === 0 ? 'pt-0' : ''}`}>
-                                  <div className="flex justify-between items-start gap-2">
-                                    <span className="font-bold text-zinc-100 print:text-black break-words flex-1">
+                                  <div className="flex justify-between items-start gap-2 font-bold text-zinc-100 print:text-black">
+                                    <span className="break-words flex-1">
                                       {nomeProduto}
                                     </span>
-                                    <span className="font-bold text-zinc-100 print:text-black shrink-0">
-                                      R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    <span className="shrink-0">
+                                      R$ {subtotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </span>
                                   </div>
-                                  {imeiProduto && (
-                                    <p className="text-[10px] text-zinc-400 print:text-black font-mono break-all">
-                                      IMEI: {imeiProduto}
-                                    </p>
-                                  )}
-                                  <p className="text-[10px] text-zinc-400 print:text-black">
-                                    {itemQtd}x R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                  </p>
+                                  <div className="text-[11px] text-zinc-400 print:text-black leading-tight">
+                                    {imeiProduto && <span>IMEI: {imeiProduto} </span>}
+                                    {corProduto && <span>• Cor: {corProduto} </span>}
+                                  </div>
+                                  <div className="text-[11px] text-zinc-400 print:text-black">
+                                    {itemQtd}x R$ {precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -31083,26 +31107,29 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </thead>
                             <tbody className="divide-y divide-zinc-300 print:divide-zinc-400">
                               {itens.map((item, idx) => {
-                                const nomeProduto = item.produto_nome || item.nome || item.descricao || item.produto?.nome || venda.produto_nome || 'Produto';
+                                const nomeProduto = item.nome || item.produto_nome || item.descricao || item.produto?.nome || venda.produto_nome || 'Produto';
                                 const imeiProduto = item.imei || item.serial || item.numero_serie || item.produto?.imei || venda.imei || null;
-                                const itemPrecoUnitario = toNum(
-                                  (isAvista ? (item.preco_original ?? item.preco_base ?? item.valor_unitario_original) : null) ??
-                                  item.preco_unitario ?? 
-                                  item.preco ?? 
-                                  item.valor ?? 
-                                  item.valor_unitario ?? 
-                                  item.subtotal ?? 
-                                  item.preco_unitario_vendido ??
-                                  item.preco_original ??
+                                const corProduto = item.cor || item.produto?.cor || null;
+                                const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
+                                const precoUnitario = Number(
+                                  item.preco_unitario || 
+                                  item.valor_unitario || 
+                                  item.preco_venda || 
+                                  item.preco || 
+                                  item.valor ||
+                                  item.preco_unitario_vendido ||
+                                  (item.subtotal && itemQtd ? item.subtotal / itemQtd : 0) || 
+                                  (item.valor_total && itemQtd ? item.valor_total / itemQtd : 0) ||
+                                  (item.total && itemQtd ? item.total / itemQtd : 0) ||
+                                  item.preco_base ||
+                                  item.preco_original ||
                                   0
                                 );
-                                const itemQtd = Number(item.quantidade ?? item.qtd ?? 1) || 1;
-                                const itemSubtotal = toNum(
-                                  (isAvista ? (item.valor_total_original ?? (itemPrecoUnitario * itemQtd)) : null) ??
-                                  item.valor_total ??
-                                  item.subtotal ??
-                                  item.total ??
-                                  (itemPrecoUnitario * itemQtd)
+                                const subtotalItem = Number(
+                                  item.subtotal || 
+                                  item.total || 
+                                  item.valor_total || 
+                                  (precoUnitario * itemQtd)
                                 );
                                 return (
                                   <tr key={idx}>
@@ -31113,20 +31140,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       <span className="font-bold text-black text-xs block">
                                         {nomeProduto}
                                       </span>
-                                      {imeiProduto && (
-                                        <span className="inline-block mt-0.5 text-[11px] font-mono text-zinc-800">
-                                          IMEI: {imeiProduto}
-                                        </span>
-                                      )}
+                                      <div className="text-[11px] font-mono text-zinc-800">
+                                        {imeiProduto && <span>IMEI: {imeiProduto} </span>}
+                                        {corProduto && <span>• Cor: {corProduto}</span>}
+                                      </div>
                                     </td>
                                     <td className="py-2.5 px-3 text-center font-medium text-black">
                                       {itemQtd} un.
                                     </td>
                                     <td className="py-2.5 px-3 text-right font-mono text-black">
-                                      R$ {itemPrecoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      R$ {precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
                                     <td className="py-2.5 px-3 text-right font-mono font-bold text-black">
-                                      R$ {itemSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      R$ {subtotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
                                   </tr>
                                 );
