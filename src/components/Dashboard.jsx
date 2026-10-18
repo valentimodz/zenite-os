@@ -15103,62 +15103,31 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             empresa_id: obterUuidPuro(empresaId),
             filial_id: obterUuidPuro(activeFilialId),
             caixa_id: obterUuidPuro(caixaAtual?.id) || null,
-            produto_nome: item.produto.nome,
-            imei_novo: item.imei || null,
+            produto_nome: item.produto?.nome || item.nome || 'Produto',
             imei: item.imei || null,
-            cliente_nome: finalClienteNome,
-            cliente_cpf_cnpj: finalClienteCpfCnpj,
-            cliente_cpf: finalClienteCpfCnpj,
-            cpf_cliente: finalClienteCpfCnpj,
-            cliente_email: finalClienteEmail,
-            cliente_telefone: finalClienteTelefone,
+            
+            // Cliente Real
             cliente_id: finalClienteId,
+            cliente_nome: finalClienteNome,
+            cliente_cpf_cnpj: finalClienteCpfCnpj || null,
+            cliente_telefone: finalClienteTelefone || null,
+            cliente_email: finalClienteEmail || null,
+
+            // Vendedor
             vendedor_id: finalVendedorId,
             usuario_id: finalVendedorId,
             criado_por: finalVendedorId,
             vendedor_nome: finalVendedorNome,
-            trainee_id: resolvedTraineeId,
-            treener_id: resolvedTraineeId,
-            trainee_nome: resolvedTraineeNome,
-            comissao: comissaoCalculada,
-            comissao_vendedor: comissaoCalculada,
-            comissao_trainee: comissaoTraineeCalculada,
-            teve_participacao_trainee: teveParticipacaoTraineeFinal,
-            metodo_pagamento: formaPagamentoFinal,
-            forma_pagamento: formaPagamentoFinal, // OBRIGATÓRIO (não pode ir null)
-            pagamentos: pagamentosAdicionados, // Salva o array JSONB no Supabase
-            valor_boleto: vBoleto,
-            valor_pix: vPix,
-            valor_dinheiro: vDinheiro,
-            valor_cartao: vCartao,
-            parcelas: parcelasEfetivo,
-            financeira: (metodoEfetivo?.toLowerCase() === 'boleto' || metodoEfetivo?.toLowerCase() === 'crediario') ? resolvedFinanceira : null,
-            financeira_parceira: resolvedFinanceira,
-            valor_pago: actualValorPago,
-            status_pagamento: pdvStatusPagamento,
-            preco_base: itemPrecoTabela,
-            preco_unitario_vendido: itemValorVendido,
-            valor_tabela: itemPrecoTabela * Number(item.quantidade),
-            valor_desconto: itemDescontoTotal,
-            desconto: itemDescontoTotal,
-            total_desconto: itemDescontoTotal,
-            percentual_desconto: itemPrecoTabela > 0 ? (itemDescontoUnitario / itemPrecoTabela) * 100 : 0,
-            produtos_descricao: `${item.produto.nome} (Qtd: ${item.quantidade})`,
-            itens_resumo: `${item.produto.nome} (Qtd: ${item.quantidade})`
-          };
 
-          console.log('🚨 [PAYLOAD VENDA PDV]:', {
-            clienteSelecionado: clienteSelecionadoObj,
-            cliente_id: payloadVendaUpdate.cliente_id,
-            cliente_nome: payloadVendaUpdate.cliente_nome,
-            cliente_cpf_cnpj: payloadVendaUpdate.cliente_cpf_cnpj,
-            cliente_telefone: payloadVendaUpdate.cliente_telefone,
-            vendedor: finalVendedorNome,
-            forma_pagamento: formaPagamentoFinal,
-            payloadCompleto: payloadVendaUpdate
-          });
-          console.log('[DEBUG PDV PAYLOAD VENDA]:', { cliente_id: payloadVendaUpdate.cliente_id, cliente_nome: payloadVendaUpdate.cliente_nome });
-          console.log("📦 Payload da Venda enviado ao banco:", payloadVendaUpdate);
+            // Pagamento (Garante que não fique NULL)
+            forma_pagamento: String(formaPagamentoFinal || 'DINHEIRO').toUpperCase().trim(),
+            metodo_pagamento: String(formaPagamentoFinal || 'DINHEIRO').toUpperCase().trim(),
+
+            // Trainee
+            trainee_id: resolvedTraineeId || null,
+            trainee_nome: resolvedTraineeNome || null,
+            teve_participacao_trainee: Boolean(resolvedTraineeId)
+          };
 
           const { error: updateVendaErr } = await supabase
             .from('vendas')
@@ -15166,27 +15135,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             .eq('id', obterUuidPuro(rpcRes.venda_id));
 
           if (updateVendaErr) {
-            console.error("❌ [ERRO AO ATUALIZAR VENDA COM CLIENTE E PAGAMENTO]:", updateVendaErr);
-            // Se falhar a atualização com cliente_id (violação foreign key), tenta fallback com cliente padrão real ou null, mas PRESERVA cliente_nome textual e dados do cliente
-            if (updateVendaErr.code === '23503' || String(updateVendaErr.message).includes('foreign key')) {
-              console.warn("⚠️ Tentando fallback de cliente_id na venda com cliente padrão ou null preservando cliente_nome textual...");
-              await supabase
-                .from('vendas')
-                .update({ ...payloadVendaUpdate, cliente_id: (DEFAULT_CONSUMIDOR_FINAL_ID ? obterUuidPuro(DEFAULT_CONSUMIDOR_FINAL_ID) : null) })
-                .eq('id', obterUuidPuro(rpcRes.venda_id));
-            } else if (String(updateVendaErr.message || '').includes('column') || String(updateVendaErr.message || '').includes('does not exist')) {
-              // Fallback se a tabela vendas ainda não possuir alguma coluna como valor_boleto ou pagamentos
-              console.warn("⚠️ Tentando fallback de update na venda sem colunas fracionadas adicionais...");
-              const fallbackPayload = { ...payloadVendaUpdate };
-              delete fallbackPayload.valor_boleto;
-              delete fallbackPayload.valor_pix;
-              delete fallbackPayload.valor_dinheiro;
-              delete fallbackPayload.valor_cartao;
-              delete fallbackPayload.pagamentos;
-              await supabase
-                .from('vendas')
-                .update(fallbackPayload)
-                .eq('id', obterUuidPuro(rpcRes.venda_id));
+            console.error("❌ [ERRO AO ATUALIZAR VENDA]:", updateVendaErr);
+            if (typeof showToast === 'function') {
+              showToast(`Erro ao atualizar venda: ${updateVendaErr.message}`, 'error');
             }
           }
 
