@@ -4984,18 +4984,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         query = query.ilike('nome', `%${termoBusca.trim()}%`);
       }
 
-      // Promise com timeout de 6 segundos
+      // Promise com timeout de 15 segundos
       const timeoutPromise = new Promise((_, reject) => {
         timeoutId = setTimeout(() => {
-          reject(new Error('TIMEOUT_6S'));
-        }, 6000);
+          reject(new Error('TIMEOUT_15S'));
+        }, 15000);
       });
 
-      const { data, error } = await Promise.race([query, timeoutPromise]);
+      const res = await Promise.race([query, timeoutPromise]);
+      if (timeoutId) clearTimeout(timeoutId);
+
+      const { data, error } = res || {};
 
       if (error) {
         console.error("Erro na consulta do estoque consolidado:", error);
-        toast.error("Erro ao carregar estoque: " + (error.message || 'Falha na consulta'));
+        if (typeof showToast === 'function') {
+          showToast("Erro ao carregar estoque: " + (error?.message || 'Falha na consulta'), 'error');
+        }
         return;
       }
 
@@ -5029,9 +5034,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       setCache(cacheKey, prodsFormatados, 5); // 5 min (300.000ms)
       setEstoqueConsolidadoLista(prodsFormatados);
     } catch (err) {
-      if (err?.message === 'TIMEOUT_6S') {
-        console.warn("Timeout de 6 segundos atingido ao carregar estoque consolidado.");
-        toast.error("A consulta do estoque demorou muito e foi interrompida. Tente refinar os filtros.");
+      if (err?.message === 'TIMEOUT_15S') {
+        console.warn("Timeout de 15 segundos atingido ao carregar estoque consolidado.");
+        if (typeof showToast === 'function') {
+          showToast("A consulta do estoque demorou muito e foi interrompida. Tente refinar os filtros.", 'error');
+        }
       } else {
         console.error("Erro fatal ao executar fetchEstoqueConsolidado:", err);
       }
