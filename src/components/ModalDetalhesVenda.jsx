@@ -78,6 +78,31 @@ export default function ModalDetalhesVenda({ venda, onClose, onEmitirNfe }) {
                                 <span>Método:</span>
                                 <span className="font-bold text-white uppercase">{metodoPagto}</span>
                             </div>
+                            {(() => {
+                                const pags = (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0)
+                                    ? venda.pagamentos
+                                    : (Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0 ? venda.vendas_pagamentos : []);
+                                if (pags.length > 1) {
+                                    return (
+                                        <div className="my-2 pt-2 border-t border-[#222] space-y-1">
+                                            <span className="text-[11px] text-gray-400 font-bold uppercase tracking-wider block">Discriminação:</span>
+                                            {pags.map((p, idx) => {
+                                                const forma = p.forma || p.metodo || p.metodo_pagamento || 'PAGAMENTO';
+                                                const val = Number(p.valor || p.valor_pago || 0);
+                                                return (
+                                                    <div key={idx} className="flex justify-between text-xs text-gray-400">
+                                                        <span>• {String(forma).toUpperCase()}:</span>
+                                                        <span className="font-mono text-gray-200">
+                                                            {val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
                             <div className="flex justify-between text-gray-300 mb-1">
                                 <span>Status:</span>
                                 <span className="text-emerald-400 font-bold">{statusPagto}</span>

@@ -5191,6 +5191,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           valor_total,
           metodo_pagamento,
           forma_pagamento,
+          pagamentos,
+          valor_boleto,
+          valor_pix,
+          valor_dinheiro,
+          valor_cartao,
           status,
           financeira,
           financeira_parceira,
@@ -14466,16 +14471,37 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     // Identificar método de pagamento principal e dados de parcelamento
     const pagamentosAdicionados = pdvListaPagamentos || [];
+
+    // CÁLCULO DE SUBTOTAIS POR MODALIDADE (PAGAMENTOS MISTOS / FRACIONADOS)
+    let vBoleto = 0;
+    let vPix = 0;
+    let vDinheiro = 0;
+    let vCartao = 0;
+
+    if (pagamentosAdicionados.length > 0) {
+      pagamentosAdicionados.forEach((p) => {
+        const f = String(p.forma || p.metodo || '').toUpperCase();
+        const v = Number(p.valor || 0);
+        if (f.includes('BOLETO') || f.includes('FINANC') || f.includes('CREDI')) vBoleto += v;
+        else if (f.includes('PIX')) vPix += v;
+        else if (f.includes('DINHEIRO') || f.includes('VISTA')) vDinheiro += v;
+        else if (f.includes('CART') || f.includes('CRED') || f.includes('DEB')) vCartao += v;
+      });
+    }
+
+    const temBoleto = vBoleto > 0;
     const formaPagamentoSelecionada = isTrocaAtiva ? 'troca' : pdvMetodoPagamento;
-    const formaFinal = 
-      formaPagamentoSelecionada || 
-      (pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].forma || pagamentosAdicionados[0].metodo : null) || 
-      'DINHEIRO';
-    const formaPagamentoFinal = String(formaFinal).toUpperCase().trim();
+    const formaExibicao = pagamentosAdicionados.length > 1
+      ? (temBoleto ? 'BOLETO + ENTRADA' : 'MISTO')
+      : (pagamentosAdicionados[0]?.forma || pagamentosAdicionados[0]?.metodo || formaPagamentoSelecionada || 'DINHEIRO');
+
+    const formaPagamentoFinal = String(formaExibicao).toUpperCase().trim();
 
     const metodoEfetivo = isTrocaAtiva
       ? 'troca'
-      : (pagamentosAdicionados.length > 0 ? (pagamentosAdicionados[0].forma || pagamentosAdicionados[0].metodo) : (pdvMetodoPagamento || 'DINHEIRO'));
+      : (temBoleto
+        ? 'boleto'
+        : (pagamentosAdicionados.length > 0 ? (pagamentosAdicionados[0].forma || pagamentosAdicionados[0].metodo) : (pdvMetodoPagamento || 'DINHEIRO')));
     const isCartaoEfetivo = String(metodoEfetivo).toLowerCase() === 'cartao_credito' || String(metodoEfetivo).toLowerCase() === 'cartao';
     const parcelasEfetivo = isCartaoEfetivo
       ? ((pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].parcelas : pdvCartaoParcelas) || 1)
@@ -15100,6 +15126,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             teve_participacao_trainee: teveParticipacaoTraineeFinal,
             metodo_pagamento: formaPagamentoFinal,
             forma_pagamento: formaPagamentoFinal, // OBRIGATÓRIO (não pode ir null)
+            pagamentos: pagamentosAdicionados, // Salva o array JSONB no Supabase
+            valor_boleto: vBoleto,
+            valor_pix: vPix,
+            valor_dinheiro: vDinheiro,
+            valor_cartao: vCartao,
             parcelas: parcelasEfetivo,
             financeira: (metodoEfetivo?.toLowerCase() === 'boleto' || metodoEfetivo?.toLowerCase() === 'crediario') ? resolvedFinanceira : null,
             financeira_parceira: resolvedFinanceira,
@@ -15142,6 +15173,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               await supabase
                 .from('vendas')
                 .update({ ...payloadVendaUpdate, cliente_id: (DEFAULT_CONSUMIDOR_FINAL_ID ? obterUuidPuro(DEFAULT_CONSUMIDOR_FINAL_ID) : null) })
+                .eq('id', obterUuidPuro(rpcRes.venda_id));
+            } else if (String(updateVendaErr.message || '').includes('column') || String(updateVendaErr.message || '').includes('does not exist')) {
+              // Fallback se a tabela vendas ainda não possuir alguma coluna como valor_boleto ou pagamentos
+              console.warn("⚠️ Tentando fallback de update na venda sem colunas fracionadas adicionais...");
+              const fallbackPayload = { ...payloadVendaUpdate };
+              delete fallbackPayload.valor_boleto;
+              delete fallbackPayload.valor_pix;
+              delete fallbackPayload.valor_dinheiro;
+              delete fallbackPayload.valor_cartao;
+              delete fallbackPayload.pagamentos;
+              await supabase
+                .from('vendas')
+                .update(fallbackPayload)
                 .eq('id', obterUuidPuro(rpcRes.venda_id));
             }
           }
@@ -17259,17 +17303,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       .filter(isAcessorio)
       .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
 
-    // Somar apenas vendas onde forma_pagamento/metodo_pagamento/financeira pertence a boleto ou financiadora
-    const totalBoletosCalculado = listaVendas
-      .filter((v) => {
+    // Somar apenas vendas onde forma_pagamento/metodo_pagamento/financeira pertence a boleto ou financiadora (com suporte a pagamentos mistos)
+    let totalBoletosCalculado = 0;
+    listaVendas.forEach((v) => {
+      const status = String(v.status || '').toUpperCase().trim();
+      if (status === 'CANCELADA' || status === 'CANCELADO') return;
+
+      // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
+      if (Number(v.valor_boleto) > 0) {
+        totalBoletosCalculado += Number(v.valor_boleto);
+      } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
+        const parcelaBoleto = v.pagamentos
+          .filter((p) => {
+            const forma = String(p.forma || p.metodo || '').toUpperCase();
+            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
+          })
+          .reduce((acc, p) => acc + Number(p.valor || 0), 0);
+        totalBoletosCalculado += parcelaBoleto > 0 ? parcelaBoleto : 0;
+      } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
+        const parcelaBoletoVp = v.vendas_pagamentos
+          .filter((p) => {
+            const forma = String(p.forma || p.metodo || p.metodo_pagamento || p.forma_pagamento || p.financeira || '').toUpperCase();
+            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
+          })
+          .reduce((acc, p) => acc + Number(p.valor_pago || p.valor || 0), 0);
+        totalBoletosCalculado += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
+      } else {
+        // 2º Fallback: Para vendas antigas de forma única gravada
         const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
-        const status = String(v.status || '').toUpperCase().trim();
-        return (
-          (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC')) &&
-          status !== 'CANCELADA'
-        );
-      })
-      .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
+        if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
+          totalBoletosCalculado += Number(v.valor_total || v.valor || 0);
+        }
+      }
+    });
 
     const totalBoletos = Math.round(totalBoletosCalculado * 100) / 100;
 

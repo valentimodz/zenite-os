@@ -103,7 +103,7 @@ export async function fetchRankingColaboradoresMensal({
     // 3. Busca de vendas da competência (REMOVIDA restrição de filial na consulta individual do colaborador)
     let vendasQuery = supabase
       .from('vendas')
-      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, status, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee, forma_pagamento, metodo_pagamento, financeira')
+      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, status, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee, forma_pagamento, metodo_pagamento, financeira, pagamentos, valor_boleto, valor_pix, valor_dinheiro, valor_cartao')
       .gte('created_at', inicioMes)
       .lte('created_at', fimMes)
       .neq('status', 'CANCELADA')
@@ -158,18 +158,33 @@ export async function fetchRankingColaboradoresMensal({
 
       const ticketMedio = transacoes > 0 ? volumeExibicao / transacoes : 0;
 
-      // 3. Soma estrita das formas de boleto / financiadora (valor_total puro)
+      // 3. Soma estrita das formas de boleto / financiadora (com suporte a pagamentos mistos / fracionados)
       const vendasTotais = isTrainee ? [...vendasDoColaborador, ...vendasComoTrainee] : vendasDoColaborador;
-      const totalBoletosCalculado = vendasTotais
-        .filter((v: any) => {
+      let totalBoletosCalculado = 0;
+
+      vendasTotais.forEach((v: any) => {
+        const status = String(v.status || '').toUpperCase().trim();
+        if (status === 'CANCELADA' || status === 'CANCELADO') return;
+
+        // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
+        if (Number(v.valor_boleto) > 0) {
+          totalBoletosCalculado += Number(v.valor_boleto);
+        } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
+          const parcelaBoleto = v.pagamentos
+            .filter((p: any) => {
+              const forma = String(p.forma || p.metodo || '').toUpperCase();
+              return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
+            })
+            .reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
+          totalBoletosCalculado += parcelaBoleto > 0 ? parcelaBoleto : 0;
+        } else {
+          // 2º Fallback: Para vendas antigas de forma única gravada
           const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
-          const status = String(v.status || '').toUpperCase().trim();
-          return (
-            (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) &&
-            status !== 'CANCELADA' && status !== 'CANCELADO'
-          );
-        })
-        .reduce((acc: number, v: any) => acc + Number(v.valor_total || 0), 0);
+          if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
+            totalBoletosCalculado += Number(v.valor_total || 0);
+          }
+        }
+      });
 
       const totalBoletos = Math.round(totalBoletosCalculado * 100) / 100;
 

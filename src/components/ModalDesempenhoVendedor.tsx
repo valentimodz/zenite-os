@@ -468,6 +468,11 @@ export default function ModalDesempenhoVendedor({
           metodo_pagamento,
           financeira,
           financeira_parceira,
+          pagamentos,
+          valor_boleto,
+          valor_pix,
+          valor_dinheiro,
+          valor_cartao,
           vendedor_id,
           vendedor_nome,
           trainee_id,
@@ -506,17 +511,39 @@ export default function ModalDesempenhoVendedor({
         const totalQtd = vendasValidas.length;
         const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
 
-        // Soma direta de Boletos / Financiadoras:
-        const totalBoletos = vendasValidas
-          .filter((v: any) => {
+        // Soma direta de Boletos / Financiadoras (com suporte a pagamentos mistos / fracionados):
+        let totalBoletos = 0;
+        vendasValidas.forEach((v: any) => {
+          const statusLimpo = String(v.status || '').toUpperCase().trim();
+          if (statusLimpo === 'CANCELADA' || statusLimpo === 'CANCELADO') return;
+
+          // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
+          if (Number(v.valor_boleto) > 0) {
+            totalBoletos += Number(v.valor_boleto);
+          } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
+            const parcelaBoleto = v.pagamentos
+              .filter((p: any) => {
+                const forma = String(p.forma || p.metodo || '').toUpperCase();
+                return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
+              })
+              .reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
+            totalBoletos += parcelaBoleto > 0 ? parcelaBoleto : 0;
+          } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
+            const parcelaBoletoVp = v.vendas_pagamentos
+              .filter((p: any) => {
+                const forma = String(p.forma || p.metodo || p.metodo_pagamento || p.forma_pagamento || p.financeira || '').toUpperCase();
+                return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
+              })
+              .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
+            totalBoletos += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
+          } else {
+            // 2º Fallback: Para vendas antigas de forma única gravada
             const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
-            const status = String(v.status || '').toUpperCase().trim();
-            return (
-              (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) &&
-              status !== 'CANCELADA' && status !== 'CANCELADO'
-            );
-          })
-          .reduce((acc: number, v: any) => acc + Number(v.valor_total || v.valor || 0), 0);
+            if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
+              totalBoletos += Number(v.valor_total || v.valor || 0);
+            }
+          }
+        });
 
         setRealizadoBoletos(Math.round(totalBoletos * 100) / 100);
 
@@ -602,6 +629,11 @@ export default function ModalDesempenhoVendedor({
             metodo_pagamento,
             financeira,
             financeira_parceira,
+            pagamentos,
+            valor_boleto,
+            valor_pix,
+            valor_dinheiro,
+            valor_cartao,
             categoria,
             produto_nome,
             produtos_descricao,
@@ -801,17 +833,39 @@ export default function ModalDesempenhoVendedor({
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
     // Detecção de Acessórios com helper robusto unificado com Minhas Metas
-    // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS:
-    const totalBoletosCalculado = vendasParaCalculo
-      .filter((v: any) => {
+    // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS (com suporte a pagamentos mistos / fracionados):
+    let totalBoletosCalculado = 0;
+    vendasParaCalculo.forEach((v: any) => {
+      const status = String(v.status || '').toUpperCase().trim();
+      if (status === 'CANCELADA' || status === 'CANCELADO') return;
+
+      // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
+      if (Number(v.valor_boleto) > 0) {
+        totalBoletosCalculado += Number(v.valor_boleto);
+      } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
+        const parcelaBoleto = v.pagamentos
+          .filter((p: any) => {
+            const forma = String(p.forma || p.metodo || '').toUpperCase();
+            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
+          })
+          .reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
+        totalBoletosCalculado += parcelaBoleto > 0 ? parcelaBoleto : 0;
+      } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
+        const parcelaBoletoVp = v.vendas_pagamentos
+          .filter((p: any) => {
+            const forma = String(p.forma || p.metodo || p.metodo_pagamento || p.forma_pagamento || p.financeira || '').toUpperCase();
+            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
+          })
+          .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
+        totalBoletosCalculado += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
+      } else {
+        // 2º Fallback: Para vendas antigas de forma única gravada
         const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
-        const status = String(v.status || '').toUpperCase().trim();
-        return (
-          (forma === 'BOLETO' || forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) &&
-          status !== 'CANCELADA' && status !== 'CANCELADO'
-        );
-      })
-      .reduce((acc: number, v: any) => acc + Number(v.valor_total || v.valor || 0), 0);
+        if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
+          totalBoletosCalculado += Number(v.valor_total || v.valor || 0);
+        }
+      }
+    });
 
     const totalBoletos = Math.round(
       (realizadoBoletos > 0
