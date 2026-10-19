@@ -4963,14 +4963,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         ? filialSelecionadaId
         : (activeFilialId || profile?.filial_id || '');
 
+      const currentEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+
       let query = supabase
         .from('produtos')
         .select(`
           id, nome, filial_id, categoria, cor, preco, preco_venda, preco_custo, quantidade, imei, status, codigo_barras, tipo,
-          imeis(id, produto_id, filial_id, empresa_id, status, vendido, imei, cor, preco_venda)
+          imeis(id, produto_id, filial_id, status, vendido, imei, cor, preco_venda)
         `)
         .order('created_at', { ascending: false })
         .limit(100);
+
+      if (currentEmpresaId) {
+        query = query.eq('empresa_id', currentEmpresaId);
+      }
+
+      // Restringir relacionamento de IMEIs apenas aos não vendidos para evitar carga de histórico
+      query = query.eq('imeis.vendido', false);
 
       if (filialFiltro && filialFiltro !== 'TODAS' && filialFiltro !== 'todas' && filialFiltro !== 'all') {
         query = query.eq('filial_id', filialFiltro);
@@ -4980,8 +4989,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         query = query.eq('categoria', categoriaFiltro);
       }
 
-      if (termoBusca && termoBusca.trim() !== '') {
-        query = query.ilike('nome', `%${termoBusca.trim()}%`);
+      const buscaLimpa = (termoBusca || '').trim();
+      if (buscaLimpa.length >= 2) {
+        query = query.ilike('nome', `%${buscaLimpa}%`);
       }
 
       // Promise com timeout de 15 segundos
