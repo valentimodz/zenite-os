@@ -15597,17 +15597,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       setModalSucessoVenda({ venda: createdVendaIds, dadosRecibo });
       showToast('Venda registrada com sucesso!', 'success');
 
-      // Limpar estados do PDV
+      // Limpar estados do PDV e liberar a UI imediatamente
       handleClearCart(false);
-      invalidateCache('pdv_produtos_');
-      invalidateCache('catalogo_produtos_');
-      invalidateCache('estoque_consolidado_');
-      invalidateCache('status_caixa_');
-      invalidateCache('sessoes_caixas_');
+      setLoadingPdvVenda(false);
 
-      // Recarregar dados
-      fetchVendedorData(activeFilialId, session.user.id);
-      fetchClientes(company?.id || profile?.empresa_id);
+      // Invalidação de cache e recarregamento assíncrono em segundo plano (não bloqueia UI)
+      (async () => {
+        try {
+          invalidateCache('pdv_produtos_');
+          invalidateCache('catalogo_produtos_');
+          invalidateCache('estoque_consolidado_');
+          invalidateCache('status_caixa_');
+          invalidateCache('sessoes_caixas_');
+
+          await Promise.allSettled([
+            fetchVendedorData(activeFilialId, session.user.id),
+            fetchClientes(company?.id || profile?.empresa_id)
+          ]);
+        } catch (bgErr) {
+          console.warn("Aviso na sincronização em segundo plano pós-venda:", bgErr);
+        }
+      })();
     } catch (err) {
       console.log('Motivo do alerta vermelho:', err);
       console.error('Erro ao registrar venda:', err);
