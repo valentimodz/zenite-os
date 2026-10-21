@@ -15,7 +15,11 @@ import {
   ShoppingBag,
   Zap,
   CheckCircle2,
-  RefreshCw
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Users,
+  Filter
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
@@ -279,6 +283,19 @@ export const isAcessorio = (venda: any): boolean => {
   return false;
 };
 
+// Helper robusto para identificar se a venda teve participação de trainee
+export const temApoioTrainee = (s: Venda | any): boolean => {
+  if (!s) return false;
+  if (s.teve_participacao_trainee === true) return true;
+  if (s.trainee_nome && String(s.trainee_nome).trim() !== '' && String(s.trainee_nome).trim() !== '-') return true;
+  if (s.trainee_id || s.treener_id) return true;
+  const obsUpper = String(s.observacoes || '').toUpperCase();
+  const catUpper = String(s.categoria || '').toUpperCase();
+  const mpUpper = String(s.metodo_pagamento || s.forma_pagamento || '').toUpperCase();
+  if (obsUpper.includes('TRAINEE') || catUpper.includes('TRAINEE') || mpUpper.includes('TRAINEE')) return true;
+  return false;
+};
+
 export default function ModalDesempenhoVendedor({
   colaborador,
   colaboradorId: propColaboradorId,
@@ -341,6 +358,11 @@ export default function ModalDesempenhoVendedor({
   const [objetivoAcessorios, setObjetivoAcessorios] = useState<number>(10000);
   const [superMetaAcessoriosState, setSuperMetaAcessorios] = useState<number>(15000);
   const [metaTotalCombinada, setMetaTotalCombinada] = useState<number>(77500);
+
+  // Filtro seletivo de Metas: 'todas' vs 'solo' (apenas titular solo)
+  const [filtroTipoVendas, setFiltroTipoVendas] = useState<'todas' | 'solo'>('todas');
+  // Seção colapsável de Extrato de Vendas com Trainee
+  const [extratoTraineeAberto, setExtratoTraineeAberto] = useState<boolean>(true);
 
   // Invalidação de cache local e força de recarga
   const invalidarCacheERecarregar = useCallback((novoMes?: string) => {
@@ -477,6 +499,9 @@ export default function ModalDesempenhoVendedor({
           vendedor_nome,
           trainee_id,
           treener_id,
+          trainee_nome,
+          comissao_trainee,
+          teve_participacao_trainee,
           status,
           itens_venda (
             id,
@@ -643,6 +668,9 @@ export default function ModalDesempenhoVendedor({
             vendedor_nome,
             trainee_id,
             treener_id,
+            trainee_nome,
+            comissao_trainee,
+            teve_participacao_trainee,
             itens_venda (
               produto_nome,
               categoria,
@@ -797,17 +825,6 @@ export default function ModalDesempenhoVendedor({
     let faturadoComApoioTraineeCalc = 0;
     let faturadoTitularSoloCalc = 0;
 
-    const temApoioTrainee = (s: Venda | any): boolean => {
-      if (s.teve_participacao_trainee === true) return true;
-      if (s.trainee_nome && String(s.trainee_nome).trim() !== '' && String(s.trainee_nome).trim() !== '-') return true;
-      if (s.trainee_id || s.treener_id) return true;
-      const obsUpper = String(s.observacoes || '').toUpperCase();
-      const catUpper = String(s.categoria || '').toUpperCase();
-      const mpUpper = String(s.metodo_pagamento || s.forma_pagamento || '').toUpperCase();
-      if (obsUpper.includes('TRAINEE') || catUpper.includes('TRAINEE') || mpUpper.includes('TRAINEE')) return true;
-      return false;
-    };
-
     sales.forEach(sale => {
       const val = parseFloat(String(sale.valor_total || sale.valor || 0));
       if (val > 0) {
@@ -832,10 +849,14 @@ export default function ModalDesempenhoVendedor({
       ? faturadoTitularSoloCalc 
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
-    // Detecção de Acessórios com helper robusto unificado com Minhas Metas
+    // Vendas filtradas para cálculo das metas (Todas as Vendas vs Apenas Titular Solo)
+    const vendasParaMetas = filtroTipoVendas === 'solo'
+      ? sales.filter(s => !temApoioTrainee(s))
+      : sales;
+
     // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS (com suporte a pagamentos mistos / fracionados):
     let totalBoletosCalculado = 0;
-    vendasParaCalculo.forEach((v: any) => {
+    vendasParaMetas.forEach((v: any) => {
       const status = String(v.status || '').toUpperCase().trim();
       if (status === 'CANCELADA' || status === 'CANCELADO') return;
 
@@ -868,8 +889,8 @@ export default function ModalDesempenhoVendedor({
     });
 
     const totalBoletos = Math.round(
-      (realizadoBoletos > 0
-        ? realizadoBoletos
+      (filtroTipoVendas === 'todas' && realizadoBoletos > 0
+        ? Math.max(realizadoBoletos, totalBoletosCalculado)
         : (totalBoletosCalculado > 0 ? totalBoletosCalculado : 0)) * 100
     ) / 100;
 
@@ -882,7 +903,7 @@ export default function ModalDesempenhoVendedor({
 
     let totalAcessoriosCalculado = 0;
 
-    vendasParaCalculo.forEach((v) => {
+    vendasParaMetas.forEach((v) => {
       const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
       
       if (itens.length > 0) {
@@ -902,8 +923,8 @@ export default function ModalDesempenhoVendedor({
       }
     });
 
-    const totalAcessorios = realizadoAcessorios > 0 
-      ? realizadoAcessorios 
+    const totalAcessorios = (filtroTipoVendas === 'todas' && realizadoAcessorios > 0)
+      ? Math.max(realizadoAcessorios, totalAcessoriosCalculado)
       : (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : 0);
 
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
@@ -969,21 +990,68 @@ export default function ModalDesempenhoVendedor({
     let totalComissoesHistorico = 0;
     let totalComissaoComoTitular = 0;
     let totalComissaoComoTrainee = 0;
+    let totalComissaoGeradaParaTrainees = 0; // Soma da comissão repassada/gerada para trainees em vendas de apoio
+
+    // Lista de extrato de vendas com trainee
+    interface ExtratoVendaTrainee {
+      id: string | number;
+      data: string;
+      produto: string;
+      traineeNome: string;
+      valorVenda: number;
+      comissaoTrainee: number;
+      imei?: string;
+    }
+    const extratoVendasComTrainee: ExtratoVendaTrainee[] = [];
 
     sales.forEach(s => {
       const vSalva = s.comissao_vendedor ?? s.comissao ?? s.valor_comissao ?? s.itens_venda?.[0]?.comissao;
       const vTitular = (vSalva !== undefined && vSalva !== null && vSalva !== '') ? Number(vSalva) : null;
-      const vTrainee = Number(s.comissao_trainee || 0);
+      const valTotal = Number(s.valor_total || s.valor || 0);
+
+      // Comissão do trainee calculada ou explícita
+      let cTraineeCalc = 0;
+      if (s.comissao_trainee !== undefined && s.comissao_trainee !== null && s.comissao_trainee !== '') {
+        const parsed = parseFloat(s.comissao_trainee);
+        cTraineeCalc = !isNaN(parsed) ? parsed : 0;
+      }
+      if (cTraineeCalc <= 0 && temApoioTrainee(s) && valTotal > 0) {
+        cTraineeCalc = Number((valTotal * 0.01).toFixed(2));
+      }
+
       if (isTrainee) {
         const cTitular = vTitular !== null ? vTitular : calcularComissaoItem(s, true);
-        const cTrainee = vTrainee > 0 ? vTrainee : (temApoioTrainee(s) ? Number((Number(s.valor_total || 0) * 0.01).toFixed(2)) : 0);
         totalComissaoComoTitular += cTitular;
-        totalComissaoComoTrainee += cTrainee;
-        totalComissoesHistorico += (cTitular + cTrainee);
+        totalComissaoComoTrainee += cTraineeCalc;
+        totalComissoesHistorico += (cTitular + cTraineeCalc);
       } else {
         const c = vTitular !== null ? vTitular : calcularComissaoItem(s, false);
         totalComissaoComoTitular += c;
         totalComissoesHistorico += c;
+        if (temApoioTrainee(s)) {
+          totalComissaoGeradaParaTrainees += cTraineeCalc;
+        }
+      }
+
+      // Adiciona ao extrato se teve apoio/participação de trainee
+      if (temApoioTrainee(s)) {
+        const itens = Array.isArray(s.itens_venda) ? s.itens_venda : [];
+        let nomeBase = s.produto_nome || s.descricao || (itens.length > 0 ? itens[0]?.produto_nome : null) || 'Produto / Pedido';
+        if (itens.length > 1) {
+          nomeBase = `${nomeBase} (+${itens.length - 1} itens)`;
+        }
+
+        const tNome = String(s.trainee_nome || (colaborador?.cargo?.toLowerCase().includes('trainee') ? colaborador.nome : '') || 'Trainee Vinculado').trim();
+
+        extratoVendasComTrainee.push({
+          id: s.id || Math.random(),
+          data: s.created_at || s.data || new Date().toISOString(),
+          produto: nomeBase,
+          traineeNome: tNome,
+          valorVenda: valTotal,
+          comissaoTrainee: cTraineeCalc,
+          imei: s.imei
+        });
       }
     });
 
@@ -1009,6 +1077,11 @@ export default function ModalDesempenhoVendedor({
     const totalComissoes = comissaoHomologadaOficial !== null
       ? comissaoHomologadaOficial
       : (comissoesAcumuladas > 0 ? comissoesAcumuladas : (totalComissoesHistorico > 0 ? totalComissoesHistorico : comissaoCalculadaPorMetas));
+
+    // Comissão exclusiva do titular
+    const comissaoTitularExclusiva = comissaoHomologadaOficial !== null
+      ? comissaoHomologadaOficial
+      : (totalComissaoComoTitular > 0 ? totalComissaoComoTitular : totalComissoes);
 
     // Evolução diária (dias 1 a 31)
     const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
@@ -1038,6 +1111,9 @@ export default function ModalDesempenhoVendedor({
       totalComissoes,
       totalComissaoComoTitular,
       totalComissaoComoTrainee,
+      comissaoTitularExclusiva,
+      totalComissaoGeradaParaTrainees,
+      extratoVendasComTrainee,
       metaTotal,
       salesCount,
       // Boletos
@@ -1085,7 +1161,8 @@ export default function ModalDesempenhoVendedor({
     superMetaBoletoState,
     objetivoAcessorios,
     superMetaAcessoriosState,
-    metaTotalCombinada
+    metaTotalCombinada,
+    filtroTipoVendas
   ]);
 
   // Identificação da filial
@@ -1246,16 +1323,29 @@ export default function ModalDesempenhoVendedor({
               </div>
               <div className="mt-3">
                 <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono block">
-                  R$ {dashboardInfo.totalComissoes.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  R$ {(dashboardInfo.isTrainee ? dashboardInfo.totalComissoes : dashboardInfo.comissaoTitularExclusiva).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
-                {dashboardInfo.totalComissaoComoTrainee > 0 ? (
-                  <span className="text-[10px] text-purple-300 mt-1 block font-medium">
-                    Titular: R$ {dashboardInfo.totalComissaoComoTitular.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Trainee: R$ {dashboardInfo.totalComissaoComoTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                  </span>
+                <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-semibold mt-0.5">
+                  {dashboardInfo.isTrainee ? 'Comissão Trainee do Período' : 'Comissão do Titular (Líquida)'}
+                </span>
+
+                {/* Subcard / Linha destacada de comissão trainee */}
+                {dashboardInfo.isTrainee ? (
+                  dashboardInfo.totalComissaoComoTrainee > 0 && (
+                    <div className="mt-2.5 pt-2 border-t border-[#1C1C1C] flex items-center justify-between text-[11px]">
+                      <span className="text-purple-300/90 font-medium">Comissão Apoio/Trainee:</span>
+                      <span className="font-mono font-bold text-purple-300">
+                        R$ {dashboardInfo.totalComissaoComoTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )
                 ) : (
-                  <span className="text-[11px] text-emerald-400/80 mt-1 block font-medium">
-                    Comissão calculada no período
-                  </span>
+                  <div className="mt-2.5 pt-2 border-t border-[#1C1C1C] flex items-center justify-between text-[11px]">
+                    <span className="text-purple-300/90 font-medium">Repassada/Gerada para Trainees:</span>
+                    <span className="font-mono font-bold text-purple-300">
+                      R$ {dashboardInfo.totalComissaoGeradaParaTrainees.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
                 )}
               </div>
             </div>
@@ -1284,6 +1374,45 @@ export default function ModalDesempenhoVendedor({
               </div>
             </div>
 
+          </div>
+
+          {/* CABEÇALHO DA SEÇÃO DE METAS COM FILTRO SELETIVO */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0A0A0A] border border-[#222222] rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Target size={16} className="text-[#6A0DAD]" />
+              <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                Metas Operacionais do Período
+              </span>
+              <span className="text-[10px] text-gray-500 font-mono">
+                (Itens faturados com apoio são somados por padrão)
+              </span>
+            </div>
+
+            {/* SELETOR SELETIVO: TODAS AS VENDAS VS APENAS TITULAR SOLO */}
+            <div className="flex items-center bg-[#141414] border border-[#262626] rounded-lg p-0.5 self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setFiltroTipoVendas('todas')}
+                className={`px-3 py-1 rounded-md text-[11px] font-bold tracking-wide transition-all ${
+                  filtroTipoVendas === 'todas'
+                    ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white shadow-md'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Todas as Vendas (Com Apoio)
+              </button>
+              <button
+                type="button"
+                onClick={() => setFiltroTipoVendas('solo')}
+                className={`px-3 py-1 rounded-md text-[11px] font-bold tracking-wide transition-all ${
+                  filtroTipoVendas === 'solo'
+                    ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white shadow-md'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Apenas Titular Solo
+              </button>
+            </div>
           </div>
 
           {/* BLOCOS DE METAS: BOLETOS & ACESSÓRIOS */}
@@ -1504,6 +1633,107 @@ export default function ModalDesempenhoVendedor({
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* ABA/SEÇÃO COLAPSÁVEL: EXTRATO DE VENDAS COM TRAINEE */}
+          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden shadow-lg transition-all">
+            <button
+              type="button"
+              onClick={() => setExtratoTraineeAberto(prev => !prev)}
+              className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-[#111111] transition-colors cursor-pointer border-b border-[#1A1A1A]"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-purple-950/40 text-purple-300 flex items-center justify-center border border-purple-800/40">
+                  <Users size={14} />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2">
+                    Extrato de Vendas com Trainee
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40">
+                      {dashboardInfo.extratoVendasComTrainee.length} {dashboardInfo.extratoVendasComTrainee.length === 1 ? 'venda com apoio' : 'vendas com apoio'}
+                    </span>
+                  </h4>
+                  <span className="text-[11px] text-gray-400 mt-0.5 block">
+                    Total gerado/repassado aos trainees: <strong className="text-purple-300 font-mono">R$ {dashboardInfo.totalComissaoGeradaParaTrainees.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-gray-400">
+                <span className="text-[11px] font-semibold hidden sm:inline">
+                  {extratoTraineeAberto ? 'Recolher' : 'Expandir extrato'}
+                </span>
+                {extratoTraineeAberto ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </div>
+            </button>
+
+            {extratoTraineeAberto && (
+              <div className="p-4 sm:p-6 overflow-x-auto animate-fade-in">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="pb-3">Data</th>
+                      <th className="pb-3">Produto / Pedido</th>
+                      <th className="pb-3">Nome do Trainee</th>
+                      <th className="pb-3 text-right">Valor da Venda</th>
+                      <th className="pb-3 text-right text-purple-400">Comissão Trainee</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#222222]/50">
+                    {dashboardInfo.extratoVendasComTrainee.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center italic text-gray-600">
+                          Nenhuma venda com apoio de trainee registrada para {colaborador.nome} nesta competência ({dashboardInfo.mesReferencia}).
+                        </td>
+                      </tr>
+                    ) : (
+                      dashboardInfo.extratoVendasComTrainee.map((item, idx) => (
+                        <tr key={`${item.id}-${idx}`} className="hover:bg-purple-950/10 transition-colors">
+                          <td className="py-3 text-gray-400 font-mono">
+                            {new Date(item.data).toLocaleDateString('pt-BR')}
+                          </td>
+                          <td className="py-3">
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white">{item.produto}</span>
+                              {Boolean(item.imei) && (
+                                <span className="text-[10px] text-zinc-500 font-mono">IMEI: ...{String(item.imei).slice(-4)}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-bold bg-purple-950/40 text-purple-300 border border-purple-800/40">
+                              <Users size={11} className="text-purple-400" />
+                              {item.traineeNome}
+                            </span>
+                          </td>
+                          <td className="py-3 text-right font-mono font-bold text-white">
+                            {formatarMoeda(item.valorVenda)}
+                          </td>
+                          <td className="py-3 text-right font-mono font-bold text-purple-400">
+                            {formatarMoeda(item.comissaoTrainee)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  {dashboardInfo.extratoVendasComTrainee.length > 0 && (
+                    <tfoot>
+                      <tr className="border-t border-[#333] font-bold text-xs bg-[#111]">
+                        <td colSpan={3} className="py-3 px-2 text-gray-300 uppercase tracking-wider text-[11px]">
+                          Totais de Vendas com Trainee
+                        </td>
+                        <td className="py-3 text-right font-mono text-white">
+                          {formatarMoeda(dashboardInfo.extratoVendasComTrainee.reduce((acc, cur) => acc + cur.valorVenda, 0))}
+                        </td>
+                        <td className="py-3 text-right font-mono text-purple-300">
+                          {formatarMoeda(dashboardInfo.totalComissaoGeradaParaTrainees)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            )}
           </div>
 
         </div>
