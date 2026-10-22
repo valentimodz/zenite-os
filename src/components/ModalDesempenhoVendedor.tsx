@@ -270,6 +270,7 @@ export const isPagamentoBoletoFinanciadora = (vendaOuPgto: any): boolean => {
     vendaOuPgto.metodo_pagamento || 
     vendaOuPgto.financeira || 
     vendaOuPgto.financeira_parceira || 
+    vendaOuPgto.bandeira || 
     vendaOuPgto.metodo_detalhe || 
     ''
   ).toUpperCase().trim();
@@ -493,6 +494,7 @@ export default function ModalDesempenhoVendedor({
       }
       if (vendedorNome) {
         orClauses.push(`vendedor_nome.ilike.%${vendedorNome}%`);
+        orClauses.push(`trainee_nome.ilike.%${vendedorNome}%`);
       }
 
       let query = supabase
@@ -778,10 +780,19 @@ export default function ModalDesempenhoVendedor({
           .neq('status', 'CANCELADA')
           .neq('status', 'cancelada');
 
+        const orDirect: string[] = [];
         if (idVendedor) {
-          query = query.or(`vendedor_id.eq.${idVendedor},trainee_id.eq.${idVendedor},treener_id.eq.${idVendedor}`);
-        } else if (nomeVendedor) {
-          query = query.ilike('vendedor_nome', `%${nomeVendedor}%`);
+          orDirect.push(`vendedor_id.eq.${idVendedor}`);
+          orDirect.push(`trainee_id.eq.${idVendedor}`);
+          orDirect.push(`treener_id.eq.${idVendedor}`);
+        }
+        if (nomeVendedor) {
+          orDirect.push(`vendedor_nome.ilike.%${nomeVendedor}%`);
+          orDirect.push(`trainee_nome.ilike.%${nomeVendedor}%`);
+        }
+
+        if (orDirect.length > 0) {
+          query = query.or(orDirect.join(','));
         }
 
         const { data } = await query;
@@ -911,13 +922,18 @@ export default function ModalDesempenhoVendedor({
   const dashboardInfo = useMemo(() => {
     const fTitularView = Number(dadosViewConsolidada?.faturado_titular || 0);
     const fTraineeView = Number(dadosViewConsolidada?.faturado_trainee || 0);
+
+    // 1. CORREÇÃO DA CLASSIFICAÇÃO DE TRAINEE:
+    // O colaborador só deve ser considerado Trainee (isTrainee) se o seu cargo ou função for explicitamente de trainee.
+    // Jamais considerar um vendedor titular como trainee apenas porque vendeu mais com apoio de trainee do que solo.
+    const cargoNormalizado = String(colaborador?.cargo || (colaborador as any)?.funcao || '').toUpperCase().trim();
+    const roleNormalizado = String(colaborador?.role || '').toUpperCase().trim();
     const isOriginalTrainee = Boolean(
-      colaborador?.cargo === 'Trainee' || 
-      colaborador?.role === 'TRAINEE' || 
-      colaborador?.is_treinner ||
-      (colaborador?.cargo || '').toLowerCase().includes('trainee')
+      cargoNormalizado.includes('TRAINEE') || 
+      roleNormalizado.includes('TRAINEE') || 
+      colaborador?.is_treinner === true
     );
-    const isTrainee = fTraineeView > fTitularView || isOriginalTrainee || (fTitularView === 0 && fTraineeView > 0);
+    const isTrainee = isOriginalTrainee;
 
     // Mapeamento oficial de metas com prioridade para regras_comissoes da filial
     const metaBanco = metaIndividual;
@@ -950,8 +966,22 @@ export default function ModalDesempenhoVendedor({
         ? 7500 
         : (superMetaAcessoriosState > 0 ? superMetaAcessoriosState : 15000));
 
-    const vendasParaCalculo = (vendasColaborador && vendasColaborador.length > 0) ? vendasColaborador : vendasLocais;
-    const sales = vendasParaCalculo || [];
+    // Fallback em cascata para que 'sales' nunca fique vazio se houver vendas disponíveis
+    const vendasParaCalculo = (Array.isArray(vendasColaborador) && vendasColaborador.length > 0)
+      ? vendasColaborador
+      : ((Array.isArray(vendasLocais) && vendasLocais.length > 0)
+        ? vendasLocais
+        : ((Array.isArray(propVendasColaborador) && propVendasColaborador.length > 0)
+          ? propVendasColaborador
+          : ((Array.isArray(vendasCache) && vendasCache.length > 0)
+            ? vendasCache
+            : ((Array.isArray((colaborador as any)?.vendas) && (colaborador as any).vendas.length > 0)
+              ? (colaborador as any).vendas
+              : ((Array.isArray((colaborador as any)?.extrato) && (colaborador as any).extrato.length > 0)
+                ? (colaborador as any).extrato
+                : [])))));
+
+    const sales = (vendasParaCalculo || []) as any[];
     const rawSalesCount = sales.length;
     const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
     
@@ -1485,7 +1515,7 @@ export default function ModalDesempenhoVendedor({
                   </div>
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-purple-300/90 font-medium">
-                      {dashboardInfo.isTrainee ? 'Comissão Apoio/Trainee:' : 'Comissão Total dos Trainees:'}
+                      {dashboardInfo.isTrainee ? 'Comissão Apoio/Trainee:' : 'Comissão Repassada aos Trainees:'}
                     </span>
                     <span className="font-mono font-bold text-purple-300">
                       R$ {(dashboardInfo.isTrainee ? dashboardInfo.totalComissaoComoTrainee : dashboardInfo.totalComissaoGeradaParaTrainees).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
