@@ -255,6 +255,27 @@ export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): numb
   return calcularComissaoTotal(sale).comissaoVendedor;
 };
 
+// Termos e financeiras para metas de boletos/financiadoras (PAYJOY, UME, WATU, AIVA, BOLETO, CREDIARIO, etc.)
+export const BOLETO_FINANCIADORAS_TERMS = [
+  'BOLETO', 'PAYJOY', 'WATU', 'UME', 'UMA', 'AIVA', 
+  'CREDIARIO', 'CREDIÁRIO', 'FINANC', 'PROMIS', 'CARNE', 'CARNÊ'
+];
+
+export const isPagamentoBoletoFinanciadora = (vendaOuPgto: any): boolean => {
+  if (!vendaOuPgto) return false;
+  const texto = String(
+    vendaOuPgto.forma || 
+    vendaOuPgto.forma_pagamento || 
+    vendaOuPgto.metodo || 
+    vendaOuPgto.metodo_pagamento || 
+    vendaOuPgto.financeira || 
+    vendaOuPgto.financeira_parceira || 
+    vendaOuPgto.metodo_detalhe || 
+    ''
+  ).toUpperCase();
+  return BOLETO_FINANCIADORAS_TERMS.some(termo => texto.includes(termo));
+};
+
 // Helper robusto para identificar se a venda é de acessório
 export const isAcessorio = (venda: any): boolean => {
   const cat = (venda.categoria || venda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
@@ -503,6 +524,15 @@ export default function ModalDesempenhoVendedor({
           comissao_trainee,
           teve_participacao_trainee,
           status,
+          vendas_pagamentos (
+            id,
+            valor_pago,
+            valor,
+            metodo_pagamento,
+            forma_pagamento,
+            financeira,
+            metodo_detalhe
+          ),
           itens_venda (
             id,
             produto_nome,
@@ -536,35 +566,28 @@ export default function ModalDesempenhoVendedor({
         const totalQtd = vendasValidas.length;
         const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
 
-        // Soma direta de Boletos / Financiadoras (com suporte a pagamentos mistos / fracionados):
+        // Soma direta de Boletos / Financiadoras (com suporte a pagamentos mistos / fracionados e apoio trainee):
         let totalBoletos = 0;
         vendasValidas.forEach((v: any) => {
           const statusLimpo = String(v.status || '').toUpperCase().trim();
           if (statusLimpo === 'CANCELADA' || statusLimpo === 'CANCELADO') return;
 
-          // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
+          // 1º Prioridade: Se houver campo explícito 'valor_boleto'
           if (Number(v.valor_boleto) > 0) {
             totalBoletos += Number(v.valor_boleto);
           } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
             const parcelaBoleto = v.pagamentos
-              .filter((p: any) => {
-                const forma = String(p.forma || p.metodo || '').toUpperCase();
-                return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
-              })
+              .filter((p: any) => isPagamentoBoletoFinanciadora(p))
               .reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
             totalBoletos += parcelaBoleto > 0 ? parcelaBoleto : 0;
           } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
             const parcelaBoletoVp = v.vendas_pagamentos
-              .filter((p: any) => {
-                const forma = String(p.forma || p.metodo || p.metodo_pagamento || p.forma_pagamento || p.financeira || '').toUpperCase();
-                return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
-              })
+              .filter((p: any) => isPagamentoBoletoFinanciadora(p))
               .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
             totalBoletos += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
           } else {
-            // 2º Fallback: Para vendas antigas de forma única gravada
-            const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
-            if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
+            // 2º Fallback: Para vendas de forma única gravada
+            if (isPagamentoBoletoFinanciadora(v)) {
               totalBoletos += Number(v.valor_total || v.valor || 0);
             }
           }
@@ -572,28 +595,28 @@ export default function ModalDesempenhoVendedor({
 
         setRealizadoBoletos(Math.round(totalBoletos * 100) / 100);
 
-        // Realizado Acessórios: Unificado com Minhas Metas
+        // Realizado Acessórios: Unificado com Minhas Metas (incluindo vendas com trainee e itens da categoria acessorios)
         const termosAcessorios = [
-          'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
+          'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
           'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 
           'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
         ];
 
         let acessorios = 0;
-        vendas.forEach((v) => {
+        vendasValidas.forEach((v: any) => {
           const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
           if (itens.length > 0) {
             itens.forEach((item: any) => {
               const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase();
               const catItem = String(item.categoria || '').toUpperCase();
-              if (termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
-                acessorios += Number(item.valor_total || (Number(item.preco_unitario || 0) * Number(item.quantidade || 1)) || 0);
+              if (catItem.includes('ACESS') || termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
+                acessorios += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
               }
             });
           } else {
             const cat = String(v.categoria || '').toUpperCase();
             const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase();
-            if (termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
+            if (cat.includes('ACESS') || termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
               acessorios += Number(v.valor_total || v.valor || 0);
             }
           }
@@ -671,6 +694,16 @@ export default function ModalDesempenhoVendedor({
             trainee_nome,
             comissao_trainee,
             teve_participacao_trainee,
+            status,
+            vendas_pagamentos (
+              id,
+              valor_pago,
+              valor,
+              metodo_pagamento,
+              forma_pagamento,
+              financeira,
+              metodo_detalhe
+            ),
             itens_venda (
               produto_nome,
               categoria,
@@ -854,35 +887,28 @@ export default function ModalDesempenhoVendedor({
       ? sales.filter(s => !temApoioTrainee(s))
       : sales;
 
-    // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS (com suporte a pagamentos mistos / fracionados):
+    // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS (com suporte a pagamentos mistos / fracionados e apoio trainee):
     let totalBoletosCalculado = 0;
     vendasParaMetas.forEach((v: any) => {
       const status = String(v.status || '').toUpperCase().trim();
       if (status === 'CANCELADA' || status === 'CANCELADO') return;
 
-      // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
+      // 1º Prioridade: Se houver campo explícito 'valor_boleto'
       if (Number(v.valor_boleto) > 0) {
         totalBoletosCalculado += Number(v.valor_boleto);
       } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
         const parcelaBoleto = v.pagamentos
-          .filter((p: any) => {
-            const forma = String(p.forma || p.metodo || '').toUpperCase();
-            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
-          })
+          .filter((p: any) => isPagamentoBoletoFinanciadora(p))
           .reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
         totalBoletosCalculado += parcelaBoleto > 0 ? parcelaBoleto : 0;
       } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
         const parcelaBoletoVp = v.vendas_pagamentos
-          .filter((p: any) => {
-            const forma = String(p.forma || p.metodo || p.metodo_pagamento || p.forma_pagamento || p.financeira || '').toUpperCase();
-            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
-          })
+          .filter((p: any) => isPagamentoBoletoFinanciadora(p))
           .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
         totalBoletosCalculado += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
       } else {
-        // 2º Fallback: Para vendas antigas de forma única gravada
-        const forma = String(v.forma_pagamento || v.metodo_pagamento || (v as any).financeira || '').toUpperCase().trim();
-        if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
+        // 2º Fallback: Para vendas de forma única gravada
+        if (isPagamentoBoletoFinanciadora(v)) {
           totalBoletosCalculado += Number(v.valor_total || v.valor || 0);
         }
       }
@@ -894,9 +920,9 @@ export default function ModalDesempenhoVendedor({
         : (totalBoletosCalculado > 0 ? totalBoletosCalculado : 0)) * 100
     ) / 100;
 
-    // 4. CÁLCULO DE ACESSÓRIOS IDÊNTICO A MINHAS METAS:
+    // 4. CÁLCULO DE ACESSÓRIOS IDÊNTICO A MINHAS METAS (com categoria acessorios e apoio de trainee):
     const termosAcessorios = [
-      'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
+      'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
       'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 
       'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
     ];
@@ -910,14 +936,14 @@ export default function ModalDesempenhoVendedor({
         itens.forEach((item: any) => {
           const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase();
           const catItem = String(item.categoria || '').toUpperCase();
-          if (termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
+          if (catItem.includes('ACESS') || termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
             totalAcessoriosCalculado += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
           }
         });
       } else {
         const cat = String(v.categoria || '').toUpperCase();
         const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase();
-        if (termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
+        if (cat.includes('ACESS') || termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
           totalAcessoriosCalculado += Number(v.valor_total || v.valor || 0);
         }
       }
@@ -1326,27 +1352,26 @@ export default function ModalDesempenhoVendedor({
                   R$ {(dashboardInfo.isTrainee ? dashboardInfo.totalComissoes : dashboardInfo.comissaoTitularExclusiva).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-semibold mt-0.5">
-                  {dashboardInfo.isTrainee ? 'Comissão Trainee do Período' : 'Comissão do Titular (Líquida)'}
+                  {dashboardInfo.isTrainee ? 'Comissão Trainee (Líquida)' : 'Comissão do Titular (Líquida)'}
                 </span>
 
-                {/* Subcard / Linha destacada de comissão trainee */}
-                {dashboardInfo.isTrainee ? (
-                  dashboardInfo.totalComissaoComoTrainee > 0 && (
-                    <div className="mt-2.5 pt-2 border-t border-[#1C1C1C] flex items-center justify-between text-[11px]">
-                      <span className="text-purple-300/90 font-medium">Comissão Apoio/Trainee:</span>
-                      <span className="font-mono font-bold text-purple-300">
-                        R$ {dashboardInfo.totalComissaoComoTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                  )
-                ) : (
-                  <div className="mt-2.5 pt-2 border-t border-[#1C1C1C] flex items-center justify-between text-[11px]">
-                    <span className="text-purple-300/90 font-medium">Repassada/Gerada para Trainees:</span>
-                    <span className="font-mono font-bold text-purple-300">
-                      R$ {dashboardInfo.totalComissaoGeradaParaTrainees.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {/* Subcard detalhado com clareza total: Titular e Trainees */}
+                <div className="mt-3 pt-2.5 border-t border-[#1C1C1C] space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-gray-300 font-medium">Comissão do Titular:</span>
+                    <span className="font-mono font-bold text-emerald-400">
+                      R$ {dashboardInfo.comissaoTitularExclusiva.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
-                )}
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-purple-300/90 font-medium">
+                      {dashboardInfo.isTrainee ? 'Comissão Apoio/Trainee:' : 'Comissão Total dos Trainees:'}
+                    </span>
+                    <span className="font-mono font-bold text-purple-300">
+                      R$ {(dashboardInfo.isTrainee ? dashboardInfo.totalComissaoComoTrainee : dashboardInfo.totalComissaoGeradaParaTrainees).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
