@@ -639,23 +639,30 @@ export default function ModalDesempenhoVendedor({
           const statusLimpo = String(v.status || '').toUpperCase().trim();
           if (statusLimpo === 'CANCELADA' || statusLimpo === 'CANCELADO') return;
 
-          // 1º Prioridade: Se houver campo explícito 'valor_boleto'
-          if (Number(v.valor_boleto) > 0) {
-            totalBoletos += Number(v.valor_boleto);
-          } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-            const parcelaBoletoVp = v.vendas_pagamentos
+          // 1. Unificação robusta de todos os pagamentos da venda
+          const listaPags: any[] = [];
+          if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
+            listaPags.push(...v.vendas_pagamentos);
+          }
+          if (v.pagamentos) {
+            try {
+              const parsed = typeof v.pagamentos === 'string' ? JSON.parse(v.pagamentos) : v.pagamentos;
+              if (Array.isArray(parsed)) listaPags.push(...parsed);
+            } catch {
+              // json parse silencioso
+            }
+          }
+
+          if (listaPags.length > 0) {
+            const somaBoletoPags = listaPags
               .filter((p: any) => isPagamentoBoletoFinanciadora(p))
-              .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
-            totalBoletos += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
-          } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
-            const parcelaBoleto = v.pagamentos
-              .filter((p: any) => isPagamentoBoletoFinanciadora(p))
-              .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
-            totalBoletos += parcelaBoleto > 0 ? parcelaBoleto : 0;
+              .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || p.valor_total || 0), 0);
+            totalBoletos += somaBoletoPags;
           } else {
-            // 2º Fallback: Para vendas de forma única gravada (v.metodo_pagamento, v.forma_pagamento, v.financeira)
-            if (isPagamentoBoletoFinanciadora(v)) {
-              totalBoletos += Number(v.valor_total || v.valor || 0);
+            // Se listaPags estiver vazia, verifique diretamente na venda:
+            // se isPagamentoBoletoFinanciadora(v) ou Number(v.valor_boleto) > 0, some Number(v.valor_boleto || v.valor_total || v.valor || 0)
+            if (isPagamentoBoletoFinanciadora(v) || Number(v.valor_boleto) > 0) {
+              totalBoletos += Number(v.valor_boleto || v.valor_total || v.valor || 0);
             }
           }
         });
@@ -1035,10 +1042,17 @@ export default function ModalDesempenhoVendedor({
       ? faturadoTitularSoloCalc 
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
-    // Vendas filtradas para cálculo das metas (Todas as Vendas vs Apenas Titular Solo)
-    const vendasParaMetas = filtroTipoVendas === 'solo'
-      ? sales.filter(s => !temApoioTrainee(s))
-      : sales;
+    // Vendas filtradas para cálculo das metas operacionais:
+    // Se o colaborador for Trainee, suas metas consideram as vendas em que atuou como Trainee (v.trainee_id ou v.trainee_nome) ou vendas diretas
+    const vendasParaMetas = isTrainee
+      ? sales.filter(s => {
+          const tIdMatch = (targetVendedorId && (String(s.trainee_id) === String(targetVendedorId) || String(s.treener_id) === String(targetVendedorId)));
+          const tNomeMatch = (targetVendedorNome && String(s.trainee_nome || '').toUpperCase().includes(targetVendedorNome.toUpperCase()));
+          return tIdMatch || tNomeMatch || temApoioTrainee(s) || String(s.vendedor_id) === String(targetVendedorId);
+        })
+      : (filtroTipoVendas === 'solo'
+          ? sales.filter(s => !temApoioTrainee(s))
+          : sales);
 
     // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS (com suporte a pagamentos mistos / fracionados e apoio trainee):
     let totalBoletosCalculado = 0;
@@ -1046,25 +1060,31 @@ export default function ModalDesempenhoVendedor({
       const status = String(v.status || '').toUpperCase().trim();
       if (status === 'CANCELADA' || status === 'CANCELADO') return;
 
-      // 1º Prioridade: Se houver campo explícito 'valor_boleto'
-      if (Number(v.valor_boleto) > 0) {
-        totalBoletosCalculado += Number(v.valor_boleto);
-      } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-        // Se houver pagamentos em vendas_pagamentos, verifica cada pagamento e soma Number(p.valor_pago || p.valor || 0)
-        const parcelaBoletoVp = v.vendas_pagamentos
+      // 1. Unificação robusta de todos os pagamentos da venda
+      const listaPags: any[] = [];
+      if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
+        listaPags.push(...v.vendas_pagamentos);
+      }
+      if (v.pagamentos) {
+        try {
+          const parsed = typeof v.pagamentos === 'string' ? JSON.parse(v.pagamentos) : v.pagamentos;
+          if (Array.isArray(parsed)) listaPags.push(...parsed);
+        } catch {
+          // json parse silencioso
+        }
+      }
+
+      if (listaPags.length > 0) {
+        // Se listaPags tiver itens, filtre por isPagamentoBoletoFinanciadora(p) e some (p.valor_pago || p.valor || p.valor_total || 0)
+        const somaBoletoPags = listaPags
           .filter((p: any) => isPagamentoBoletoFinanciadora(p))
-          .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
-        totalBoletosCalculado += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
-      } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
-        const parcelaBoleto = v.pagamentos
-          .filter((p: any) => isPagamentoBoletoFinanciadora(p))
-          .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || 0), 0);
-        totalBoletosCalculado += parcelaBoleto > 0 ? parcelaBoleto : 0;
+          .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || p.valor_total || 0), 0);
+        totalBoletosCalculado += somaBoletoPags;
       } else {
-        // Se não houver array de pagamentos (ou estiver vazio), verifique diretamente na venda:
-        // se v.metodo_pagamento, v.forma_pagamento ou v.financeira corresponder, some o valor da venda
-        if (isPagamentoBoletoFinanciadora(v)) {
-          totalBoletosCalculado += Number(v.valor_total || v.valor || 0);
+        // Se listaPags estiver vazia, verifique diretamente na venda:
+        // se isPagamentoBoletoFinanciadora(v) ou Number(v.valor_boleto) > 0, some Number(v.valor_boleto || v.valor_total || v.valor || 0)
+        if (isPagamentoBoletoFinanciadora(v) || Number(v.valor_boleto) > 0) {
+          totalBoletosCalculado += Number(v.valor_boleto || v.valor_total || v.valor || 0);
         }
       }
     });
@@ -1401,7 +1421,9 @@ export default function ModalDesempenhoVendedor({
                   <span className="inline-flex items-center gap-2">
                     <span className="text-gray-600">•</span>
                     <span className="text-purple-300 font-semibold">
-                      Titular Solo: R$ {dashboardInfo.faturadoTitularSolo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Com Apoio Trainee: R$ {dashboardInfo.faturadoComApoioTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      {dashboardInfo.isTrainee
+                        ? `Atuação como Trainee: R$ ${dashboardInfo.faturadoComApoioTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Vendas Diretas: R$ ${dashboardInfo.faturadoTitularSolo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                        : `Titular Solo: R$ ${dashboardInfo.faturadoTitularSolo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Com Apoio Trainee: R$ ${dashboardInfo.faturadoComApoioTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
                     </span>
                   </span>
                 )}
