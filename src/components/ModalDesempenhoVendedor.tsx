@@ -272,8 +272,10 @@ export const isPagamentoBoletoFinanciadora = (vendaOuPgto: any): boolean => {
     vendaOuPgto.financeira_parceira || 
     vendaOuPgto.metodo_detalhe || 
     ''
-  ).toUpperCase();
-  return BOLETO_FINANCIADORAS_TERMS.some(termo => texto.includes(termo));
+  ).toUpperCase().trim();
+
+  // Verifica se o texto exato ou termos de boletos/financiadoras estão presentes
+  return BOLETO_FINANCIADORAS_TERMS.some(termo => texto.includes(termo.toUpperCase().trim()));
 };
 
 // Helper robusto para identificar se a venda é de acessório
@@ -556,10 +558,68 @@ export default function ModalDesempenhoVendedor({
 
       if (vendas) {
         // Filtrar apenas se não estiver cancelada (insensível a maiúsculas/minúsculas)
-        const vendasValidas = vendas.filter((v: any) => {
+        const vendasValidas: any[] = vendas.filter((v: any) => {
           const statusLimpo = String(v.status || '').toUpperCase().trim();
           return statusLimpo !== 'CANCELADA' && statusLimpo !== 'CANCELADO';
         });
+
+        const idsVendas = vendasValidas.map(v => v.id).filter(Boolean);
+
+        // Fetch complementar de itens_venda caso não venham aninhados pelo PostgREST
+        const faltamItens = vendasValidas.some(v => !Array.isArray(v.itens_venda) || v.itens_venda.length === 0);
+        if (faltamItens && idsVendas.length > 0) {
+          try {
+            const { data: itensComp } = await supabase
+              .from('itens_venda')
+              .select('*')
+              .in('venda_id', idsVendas);
+
+            if (itensComp && itensComp.length > 0) {
+              const mapaItens: Record<string, any[]> = {};
+              itensComp.forEach((it: any) => {
+                const vid = String(it.venda_id);
+                if (!mapaItens[vid]) mapaItens[vid] = [];
+                mapaItens[vid].push(it);
+              });
+
+              vendasValidas.forEach(v => {
+                if (!Array.isArray(v.itens_venda) || v.itens_venda.length === 0) {
+                  v.itens_venda = mapaItens[String(v.id)] || [];
+                }
+              });
+            }
+          } catch (errItens) {
+            console.warn('[ModalDesempenhoVendedor] Aviso ao buscar itens_venda complementares:', errItens);
+          }
+        }
+
+        // Fetch complementar de vendas_pagamentos caso não venham aninhados pelo PostgREST
+        const faltamPagtos = vendasValidas.some(v => !Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0);
+        if (faltamPagtos && idsVendas.length > 0) {
+          try {
+            const { data: pagtosComp } = await supabase
+              .from('vendas_pagamentos')
+              .select('*')
+              .in('venda_id', idsVendas);
+
+            if (pagtosComp && pagtosComp.length > 0) {
+              const mapaPagtos: Record<string, any[]> = {};
+              pagtosComp.forEach((pg: any) => {
+                const vid = String(pg.venda_id);
+                if (!mapaPagtos[vid]) mapaPagtos[vid] = [];
+                mapaPagtos[vid].push(pg);
+              });
+
+              vendasValidas.forEach(v => {
+                if (!Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0) {
+                  v.vendas_pagamentos = mapaPagtos[String(v.id)] || [];
+                }
+              });
+            }
+          } catch (errPagtos) {
+            console.warn('[ModalDesempenhoVendedor] Aviso ao buscar vendas_pagamentos complementares:', errPagtos);
+          }
+        }
 
         const totalFaturado = vendasValidas.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
         const totalComissao = vendasValidas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
@@ -607,15 +667,15 @@ export default function ModalDesempenhoVendedor({
           const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
           if (itens.length > 0) {
             itens.forEach((item: any) => {
-              const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase();
-              const catItem = String(item.categoria || '').toUpperCase();
+              const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase().trim();
+              const catItem = String(item.categoria || '').toUpperCase().trim();
               if (catItem.includes('ACESS') || termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
                 acessorios += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
               }
             });
           } else {
-            const cat = String(v.categoria || '').toUpperCase();
-            const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase();
+            const cat = String(v.categoria || '').toUpperCase().trim();
+            const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase().trim();
             if (cat.includes('ACESS') || termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
               acessorios += Number(v.valor_total || v.valor || 0);
             }
@@ -705,6 +765,7 @@ export default function ModalDesempenhoVendedor({
               metodo_detalhe
             ),
             itens_venda (
+              id,
               produto_nome,
               categoria,
               quantidade,
@@ -725,8 +786,65 @@ export default function ModalDesempenhoVendedor({
 
         const { data } = await query;
         if (data && data.length > 0) {
-          setVendasLocais(data);
-          setVendasColaborador(data as Venda[]);
+          const vendasDiretasValidas: any[] = [...data];
+          const idsDiretos = vendasDiretasValidas.map(v => v.id).filter(Boolean);
+
+          // Fetch complementar de itens_venda
+          const faltamItens = vendasDiretasValidas.some(v => !Array.isArray(v.itens_venda) || v.itens_venda.length === 0);
+          if (faltamItens && idsDiretos.length > 0) {
+            try {
+              const { data: itensComp } = await supabase
+                .from('itens_venda')
+                .select('*')
+                .in('venda_id', idsDiretos);
+
+              if (itensComp && itensComp.length > 0) {
+                const mapaItens: Record<string, any[]> = {};
+                itensComp.forEach((it: any) => {
+                  const vid = String(it.venda_id);
+                  if (!mapaItens[vid]) mapaItens[vid] = [];
+                  mapaItens[vid].push(it);
+                });
+                vendasDiretasValidas.forEach(v => {
+                  if (!Array.isArray(v.itens_venda) || v.itens_venda.length === 0) {
+                    v.itens_venda = mapaItens[String(v.id)] || [];
+                  }
+                });
+              }
+            } catch (errItens) {
+              console.warn('[ModalDesempenhoVendedor] Aviso ao buscar itens complementares em fetchVendasDireto:', errItens);
+            }
+          }
+
+          // Fetch complementar de vendas_pagamentos
+          const faltamPagtos = vendasDiretasValidas.some(v => !Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0);
+          if (faltamPagtos && idsDiretos.length > 0) {
+            try {
+              const { data: pagtosComp } = await supabase
+                .from('vendas_pagamentos')
+                .select('*')
+                .in('venda_id', idsDiretos);
+
+              if (pagtosComp && pagtosComp.length > 0) {
+                const mapaPagtos: Record<string, any[]> = {};
+                pagtosComp.forEach((pg: any) => {
+                  const vid = String(pg.venda_id);
+                  if (!mapaPagtos[vid]) mapaPagtos[vid] = [];
+                  mapaPagtos[vid].push(pg);
+                });
+                vendasDiretasValidas.forEach(v => {
+                  if (!Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0) {
+                    v.vendas_pagamentos = mapaPagtos[String(v.id)] || [];
+                  }
+                });
+              }
+            } catch (errPagtos) {
+              console.warn('[ModalDesempenhoVendedor] Aviso ao buscar pagtos complementares em fetchVendasDireto:', errPagtos);
+            }
+          }
+
+          setVendasLocais(vendasDiretasValidas);
+          setVendasColaborador(vendasDiretasValidas as Venda[]);
         }
       } catch (err) {
         console.error('Erro ao carregar vendas diretamente:', err);
@@ -915,8 +1033,8 @@ export default function ModalDesempenhoVendedor({
     });
 
     const totalBoletos = Math.round(
-      (filtroTipoVendas === 'todas' && realizadoBoletos > 0
-        ? Math.max(realizadoBoletos, totalBoletosCalculado)
+      (filtroTipoVendas === 'todas'
+        ? (totalBoletosCalculado > 0 ? totalBoletosCalculado : (realizadoBoletos > 0 ? realizadoBoletos : 0))
         : (totalBoletosCalculado > 0 ? totalBoletosCalculado : 0)) * 100
     ) / 100;
 
@@ -934,24 +1052,26 @@ export default function ModalDesempenhoVendedor({
       
       if (itens.length > 0) {
         itens.forEach((item: any) => {
-          const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase();
-          const catItem = String(item.categoria || '').toUpperCase();
+          const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase().trim();
+          const catItem = String(item.categoria || '').toUpperCase().trim();
           if (catItem.includes('ACESS') || termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
             totalAcessoriosCalculado += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
           }
         });
       } else {
-        const cat = String(v.categoria || '').toUpperCase();
-        const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase();
+        const cat = String(v.categoria || '').toUpperCase().trim();
+        const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase().trim();
         if (cat.includes('ACESS') || termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
           totalAcessoriosCalculado += Number(v.valor_total || v.valor || 0);
         }
       }
     });
 
-    const totalAcessorios = (filtroTipoVendas === 'todas' && realizadoAcessorios > 0)
-      ? Math.max(realizadoAcessorios, totalAcessoriosCalculado)
-      : (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : 0);
+    const totalAcessorios = Math.round(
+      (filtroTipoVendas === 'todas'
+        ? (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : (realizadoAcessorios > 0 ? realizadoAcessorios : 0))
+        : (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : 0)) * 100
+    ) / 100;
 
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 
