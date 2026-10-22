@@ -264,6 +264,11 @@ export const BOLETO_FINANCIADORAS_TERMS = [
 
 export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
   if (!p) return false;
+  // Se for string direta
+  if (typeof p === 'string') {
+    const s = p.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    return BOLETO_FINANCIADORAS_TERMS.some(t => s.includes(t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()));
+  }
   const texto = [
     p.metodo_pagamento,
     p.forma_pagamento,
@@ -276,12 +281,13 @@ export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
     p.metodo,
     p.forma,
     p.metodo_detalhe
-  ].filter(Boolean).join(' ').toUpperCase().trim();
+  ].filter(Boolean).join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
   if (!texto) return false;
-
-  // Verifica se qualquer um dos termos de boletos/financiadoras está presente no texto
-  return BOLETO_FINANCIADORAS_TERMS.some(termo => texto.includes(termo.toUpperCase().trim()));
+  return BOLETO_FINANCIADORAS_TERMS.some(t => {
+    const termoNorm = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    return texto.includes(termoNorm);
+  });
 };
 
 // Helper robusto para identificar se a venda é de acessório
@@ -639,32 +645,48 @@ export default function ModalDesempenhoVendedor({
           const statusLimpo = String(v.status || '').toUpperCase().trim();
           if (statusLimpo === 'CANCELADA' || statusLimpo === 'CANCELADO') return;
 
-          // 1. Unificação robusta de todos os pagamentos da venda
-          const listaPags: any[] = [];
-          if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-            listaPags.push(...v.vendas_pagamentos);
-          }
-          if (v.pagamentos) {
-            try {
-              const parsed = typeof v.pagamentos === 'string' ? JSON.parse(v.pagamentos) : v.pagamentos;
-              if (Array.isArray(parsed)) listaPags.push(...parsed);
-            } catch {
-              // json parse silencioso
-            }
+          let valorBoletoVenda = 0;
+
+          // A) Verifica valor explícito em v.valor_boleto
+          if (v.valor_boleto && !isNaN(Number(v.valor_boleto)) && Number(v.valor_boleto) > 0) {
+            valorBoletoVenda += Number(v.valor_boleto);
           }
 
-          if (listaPags.length > 0) {
-            const somaBoletoPags = listaPags
-              .filter((p: any) => isPagamentoBoletoFinanciadora(p))
-              .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || p.valor_total || 0), 0);
-            totalBoletos += somaBoletoPags;
-          } else {
-            // Se listaPags estiver vazia, verifique diretamente na venda:
-            // se isPagamentoBoletoFinanciadora(v) ou Number(v.valor_boleto) > 0, some Number(v.valor_boleto || v.valor_total || v.valor || 0)
-            if (isPagamentoBoletoFinanciadora(v) || Number(v.valor_boleto) > 0) {
-              totalBoletos += Number(v.valor_boleto || v.valor_total || v.valor || 0);
+          // B) Extrai pagamentos de vendas_pagamentos
+          if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
+            v.vendas_pagamentos.forEach((p: any) => {
+              if (isPagamentoBoletoFinanciadora(p)) {
+                valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
+              }
+            });
+          }
+
+          // C) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string)
+          let listaPags: any[] = [];
+          if (v.pagamentos) {
+            if (Array.isArray(v.pagamentos)) {
+              listaPags = v.pagamentos;
+            } else if (typeof v.pagamentos === 'string') {
+              try {
+                const parsed = JSON.parse(v.pagamentos);
+                if (Array.isArray(parsed)) listaPags = parsed;
+              } catch (e) {}
             }
           }
+          if (listaPags.length > 0) {
+            listaPags.forEach((p: any) => {
+              if (isPagamentoBoletoFinanciadora(p)) {
+                valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
+              }
+            });
+          }
+
+          // D) Se não encontrou parcelas específicas, mas a venda inteira foi marcada como Boleto/Financiadora
+          if (valorBoletoVenda === 0 && isPagamentoBoletoFinanciadora(v)) {
+            valorBoletoVenda += Number(v.valor_total || v.valor || 0);
+          }
+
+          totalBoletos += valorBoletoVenda;
         });
 
         setRealizadoBoletos(Math.round(totalBoletos * 100) / 100);
@@ -1060,33 +1082,48 @@ export default function ModalDesempenhoVendedor({
       const status = String(v.status || '').toUpperCase().trim();
       if (status === 'CANCELADA' || status === 'CANCELADO') return;
 
-      // 1. Unificação robusta de todos os pagamentos da venda
-      const listaPags: any[] = [];
-      if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-        listaPags.push(...v.vendas_pagamentos);
-      }
-      if (v.pagamentos) {
-        try {
-          const parsed = typeof v.pagamentos === 'string' ? JSON.parse(v.pagamentos) : v.pagamentos;
-          if (Array.isArray(parsed)) listaPags.push(...parsed);
-        } catch {
-          // json parse silencioso
-        }
+      let valorBoletoVenda = 0;
+
+      // A) Verifica valor explícito em v.valor_boleto
+      if (v.valor_boleto && !isNaN(Number(v.valor_boleto)) && Number(v.valor_boleto) > 0) {
+        valorBoletoVenda += Number(v.valor_boleto);
       }
 
-      if (listaPags.length > 0) {
-        // Se listaPags tiver itens, filtre por isPagamentoBoletoFinanciadora(p) e some (p.valor_pago || p.valor || p.valor_total || 0)
-        const somaBoletoPags = listaPags
-          .filter((p: any) => isPagamentoBoletoFinanciadora(p))
-          .reduce((acc: number, p: any) => acc + Number(p.valor_pago || p.valor || p.valor_total || 0), 0);
-        totalBoletosCalculado += somaBoletoPags;
-      } else {
-        // Se listaPags estiver vazia, verifique diretamente na venda:
-        // se isPagamentoBoletoFinanciadora(v) ou Number(v.valor_boleto) > 0, some Number(v.valor_boleto || v.valor_total || v.valor || 0)
-        if (isPagamentoBoletoFinanciadora(v) || Number(v.valor_boleto) > 0) {
-          totalBoletosCalculado += Number(v.valor_boleto || v.valor_total || v.valor || 0);
+      // B) Extrai pagamentos de vendas_pagamentos
+      if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
+        v.vendas_pagamentos.forEach((p: any) => {
+          if (isPagamentoBoletoFinanciadora(p)) {
+            valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
+          }
+        });
+      }
+
+      // C) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string)
+      let listaPags: any[] = [];
+      if (v.pagamentos) {
+        if (Array.isArray(v.pagamentos)) {
+          listaPags = v.pagamentos;
+        } else if (typeof v.pagamentos === 'string') {
+          try {
+            const parsed = JSON.parse(v.pagamentos);
+            if (Array.isArray(parsed)) listaPags = parsed;
+          } catch (e) {}
         }
       }
+      if (listaPags.length > 0) {
+        listaPags.forEach((p: any) => {
+          if (isPagamentoBoletoFinanciadora(p)) {
+            valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
+          }
+        });
+      }
+
+      // D) Se não encontrou parcelas específicas, mas a venda inteira foi marcada como Boleto/Financiadora
+      if (valorBoletoVenda === 0 && isPagamentoBoletoFinanciadora(v)) {
+        valorBoletoVenda += Number(v.valor_total || v.valor || 0);
+      }
+
+      totalBoletosCalculado += valorBoletoVenda;
     });
 
     const totalBoletos = Math.round(
