@@ -14433,14 +14433,113 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
     }
 
+    // Auto-inclusão de retoma/troca preenchida pelo operador antes de validar
+    let effectiveUsadoList = [...pdvUsadoList];
+
+    // 1. Se houver dados preenchidos no formulário de Aparelho Usado/Troca (pdvTroca*)
+    const pendenteTrocaModelo = (pdvTrocaModelo || '').trim();
+    const pendenteTrocaImei = (pdvTrocaImei || '').replace(/\D/g, '').trim();
+    const pendenteTrocaValor = typeof pdvTrocaValor === 'number'
+      ? pdvTrocaValor
+      : parseFloat(String(pdvTrocaValor || '').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+    const pendenteTrocaCor = (pdvTrocaCor || 'Padrão').trim();
+    const pendenteTrocaCapacidade = (pdvTrocaCapacidade || '').trim();
+
+    if (pendenteTrocaModelo && pendenteTrocaValor > 0) {
+      const imeiOuGen = pendenteTrocaImei || `USADO-${Date.now()}`;
+      if (!effectiveUsadoList.some(u => u.imei === imeiOuGen)) {
+        const itemAutoAdicionado = {
+          produto: {
+            nome: [pendenteTrocaModelo, pendenteTrocaCapacidade].filter(Boolean).join(' ') || pendenteTrocaModelo,
+            tipo: 'SEMINOVO'
+          },
+          imei: imeiOuGen,
+          cor: pendenteTrocaCor,
+          bateria: 100,
+          valor: pendenteTrocaValor,
+          obs: `Entrada automática via PDV: ${[pendenteTrocaModelo, pendenteTrocaCapacidade, pendenteTrocaCor].filter(Boolean).join(' ')}`
+        };
+        effectiveUsadoList.push(itemAutoAdicionado);
+        setPdvUsadoList(effectiveUsadoList);
+
+        // Se o método de pagamento troca estiver sendo adicionado e não estiver na lista de pagamentos ainda
+        if (!pdvListaPagamentos.some(p => p.metodo === 'troca')) {
+          const descAparelho = [pendenteTrocaModelo, pendenteTrocaCapacidade, pendenteTrocaCor].filter(Boolean).join(' ');
+          const novoPagTroca = {
+            id: Date.now().toString() + Math.random().toString(36).substring(2, 5),
+            metodo: 'troca',
+            label: `📱 Entrada de Aparelho (${descAparelho || 'Seminovo'})`,
+            valor: pendenteTrocaValor,
+            parcelas: 1,
+            financeira: null,
+            metodo_detalhe: pendenteTrocaModelo,
+            troca_dados: {
+              modelo: pendenteTrocaModelo,
+              capacidade: pendenteTrocaCapacidade,
+              cor: pendenteTrocaCor,
+              imei: pendenteTrocaImei,
+              valor: pendenteTrocaValor,
+              dar_entrada_estoque: pdvTrocaEntradaEstoque
+            }
+          };
+          setPdvListaPagamentos(prev => [...prev, novoPagTroca]);
+        }
+      }
+    }
+
+    // 2. Se houver dados preenchidos no formulário direto pdvUsado*
+    const pendenteUsadoImei = (pdvUsadoImei || '').trim();
+    const pendenteUsadoValor = parseFloat(pdvUsadoValor) || 0;
+    const pendenteUsadoNome = (pdvUsadoNomeProduto || pdvUsadoProdutoSelecionado?.nome || '').trim();
+
+    if ((pendenteUsadoNome || pendenteUsadoProdutoSelecionado) && pendenteUsadoValor > 0) {
+      const imeiOuGen = pendenteUsadoImei || `USADO-${Date.now()}`;
+      if (!effectiveUsadoList.some(u => u.imei === imeiOuGen)) {
+        const itemAutoAdicionado = {
+          produto: pdvUsadoProdutoSelecionado || { nome: pendenteUsadoNome, tipo: 'SEMINOVO' },
+          imei: imeiOuGen,
+          cor: pdvUsadoCor.trim() || 'Padrão',
+          bateria: parseInt(pdvUsadoBateria, 10) || 100,
+          valor: pendenteUsadoValor,
+          obs: pdvUsadoObs || ''
+        };
+        effectiveUsadoList.push(itemAutoAdicionado);
+        setPdvUsadoList(effectiveUsadoList);
+      }
+    }
+
+    // 3. Se houver pagamento de troca já na lista pdvListaPagamentos, sincronizar com effectiveUsadoList
+    if (pdvListaPagamentos && pdvListaPagamentos.length > 0) {
+      pdvListaPagamentos.forEach(pag => {
+        if (pag.metodo === 'troca' && pag.troca_dados) {
+          const tImei = (pag.troca_dados.imei || '').replace(/\D/g, '') || `USADO-${pag.id}`;
+          if (!effectiveUsadoList.some(u => u.imei === tImei)) {
+            const tNome = [pag.troca_dados.modelo, pag.troca_dados.capacidade].filter(Boolean).join(' ') || pag.troca_dados.modelo || 'Aparelho Entrada';
+            const tValor = parseFloat(pag.troca_dados.valor) || parseFloat(pag.valor) || 0;
+            effectiveUsadoList.push({
+              produto: { nome: tNome, tipo: 'SEMINOVO' },
+              imei: tImei,
+              cor: pag.troca_dados.cor || 'Padrão',
+              bateria: 100,
+              valor: tValor,
+              obs: 'Entrada de Aparelho via Pagamento Multiplo'
+            });
+          }
+        }
+      });
+      if (effectiveUsadoList.length > pdvUsadoList.length) {
+        setPdvUsadoList(effectiveUsadoList);
+      }
+    }
+
     const isTrocaAtiva = pdvMetodoPagamento === 'troca';
-    const temPagamentoTroca = isTrocaAtiva || (pdvListaPagamentos && pdvListaPagamentos.some(p => p.metodo === 'troca')) || pdvUsadoList.length > 0;
+    const temPagamentoTroca = isTrocaAtiva || (pdvListaPagamentos && pdvListaPagamentos.some(p => p.metodo === 'troca')) || effectiveUsadoList.length > 0;
     if (temPagamentoTroca && !temIphoneNoCarrinho) {
       alert('A forma de pagamento "Entrada de Aparelho" é permitida exclusivamente na compra de um iPhone.');
       return;
     }
 
-    if (isTrocaAtiva && pdvUsadoList.length === 0) {
+    if (isTrocaAtiva && effectiveUsadoList.length === 0) {
       alert('Método de pagamento por Troca selecionado, mas nenhum aparelho usado foi adicionado.');
       return;
     }
@@ -14584,7 +14683,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     // Calcular valores do carrinho
     const subtotalCart = pdvCart.reduce((sum, item) => sum + (parseFloat(item.valorUnitario) || 0) * item.quantidade, 0);
-    const valorUsadoTotal = isTrocaAtiva ? pdvUsadoList.reduce((acc, item) => acc + item.valor, 0) : 0;
+    const temAlgumaTroca = isTrocaAtiva || (pdvListaPagamentos && pdvListaPagamentos.some(p => p.metodo === 'troca')) || effectiveUsadoList.length > 0;
+    const valorUsadoTotal = temAlgumaTroca ? effectiveUsadoList.reduce((acc, item) => acc + (Number(item.valor) || 0), 0) : 0;
 
     // Identificar método de pagamento principal e dados de parcelamento
     const pagamentosAdicionados = pdvListaPagamentos || [];
@@ -15077,7 +15177,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const teveParticipacaoTraineeFinal = Boolean(hasTraineeSelecionado || comissaoInfo.teveParticipacaoTrainee);
 
         // Só vincula trocas e desconto de troca no primeiro item
-        const itemTrocaJson = idx === 0 && isTrocaAtiva ? pdvUsadoList : [];
+        const itemTrocaJson = idx === 0 && temAlgumaTroca ? effectiveUsadoList : [];
         const itemDescontoTroca = idx === 0 ? valorUsadoTotal : 0;
 
         // Assegurar que o produto tem um UUID real no banco de dados para evitar erro de sintaxe UUID no RPC
@@ -15563,7 +15663,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           parcelas: parcelasEfetivo,
           pagamentos: pdvListaPagamentos
         },
-        trocas: pdvUsadoList
+        trocas: effectiveUsadoList
       };
 
       // Rastrear Auditoria de Desconto para Gerência e Administração
@@ -20167,8 +20267,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       if (m.value === 'cartao_credito' || m.value === 'cartao') {
                                         setPdvCartaoParcelas(pdvNovoParcelas || 1);
                                       }
-                                      if (m.value === 'troca' && (!pdvTrocaValor || parseFloat(pdvTrocaValor) === 0) && faltaPagar > 0) {
-                                        setPdvTrocaValor(faltaPagar.toFixed(2));
+                                      if (m.value === 'troca') {
+                                        const totalUsadosCadastrados = pdvUsadoList.reduce((acc, u) => acc + (Number(u.valor) || 0), 0);
+                                        if (totalUsadosCadastrados > 0) {
+                                          setPdvTrocaValor(totalUsadosCadastrados.toFixed(2));
+                                        } else if ((!pdvTrocaValor || parseFloat(pdvTrocaValor) === 0) && faltaPagar > 0) {
+                                          setPdvTrocaValor(faltaPagar.toFixed(2));
+                                        }
                                       }
                                     }}
                                     className={`py-2 px-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border ${pdvNovoMetodo === m.value
@@ -20370,8 +20475,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                                 {/* Valor Pago / Avaliado (R$) (Obrigatório) */}
                                 <div>
-                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5 flex justify-between">
+                                  <label className="block text-[9px] font-bold text-gray-300 uppercase tracking-wide mb-0.5 flex justify-between items-center">
                                     <span>VALOR AVALIADO (R$) <span className="text-destructive">*</span></span>
+                                    {pdvUsadoList.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const tot = pdvUsadoList.reduce((acc, u) => acc + (Number(u.valor) || 0), 0);
+                                          if (tot > 0) setPdvTrocaValor(tot.toFixed(2));
+                                        }}
+                                        className="text-[9px] text-purple-300 hover:text-purple-200 underline font-semibold cursor-pointer"
+                                      >
+                                        Usar Total Retoma: R$ {pdvUsadoList.reduce((acc, u) => acc + (Number(u.valor) || 0), 0).toFixed(2)}
+                                      </button>
+                                    )}
                                     <span className="text-[9px] text-emerald-400 font-semibold">Abaterá o total da venda</span>
                                   </label>
                                   <div className="relative">
@@ -20385,7 +20502,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                         const val = e.target.value.replace(/[^\d.,]/g, '');
                                         setPdvTrocaValor(val);
                                       }}
-                                      placeholder={faltaPagar.toFixed(2)}
+                                      placeholder={pdvUsadoList.length > 0 ? pdvUsadoList.reduce((acc, u) => acc + (Number(u.valor) || 0), 0).toFixed(2) : faltaPagar.toFixed(2)}
                                       className="w-full bg-black border border-purple-800/50 focus:border-emerald-500 rounded-lg pl-9 pr-3 py-1.5 text-xs text-white font-mono font-bold outline-none"
                                     />
                                   </div>
