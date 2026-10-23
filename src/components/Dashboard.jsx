@@ -1449,7 +1449,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [cargasPendentes, setCargasPendentes] = useState([]);
   const [loadingTransferencias, setLoadingTransferencias] = useState(false);
   const [transfOrigemId, setTransfOrigemId] = useState(() => {
-    return profile?.filial_id || profile?.filiais?.id || activeFilialId || '';
+    return activeFilialId || profile?.filial_id || profile?.filiais?.id || '';
   });
   const [transfDestinoId, setTransfDestinoId] = useState('');
   const [transfItens, setTransfItens] = useState([]);
@@ -1463,13 +1463,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [transfSubTab, setTransfSubTab] = useState('enviar'); // 'enviar' | 'receber'
   const [transfObs, setTransfObs] = useState('');
 
-  // Sincronizar Filial de Origem obrigatoriamente com o Perfil / Filial Ativa do Colaborador Logado
+  // Sincronizar Filial de Origem com a filial ativa da barra lateral ou perfil caso ainda não tenha sido definida
   useEffect(() => {
-    const filialDoUsuario = profile?.filial_id || profile?.filiais?.id || activeFilialId;
-    if (filialDoUsuario && (!transfOrigemId || transfItens.length === 0)) {
-      setTransfOrigemId(filialDoUsuario);
+    const filialAtualOperacao = activeFilialId || profile?.filial_id || profile?.filiais?.id;
+    if (filialAtualOperacao && !transfOrigemId && transfItens.length === 0) {
+      setTransfOrigemId(filialAtualOperacao);
     }
-  }, [profile?.filial_id, profile?.filiais?.id, activeFilialId, transfItens.length]);
+  }, [activeFilialId, profile?.filial_id, profile?.filiais?.id, transfItens.length, transfOrigemId]);
 
   // Garantir que a Filial Destino nunca seja igual à Filial Origem
   useEffect(() => {
@@ -18231,14 +18231,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center justify-between">
-                      <span>Filial Origem (Fixa) <span className="text-red-500">*</span></span>
-                      <span className="text-[10px] text-[#6A0DAD] lowercase font-normal">(filial de operação atual)</span>
+                      {isDonoOuAdmin ? (
+                        <span>FILIAL ORIGEM <span className="text-red-500">*</span></span>
+                      ) : (
+                        <span>Filial Origem (Fixa) <span className="text-red-500">*</span></span>
+                      )}
+                      {!isDonoOuAdmin && (
+                        <span className="text-[10px] text-[#6A0DAD] lowercase font-normal">(filial de operação atual)</span>
+                      )}
                     </label>
                     <select
                       value={finalOrigemId}
-                      onChange={(e) => setTransfOrigemId(e.target.value)}
-                      className="w-full bg-[#111111] border border-[#222222] text-gray-300 rounded px-3 py-2 text-sm outline-none font-semibold cursor-not-allowed opacity-80"
-                      disabled={true}
+                      onChange={(e) => {
+                        const newOrigem = e.target.value;
+                        setTransfOrigemId(newOrigem);
+                        if (transfDestinoId && transfDestinoId === newOrigem) {
+                          setTransfDestinoId('');
+                        }
+                      }}
+                      className={`w-full rounded px-3 py-2 text-sm outline-none font-semibold transition-all ${
+                        isDonoOuAdmin
+                          ? 'bg-black border border-[#222222] focus:border-[#6A0DAD] text-white cursor-pointer'
+                          : 'bg-[#111111] border border-[#222222] text-gray-300 cursor-not-allowed opacity-80'
+                      }`}
+                      disabled={!isDonoOuAdmin || transfItens.length > 0}
                     >
                       <option value="">Selecione a Origem...</option>
                       {filiais.map(f => (
@@ -18262,8 +18278,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     >
                       <option value="">Selecione a Filial Destino...</option>
                       {filiais.map(f => (
-                        <option key={f.id} value={f.id} disabled={f.id === finalOrigemId}>
-                          {f.nome} {f.id === finalOrigemId ? '(Mesma Origem)' : ''}
+                        <option key={f.id} value={f.id} disabled={String(f.id) === String(finalOrigemId)}>
+                          {f.nome} {String(f.id) === String(finalOrigemId) ? '(Mesma Origem)' : ''}
                         </option>
                       ))}
                     </select>
