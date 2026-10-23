@@ -23,74 +23,39 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatarMoeda } from '../utils/currencyUtils';
 
-interface ConsultaEstoqueProps {
-  filiais: Array<{ id: string | number; nome: string }>;
-  activeFilialId?: string | number | null;
-  profile?: any;
-  onNavigateToTransferencias?: () => void;
-  onOpenDetalhesProduto?: (produto: any) => void;
-}
-
-interface ProdutoItem {
-  id: string;
-  nome: string;
-  sku?: string | null;
-  codigo_barras?: string | null;
-  categoria?: string | null;
-  tipo?: string | null;
-  preco?: number | string | null;
-  preco_venda?: number | string | null;
-  preco_custo?: number | string | null;
-  quantidade?: number | null;
-  filial_id?: string | number | null;
-  cor?: string | null;
-  imeis?: any[];
-}
-
-interface ImeiItem {
-  id: string;
-  imei: string;
-  produto_id?: string;
-  filial_id?: string | number;
-  status?: string;
-  vendido?: boolean;
-  cor?: string;
-  preco_venda?: number;
-}
-
 export default function ConsultaEstoque({
   filiais = [],
   activeFilialId = null,
   profile,
   onNavigateToTransferencias,
   onOpenDetalhesProduto
-}: ConsultaEstoqueProps) {
+}) {
   // 1. Estados dos Filtros
   const [busca, setBusca] = useState('');
   const [buscaDebounced, setBuscaDebounced] = useState('');
   
   // Inicia com a filial ativa do contexto do sistema se existir, senão 'TODAS'
-  const [filialSelecionada, setFilialSelecionada] = useState<string>(() => {
+  const [filialSelecionada, setFilialSelecionada] = useState(() => {
     if (activeFilialId && activeFilialId !== 'null' && activeFilialId !== 'undefined') {
       return String(activeFilialId);
     }
     return 'TODAS';
   });
 
-  const [categoriaSelecionada, setCategoriaSelecionada] = useState<string>('TODAS');
-  const [statusFiltro, setStatusFiltro] = useState<'TODOS' | 'CRITICO' | 'ZERADO' | 'DISPONIVEL'>('TODOS');
+  const [categoriaSelecionada, setCategoriaSelecionada] = useState('TODAS');
+  const [statusFiltro, setStatusFiltro] = useState('TODOS'); // 'TODOS' | 'CRITICO' | 'ZERADO' | 'DISPONIVEL'
 
   // 2. Estados dos Dados
   const [loading, setLoading] = useState(false);
-  const [produtos, setProdutos] = useState<ProdutoItem[]>([]);
-  const [produtosCatalogo, setProdutosCatalogo] = useState<ProdutoItem[]>([]);
-  const [imeisDisponiveis, setImeisDisponiveis] = useState<ImeiItem[]>([]);
-  const [categoriasLista, setCategoriasLista] = useState<string[]>([]);
+  const [produtos, setProdutos] = useState([]);
+  const [produtosCatalogo, setProdutosCatalogo] = useState([]);
+  const [imeisDisponiveis, setImeisDisponiveis] = useState([]);
+  const [categoriasLista, setCategoriasLista] = useState([]);
 
   // 3. Estado do Modal de IMEIs Disponíveis
   const [modalImeisAberto, setModalImeisAberto] = useState(false);
-  const [produtoImeisModal, setProdutoImeisModal] = useState<any>(null);
-  const [imeisDoProdutoModal, setImeisDoProdutoModal] = useState<ImeiItem[]>([]);
+  const [produtoImeisModal, setProdutoImeisModal] = useState(null);
+  const [imeisDoProdutoModal, setImeisDoProdutoModal] = useState([]);
 
   // Debounce na busca de texto
   useEffect(() => {
@@ -100,7 +65,7 @@ export default function ConsultaEstoque({
     return () => clearTimeout(timer);
   }, [busca]);
 
-  // Sincronizar filial selecionada caso activeFilialId mude inicialmente e ainda não tenhamos selecionado manualmente
+  // Sincronizar filial selecionada caso activeFilialId mude inicialmente
   useEffect(() => {
     if (activeFilialId && filialSelecionada === 'TODAS' && activeFilialId !== 'null') {
       setFilialSelecionada(String(activeFilialId));
@@ -156,7 +121,7 @@ export default function ConsultaEstoque({
 
       const prods = dataProdutos || [];
       const catsMestre = dataCatalogo || [];
-      const ims = (dataImeis || []).filter((im: any) => {
+      const ims = (dataImeis || []).filter((im) => {
         const st = String(im.status || '').toUpperCase();
         return !im.vendido && !st.includes('VEND') && st !== 'DEFEITO' && st !== 'RESERVADO_OUTRO';
       });
@@ -166,14 +131,14 @@ export default function ConsultaEstoque({
       setImeisDisponiveis(ims);
 
       // Consolidar lista de categorias
-      const catsSet = new Set<string>();
-      (dataCategorias || []).forEach((c: any) => {
+      const catsSet = new Set();
+      (dataCategorias || []).forEach((c) => {
         if (c.nome && c.nome.trim()) catsSet.add(c.nome.trim().toUpperCase());
       });
-      prods.forEach((p: any) => {
+      prods.forEach((p) => {
         if (p.categoria && p.categoria.trim()) catsSet.add(p.categoria.trim().toUpperCase());
       });
-      catsMestre.forEach((c: any) => {
+      catsMestre.forEach((c) => {
         if (c.categoria && c.categoria.trim()) catsSet.add(c.categoria.trim().toUpperCase());
       });
       setCategoriasLista(Array.from(catsSet).sort());
@@ -189,21 +154,8 @@ export default function ConsultaEstoque({
   }, [carregarDadosEstoque]);
 
   // 5. Agrupamento e Consolidação dos Produtos
-  // Agrupa os produtos físicos e itens do catálogo por "Chave Única do Produto" (nome normalizado + categoria ou SKU)
   const produtosConsolidados = useMemo(() => {
-    const mapa = new Map<string, {
-      id: string;
-      nome: string;
-      sku: string;
-      codigo_barras: string;
-      categoria: string;
-      tipo: string;
-      preco: number;
-      isCelular: boolean;
-      // Itens físicos vinculados
-      itensFisicos: ProdutoItem[];
-      catalogoItem?: ProdutoItem;
-    }>();
+    const mapa = new Map();
 
     // 1º Passo: Alimentar com o Catálogo Mestre
     (produtosCatalogo || []).forEach(cat => {
@@ -252,7 +204,7 @@ export default function ConsultaEstoque({
           itensFisicos: [prod]
         });
       } else {
-        const itemExistente = mapa.get(key)!;
+        const itemExistente = mapa.get(key);
         itemExistente.itensFisicos.push(prod);
         if (!itemExistente.sku && prod.sku) itemExistente.sku = prod.sku;
         if (!itemExistente.codigo_barras && prod.codigo_barras) itemExistente.codigo_barras = prod.codigo_barras;
@@ -268,26 +220,21 @@ export default function ConsultaEstoque({
   // 6. Cálculo Dinâmico de Quantidades (Na Filial Selecionada & Na Rede)
   const itensCalculados = useMemo(() => {
     return produtosConsolidados.map(item => {
-      // Obter IDs relacionados a este produto
-      const produtoIds = new Set<string>();
+      const produtoIds = new Set();
       if (item.id) produtoIds.add(String(item.id));
       item.itensFisicos.forEach(p => {
         if (p.id) produtoIds.add(String(p.id));
       });
 
-      // Cálculo para Celular / Aparelho com IMEI
       let qtdFilial = 0;
       let qtdRede = 0;
 
       if (item.isCelular) {
-        // Encontra os IMEIs correspondentes
         const imeisDoItem = (imeisDisponiveis || []).filter(im => {
           if (im.produto_id && produtoIds.has(String(im.produto_id))) return true;
-          // Fallback por nome caso produto_id não bata diretamente
           return false;
         });
 
-        // Se encontrou IMEIs vinculados
         if (imeisDoItem.length > 0) {
           qtdRede = imeisDoItem.length;
           if (filialSelecionada === 'TODAS') {
@@ -296,7 +243,6 @@ export default function ConsultaEstoque({
             qtdFilial = imeisDoItem.filter(im => String(im.filial_id || '') === String(filialSelecionada)).length;
           }
         } else {
-          // Se não há registros em imeis, usa a soma dos campos quantidade na tabela produtos
           item.itensFisicos.forEach(p => {
             const q = Number(p.quantidade || 0);
             qtdRede += q;
@@ -309,7 +255,6 @@ export default function ConsultaEstoque({
           }
         }
       } else {
-        // Acessório / Geral: Soma as quantidades físicas
         item.itensFisicos.forEach(p => {
           const q = Number(p.quantidade || 0);
           qtdRede += q;
@@ -326,7 +271,6 @@ export default function ConsultaEstoque({
         ...item,
         qtdFilial,
         qtdRede,
-        // Status baseado na filial selecionada (ou na rede se 'TODAS')
         statusEstoque: qtdFilial === 0 ? 'ZERADO' : qtdFilial < 5 ? 'CRITICO' : 'DISPONIVEL'
       };
     });
@@ -378,10 +322,10 @@ export default function ConsultaEstoque({
   }, [itensCalculados]);
 
   // Abrir Modal de IMEIs para o Produto
-  const handleAbrirImeis = (item: any) => {
-    const produtoIds = new Set<string>();
+  const handleAbrirImeis = (item) => {
+    const produtoIds = new Set();
     if (item.id) produtoIds.add(String(item.id));
-    item.itensFisicos?.forEach((p: any) => {
+    item.itensFisicos?.forEach((p) => {
       if (p.id) produtoIds.add(String(p.id));
     });
 
@@ -389,7 +333,6 @@ export default function ConsultaEstoque({
       const matchProd = im.produto_id && produtoIds.has(String(im.produto_id));
       if (!matchProd) return false;
 
-      // Filtra pela filial selecionada se não for 'TODAS'
       if (filialSelecionada !== 'TODAS') {
         return String(im.filial_id || '') === String(filialSelecionada);
       }
