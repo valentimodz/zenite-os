@@ -671,14 +671,13 @@ export default function ConsultaEstoque({
             return (
               <div
                 key={item.cardKey}
-                className="bg-[#0e0e11] border border-[#202028] hover:border-[#8B5CF6]/50 rounded-2xl p-5 flex flex-col justify-between gap-4 transition-all duration-200 group hover:shadow-xl hover:shadow-[#8B5CF6]/5 relative overflow-hidden"
+                className="bg-[#0e0e11] border border-[#202028] hover:border-[#8B5CF6]/50 rounded-xl p-4 flex flex-col justify-between gap-3 transition-all duration-200 group hover:shadow-lg hover:shadow-[#8B5CF6]/5 relative"
               >
-                {/* Linha Superior: Nome da Filial em Destaque + Categoria */}
+                {/* 1. Cabeçalho: [NOME DA FILIAL] e Preço (R$) */}
                 <div>
-                  {/* Destaque no Topo do Card: NOME DA FILIAL */}
-                  <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-[#1b1b22]">
+                  <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1b1b22]">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <Store size={14} className="text-[#8B5CF6] shrink-0" />
+                      <Store size={13} className="text-[#8B5CF6] shrink-0" />
                       <span className="text-xs font-black uppercase tracking-wider text-purple-200 truncate">
                         [{item.filialNomeCard}]
                       </span>
@@ -688,159 +687,113 @@ export default function ConsultaEstoque({
                     </span>
                   </div>
 
-                  {/* Badges de Categoria e SKU */}
+                  {/* 2. Identificação: Categoria, Nome do Produto, SKU/EAN */}
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] bg-[#1a1228] text-purple-300 border border-[#3b255e] px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider flex items-center gap-1">
-                      {item.isCelular ? <Smartphone size={11} className="text-[#8B5CF6]" /> : <Tag size={11} className="text-[#8B5CF6]" />}
+                    <span className="text-[10px] bg-[#1a1228] text-purple-300 border border-[#3b255e] px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1">
+                      {item.isCelular ? <Smartphone size={10} className="text-[#8B5CF6]" /> : <Tag size={10} className="text-[#8B5CF6]" />}
                       {item.categoria || 'Geral'}
                     </span>
-                    <span className="text-[11px] text-gray-500 font-mono">
-                      SKU: <strong className="text-gray-400">{item.sku || 'N/D'}</strong>
+                    <span className="text-[10px] text-gray-400 font-mono">
+                      SKU: <strong className="text-gray-300">{item.sku || 'N/D'}</strong>
                     </span>
                   </div>
 
-                  {/* Nome do Produto em Destaque */}
-                  <h3 className="text-sm font-extrabold text-white mt-2 group-hover:text-purple-300 transition-colors line-clamp-2">
+                  <h3 className="text-xs md:text-sm font-extrabold text-white mt-1.5 group-hover:text-purple-300 transition-colors line-clamp-2 leading-snug">
                     {item.nome}
                   </h3>
                   {item.codigo_barras && (
-                    <span className="text-[10px] text-gray-500 font-mono mt-0.5 block">
+                    <span className="text-[10px] text-gray-500 font-mono mt-0.5 block truncate">
                       EAN: {item.codigo_barras}
                     </span>
                   )}
                 </div>
 
-                {/* Caixa de Destaque de Estoque */}
-                <div className="bg-black/60 border border-[#22222a] rounded-xl p-3.5 space-y-3">
-                  {/* Saldo nesta Filial */}
-                  <div className="flex items-center justify-between">
+                {/* 3. Bloco de Estoque & Rodapé Sutil */}
+                <div className="bg-black/50 border border-[#1f1f26] rounded-lg p-2.5 space-y-2">
+                  {/* Bloco de Estoque: "ESTOQUE NESTA FILIAL: X un" com o badge de status */}
+                  <div className="flex items-center justify-between gap-2">
                     <div>
                       <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                        Estoque nesta Filial
+                        ESTOQUE NESTA FILIAL
                       </span>
-                      <span className="text-xs text-[#A78BFA] font-bold truncate max-w-[150px] block">
-                        {item.filialNomeCard}
+                      <span className="text-lg font-extrabold text-white font-mono leading-none mt-0.5 block">
+                        {item.qtdFilial} <span className="text-[11px] text-gray-400 font-sans font-normal">un</span>
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl font-extrabold text-white font-mono">
-                        {item.qtdFilial} <span className="text-[11px] text-gray-400 font-sans">un</span>
-                      </span>
-
-                      {/* Badge Dinâmico de Status */}
+                    <div className="shrink-0">
                       {isEsgotado && (
-                        <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/50 px-2 py-0.5 rounded-md font-extrabold tracking-wide">
+                        <span className="text-[10px] bg-rose-500/15 text-rose-300 border border-rose-500/40 px-2 py-0.5 rounded font-extrabold tracking-wide">
                           ESGOTADO
                         </span>
                       )}
                       {isCritico && (
-                        <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/50 px-2 py-0.5 rounded-md font-extrabold tracking-wide">
+                        <span className="text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-extrabold tracking-wide">
                           CRÍTICO
                         </span>
                       )}
                       {isDisponivel && (
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 px-2 py-0.5 rounded-md font-extrabold tracking-wide">
+                        <span className="text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded font-extrabold tracking-wide">
                           DISPONÍVEL
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Seção "Detalhamento por Filial" (Saldos em toda a rede) */}
-                  <div className="border-t border-[#1a1a22] pt-2.5 space-y-1.5">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
-                      Detalhamento por Filial:
-                    </span>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {item.detalhamentoPorFilial.map(df => {
-                        const isCurrentFilialCard = String(df.filial_id) === String(item.filialIdCard);
-                        return (
-                          <div
-                            key={df.filial_id}
-                            className={`flex items-center justify-between px-2 py-1 rounded text-[11px] border ${
-                              isCurrentFilialCard
-                                ? 'bg-purple-950/40 border-purple-800/50 text-white font-bold'
-                                : 'bg-black/40 border-[#1f1f26] text-gray-400'
-                            }`}
-                          >
-                            <span className="truncate max-w-[95px]" title={df.filial_nome}>
-                              {df.filial_nome}
-                            </span>
-                            <span
-                              className={`font-mono text-xs font-bold ${
-                                df.quantidade === 0
-                                  ? 'text-rose-400/80'
-                                  : df.quantidade < 5
-                                  ? 'text-amber-400'
-                                  : 'text-emerald-400'
-                              }`}
-                            >
-                              {df.quantidade} un
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Separador */}
-                  <div className="border-t border-[#1a1a22]" />
-
-                  {/* Disponível na Rede */}
-                  <div className="flex items-center justify-between text-xs">
+                  {/* Rodapé sutil: "Disponível na Rede: X unidades" */}
+                  <div className="border-t border-[#181820] pt-1.5 flex items-center justify-between text-[11px]">
                     <span className="text-gray-400 font-medium flex items-center gap-1">
-                      <Building2 size={13} className="text-[#8B5CF6]" />
+                      <Building2 size={12} className="text-[#8B5CF6]" />
                       Disponível na Rede:
                     </span>
-                    <span className="text-xs font-mono font-bold text-purple-300">
+                    <span className="font-mono font-bold text-purple-300">
                       {item.qtdRede} {item.qtdRede === 1 ? 'unidade' : 'unidades'}
                     </span>
                   </div>
                 </div>
 
-                {/* Rodapé do Card */}
-                <div className="pt-1">
-                  {item.isCelular ? (
+                {/* 4. Botões de ação no rodapé: [Histórico / Ajuste] e [Transferir] */}
+                <div className="space-y-1.5 pt-0.5">
+                  {item.isCelular && (
                     <button
                       type="button"
                       onClick={() => handleAbrirImeis(item)}
-                      className="w-full bg-[#1b122c] hover:bg-[#281845] border border-[#8B5CF6]/50 hover:border-[#8B5CF6] text-purple-300 hover:text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-sm active:scale-98 cursor-pointer"
+                      className="w-full bg-[#1b122c] hover:bg-[#281845] border border-[#8B5CF6]/40 hover:border-[#8B5CF6] text-purple-300 hover:text-white font-bold py-1.5 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
-                      <QrCode size={14} className="text-[#8B5CF6]" />
-                      <span>Ver IMEIs em {item.filialNomeCard}</span>
+                      <QrCode size={13} className="text-[#8B5CF6]" />
+                      <span>Ver IMEIs nesta Filial</span>
                     </button>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (onOpenDetalhesProduto) {
-                            onOpenDetalhesProduto(item.itensFisicos?.[0] || item);
-                          }
-                        }}
-                        className="w-full bg-black/60 hover:bg-[#1a1226] border border-[#2b2b36] hover:border-[#8B5CF6]/50 text-gray-300 hover:text-white font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                        title="Ver histórico e ajustes"
-                      >
-                        <History size={13} className="text-[#8B5CF6]" />
-                        <span>Histórico / Ajuste</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (onNavigateToTransferencias) {
-                            onNavigateToTransferencias();
-                          }
-                        }}
-                        className="w-full bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 hover:text-white font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                        title="Solicitar transferência entre filiais"
-                      >
-                        <ArrowRightLeft size={13} className="text-[#8B5CF6]" />
-                        <span>Transferir</span>
-                      </button>
-                    </div>
                   )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onOpenDetalhesProduto) {
+                          onOpenDetalhesProduto(item.itensFisicos?.[0] || item);
+                        }
+                      }}
+                      className="w-full bg-black/60 hover:bg-[#1a1226] border border-[#2b2b36] hover:border-[#8B5CF6]/50 text-gray-300 hover:text-white font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate"
+                      title="Ver histórico e ajustes"
+                    >
+                      <History size={12} className="text-[#8B5CF6] shrink-0" />
+                      <span className="truncate">Histórico / Ajuste</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onNavigateToTransferencias) {
+                          onNavigateToTransferencias();
+                        }
+                      }}
+                      className="w-full bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 hover:text-white font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate"
+                      title="Solicitar transferência entre filiais"
+                    >
+                      <ArrowRightLeft size={12} className="text-[#8B5CF6] shrink-0" />
+                      <span className="truncate">Transferir</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             );
