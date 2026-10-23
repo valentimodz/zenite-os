@@ -47,6 +47,7 @@ interface ItemProdutoDetalhado {
   imeis: string[];
   updated_at?: string;
   created_at?: string;
+  isSynthetic?: boolean;
 }
 
 interface EstoquePorFilialItem {
@@ -191,8 +192,16 @@ export default function ModalDetalheEstoqueProduto({
 
       const listaBruta = prodsDb && prodsDb.length > 0 ? prodsDb : [produto];
 
-      // Formatar cada item individualmente
-      const itensFormatados: ItemProdutoDetalhado[] = listaBruta.map((p: any) => {
+      // Formatar cada item individualmente e filtrar itens com filial real
+      const itensFormatados: ItemProdutoDetalhado[] = [];
+      listaBruta.forEach((p: any) => {
+        if (!p) return;
+        const rawFId = p.filial_id;
+        // Não incluir registros sem filial válida no estoque físico
+        if (!rawFId || rawFId === 'sem_filial' || String(rawFId).trim() === '') {
+          return;
+        }
+
         const seriais = Array.isArray(p.imeis)
           ? p.imeis.filter((i: any) => !i.vendido && String(i.status || '').toUpperCase() !== 'VENDIDO')
           : [];
@@ -204,23 +213,23 @@ export default function ModalDetalheEstoqueProduto({
           qtdValida = Number(p.quantidade || 0);
         }
 
-        const fId = String(p.filial_id || 'sem_filial');
-        const fNome = p.filiais?.nome || mapaFiliaisNome[fId] || (fId === 'sem_filial' ? 'Sem Filial' : `Filial ${fId}`);
+        const fId = String(rawFId);
+        const fNome = p.filiais?.nome || mapaFiliaisNome[fId] || `Filial ${fId}`;
 
-        return {
+        itensFormatados.push({
           id: String(p.id),
           nome: p.nome || produtoNome,
           filial_id: fId,
           filial_nome: fNome,
           categoria: p.categoria || categoria,
-          cor: (p.cor || 'Não informada').trim(),
+          cor: (p.cor || corAtual || 'Padrão').trim(),
           preco: Number(p.preco || p.preco_venda || precoBaseVenda),
           preco_venda: Number(p.preco_venda || p.preco || precoBaseVenda),
           quantidade: qtdValida,
           imeis: imeisStrings,
           updated_at: p.updated_at,
           created_at: p.created_at
-        };
+        });
       });
 
       setProdutosIrmaos(itensFormatados);
@@ -229,7 +238,7 @@ export default function ModalDetalheEstoqueProduto({
     } finally {
       setLoading(false);
     }
-  }, [produto, produtoNome, produtoId, categoria, precoBaseVenda, mapaFiliaisNome]);
+  }, [produto, produtoNome, produtoId, categoria, corAtual, precoBaseVenda, mapaFiliaisNome]);
 
   useEffect(() => {
     if (isOpen && produto) {
@@ -255,6 +264,7 @@ export default function ModalDetalheEstoqueProduto({
     // Inicia com todas as filiais conhecidas
     (filiais || []).forEach(f => {
       const fId = String(f.id);
+      if (!fId || fId === 'sem_filial') return;
       mapa[fId] = {
         filial_id: fId,
         filial_nome: f.nome,
@@ -266,11 +276,13 @@ export default function ModalDetalheEstoqueProduto({
     });
 
     produtosIrmaos.forEach(item => {
-      const fId = item.filial_id;
+      const fId = String(item.filial_id);
+      if (!fId || fId === 'sem_filial') return;
+
       if (!mapa[fId]) {
         mapa[fId] = {
           filial_id: fId,
-          filial_nome: item.filial_nome,
+          filial_nome: item.filial_nome || mapaFiliaisNome[fId] || `Filial ${fId}`,
           quantidadeTotal: 0,
           itens: [],
           status: 'ESGOTADO',
@@ -285,6 +297,27 @@ export default function ModalDetalheEstoqueProduto({
       }
     });
 
+    // Para qualquer filial que ainda não possua nenhum item/variação cadastrada,
+    // injeta uma linha com saldo 0 para permitir adição direta com [ - ] [ 0 ] [ + ]
+    Object.values(mapa).forEach(filialObj => {
+      if (filialObj.itens.length === 0) {
+        const itemZerado: ItemProdutoDetalhado = {
+          id: `temp_${filialObj.filial_id}_${encodeURIComponent(corAtual || 'Padrão')}`,
+          nome: produtoNome,
+          filial_id: filialObj.filial_id,
+          filial_nome: filialObj.filial_nome,
+          categoria: categoria,
+          cor: (corAtual || 'Padrão').trim(),
+          preco: precoBaseVenda,
+          preco_venda: precoBaseVenda,
+          quantidade: 0,
+          imeis: [],
+          isSynthetic: true
+        };
+        filialObj.itens.push(itemZerado);
+      }
+    });
+
     return Object.values(mapa).map(f => {
       let statusCalc: 'EM_ESTOQUE' | 'ESTOQUE_BAIXO' | 'ESGOTADO' = 'ESGOTADO';
       if (f.quantidadeTotal > 3) statusCalc = 'EM_ESTOQUE';
@@ -295,7 +328,7 @@ export default function ModalDetalheEstoqueProduto({
         status: statusCalc
       };
     }).sort((a, b) => b.quantidadeTotal - a.quantidadeTotal);
-  }, [filiais, produtosIrmaos]);
+  }, [filiais, produtosIrmaos, mapaFiliaisNome, produtoNome, categoria, corAtual, precoBaseVenda]);
 
   // Agrupamento por Variações de Cor
   const variacoesCores = useMemo(() => {
@@ -349,6 +382,166 @@ export default function ModalDetalheEstoqueProduto({
     }
   };
 
+  // Função auxiliar para inserir ou atualizar estoque de uma filial no Supabase
+  const persistirEstoqueFilial = async (
+    item: ItemProdutoDetalhado,
+    novosValores: { quantidade?: number; preco?: number; cor?: string }
+  ): Promise<ItemProdutoDetalhado> => {
+    const fIdReal = item.filial_id;
+    if (!fIdReal || fIdReal === 'sem_filial') {
+      throw new Error('Não é possível salvar estoque com filial inválida.');
+    }
+
+    const filialIdNumerico = isNaN(Number(fIdReal)) ? fIdReal : Number(fIdReal);
+    const empresaIdReal = produto?.empresa_id || null;
+    const catIdReal = produto?.produto_catalogo_id || produto?.catalogo_id || null;
+    const codBarrasReal = produto?.codigo_barras || null;
+
+    const qtdFinal = novosValores.quantidade !== undefined ? novosValores.quantidade : item.quantidade;
+    const precoFinal = novosValores.preco !== undefined ? novosValores.preco : (item.preco_venda || item.preco || precoBaseVenda);
+    const corFinal = (novosValores.cor !== undefined ? novosValores.cor : (item.cor || corAtual || 'Padrão')).trim();
+    const nomeFinal = item.nome || produtoNome;
+    const categoriaFinal = item.categoria || categoria;
+
+    // Se é um item sintético (ainda não existe registro real no banco para esta filial)
+    if (item.isSynthetic || String(item.id).startsWith('temp_')) {
+      // 1. Tentar verificar se já existe no banco (para evitar duplicidade acidental)
+      let queryCheck = supabase
+        .from('produtos')
+        .select('id, quantidade, preco, preco_venda, cor, filial_id')
+        .eq('filial_id', filialIdNumerico)
+        .ilike('nome', nomeFinal.trim());
+
+      if (corFinal) {
+        queryCheck = queryCheck.ilike('cor', corFinal);
+      }
+
+      const { data: existente } = await queryCheck.maybeSingle();
+
+      if (existente && existente.id) {
+        // Se já existia, faz update
+        const { error: updErr } = await supabase
+          .from('produtos')
+          .update({
+            quantidade: qtdFinal,
+            preco: precoFinal,
+            preco_venda: precoFinal,
+            cor: corFinal
+          })
+          .eq('id', existente.id);
+
+        if (updErr) throw updErr;
+
+        return {
+          ...item,
+          id: String(existente.id),
+          filial_id: String(filialIdNumerico),
+          quantidade: qtdFinal,
+          preco: precoFinal,
+          preco_venda: precoFinal,
+          cor: corFinal,
+          isSynthetic: false
+        };
+      } else {
+        // Não existe: INSERT com dados completos
+        const payloadInsert: any = {
+          nome: nomeFinal,
+          filial_id: filialIdNumerico,
+          quantidade: qtdFinal,
+          preco: precoFinal,
+          preco_venda: precoFinal,
+          preco_custo: Number(produto?.preco_custo || 0),
+          cor: corFinal,
+          categoria: categoriaFinal,
+          status: 'ATIVO'
+        };
+
+        if (empresaIdReal) payloadInsert.empresa_id = empresaIdReal;
+        if (catIdReal) payloadInsert.produto_catalogo_id = catIdReal;
+        if (codBarrasReal) payloadInsert.codigo_barras = codBarrasReal;
+
+        const { data: inserted, error: insErr } = await supabase
+          .from('produtos')
+          .insert(payloadInsert)
+          .select()
+          .single();
+
+        if (insErr) {
+          // Fallback caso alguma coluna estrita (como status ou empresa_id) dê erro de esquema
+          console.warn('[ModalDetalheEstoqueProduto] Tentando insert de fallback simplificado:', insErr);
+          const fallbackPayload: any = {
+            nome: nomeFinal,
+            filial_id: filialIdNumerico,
+            quantidade: qtdFinal,
+            preco: precoFinal,
+            preco_venda: precoFinal,
+            cor: corFinal,
+            categoria: categoriaFinal
+          };
+          if (empresaIdReal) fallbackPayload.empresa_id = empresaIdReal;
+
+          const { data: insFallback, error: insFbErr } = await supabase
+            .from('produtos')
+            .insert(fallbackPayload)
+            .select()
+            .single();
+
+          if (insFbErr) throw insFbErr;
+
+          return {
+            ...item,
+            id: String(insFallback.id),
+            filial_id: String(filialIdNumerico),
+            quantidade: qtdFinal,
+            preco: precoFinal,
+            preco_venda: precoFinal,
+            cor: corFinal,
+            isSynthetic: false
+          };
+        }
+
+        return {
+          ...item,
+          id: String(inserted.id),
+          filial_id: String(filialIdNumerico),
+          quantidade: qtdFinal,
+          preco: precoFinal,
+          preco_venda: precoFinal,
+          cor: corFinal,
+          isSynthetic: false
+        };
+      }
+    } else {
+      // Registro real existente: UPDATE direto no banco
+      const payloadUpdate: any = {};
+      if (novosValores.quantidade !== undefined) payloadUpdate.quantidade = novosValores.quantidade;
+      if (novosValores.preco !== undefined) {
+        payloadUpdate.preco = novosValores.preco;
+        payloadUpdate.preco_venda = novosValores.preco;
+      }
+      if (novosValores.cor !== undefined) payloadUpdate.cor = novosValores.cor;
+
+      if (onUpdateProdutoField && novosValores.quantidade !== undefined) {
+        await onUpdateProdutoField(item.id, item.nome, 'quantidade', novosValores.quantidade, item.filial_id);
+      } else {
+        const { error: updErr } = await supabase
+          .from('produtos')
+          .update(payloadUpdate)
+          .eq('id', item.id);
+
+        if (updErr) throw updErr;
+      }
+
+      return {
+        ...item,
+        quantidade: qtdFinal,
+        preco: precoFinal,
+        preco_venda: precoFinal,
+        cor: corFinal
+      };
+    }
+  };
+
   // 2. AÇÃO: Salvar Edição Inline de Item (Preço, Cor ou Quantidade)
   const salvarEdicaoInline = async (item: ItemProdutoDetalhado) => {
     if (!campoEditando || salvandoInline) return;
@@ -358,32 +551,32 @@ export default function ModalDetalheEstoqueProduto({
       if (campoEditando === 'preco') {
         const novoValor = parseFloat(String(valorEditando).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
         if (!isNaN(novoValor) && novoValor >= 0) {
-          if (onUpdateProdutoField) {
-            await onUpdateProdutoField(item.id, item.nome, 'preco', novoValor, item.filial_id);
-          } else {
-            await supabase.from('produtos').update({ preco: novoValor, preco_venda: novoValor }).eq('id', item.id);
-          }
-          setProdutosIrmaos(prev => prev.map(p => p.id === item.id ? { ...p, preco: novoValor, preco_venda: novoValor } : p));
+          const itemAtualizado = await persistirEstoqueFilial(item, { preco: novoValor });
+          setProdutosIrmaos(prev => {
+            const existe = prev.some(p => p.id === item.id);
+            if (!existe) return [...prev, itemAtualizado];
+            return prev.map(p => (p.id === item.id ? itemAtualizado : p));
+          });
         }
       } else if (campoEditando === 'cor') {
         const novaCor = String(valorEditando).trim();
         if (novaCor) {
-          if (onUpdateProdutoField) {
-            await onUpdateProdutoField(item.id, item.nome, 'cor', novaCor, item.filial_id);
-          } else {
-            await supabase.from('produtos').update({ cor: novaCor }).eq('id', item.id);
-          }
-          setProdutosIrmaos(prev => prev.map(p => p.id === item.id ? { ...p, cor: novaCor } : p));
+          const itemAtualizado = await persistirEstoqueFilial(item, { cor: novaCor });
+          setProdutosIrmaos(prev => {
+            const existe = prev.some(p => p.id === item.id);
+            if (!existe) return [...prev, itemAtualizado];
+            return prev.map(p => (p.id === item.id ? itemAtualizado : p));
+          });
         }
       } else if (campoEditando === 'quantidade') {
         const novaQtd = parseInt(valorEditando, 10);
         if (!isNaN(novaQtd) && novaQtd >= 0) {
-          if (onUpdateProdutoField) {
-            await onUpdateProdutoField(item.id, item.nome, 'quantidade', novaQtd, item.filial_id);
-          } else {
-            await supabase.from('produtos').update({ quantidade: novaQtd }).eq('id', item.id);
-          }
-          setProdutosIrmaos(prev => prev.map(p => p.id === item.id ? { ...p, quantidade: novaQtd } : p));
+          const itemAtualizado = await persistirEstoqueFilial(item, { quantidade: novaQtd });
+          setProdutosIrmaos(prev => {
+            const existe = prev.some(p => p.id === item.id);
+            if (!existe) return [...prev, itemAtualizado];
+            return prev.map(p => (p.id === item.id ? itemAtualizado : p));
+          });
         }
       }
 
@@ -403,12 +596,12 @@ export default function ModalDetalheEstoqueProduto({
     if (ehCelularOuSerial) return;
     const novaQtd = Math.max(0, item.quantidade + delta);
     try {
-      if (onUpdateProdutoField) {
-        await onUpdateProdutoField(item.id, item.nome, 'quantidade', novaQtd, item.filial_id);
-      } else {
-        await supabase.from('produtos').update({ quantidade: novaQtd }).eq('id', item.id);
-      }
-      setProdutosIrmaos(prev => prev.map(p => p.id === item.id ? { ...p, quantidade: novaQtd } : p));
+      const itemAtualizado = await persistirEstoqueFilial(item, { quantidade: novaQtd });
+      setProdutosIrmaos(prev => {
+        const existe = prev.some(p => p.id === item.id);
+        if (!existe) return [...prev, itemAtualizado];
+        return prev.map(p => (p.id === item.id ? itemAtualizado : p));
+      });
       if (onRefresh) onRefresh();
     } catch (err) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao ajustar quantidade rápida:', err);
@@ -427,14 +620,20 @@ export default function ModalDetalheEstoqueProduto({
     setSalvandoNovoImei(true);
     setErroNovoImei(null);
     try {
+      let targetItem = itemParaAdicionarImei;
+      // Se for item sintético, persistir primeiro o registro real na tabela produtos
+      if (targetItem.isSynthetic || String(targetItem.id).startsWith('temp_')) {
+        targetItem = await persistirEstoqueFilial(targetItem, { quantidade: 0 });
+      }
+
       // 1. Inserir na tabela 'imeis'
       const { data: novoImeiDb, error: insertError } = await supabase
         .from('imeis')
         .insert({
           imei: imeiLimpo,
-          produto_id: itemParaAdicionarImei.id,
-          filial_id: itemParaAdicionarImei.filial_id && itemParaAdicionarImei.filial_id !== 'sem_filial' ? itemParaAdicionarImei.filial_id : null,
-          cor: itemParaAdicionarImei.cor || 'Padrão',
+          produto_id: targetItem.id,
+          filial_id: targetItem.filial_id && targetItem.filial_id !== 'sem_filial' ? targetItem.filial_id : null,
+          cor: targetItem.cor || 'Padrão',
           status: 'DISPONÍVEL',
           vendido: false
         })
@@ -452,23 +651,36 @@ export default function ModalDetalheEstoqueProduto({
       }
 
       // 2. Incrementar a quantidade do produto para refletir o total de seriais
-      const novaQtd = itemParaAdicionarImei.imeis.length + 1;
+      const novaQtd = targetItem.imeis.length + 1;
       await supabase
         .from('produtos')
         .update({ quantidade: novaQtd })
-        .eq('id', itemParaAdicionarImei.id);
+        .eq('id', targetItem.id);
 
       // 3. Atualizar estado local
-      setProdutosIrmaos(prev => prev.map(p => {
-        if (p.id === itemParaAdicionarImei.id) {
-          return {
-            ...p,
-            quantidade: novaQtd,
-            imeis: [...p.imeis, imeiLimpo]
-          };
+      setProdutosIrmaos(prev => {
+        const existe = prev.some(p => p.id === targetItem.id);
+        if (!existe) {
+          return [
+            ...prev.filter(p => p.id !== itemParaAdicionarImei.id),
+            {
+              ...targetItem,
+              quantidade: novaQtd,
+              imeis: [...targetItem.imeis, imeiLimpo]
+            }
+          ];
         }
-        return p;
-      }));
+        return prev.map(p => {
+          if (p.id === targetItem.id) {
+            return {
+              ...p,
+              quantidade: novaQtd,
+              imeis: [...p.imeis, imeiLimpo]
+            };
+          }
+          return p;
+        });
+      });
 
       setNovoImeiInput('');
       setItemParaAdicionarImei(null);
