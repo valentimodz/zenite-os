@@ -736,6 +736,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
   // Ref de guarda para evitar loops de sincronização de vendas/metas do vendedor
   const lastLoadedSellerKeyRef = useRef('');
+  // Refs de controle para evitar loops e chamadas concorrentes contínuas
+  const isFetchingGerenteRef = useRef(false);
+  const isFetchingCaixasRef = useRef(false);
+  const lastGestaoFetchKeyRef = useRef('');
 
   // Estados do Painel Supremo (ADMIN)
   const [allCompanies, setAllCompanies] = useState([]);
@@ -2909,8 +2913,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   );
 
   // Recarregar dados de gestão, auditoria de descontos e vendas consolidadas sob demanda quando a empresa, mês ou aba relevante mudar
+  const empresaIdPrimitivo = profile?.empresa_id || company?.id || activeEmpresaId || '';
+  const userRolePrimitivo = String(profile?.role || profile?.cargo || '').toUpperCase();
+  const periodoMesAno = periodoDescontos?.mesAno || '';
+  const periodoInicio = periodoDescontos?.inicio || '';
+  const periodoFim = periodoDescontos?.fim || '';
+
   useEffect(() => {
-    const targetEmpresaId = profile?.empresa_id || company?.id || activeEmpresaId;
+    const targetEmpresaId = empresaIdPrimitivo;
     if (!targetEmpresaId) return;
 
     fetchCategorias(targetEmpresaId).catch(e => console.warn('Aviso ao carregar categorias:', e));
@@ -2918,17 +2928,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const isAbaGestao = ['gestao', 'relatorios', 'ranking', 'fechamentos'].includes(activeTab) ||
       ['gestao', 'relatorios', 'ranking', 'fechamentos'].includes(currentView);
 
-    if ((podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(profile?.role)) && isAbaGestao) {
-      fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
-      fetchGerenteData(targetEmpresaId, filtroMes, true).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
-      fetchRankingColaboradoresView(filtroMes).catch(e => console.warn('Aviso ao atualizar ranking da view:', e));
-      fetchCatalogoProdutos(targetEmpresaId).catch(e => console.warn('Aviso ao carregar catálogo de produtos:', e));
+    const podeGestao = podeVerAuditoria || ['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN', 'GERENTE'].includes(userRolePrimitivo);
+
+    if (podeGestao && isAbaGestao) {
+      const fetchKey = `${targetEmpresaId}_${filtroMes}_${activeTab}_${currentView}`;
+      if (lastGestaoFetchKeyRef.current !== fetchKey) {
+        lastGestaoFetchKeyRef.current = fetchKey;
+        fetchTeamMembers(targetEmpresaId).catch(e => console.warn('Aviso ao atualizar equipe automaticamente:', e));
+        fetchGerenteData(targetEmpresaId, filtroMes, false).catch(e => console.warn('Aviso ao atualizar vendas executivas automaticamente:', e));
+        fetchRankingColaboradoresView(filtroMes).catch(e => console.warn('Aviso ao atualizar ranking da view:', e));
+        fetchCatalogoProdutos(targetEmpresaId).catch(e => console.warn('Aviso ao carregar catálogo de produtos:', e));
+      }
     }
 
     if (activeTab === 'auditoria' || currentView === 'auditoria' || activeTab === 'descontos' || currentView === 'descontos') {
-      fetchAuditoriaDescontos(targetEmpresaId, periodoDescontos?.mesAno || filtroMes, periodoDescontos?.inicio, periodoDescontos?.fim).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
+      fetchAuditoriaDescontos(targetEmpresaId, periodoMesAno || filtroMes, periodoInicio, periodoFim).catch(e => console.warn('Aviso ao atualizar descontos automaticamente:', e));
     }
-  }, [profile?.empresa_id, company?.id, activeEmpresaId, activeTab, currentView, podeVerAuditoria, filtroMes, periodoDescontos]);
+  }, [empresaIdPrimitivo, activeTab, currentView, podeVerAuditoria, userRolePrimitivo, filtroMes, periodoMesAno, periodoInicio, periodoFim]);
 
   // Log de inspeção de vendas no relatório solicitado para auditoria de vendedor e comissões
   useEffect(() => {
@@ -4136,6 +4152,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
   // Buscar dados consolidados do Gerente (Estoque, Vendas Globais, Fechamentos) com cache de 5 minutos
   const fetchGerenteData = async (empresaId, mesAnoFiltro, forceRefresh = false) => {
+    if (isFetchingGerenteRef.current) return;
+    isFetchingGerenteRef.current = true;
+
     const selectedMonth = mesAnoFiltro || filtroMes || new Date().toISOString().substring(0, 7);
     const targetEmpresaId = empresaId || profile?.empresa_id || company?.id || activeEmpresaId;
     const cacheKey = `gerente_data_${targetEmpresaId || 'global'}_${selectedMonth}`;
@@ -4148,6 +4167,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         setUltimosRecebidos(cached.ultimosRecebidos || []);
         setDisponiveisImeis(cached.baseImeis || []);
         setLoadingDados(false);
+        isFetchingGerenteRef.current = false;
         return cached;
       }
     }
@@ -4359,18 +4379,44 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       let fechRes = { data: [], error: null };
       try {
-        let { data: fData, error: fErr } = await supabase
-          .from('fechamentos')
-          .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
-          .eq('empresa_id', empresaId)
-          .order('created_at', { ascending: false })
-          .limit(30);
+        let fData = null;
+        let fErr = null;
 
+        // Tentar ordenar por created_at
+        try {
+          const res1 = await supabase
+            .from('fechamentos')
+            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .eq('empresa_id', empresaId)
+            .order('created_at', { ascending: false })
+            .limit(30);
+          fData = res1.data;
+          fErr = res1.error;
+        } catch (e1) {
+          fErr = e1;
+        }
+
+        // Se falhou (ex: erro 400 por não existir coluna created_at), tentar ordenando por id
+        if (fErr || !fData) {
+          try {
+            const res2 = await supabase
+              .from('fechamentos')
+              .select('id, empresa_id, filial_id, status, total_financiadoras, total_dinheiro_gaveta')
+              .eq('empresa_id', empresaId)
+              .order('id', { ascending: false })
+              .limit(30);
+            fData = res2.data;
+            fErr = res2.error;
+          } catch (e2) {
+            fErr = e2;
+          }
+        }
+
+        // Fallback resiliente sem ordenação estrita
         if (fErr || !fData) {
           const fallbackF = await supabase
             .from('fechamentos')
-            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
-            .order('created_at', { ascending: false })
+            .select('*')
             .limit(30);
           fData = fallbackF.data || [];
         }
@@ -4497,19 +4543,50 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       setDisponiveisImeis(prev => Array.isArray(prev) ? prev : []);
     } finally {
       setLoadingDados(false);
+      isFetchingGerenteRef.current = false;
     }
   };
 
   const fetchTransferencias = async (filialId, empresaId) => {
     setLoadingTransferencias(true);
     try {
-      const { data, error } = await supabase
-        .from('transferencias')
-        .select('*, transferencias_itens(*)')
-        .eq('empresa_id', empresaId)
-        .order('created_at', { ascending: false });
+      let data = null;
+      let error = null;
 
-      if (error) throw error;
+      try {
+        const res = await supabase
+          .from('transferencias')
+          .select('*, transferencias_itens(*)')
+          .eq('empresa_id', empresaId)
+          .order('created_at', { ascending: false });
+        data = res.data;
+        error = res.error;
+      } catch (e1) {
+        error = e1;
+      }
+
+      if (error || !data) {
+        try {
+          const res2 = await supabase
+            .from('transferencias')
+            .select('*, transferencias_itens(*)')
+            .eq('empresa_id', empresaId)
+            .order('id', { ascending: false });
+          data = res2.data;
+          error = res2.error;
+        } catch (e2) {
+          error = e2;
+        }
+      }
+
+      if (error || !data) {
+        const fallbackT = await supabase
+          .from('transferencias')
+          .select('*')
+          .eq('empresa_id', empresaId);
+        data = fallbackT.data || [];
+        error = null;
+      }
 
       const hoje = new Date().toISOString().split('T')[0];
       const todas = data || [];
@@ -7375,17 +7452,40 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // Recarregar os fechamentos para atualizar a UI (select estrito sem vazamento de memória)
       try {
-        let { data: newFechamentos, error: fetchErr } = await supabase
-          .from('fechamentos')
-          .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
-          .eq('empresa_id', profile.empresa_id)
-          .order('created_at', { ascending: false })
-          .limit(30);
+        let newFechamentos = null;
+        let fetchErr = null;
+
+        try {
+          const res1 = await supabase
+            .from('fechamentos')
+            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .eq('empresa_id', profile.empresa_id)
+            .order('created_at', { ascending: false })
+            .limit(30);
+          newFechamentos = res1.data;
+          fetchErr = res1.error;
+        } catch (e1) {
+          fetchErr = e1;
+        }
+
+        if (fetchErr || !newFechamentos) {
+          try {
+            const res2 = await supabase
+              .from('fechamentos')
+              .select('id, empresa_id, filial_id, status, total_financiadoras, total_dinheiro_gaveta')
+              .eq('empresa_id', profile.empresa_id)
+              .order('id', { ascending: false })
+              .limit(30);
+            newFechamentos = res2.data;
+            fetchErr = res2.error;
+          } catch (e2) {
+            fetchErr = e2;
+          }
+        }
 
         if (fetchErr || !newFechamentos) {
           const fbRes = await supabase.from('fechamentos')
-            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
-            .order('created_at', { ascending: false })
+            .select('*')
             .limit(30);
           newFechamentos = fbRes.data || [];
         }
@@ -7605,17 +7705,40 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       fetchStatusCaixa(modalDetalheCaixa.filial_id);
 
       try {
-        let { data: newFechamentos, error: fetchErr } = await supabase
-          .from('fechamentos')
-          .select('id, empresa_id, filial_id, vendedor_id, caixa_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
-          .eq('empresa_id', targetEmpresaId)
-          .order('created_at', { ascending: false })
-          .limit(30);
+        let newFechamentos = null;
+        let fetchErr = null;
+
+        try {
+          const res1 = await supabase
+            .from('fechamentos')
+            .select('id, empresa_id, filial_id, vendedor_id, caixa_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .eq('empresa_id', targetEmpresaId)
+            .order('created_at', { ascending: false })
+            .limit(30);
+          newFechamentos = res1.data;
+          fetchErr = res1.error;
+        } catch (e1) {
+          fetchErr = e1;
+        }
+
+        if (fetchErr || !newFechamentos) {
+          try {
+            const res2 = await supabase
+              .from('fechamentos')
+              .select('id, empresa_id, filial_id, vendedor_id, caixa_id, status')
+              .eq('empresa_id', targetEmpresaId)
+              .order('id', { ascending: false })
+              .limit(30);
+            newFechamentos = res2.data;
+            fetchErr = res2.error;
+          } catch (e2) {
+            fetchErr = e2;
+          }
+        }
 
         if (fetchErr || !newFechamentos) {
           const fbRes = await supabase.from('fechamentos')
-            .select('id, empresa_id, filial_id, created_at, status')
-            .order('created_at', { ascending: false })
+            .select('*')
             .limit(30);
           newFechamentos = fbRes.data || [];
         }

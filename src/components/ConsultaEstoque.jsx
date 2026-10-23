@@ -75,11 +75,26 @@ export default function ConsultaEstoque({
     }
   }, [activeFilialId]);
 
+  // Refs de controle para evitar chamadas concorrentes contínuas e loops de re-renderização
+  const isFetchingRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const empresaIdPrimitivo = profile?.empresa_id ? String(profile.empresa_id) : '';
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // 4. Carregar Dados do Supabase com Resiliência (.select('*'))
-  const carregarDadosEstoque = useCallback(async () => {
-    setLoading(true);
+  const carregarDadosEstoque = useCallback(async (forcedEmpresaId = null) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    if (isMountedRef.current) setLoading(true);
+
     try {
-      const empresaId = profile?.empresa_id;
+      const empresaId = forcedEmpresaId || empresaIdPrimitivo;
 
       // 4.1 Carregar produtos físicos da tabela 'produtos' com .select('*')
       let qProdutos = supabase.from('produtos').select('*');
@@ -122,6 +137,8 @@ export default function ConsultaEstoque({
       }
       const { data: dataCategorias } = await qCategorias;
 
+      if (!isMountedRef.current) return;
+
       const prods = dataProdutos || [];
       const catsMestre = dataCatalogo || [];
       const ims = (dataImeis || []).filter((im) => {
@@ -148,9 +165,12 @@ export default function ConsultaEstoque({
     } catch (error) {
       console.error('Falha geral ao carregar dados do estoque:', error);
     } finally {
-      setLoading(false);
+      isFetchingRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
-  }, [profile?.empresa_id]);
+  }, [empresaIdPrimitivo]);
 
   useEffect(() => {
     carregarDadosEstoque();
