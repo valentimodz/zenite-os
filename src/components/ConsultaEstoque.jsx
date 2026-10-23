@@ -49,6 +49,7 @@ export default function ConsultaEstoque({
 
   // 2. Estados dos Dados
   const [loading, setLoading] = useState(false);
+  const [filiaisCarregadas, setFiliaisCarregadas] = useState([]);
   const [produtos, setProdutos] = useState([]);
   const [produtosCatalogo, setProdutosCatalogo] = useState([]);
   const [imeisDisponiveis, setImeisDisponiveis] = useState([]);
@@ -70,7 +71,7 @@ export default function ConsultaEstoque({
 
   // Sincronizar filial selecionada caso activeFilialId mude inicialmente
   useEffect(() => {
-    if (activeFilialId && filialSelecionada === 'TODAS' && activeFilialId !== 'null') {
+    if (activeFilialId && filialSelecionada === 'TODAS' && activeFilialId !== 'null' && activeFilialId !== 'undefined') {
       setFilialSelecionada(String(activeFilialId));
     }
   }, [activeFilialId]);
@@ -95,6 +96,18 @@ export default function ConsultaEstoque({
 
     try {
       const empresaId = forcedEmpresaId || empresaIdPrimitivo;
+
+      // 4.0 Carregar filiais diretamente para garantir presença na rede
+      let qFiliais = supabase.from('filiais').select('*').order('nome', { ascending: true });
+      if (empresaId) {
+        qFiliais = qFiliais.eq('empresa_id', empresaId);
+      }
+      const { data: dataFiliais, error: errFiliais } = await qFiliais;
+      if (errFiliais) {
+        console.warn('Erro ao carregar filiais:', errFiliais);
+      } else if (dataFiliais && Array.isArray(dataFiliais)) {
+        setFiliaisCarregadas(dataFiliais);
+      }
 
       // 4.1 Carregar produtos físicos da tabela 'produtos' com .select('*')
       let qProdutos = supabase.from('produtos').select('*');
@@ -176,6 +189,39 @@ export default function ConsultaEstoque({
     carregarDadosEstoque();
   }, [carregarDadosEstoque]);
 
+  // Lista unificada e garantida de Filiais da Rede
+  const listaFiliais = useMemo(() => {
+    const mapa = new Map();
+
+    // 1. Filiais passadas via props
+    if (Array.isArray(filiais)) {
+      filiais.forEach(f => {
+        if (f && f.id) mapa.set(String(f.id), f);
+      });
+    }
+
+    // 2. Filiais carregadas diretamente do banco
+    if (Array.isArray(filiaisCarregadas)) {
+      filiaisCarregadas.forEach(f => {
+        if (f && f.id && !mapa.has(String(f.id))) {
+          mapa.set(String(f.id), f);
+        }
+      });
+    }
+
+    // 3. Fallback: Filiais presentes nos produtos físicos se houver filial_id
+    produtos.forEach(p => {
+      if (p.filial_id && !mapa.has(String(p.filial_id))) {
+        mapa.set(String(p.filial_id), {
+          id: p.filial_id,
+          nome: p.filial_nome || `Filial ${String(p.filial_id).slice(0, 6)}`
+        });
+      }
+    });
+
+    return Array.from(mapa.values()).sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || '')));
+  }, [filiais, filiaisCarregadas, produtos]);
+
   // 5. Agrupamento Base dos Modelos de Produtos (Catálogo + Produtos Físicos)
   const produtosConsolidados = useMemo(() => {
     const mapa = new Map();
@@ -250,12 +296,12 @@ export default function ConsultaEstoque({
         if (p.id) produtoIds.add(String(p.id));
       });
 
-      // Mapear saldos para cada filial cadastrada
+      // Mapear saldos para cada filial cadastrada na rede
       let qtdRede = 0;
       const saldosFiliaisMap = new Map();
 
       // Inicializa todas as filiais cadastradas com 0
-      filiais.forEach(f => {
+      listaFiliais.forEach(f => {
         saldosFiliaisMap.set(String(f.id), {
           filial_id: String(f.id),
           filial_nome: f.nome,
@@ -276,7 +322,7 @@ export default function ConsultaEstoque({
             if (saldosFiliaisMap.has(fId)) {
               saldosFiliaisMap.get(fId).quantidade += 1;
             } else if (fId) {
-              const filObj = filiais.find(f => String(f.id) === fId);
+              const filObj = listaFiliais.find(f => String(f.id) === fId);
               saldosFiliaisMap.set(fId, {
                 filial_id: fId,
                 filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
@@ -293,7 +339,7 @@ export default function ConsultaEstoque({
             if (saldosFiliaisMap.has(fId)) {
               saldosFiliaisMap.get(fId).quantidade += q;
             } else if (fId) {
-              const filObj = filiais.find(f => String(f.id) === fId);
+              const filObj = listaFiliais.find(f => String(f.id) === fId);
               saldosFiliaisMap.set(fId, {
                 filial_id: fId,
                 filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
@@ -311,7 +357,7 @@ export default function ConsultaEstoque({
           if (saldosFiliaisMap.has(fId)) {
             saldosFiliaisMap.get(fId).quantidade += q;
           } else if (fId) {
-            const filObj = filiais.find(f => String(f.id) === fId);
+            const filObj = listaFiliais.find(f => String(f.id) === fId);
             saldosFiliaisMap.set(fId, {
               filial_id: fId,
               filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
@@ -329,34 +375,56 @@ export default function ConsultaEstoque({
         detalhamentoPorFilial
       };
     });
-  }, [produtosConsolidados, imeisDisponiveis, filiais]);
+  }, [produtosConsolidados, imeisDisponiveis, listaFiliais]);
 
   // 7. Desdobramento dos Cards:
-  // Se filialSelecionada === 'TODAS': desdobra para exibir um card individual para cada filial (com destaque do nome da filial e quantidade exata daquela filial)
-  // Se filialSelecionada !== 'TODAS': exibe o card daquela filial selecionada
+  // - Quando filialSelecionada === 'TODAS' (Rede Completa) OU quando há termo de busca digitado:
+  //   Gera UM CARD INDIVIDUAL PARA CADA FILIAL da rede (ou que possui saldo/registro).
+  // - Quando uma filial específica for selecionada (e sem busca de rede):
+  //   Gera o card apenas daquela filial selecionada.
   const cardsDesdobrados = useMemo(() => {
     const lista = [];
+    const temBuscaAtiva = Boolean(buscaDebounced && buscaDebounced.trim());
+    const deveDesdobrarTodasFiliais = filialSelecionada === 'TODAS' || temBuscaAtiva;
 
     produtosComSaldosPorFilial.forEach(prod => {
-      if (filialSelecionada === 'TODAS') {
-        // Desdobra em um card por filial cadastrada
-        filiais.forEach(f => {
-          const saldoFilial = prod.detalhamentoPorFilial.find(df => String(df.filial_id) === String(f.id))?.quantidade || 0;
-          const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
+      if (deveDesdobrarTodasFiliais) {
+        // Se temos lista de filiais da rede, desdobra 1 card para cada filial
+        if (listaFiliais.length > 0) {
+          listaFiliais.forEach(f => {
+            const saldoFilial = prod.detalhamentoPorFilial.find(df => String(df.filial_id) === String(f.id))?.quantidade || 0;
+            const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
 
-          lista.push({
-            ...prod,
-            cardKey: `${prod.id}_${f.id}`,
-            filialIdCard: String(f.id),
-            filialNomeCard: f.nome,
-            qtdFilial: saldoFilial,
-            statusEstoque,
-            isMultiLojaDesdobrado: true
+            lista.push({
+              ...prod,
+              cardKey: `${prod.id}_${f.id}`,
+              filialIdCard: String(f.id),
+              filialNomeCard: f.nome,
+              qtdFilial: saldoFilial,
+              statusEstoque,
+              isMultiLojaDesdobrado: true
+            });
           });
-        });
+        } else {
+          // Fallback caso não haja filiais cadastradas ainda
+          prod.detalhamentoPorFilial.forEach(df => {
+            const saldoFilial = df.quantidade || 0;
+            const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
+
+            lista.push({
+              ...prod,
+              cardKey: `${prod.id}_${df.filial_id}`,
+              filialIdCard: String(df.filial_id),
+              filialNomeCard: df.filial_nome,
+              qtdFilial: saldoFilial,
+              statusEstoque,
+              isMultiLojaDesdobrado: true
+            });
+          });
+        }
       } else {
         // Exibe somente para a filial ativa selecionada
-        const fObj = filiais.find(f => String(f.id) === String(filialSelecionada));
+        const fObj = listaFiliais.find(f => String(f.id) === String(filialSelecionada));
         const fNome = fObj ? fObj.nome : 'Filial Selecionada';
         const saldoFilial = prod.detalhamentoPorFilial.find(df => String(df.filial_id) === String(filialSelecionada))?.quantidade || 0;
         const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
@@ -374,7 +442,7 @@ export default function ConsultaEstoque({
     });
 
     return lista;
-  }, [produtosComSaldosPorFilial, filialSelecionada, filiais]);
+  }, [produtosComSaldosPorFilial, filialSelecionada, listaFiliais, buscaDebounced]);
 
   // 8. Filtros de Interface (Busca Textual, Categoria e Status de Estoque)
   const itensFiltrados = useMemo(() => {
@@ -385,13 +453,20 @@ export default function ConsultaEstoque({
         if (catItem !== categoriaSelecionada.toUpperCase()) return false;
       }
 
-      // Filtro de Status de Estoque
-      if (statusFiltro !== 'TODOS') {
-        if (item.statusEstoque !== statusFiltro) return false;
+      // Filtro de Status de Estoque:
+      // CRITICO: saldo entre 1 e 4 (item.qtdFilial > 0 && item.qtdFilial < 5)
+      // ZERADO: saldo 0 (item.qtdFilial === 0)
+      // DISPONIVEL: saldo >= 5 (item.qtdFilial >= 5)
+      if (statusFiltro === 'CRITICO') {
+        if (!(item.qtdFilial > 0 && item.qtdFilial < 5)) return false;
+      } else if (statusFiltro === 'ZERADO') {
+        if (item.qtdFilial !== 0) return false;
+      } else if (statusFiltro === 'DISPONIVEL') {
+        if (item.qtdFilial < 5) return false;
       }
 
-      // Busca Textual (Nome, SKU ou Código de Barras)
-      if (buscaDebounced.trim()) {
+      // Busca Textual (Nome, SKU, Código de Barras ou Nome da Filial)
+      if (buscaDebounced && buscaDebounced.trim()) {
         const termo = buscaDebounced.toLowerCase().trim();
         const nome = String(item.nome || '').toLowerCase();
         const sku = String(item.sku || '').toLowerCase();
@@ -450,9 +525,9 @@ export default function ConsultaEstoque({
   // Nome da filial ativa selecionada para display no cabeçalho
   const nomeFilialAtiva = useMemo(() => {
     if (filialSelecionada === 'TODAS') return 'Todas as Filiais (Rede Completa)';
-    const f = filiais.find(fil => String(fil.id) === String(filialSelecionada));
+    const f = listaFiliais.find(fil => String(fil.id) === String(filialSelecionada));
     return f ? f.nome : 'Filial Selecionada';
-  }, [filialSelecionada, filiais]);
+  }, [filialSelecionada, listaFiliais]);
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
@@ -524,7 +599,7 @@ export default function ConsultaEstoque({
               className="w-full bg-black/70 border border-[#282830] focus:border-[#8B5CF6] text-xs text-white rounded-xl pl-10 pr-8 py-2.5 outline-none font-semibold cursor-pointer appearance-none transition-all"
             >
               <option value="TODAS">🏢 Todas as Filiais (Rede Completa)</option>
-              {filiais.map(f => (
+              {listaFiliais.map(f => (
                 <option key={f.id} value={String(f.id)}>
                   📍 {f.nome}
                 </option>
@@ -845,7 +920,7 @@ export default function ConsultaEstoque({
                 </div>
               ) : (
                 imeisDoProdutoModal.map((im, idx) => {
-                  const filialDoImei = filiais.find(f => String(f.id) === String(im.filial_id))?.nome || 'Filial não identificada';
+                  const filialDoImei = listaFiliais.find(f => String(f.id) === String(im.filial_id))?.nome || 'Filial não identificada';
                   return (
                     <div
                       key={im.id || idx}
