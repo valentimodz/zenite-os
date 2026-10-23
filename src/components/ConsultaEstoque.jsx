@@ -21,7 +21,9 @@ import {
   ExternalLink,
   History,
   Store,
-  ChevronUp
+  ChevronUp,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { formatCurrency, formatarMoeda } from '../utils/currencyUtils';
 
@@ -46,6 +48,15 @@ export default function ConsultaEstoque({
 
   const [categoriaSelecionada, setCategoriaSelecionada] = useState('TODAS');
   const [statusFiltro, setStatusFiltro] = useState('TODOS'); // 'TODOS' | 'CRITICO' | 'ZERADO' | 'DISPONIVEL'
+
+  // Paginação para desempenho de renderização ultra-rápido (evita travar o navegador com milhares de cards)
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const itensPorPagina = 24;
+
+  // Reset da página atual ao alterar qualquer filtro
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [buscaDebounced, categoriaSelecionada, filialSelecionada, statusFiltro]);
 
   // 2. Estados dos Dados
   const [loading, setLoading] = useState(false);
@@ -481,6 +492,15 @@ export default function ConsultaEstoque({
     });
   }, [cardsDesdobrados, categoriaSelecionada, statusFiltro, buscaDebounced]);
 
+  // 9. Fatiamento dos Dados com Paginação (Garante performance ultra-rápida sem travar o navegador)
+  const totalPaginas = Math.max(1, Math.ceil(itensFiltrados.length / itensPorPagina));
+  const paginaValida = Math.min(Math.max(1, paginaAtual), totalPaginas);
+  const indiceInicio = (paginaValida - 1) * itensPorPagina;
+  const indiceFim = Math.min(indiceInicio + itensPorPagina, itensFiltrados.length);
+  const cardsExibidos = useMemo(() => {
+    return itensFiltrados.slice(indiceInicio, indiceFim);
+  }, [itensFiltrados, indiceInicio, indiceFim]);
+
   // Contadores para as Pílulas de Status
   const contadores = useMemo(() => {
     let todos = cardsDesdobrados.length;
@@ -737,8 +757,9 @@ export default function ConsultaEstoque({
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {itensFiltrados.map((item) => {
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {cardsExibidos.map((item) => {
             const isEsgotado = item.qtdFilial === 0;
             const isCritico = item.qtdFilial > 0 && item.qtdFilial < 5;
             const isDisponivel = item.qtdFilial >= 5;
@@ -879,6 +900,81 @@ export default function ConsultaEstoque({
               </div>
             );
           })}
+          </div>
+
+          {/* Barra de Paginação Simples no Rodapé */}
+          {totalPaginas > 1 && (
+            <div className="bg-[#0e0e11] border border-[#222228] rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
+              {/* Indicação de Cards Exibidos */}
+              <div className="text-xs text-gray-400">
+                Mostrando <span className="font-bold text-white font-mono">{itensFiltrados.length === 0 ? 0 : indiceInicio + 1}</span> - <span className="font-bold text-white font-mono">{indiceFim}</span> de <span className="font-bold text-purple-400 font-mono">{itensFiltrados.length}</span> cards
+                <span className="ml-2 text-zinc-600">|</span>
+                <span className="ml-2 text-zinc-400">Página <strong className="text-white">{paginaValida}</strong> de <strong className="text-white">{totalPaginas}</strong></span>
+              </div>
+
+              {/* Controles de Navegação */}
+              <div className="flex items-center gap-2">
+                {/* Botão Anterior */}
+                <button
+                  type="button"
+                  onClick={() => setPaginaAtual(prev => Math.max(1, prev - 1))}
+                  disabled={paginaValida <= 1}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-black/60 hover:bg-[#1a1226] border border-[#282830] hover:border-purple-500/50 text-xs font-semibold text-zinc-300 hover:text-white rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <ChevronLeft size={14} />
+                  <span>Anterior</span>
+                </button>
+
+                {/* Botões Numéricos Inteligentes */}
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaValida) <= 1)
+                    .reduce((acc, p, idx, arr) => {
+                      if (idx > 0 && p - arr[idx - 1] > 1) {
+                        acc.push(-1 * p); // Marca ellipsis
+                      }
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, idx) => {
+                      if (p < 0) {
+                        return (
+                          <span key={`ellipsis-${idx}`} className="px-1 text-xs text-zinc-600">
+                            ...
+                          </span>
+                        );
+                      }
+                      const isAtiva = p === paginaValida;
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setPaginaAtual(p)}
+                          className={`min-w-[32px] h-8 px-2 text-xs font-bold rounded-xl transition-all cursor-pointer font-mono ${
+                            isAtiva
+                              ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40 border border-purple-500'
+                              : 'bg-black/50 text-zinc-400 hover:text-white hover:bg-zinc-800/80 border border-[#282830]'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      );
+                    })}
+                </div>
+
+                {/* Botão Próxima */}
+                <button
+                  type="button"
+                  onClick={() => setPaginaAtual(prev => Math.min(totalPaginas, prev + 1))}
+                  disabled={paginaValida >= totalPaginas}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-black/60 hover:bg-[#1a1226] border border-[#282830] hover:border-purple-500/50 text-xs font-semibold text-zinc-300 hover:text-white rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <span>Próxima</span>
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
