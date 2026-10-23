@@ -697,6 +697,13 @@ export default function ModalDetalheEstoqueProduto({
   const confirmarExcluirItem = async () => {
     if (!itemParaExcluir) return;
     const item = itemParaExcluir;
+
+    // Se for item sintético (ainda não salvo no banco), apenas fecha o diálogo
+    if (item.isSynthetic || String(item.id).startsWith('temp_')) {
+      setItemParaExcluir(null);
+      return;
+    }
+
     setExcluindoId(item.id);
 
     try {
@@ -911,13 +918,11 @@ export default function ModalDetalheEstoqueProduto({
                         <Store size={15} className={filial.quantidadeTotal > 0 ? 'text-purple-400' : 'text-zinc-600'} />
                         <span className="font-bold text-white text-xs sm:text-sm">{filial.filial_nome}</span>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          filial.status === 'EM_ESTOQUE'
+                          filial.quantidadeTotal > 0
                             ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
-                            : filial.status === 'ESTOQUE_BAIXO'
-                            ? 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
                             : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
                         }`}>
-                          {filial.status === 'EM_ESTOQUE' ? 'Em Estoque' : filial.status === 'ESTOQUE_BAIXO' ? 'Estoque Baixo' : 'Esgotado'}
+                          {filial.quantidadeTotal > 0 ? 'Em Estoque' : 'Esgotado'}
                         </span>
                       </div>
                       <span className="font-mono text-xs font-bold text-cyan-400">
