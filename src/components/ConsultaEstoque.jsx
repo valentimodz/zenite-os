@@ -26,6 +26,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { formatCurrency, formatarMoeda } from '../utils/currencyUtils';
+import ModalDetalheEstoqueProduto from './ModalDetalheEstoqueProduto';
 
 export default function ConsultaEstoque({
   filiais = [],
@@ -66,7 +67,8 @@ export default function ConsultaEstoque({
   const [imeisDisponiveis, setImeisDisponiveis] = useState([]);
   const [categoriasLista, setCategoriasLista] = useState([]);
 
-  // 3. Estado do Modal de IMEIs Disponíveis
+  // 3. Estado dos Modais
+  const [produtoSelecionadoModal, setProdutoSelecionadoModal] = useState(null);
   const [modalImeisAberto, setModalImeisAberto] = useState(false);
   const [produtoImeisModal, setProdutoImeisModal] = useState(null);
   const [filialImeisModal, setFilialImeisModal] = useState(null);
@@ -769,8 +771,12 @@ export default function ConsultaEstoque({
                 key={item.cardKey}
                 className="bg-[#0d1117] border border-zinc-800/80 hover:border-purple-500/50 rounded-xl p-4 flex flex-col justify-between gap-3 transition-all duration-200 group hover:shadow-xl hover:shadow-purple-950/20 relative"
               >
-                {/* 1. Cabeçalho do Card */}
-                <div>
+                {/* 1. Cabeçalho do Card (Clicável para abrir Detalhes / Ajuste) */}
+                <div
+                  onClick={() => setProdutoSelecionadoModal(item.itensFisicos?.[0] || item)}
+                  className="cursor-pointer group/header"
+                  title="Clique para ver detalhes e ajustes do produto"
+                >
                   {/* Topo Superior: Ícone de loja + [NOME DA FILIAL] e Preço Verde Vibrante */}
                   <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-zinc-800/60">
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -796,7 +802,7 @@ export default function ConsultaEstoque({
                   </div>
 
                   {/* Nome do Produto: Em branco brilhante com tracking-wide */}
-                  <h3 className="text-xs md:text-sm font-bold text-white tracking-wide mt-2 group-hover:text-purple-200 transition-colors line-clamp-2 leading-snug">
+                  <h3 className="text-xs md:text-sm font-bold text-white tracking-wide mt-2 group-hover/header:text-purple-300 transition-colors line-clamp-2 leading-snug">
                     {item.nome}
                   </h3>
                   {item.codigo_barras && (
@@ -871,8 +877,10 @@ export default function ConsultaEstoque({
                     <button
                       type="button"
                       onClick={() => {
+                        const targetProd = item.itensFisicos?.[0] || item;
+                        setProdutoSelecionadoModal(targetProd);
                         if (onOpenDetalhesProduto) {
-                          onOpenDetalhesProduto(item.itensFisicos?.[0] || item);
+                          onOpenDetalhesProduto(targetProd);
                         }
                       }}
                       className="w-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/60 hover:border-zinc-500 text-zinc-300 hover:text-white font-medium py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate shadow-sm"
@@ -1065,6 +1073,31 @@ export default function ConsultaEstoque({
             </div>
           </div>
         </div>
+      )}
+
+      {/* 5. Modal de Detalhes, Histórico e Ajuste de Estoque */}
+      {produtoSelecionadoModal && (
+        <ModalDetalheEstoqueProduto
+          produtoId={produtoSelecionadoModal.id || produtoSelecionadoModal.produto_id}
+          produto={produtoSelecionadoModal}
+          filialId={filialSelecionada !== 'TODAS' ? filialSelecionada : activeFilialId}
+          filiais={listaFiliais}
+          isOpen={!!produtoSelecionadoModal}
+          onClose={() => setProdutoSelecionadoModal(null)}
+          onRefresh={() => {
+            carregarDadosEstoque();
+          }}
+          onSuccess={() => {
+            // Recarrega os dados de estoque atualizados após salvar a edição
+            carregarDadosEstoque();
+          }}
+          onTransferir={() => {
+            setProdutoSelecionadoModal(null);
+            if (onNavigateToTransferencias) {
+              onNavigateToTransferencias();
+            }
+          }}
+        />
       )}
     </div>
   );
