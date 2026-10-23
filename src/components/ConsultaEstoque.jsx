@@ -671,79 +671,85 @@ export default function ConsultaEstoque({
             return (
               <div
                 key={item.cardKey}
-                className="bg-[#0e0e11] border border-[#202028] hover:border-[#8B5CF6]/50 rounded-xl p-4 flex flex-col justify-between gap-3 transition-all duration-200 group hover:shadow-lg hover:shadow-[#8B5CF6]/5 relative"
+                className="bg-[#0d1117] border border-zinc-800/80 hover:border-purple-500/50 rounded-xl p-4 flex flex-col justify-between gap-3 transition-all duration-200 group hover:shadow-xl hover:shadow-purple-950/20 relative"
               >
-                {/* 1. Cabeçalho: [NOME DA FILIAL] e Preço (R$) */}
+                {/* 1. Cabeçalho do Card */}
                 <div>
-                  <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-[#1b1b22]">
+                  {/* Topo Superior: Ícone de loja + [NOME DA FILIAL] e Preço Verde Vibrante */}
+                  <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-zinc-800/60">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <Store size={13} className="text-[#8B5CF6] shrink-0" />
-                      <span className="text-xs font-black uppercase tracking-wider text-purple-200 truncate">
+                      <Store size={15} className="text-cyan-400 shrink-0" />
+                      <span className="text-xs font-black uppercase tracking-wider text-cyan-300 truncate">
                         [{item.filialNomeCard}]
                       </span>
                     </div>
-                    <span className="text-sm font-mono font-extrabold text-emerald-400 shrink-0">
+                    <span className="text-sm font-mono font-bold text-emerald-400 shrink-0 tracking-tight">
                       {formatCurrency(item.preco)}
                     </span>
                   </div>
 
-                  {/* 2. Identificação: Categoria, Nome do Produto, SKU/EAN */}
+                  {/* Linha Secundária: Tag/Pill de categoria e SKU */}
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] bg-[#1a1228] text-purple-300 border border-[#3b255e] px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1">
-                      {item.isCelular ? <Smartphone size={10} className="text-[#8B5CF6]" /> : <Tag size={10} className="text-[#8B5CF6]" />}
+                    <span className="text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/60 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
+                      {item.isCelular ? <Smartphone size={10} className="text-purple-400" /> : <Tag size={10} className="text-purple-400" />}
                       {item.categoria || 'Geral'}
                     </span>
-                    <span className="text-[10px] text-gray-400 font-mono">
-                      SKU: <strong className="text-gray-300">{item.sku || 'N/D'}</strong>
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      SKU: <strong className="text-zinc-300">{item.sku || 'N/D'}</strong>
                     </span>
                   </div>
 
-                  <h3 className="text-xs md:text-sm font-extrabold text-white mt-1.5 group-hover:text-purple-300 transition-colors line-clamp-2 leading-snug">
+                  {/* Nome do Produto: Em branco brilhante com tracking-wide */}
+                  <h3 className="text-xs md:text-sm font-bold text-white tracking-wide mt-2 group-hover:text-purple-200 transition-colors line-clamp-2 leading-snug">
                     {item.nome}
                   </h3>
                   {item.codigo_barras && (
-                    <span className="text-[10px] text-gray-500 font-mono mt-0.5 block truncate">
+                    <span className="text-[10px] text-zinc-500 font-mono mt-0.5 block truncate">
                       EAN: {item.codigo_barras}
                     </span>
                   )}
                 </div>
 
-                {/* 3. Bloco de Estoque & Rodapé Sutil */}
-                <div className="bg-black/50 border border-[#1f1f26] rounded-lg p-2.5 space-y-2">
-                  {/* Bloco de Estoque: "ESTOQUE NESTA FILIAL: X un" com o badge de status */}
+                {/* 2. Bloco Central de Estoque (Painel interno com bg-black/40 e borda sutil) */}
+                <div className="bg-black/40 border border-zinc-800/60 rounded-lg p-3 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                      <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">
                         ESTOQUE NESTA FILIAL
                       </span>
-                      <span className="text-lg font-extrabold text-white font-mono leading-none mt-0.5 block">
-                        {item.qtdFilial} <span className="text-[11px] text-gray-400 font-sans font-normal">un</span>
+                      <span className="text-xs font-bold text-cyan-300 truncate max-w-[140px] block mt-0.5">
+                        {item.filialNomeCard}
                       </span>
                     </div>
 
-                    <div className="shrink-0">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl font-bold text-white font-mono leading-none">
+                        {item.qtdFilial} <span className="text-[11px] text-gray-400 font-sans font-normal">un</span>
+                      </span>
+
+                      {/* Badges de Status com fundo escuro, borda e texto vivo */}
                       {isEsgotado && (
-                        <span className="text-[10px] bg-rose-500/15 text-rose-300 border border-rose-500/40 px-2 py-0.5 rounded font-extrabold tracking-wide">
+                        <span className="text-[10px] bg-red-950/80 text-red-400 border border-red-600/80 px-2 py-0.5 rounded font-bold tracking-wide">
                           ESGOTADO
                         </span>
                       )}
                       {isCritico && (
-                        <span className="text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-extrabold tracking-wide">
+                        <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-500/80 px-2 py-0.5 rounded font-bold tracking-wide">
                           CRÍTICO
                         </span>
                       )}
                       {isDisponivel && (
-                        <span className="text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded font-extrabold tracking-wide">
+                        <span className="text-[10px] bg-emerald-950/80 text-emerald-400 border border-emerald-500/80 px-2 py-0.5 rounded font-bold tracking-wide">
                           DISPONÍVEL
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Rodapé sutil: "Disponível na Rede: X unidades" */}
-                  <div className="border-t border-[#181820] pt-1.5 flex items-center justify-between text-[11px]">
-                    <span className="text-gray-400 font-medium flex items-center gap-1">
-                      <Building2 size={12} className="text-[#8B5CF6]" />
+                  {/* Rodapé interno do bloco: Ícone de rede + "Disponível na Rede: X unidades" */}
+                  <div className="border-t border-zinc-800/60 pt-2 flex items-center justify-between text-[11px]">
+                    <span className="text-gray-400 font-medium flex items-center gap-1.5">
+                      <Building2 size={13} className="text-purple-400" />
                       Disponível na Rede:
                     </span>
                     <span className="font-mono font-bold text-purple-300">
@@ -752,15 +758,15 @@ export default function ConsultaEstoque({
                   </div>
                 </div>
 
-                {/* 4. Botões de ação no rodapé: [Histórico / Ajuste] e [Transferir] */}
+                {/* 3. Botões de Ação no Rodapé */}
                 <div className="space-y-1.5 pt-0.5">
                   {item.isCelular && (
                     <button
                       type="button"
                       onClick={() => handleAbrirImeis(item)}
-                      className="w-full bg-[#1b122c] hover:bg-[#281845] border border-[#8B5CF6]/40 hover:border-[#8B5CF6] text-purple-300 hover:text-white font-bold py-1.5 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      className="w-full bg-[#1b122c] hover:bg-[#281845] border border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white font-bold py-1.5 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
                     >
-                      <QrCode size={13} className="text-[#8B5CF6]" />
+                      <QrCode size={13} className="text-purple-400" />
                       <span>Ver IMEIs nesta Filial</span>
                     </button>
                   )}
@@ -773,10 +779,10 @@ export default function ConsultaEstoque({
                           onOpenDetalhesProduto(item.itensFisicos?.[0] || item);
                         }
                       }}
-                      className="w-full bg-black/60 hover:bg-[#1a1226] border border-[#2b2b36] hover:border-[#8B5CF6]/50 text-gray-300 hover:text-white font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate"
+                      className="w-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/60 hover:border-zinc-500 text-zinc-300 hover:text-white font-medium py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate shadow-sm"
                       title="Ver histórico e ajustes"
                     >
-                      <History size={12} className="text-[#8B5CF6] shrink-0" />
+                      <History size={13} className="text-zinc-400 shrink-0" />
                       <span className="truncate">Histórico / Ajuste</span>
                     </button>
 
@@ -787,11 +793,11 @@ export default function ConsultaEstoque({
                           onNavigateToTransferencias();
                         }
                       }}
-                      className="w-full bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 hover:text-white font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate"
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate shadow-md shadow-purple-900/30"
                       title="Solicitar transferência entre filiais"
                     >
-                      <ArrowRightLeft size={12} className="text-[#8B5CF6] shrink-0" />
-                      <span className="truncate">Transferir</span>
+                      <ArrowRightLeft size={13} className="text-white shrink-0" />
+                      <span className="truncate font-semibold">Transferir</span>
                     </button>
                   </div>
                 </div>
