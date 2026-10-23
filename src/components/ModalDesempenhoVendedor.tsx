@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  X, 
-  Award, 
-  TrendingUp, 
-  Target, 
-  DollarSign, 
-  Receipt, 
-  Sparkles, 
-  Calendar, 
-  Store, 
-  User, 
-  CreditCard, 
+import {
+  X,
+  Award,
+  TrendingUp,
+  Target,
+  DollarSign,
+  Receipt,
+  Sparkles,
+  Calendar,
+  Store,
+  User,
+  CreditCard,
   ShoppingBag,
   Zap,
   CheckCircle2,
@@ -122,22 +122,22 @@ export function obterComissaoVenda(venda: any): number {
   const item = venda?.itens_venda?.[0] || {};
   const produtoNome = String(venda?.produto_nome || item.produto_nome || venda?.nome || item.nome || '').toUpperCase();
   const categoria = String(venda?.categoria || item.categoria || '').toUpperCase();
-  
+
   // A FORMA DE PAGAMENTO DEVE VIR DA VENDA PRINCIPAL (extração tolerante)
   const formaPgto = String(
-    venda?.forma_pagamento || 
-    venda?.metodo_pagamento || 
-    venda?.pagamento || 
-    item?.forma_pagamento || 
-    item?.metodo_pagamento || 
+    venda?.forma_pagamento ||
+    venda?.metodo_pagamento ||
+    venda?.pagamento ||
+    item?.forma_pagamento ||
+    item?.metodo_pagamento ||
     ''
   ).toUpperCase();
-  
+
   const valorTotal = Number(venda?.valor_total || item?.valor_total || item?.preco_unitario || venda?.valor || 0);
   if (valorTotal <= 0) return 0;
 
   // REGRA 1: ACESSÓRIOS (2,5%)
-  const isAcessorio = 
+  const isAcessorio =
     categoria.includes('ACESS') ||
     categoria.includes('CARREGADOR') ||
     categoria.includes('CABO') ||
@@ -198,15 +198,15 @@ export function obterComissaoVenda(venda: any): number {
 export function calcularComissaoTotal(venda: any, item?: any) {
   const produtoNome = String(item?.produto_nome || venda?.produto_nome || venda?.nome || '').toUpperCase();
   const categoria = String(item?.categoria || venda?.categoria || '').toUpperCase();
-  
+
   // Captura a forma de pagamento tanto da venda quanto do item
   const formaPgto = String(
-    venda?.forma_pagamento || 
-    venda?.metodo_pagamento || 
-    item?.forma_pagamento || 
+    venda?.forma_pagamento ||
+    venda?.metodo_pagamento ||
+    item?.forma_pagamento ||
     ''
   ).toUpperCase();
-  
+
   const valor = Number(item?.valor_total || venda?.valor_total || 0);
   if (valor <= 0) return { comissaoVendedor: 0, comissaoTrainee: 0 };
 
@@ -226,7 +226,7 @@ export function calcularComissao(vendaOuItem: any): number {
 // Helper robusto de comissão para cada item
 export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): number => {
   if (!sale) return 0;
-  
+
   if (isTrainee) {
     if (sale.comissao_trainee !== undefined && sale.comissao_trainee !== null && sale.comissao_trainee !== '') {
       const val = parseFloat(sale.comissao_trainee);
@@ -257,8 +257,8 @@ export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): numb
 
 // Termos e financeiras para metas de boletos/financiadoras (PAYJOY, UME, WATU, AIVA, BOLETO, CREDIARIO, FINANCIADORA, etc.)
 export const BOLETO_FINANCIADORAS_TERMS = [
-  'BOLETO', 'PAYJOY', 'UME', 'UMA', 'WATU', 'AIVA', 
-  'CREDIARIO', 'CREDIÁRIO', 'FINANCIADORA', 'FINANCIAMENTO', 'FINANC', 
+  'BOLETO', 'PAYJOY', 'UME', 'UMA', 'WATU', 'AIVA',
+  'CREDIARIO', 'CREDIÁRIO', 'FINANCIADORA', 'FINANCIAMENTO', 'FINANC',
   'PARCELADO', 'PROMIS', 'CARNE', 'CARNÊ'
 ];
 
@@ -295,11 +295,11 @@ export const isAcessorio = (venda: any): boolean => {
   const cat = (venda.categoria || venda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
   const prod = (venda.produto_nome || venda.produtos?.nome || venda.descricao || venda.produtos_descricao || venda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
   const obs = (venda.observacoes || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-  
+
   const termosAcessorios = [
-    'ACESSORIO', 'ACESSORIOS', 'CAPA', 'CAPAS', 'CASE', 'CASES', 
+    'ACESSORIO', 'ACESSORIOS', 'CAPA', 'CAPAS', 'CASE', 'CASES',
     'PELICULA', 'PELICULAS', 'FILME', 'FONE', 'FONES', 'HEADSET', 'AIRPOD',
-    'FONTE', 'FONTES', 'CABO', 'CABOS', 'CARREGADOR', 'CARREGADORES', 
+    'FONTE', 'FONTES', 'CABO', 'CABOS', 'CARREGADOR', 'CARREGADORES',
     'SUPORTE', 'POWERBANK', 'POWER BANK', 'ADAPTADOR', 'ADAPTADORES'
   ];
 
@@ -369,10 +369,10 @@ export default function ModalDesempenhoVendedor({
   const queryClient = useQueryClient();
 
   // Consulta à view consolidada do Supabase para conciliação perfeita
-  const { 
-    colaboradorMetas: dadosViewConsolidada, 
-    isLoading: isLoadingView, 
-    refetch: refetchViewConsolidada 
+  const {
+    colaboradorMetas: dadosViewConsolidada,
+    isLoading: isLoadingView,
+    refetch: refetchViewConsolidada
   } = useMinhasMetasIndividual({
     colaboradorId: targetVendedorId,
     competencia: mesAtivo,
@@ -511,52 +511,10 @@ export default function ModalDesempenhoVendedor({
       let query = supabase
         .from('vendas')
         .select(`
-          id,
-          created_at,
-          data,
-          valor_total,
-          valor,
-          categoria,
-          produto_nome,
-          produtos_descricao,
-          descricao,
-          comissao,
-          comissao_vendedor,
-          forma_pagamento,
-          metodo_pagamento,
-          financeira,
-          financeira_parceira,
-          pagamentos,
-          valor_boleto,
-          valor_pix,
-          valor_dinheiro,
-          valor_cartao,
-          vendedor_id,
-          vendedor_nome,
-          trainee_id,
-          treener_id,
-          trainee_nome,
-          comissao_trainee,
-          teve_participacao_trainee,
-          status,
-          vendas_pagamentos (
-            id,
-            valor_pago,
-            valor,
-            metodo_pagamento,
-            forma_pagamento,
-            financeira,
-            metodo_detalhe
-          ),
-          itens_venda (
-            id,
-            produto_nome,
-            categoria,
-            quantidade,
-            preco_unitario,
-            valor_total
-          )
-        `)
+    *,
+    vendas_pagamentos (*),
+    itens_venda (*)
+  `)
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
         .order('created_at', { ascending: false });
@@ -670,7 +628,7 @@ export default function ModalDesempenhoVendedor({
               try {
                 const parsed = JSON.parse(v.pagamentos);
                 if (Array.isArray(parsed)) listaPags = parsed;
-              } catch (e) {}
+              } catch (e) { }
             }
           }
           if (listaPags.length > 0) {
@@ -693,8 +651,8 @@ export default function ModalDesempenhoVendedor({
 
         // Realizado Acessórios: Unificado com Minhas Metas (incluindo vendas com trainee e itens da categoria acessorios)
         const termosAcessorios = [
-          'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
-          'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 
+          'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER',
+          'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE',
           'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
         ];
 
@@ -764,50 +722,8 @@ export default function ModalDesempenhoVendedor({
         let query = supabase
           .from('vendas')
           .select(`
-            id,
-            valor_total,
-            valor,
-            comissao_vendedor,
-            comissao,
-            forma_pagamento,
-            metodo_pagamento,
-            financeira,
-            financeira_parceira,
-            pagamentos,
-            valor_boleto,
-            valor_pix,
-            valor_dinheiro,
-            valor_cartao,
-            categoria,
-            produto_nome,
-            produtos_descricao,
-            descricao,
-            created_at,
-            vendedor_id,
-            vendedor_nome,
-            trainee_id,
-            treener_id,
-            trainee_nome,
-            comissao_trainee,
-            teve_participacao_trainee,
-            status,
-            vendas_pagamentos (
-              id,
-              valor_pago,
-              valor,
-              metodo_pagamento,
-              forma_pagamento,
-              financeira,
-              metodo_detalhe
-            ),
-            itens_venda (
-              id,
-              produto_nome,
-              categoria,
-              quantidade,
-              preco_unitario,
-              valor_total
-            )
+            vendas_pagamentos (*),
+itens_venda (*)
           `)
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
@@ -963,8 +879,8 @@ export default function ModalDesempenhoVendedor({
     const cargoNormalizado = String(colaborador?.cargo || (colaborador as any)?.funcao || '').toUpperCase().trim();
     const roleNormalizado = String(colaborador?.role || '').toUpperCase().trim();
     const isOriginalTrainee = Boolean(
-      cargoNormalizado.includes('TRAINEE') || 
-      roleNormalizado.includes('TRAINEE') || 
+      cargoNormalizado.includes('TRAINEE') ||
+      roleNormalizado.includes('TRAINEE') ||
       colaborador?.is_treinner === true
     );
     const isTrainee = isOriginalTrainee;
@@ -973,31 +889,31 @@ export default function ModalDesempenhoVendedor({
     const metaBanco = metaIndividual;
 
     // Prioriza meta individual se existir e for maior que 0, senão utiliza a meta de regras_comissoes
-    const metaBoleto = Number(metaBanco?.meta_boleto) > 0 
-      ? Number(metaBanco?.meta_boleto) 
-      : (isTrainee 
-        ? (Number(metaBanco?.meta_trainee_boleto) || 35000) 
+    const metaBoleto = Number(metaBanco?.meta_boleto) > 0
+      ? Number(metaBanco?.meta_boleto)
+      : (isTrainee
+        ? (Number(metaBanco?.meta_trainee_boleto) || 35000)
         : (objetivoBoleto > 0 ? objetivoBoleto : 67500));
 
-    const metaAcessorios = Number(metaBanco?.meta_acessorios) > 0 
-      ? Number(metaBanco?.meta_acessorios) 
-      : (isTrainee 
-        ? 5000 
+    const metaAcessorios = Number(metaBanco?.meta_acessorios) > 0
+      ? Number(metaBanco?.meta_acessorios)
+      : (isTrainee
+        ? 5000
         : (objetivoAcessorios > 0 ? objetivoAcessorios : 10000));
 
     // META TOTAL COMBINADA: soma de meta_boleto + meta_acessorios (ou metaTotalCombinada calculada)
     const metaTotal = metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios);
 
-    const superMetaBoleto = Number(metaBanco?.super_meta_boleto) > 0 
-      ? Number(metaBanco?.super_meta_boleto) 
-      : (isTrainee 
-        ? 45000 
+    const superMetaBoleto = Number(metaBanco?.super_meta_boleto) > 0
+      ? Number(metaBanco?.super_meta_boleto)
+      : (isTrainee
+        ? 45000
         : (superMetaBoletoState > 0 ? superMetaBoletoState : 87000));
 
-    const superMetaAcessorios = Number(metaBanco?.super_meta_acessorios) > 0 
-      ? Number(metaBanco?.super_meta_acessorios) 
-      : (isTrainee 
-        ? 7500 
+    const superMetaAcessorios = Number(metaBanco?.super_meta_acessorios) > 0
+      ? Number(metaBanco?.super_meta_acessorios)
+      : (isTrainee
+        ? 7500
         : (superMetaAcessoriosState > 0 ? superMetaAcessoriosState : 15000));
 
     // Fallback em cascata para que 'sales' nunca fique vazio se houver vendas disponíveis
@@ -1018,7 +934,7 @@ export default function ModalDesempenhoVendedor({
     const sales = (vendasParaCalculo || []) as any[];
     const rawSalesCount = sales.length;
     const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
-    
+
     // Prioriza dados da view consolidada ou dos estados calculados da RPC/query direta otimizada
     const totalVendasGeral = Number(dadosViewConsolidada?.volume_total_participado || 0) > 0
       ? Number(dadosViewConsolidada?.volume_total_participado)
@@ -1056,25 +972,25 @@ export default function ModalDesempenhoVendedor({
     const isIslayne = nomeColabUpper.includes('ISLAYNE');
 
     // Validação específica da folha oficial de Setembro/2026 para apoio Trainee se view ainda não computou
-    const faturadoComApoioTrainee = faturadoComApoioTraineeCalc > 0 
-      ? faturadoComApoioTraineeCalc 
+    const faturadoComApoioTrainee = faturadoComApoioTraineeCalc > 0
+      ? faturadoComApoioTraineeCalc
       : (isIslayne && isSetembro2026 ? 11133.92 : (faturadoTraineeView > 0 ? faturadoTraineeView : 0));
 
-    const faturadoTitularSolo = faturadoTitularSoloCalc > 0 
-      ? faturadoTitularSoloCalc 
+    const faturadoTitularSolo = faturadoTitularSoloCalc > 0
+      ? faturadoTitularSoloCalc
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
     // Vendas filtradas para cálculo das metas operacionais:
     // Se o colaborador for Trainee, suas metas consideram as vendas em que atuou como Trainee (v.trainee_id ou v.trainee_nome) ou vendas diretas
     const vendasParaMetas = isTrainee
       ? sales.filter(s => {
-          const tIdMatch = (targetVendedorId && (String(s.trainee_id) === String(targetVendedorId) || String(s.treener_id) === String(targetVendedorId)));
-          const tNomeMatch = (targetVendedorNome && String(s.trainee_nome || '').toUpperCase().includes(targetVendedorNome.toUpperCase()));
-          return tIdMatch || tNomeMatch || temApoioTrainee(s) || String(s.vendedor_id) === String(targetVendedorId);
-        })
+        const tIdMatch = (targetVendedorId && (String(s.trainee_id) === String(targetVendedorId) || String(s.treener_id) === String(targetVendedorId)));
+        const tNomeMatch = (targetVendedorNome && String(s.trainee_nome || '').toUpperCase().includes(targetVendedorNome.toUpperCase()));
+        return tIdMatch || tNomeMatch || temApoioTrainee(s) || String(s.vendedor_id) === String(targetVendedorId);
+      })
       : (filtroTipoVendas === 'solo'
-          ? sales.filter(s => !temApoioTrainee(s))
-          : sales);
+        ? sales.filter(s => !temApoioTrainee(s))
+        : sales);
 
     // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS (com suporte a pagamentos mistos / fracionados e apoio trainee):
     let totalBoletosCalculado = 0;
@@ -1107,7 +1023,7 @@ export default function ModalDesempenhoVendedor({
           try {
             const parsed = JSON.parse(v.pagamentos);
             if (Array.isArray(parsed)) listaPags = parsed;
-          } catch (e) {}
+          } catch (e) { }
         }
       }
       if (listaPags.length > 0) {
@@ -1134,8 +1050,8 @@ export default function ModalDesempenhoVendedor({
 
     // 4. CÁLCULO DE ACESSÓRIOS IDÊNTICO A MINHAS METAS (com categoria acessorios e apoio de trainee):
     const termosAcessorios = [
-      'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER', 
-      'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 
+      'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER',
+      'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE',
       'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
     ];
 
@@ -1143,7 +1059,7 @@ export default function ModalDesempenhoVendedor({
 
     vendasParaMetas.forEach((v) => {
       const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-      
+
       if (itens.length > 0) {
         itens.forEach((item: any) => {
           const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase().trim();
@@ -1380,16 +1296,16 @@ export default function ModalDesempenhoVendedor({
       historico: sales
     };
   }, [
-    metaIndividual, 
-    vendasColaborador, 
+    metaIndividual,
+    vendasColaborador,
     vendasLocais,
-    dadosViewConsolidada, 
-    colaboradorId, 
-    colaborador?.nome, 
-    colaborador?.cargo, 
-    colaborador?.role, 
-    colaborador?.is_treinner, 
-    mesAtivo, 
+    dadosViewConsolidada,
+    colaboradorId,
+    colaborador?.nome,
+    colaborador?.cargo,
+    colaborador?.role,
+    colaborador?.is_treinner,
+    mesAtivo,
     mesCompetencia,
     totalVendas,
     qtdVendas,
@@ -1415,16 +1331,16 @@ export default function ModalDesempenhoVendedor({
   const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
       <div className="bg-[#0D0D0D] border border-[#222222] rounded-2xl w-full max-w-6xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden relative my-auto">
-        
+
         {/* CABEÇALHO DO MODAL */}
         <div className="p-4 sm:p-6 border-b border-[#222222] bg-[#0A0A0A] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#6A0DAD] to-[#450A7A] flex items-center justify-center text-white font-black text-lg shadow-lg shadow-purple-950/40 border border-purple-500/30">
               {colaborador.avatar_url ? (
-                <img 
-                  src={colaborador.avatar_url} 
-                  alt={colaborador.nome} 
-                  className="w-full h-full object-cover rounded-xl" 
+                <img
+                  src={colaborador.avatar_url}
+                  alt={colaborador.nome}
+                  className="w-full h-full object-cover rounded-xl"
                 />
               ) : (
                 (colaborador.nome || 'V').slice(0, 2).toUpperCase()
@@ -1436,11 +1352,10 @@ export default function ModalDesempenhoVendedor({
                 <h3 className="text-base sm:text-lg font-black text-white tracking-wide">
                   Desempenho &amp; Metas: {colaborador.nome}
                 </h3>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                  dashboardInfo.isTrainee 
-                    ? 'bg-purple-950/60 text-purple-300 border border-purple-700/50' 
-                    : 'bg-emerald-950/60 text-emerald-400 border border-emerald-700/50'
-                }`}>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${dashboardInfo.isTrainee
+                  ? 'bg-purple-950/60 text-purple-300 border border-purple-700/50'
+                  : 'bg-emerald-950/60 text-emerald-400 border border-emerald-700/50'
+                  }`}>
                   {dashboardInfo.isTrainee ? 'Trainee Bonificado' : (colaborador.cargo || colaborador.role || 'Vendedor')}
                 </span>
               </div>
@@ -1512,10 +1427,10 @@ export default function ModalDesempenhoVendedor({
 
         {/* CORPO DO MODAL (SCROLLÁVEL) */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar">
-          
+
           {/* CARDS SUPERIORES DE MÉTRICAS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            
+
             {/* Vendas Totais */}
             <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-4 flex flex-col justify-between shadow-lg">
               <div className="flex items-center justify-between">
@@ -1604,7 +1519,7 @@ export default function ModalDesempenhoVendedor({
                   R$ {dashboardInfo.metaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
                 <div className="w-full bg-[#1A1A1A] rounded-full h-1.5 mt-2 overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-gradient-to-r from-[#6A0DAD] to-purple-400 transition-all duration-700"
                     style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.progressoTotal))}%` }}
                   ></div>
@@ -1634,22 +1549,20 @@ export default function ModalDesempenhoVendedor({
               <button
                 type="button"
                 onClick={() => setFiltroTipoVendas('todas')}
-                className={`px-3 py-1 rounded-md text-[11px] font-bold tracking-wide transition-all ${
-                  filtroTipoVendas === 'todas'
-                    ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white shadow-md'
-                    : 'text-gray-400 hover:text-gray-200'
-                }`}
+                className={`px-3 py-1 rounded-md text-[11px] font-bold tracking-wide transition-all ${filtroTipoVendas === 'todas'
+                  ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white shadow-md'
+                  : 'text-gray-400 hover:text-gray-200'
+                  }`}
               >
                 Todas as Vendas (Com Apoio)
               </button>
               <button
                 type="button"
                 onClick={() => setFiltroTipoVendas('solo')}
-                className={`px-3 py-1 rounded-md text-[11px] font-bold tracking-wide transition-all ${
-                  filtroTipoVendas === 'solo'
-                    ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white shadow-md'
-                    : 'text-gray-400 hover:text-gray-200'
-                }`}
+                className={`px-3 py-1 rounded-md text-[11px] font-bold tracking-wide transition-all ${filtroTipoVendas === 'solo'
+                  ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white shadow-md'
+                  : 'text-gray-400 hover:text-gray-200'
+                  }`}
               >
                 Apenas Titular Solo
               </button>
@@ -1658,7 +1571,7 @@ export default function ModalDesempenhoVendedor({
 
           {/* BLOCOS DE METAS: BOLETOS & ACESSÓRIOS */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            
+
             {/* CARTÃO 2: META DE BOLETOS / FINANCIADORAS */}
             <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-5 space-y-4 shadow-lg">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1A1A1A] pb-3">
@@ -1822,10 +1735,10 @@ export default function ModalDesempenhoVendedor({
                         ? itens[0].categoria
                         : (sale.categoria || 'Geral');
 
-                      const valorComissaoSalva = 
-                        sale.comissao_vendedor ?? 
-                        sale.comissao ?? 
-                        sale.valor_comissao ?? 
+                      const valorComissaoSalva =
+                        sale.comissao_vendedor ??
+                        sale.comissao ??
+                        sale.valor_comissao ??
                         itens?.[0]?.comissao;
 
                       const valorComissaoBruto = valorComissaoSalva !== undefined && valorComissaoSalva !== null && valorComissaoSalva !== ''

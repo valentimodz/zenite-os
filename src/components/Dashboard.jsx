@@ -35,6 +35,7 @@ import ModalEntradaEstoqueRapida from './ModalEntradaEstoqueRapida';
 import ModalMetasFilial from './ModalMetasFilial';
 import ModalMetasVendedor from './ModalMetasVendedor';
 import ModalDetalheEstoqueProduto from './ModalDetalheEstoqueProduto';
+import ConsultaEstoque from './ConsultaEstoque';
 import AlertaEstoqueBaixo from './AlertaEstoqueBaixo';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
@@ -466,8 +467,8 @@ function ProductTableRow({
         {/* 3. CATEGORIA */}
         <td className="w-[15%] px-3 py-3 whitespace-nowrap align-middle">
           <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${p.categoria === 'IOS'
-              ? 'bg-blue-950/30 text-blue-300 border border-blue-800/30'
-              : 'bg-purple-950/30 text-purple-300 border border-purple-800/30'
+            ? 'bg-blue-950/30 text-blue-300 border border-blue-800/30'
+            : 'bg-purple-950/30 text-purple-300 border border-purple-800/30'
             }`}>
             {p.categoria || p.tipo || 'GERAL'}
           </span>
@@ -4555,31 +4556,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       let query = supabase
         .from('caixas')
         .select(`
-          id,
-          filial_id,
-          empresa_id,
-          operador_id,
-          status,
-          saldo_inicial,
-          valor_abertura,
-          deposito_inicial,
-          total_vendas,
-          total_dinheiro,
-          total_cartao,
-          total_pix,
-          saldo_final,
-          saldo_final_dinheiro,
-          saldo_final_cartao,
-          saldo_final_pix,
-          data_abertura,
-          aberto_em,
-          data_fechamento,
-          fechado_em,
-          observacao,
-          observacao_abertura,
-          observacoes_abertura,
-          observacoes_fechamento,
-          created_at
+          *
         `)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -16271,15 +16248,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           status,
           filial_id,
           vendedor_id,
-          vendas_pagamentos (
-            id,
-            valor_pago,
-            valor,
-            metodo_pagamento,
-            forma_pagamento,
-            financeira,
-            metodo_detalhe
-          )
+          vendas_pagamentos (*)
         `)
         .gte('created_at', inicioDoDia.toISOString())
         .lte('created_at', fimDoDia.toISOString())
@@ -20304,8 +20273,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     onClick={handleAdicionarPagamentoPdv}
                                     disabled={!isFormularioAparelhoValido}
                                     className={`w-full py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md ${isFormularioAparelhoValido
-                                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-95'
-                                        : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed opacity-60'
+                                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-95'
+                                      : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed opacity-60'
                                       }`}
                                   >
                                     <Plus size={14} />
@@ -21610,8 +21579,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             type="button"
             onClick={() => setEntradaSubTab('conferencia')}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${entradaSubTab === 'conferencia'
-                ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
+              ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
+              : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
           >
             <CheckCircle2 size={15} />
@@ -21630,8 +21599,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               fetchEstoqueMovimentacoes();
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${entradaSubTab === 'movimentacoes'
-                ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
+              ? 'bg-[#6A0DAD] text-white shadow-md shadow-[#6A0DAD]/20'
+              : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
           >
             <ClipboardList size={15} />
@@ -22095,8 +22064,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </div>
                             <div>
                               <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${String(item.status || '').toUpperCase() === 'VENDIDO'
-                                  ? 'bg-red-950/20 text-red-400 border border-red-800/30'
-                                  : 'bg-green-950/20 text-green-400 border border-green-800/30'
+                                ? 'bg-red-950/20 text-red-400 border border-red-800/30'
+                                : 'bg-green-950/20 text-green-400 border border-green-800/30'
                                 }`}>
                                 {item.status || 'DISPONIVEL'}
                               </span>
@@ -22319,8 +22288,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </td>
                           <td className="py-3">
                             <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${isEntrada
-                                ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/40'
-                                : 'bg-blue-950/30 text-blue-400 border border-blue-800/40'
+                              ? 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/40'
+                              : 'bg-blue-950/30 text-blue-400 border border-blue-800/40'
                               }`}>
                               {tipo}
                             </span>
@@ -22529,7 +22498,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               {estoqueSubMenuOpen && (
                 <div className="pl-4 space-y-1 border-l border-[#222222]/80 ml-5">
                   {showEstoque && sidebarItem('estoque', 'Entrada de Estoque', Database)}
-                  {showCatalogoMestre && sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2)}
+                  {showCatalogoMestre && sidebarItem('catalogo_mestre', 'Estoque', Package)}
                   {showCategorias && sidebarItem('categorias', 'Categorias', Tag)}
                   {showTransferencias && sidebarItem('transferencias', 'Transferências', Truck)}
                 </div>
@@ -22538,7 +22507,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           );
         } else {
           if (showEstoque) items.push(sidebarItem('estoque', 'Entrada de Estoque', Database));
-          if (showCatalogoMestre) items.push(sidebarItem('catalogo_mestre', 'Catálogo Mestre (Distribuir)', Share2));
+          if (showCatalogoMestre) items.push(sidebarItem('catalogo_mestre', 'Estoque', Package));
           if (showCategorias) items.push(sidebarItem('categorias', 'Categorias', Tag));
           if (showTransferencias) items.push(sidebarItem('transferencias', 'Transferências', Truck));
         }
@@ -26815,158 +26784,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   </div>
                 )}
 
-                {/* ABA CATÁLOGO MESTRE (DISTRIBUIR - RESTRITO ESTRITAMENTE PARA ADMIN E MASTER) */}
-                {activeTab === 'catalogo_mestre' && ['ADMIN', 'MASTER', 'DONO', 'OWNER', 'SUPER_ADMIN'].includes((profile?.role || profileDataProps?.role || '').toUpperCase()) && (
-                  <div className="space-y-6 animate-fadeIn">
-                    {/* Banner do Topo */}
-                    <div className="bg-gradient-to-r from-[#0A001A] to-[#0A0A0A] border border-[#6A0DAD]/30 p-6 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg">
-                      <div>
-                        <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
-                          <Share2 size={22} className="text-[#6A0DAD]" />
-                          Catálogo Mestre & Distribuição em Lote
-                        </h3>
-                        <p className="text-xs text-gray-400 mt-1">Gerencie os modelos mestre e distribua estoque diretamente para todas as filiais e lojas da rede.</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs bg-[#6A0DAD]/20 border border-[#6A0DAD]/40 text-purple-300 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm">
-                          <Database size={14} className="text-[#6A0DAD]" />
-                          {catalogoProdutosFiltrados.length} {catalogoProdutosFiltrados.length === 1 ? 'modelo' : 'modelos'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Painel Principal do Catálogo com Filtros e Buscas */}
-                    <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
-
-                      {/* Header Estratégico de Busca e Filtragem */}
-                      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-[#111111]/80 border border-[#222222] p-4 rounded-xl shadow-inner">
-
-                        {/* Input de Busca Textual por Nome/Cor/SKU */}
-                        <div className="relative flex-1">
-                          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
-                          <input
-                            type="text"
-                            placeholder="Buscar modelo por nome, cor ou SKU..."
-                            value={buscaCatalogoMestre}
-                            onChange={(e) => setBuscaCatalogoMestre(e.target.value)}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-xs text-white placeholder-gray-500 rounded-xl pl-10 pr-9 py-2.5 outline-none font-semibold transition-all"
-                          />
-                          {buscaCatalogoMestre && (
-                            <button
-                              type="button"
-                              onClick={() => setBuscaCatalogoMestre('')}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors p-1"
-                              title="Limpar busca"
-                            >
-                              <X size={14} />
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Dropdown de Categoria */}
-                        <div className="relative min-w-[220px]">
-                          <Filter className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6A0DAD] pointer-events-none" size={15} />
-                          <select
-                            value={categoriaCatalogoMestre}
-                            onChange={(e) => setCategoriaCatalogoMestre(e.target.value)}
-                            className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] text-xs text-white rounded-xl pl-10 pr-8 py-2.5 outline-none font-semibold cursor-pointer appearance-none transition-all"
-                          >
-                            <option value="TODAS">Todas as Categorias ({catalogoProdutos.length})</option>
-                            {categoriasDisponiveisMestre.filter(c => c !== 'TODAS').map(cat => {
-                              const countCat = catalogoProdutos.filter(p => (p.categoria || 'GERAL').toUpperCase() === cat).length;
-                              return (
-                                <option key={cat} value={cat}>
-                                  {cat} ({countCat})
-                                </option>
-                              );
-                            })}
-                          </select>
-                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" size={14} />
-                        </div>
-
-                        {/* Botão Resetar Filtros se houver filtro ativo */}
-                        {(buscaCatalogoMestre || categoriaCatalogoMestre !== 'TODAS') && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setBuscaCatalogoMestre('');
-                              setCategoriaCatalogoMestre('TODAS');
-                            }}
-                            className="px-3.5 py-2.5 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-800/40 text-purple-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shrink-0 cursor-pointer"
-                            title="Resetar filtros"
-                          >
-                            <X size={14} />
-                            <span>Limpar Filtros</span>
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Barra de Status do Filtro e Contadores */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-400 px-1">
-                        <span className="font-semibold flex items-center gap-1.5">
-                          <Database size={14} className="text-[#6A0DAD]" />
-                          Exibindo <strong className="text-white">{catalogoProdutosFiltrados.length}</strong> de <strong className="text-gray-300">{catalogoProdutos.length}</strong> modelos no catálogo mestre
-                        </span>
-                        {buscaCatalogoMestreDebounced && (
-                          <span className="text-[11px] text-purple-300 bg-purple-950/40 border border-purple-800/40 px-2.5 py-0.5 rounded-full font-mono self-start sm:self-auto">
-                            Busca: "{buscaCatalogoMestreDebounced}"
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Grid de Produtos ou Empty State */}
-                      {catalogoProdutosFiltrados.length === 0 ? (
-                        <div className="py-16 px-4 text-center bg-black/40 border border-dashed border-[#222222] rounded-xl flex flex-col items-center justify-center space-y-3 animate-fadeIn">
-                          <div className="p-3.5 bg-purple-950/30 border border-purple-800/40 rounded-full text-purple-400">
-                            <Search size={32} />
-                          </div>
-                          <h4 className="text-base font-bold text-white">Nenhum produto encontrado</h4>
-                          <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
-                            Não encontramos nenhum modelo no catálogo mestre com os termos informados
-                            {buscaCatalogoMestreDebounced && <span> para a busca <strong className="text-purple-300">"{buscaCatalogoMestreDebounced}"</strong></span>}
-                            {categoriaCatalogoMestre !== 'TODAS' && <span> na categoria <strong className="text-purple-300">"{categoriaCatalogoMestre}"</strong></span>}.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setBuscaCatalogoMestre('');
-                              setCategoriaCatalogoMestre('TODAS');
-                            }}
-                            className="px-4 py-2 bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 border border-[#6A0DAD]/50 text-purple-300 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 mt-2 cursor-pointer"
-                          >
-                            <X size={14} />
-                            <span>Resetar Filtros de Busca</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {catalogoProdutosFiltrados.map(p => (
-                            <div key={p.id} className="bg-black border border-[#222222] hover:border-[#6A0DAD]/40 p-4 rounded-xl flex flex-col justify-between gap-3 transition-all group">
-                              <div>
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-[9px] bg-purple-950/30 text-purple-400 border border-purple-800/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
-                                    {p.categoria || 'Geral'}
-                                  </span>
-                                  {p.cor && <ColorBadge cor={p.cor} />}
-                                </div>
-                                <h5 className="text-sm font-bold text-white mt-2 group-hover:text-purple-300 transition-colors">{p.nome}</h5>
-                                <p className="text-xs font-mono font-bold text-emerald-400 mt-1">R$ {parseFloat(p.preco || 0).toFixed(2)}</p>
-                                {p.sku && <p className="text-[10px] text-gray-500 font-mono mt-0.5">SKU: {p.sku}</p>}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleAbrirDistribuirEstoque(p)}
-                                className="w-full bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
-                              >
-                                <Share2 size={13} />
-                                <span>Distribuir para Filiais</span>
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                {/* ABA CONSULTA DE ESTOQUE (ESTOQUE POR FILIAL / POSIÇÃO DE ESTOQUE & AUDITORIA) */}
+                {activeTab === 'catalogo_mestre' && (
+                  <ConsultaEstoque
+                    filiais={filiais}
+                    activeFilialId={activeFilialId}
+                    profile={profile}
+                    onNavigateToTransferencias={() => setActiveTab('transferencias')}
+                    onOpenDetalhesProduto={(prod) => {
+                      setProdutoSelecionadoEstoque(prod);
+                      setModalDetalhesEstoqueAberto(true);
+                    }}
+                  />
                 )}
 
                 {/* ABA 2: ENTRADA DE ESTOQUE - POKA-YOKE (EXCLUSIVO PARA ADMIN / SUPER_ADMIN / ESTOQUISTA - BLOQUEADO PARA GERENTE E VENDEDOR) */}
@@ -30487,8 +30316,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             <div
               id="area-cupom-impressao"
               className={`w-full space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:shadow-none transition-all ${formatoImpressao === 'a4'
-                  ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8'
-                  : 'max-w-md modo-termica bg-card text-card-foreground border border-border rounded-2xl p-6'
+                ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8'
+                : 'max-w-md modo-termica bg-card text-card-foreground border border-border rounded-2xl p-6'
                 }`}
             >
               {/* Barra Superior de Seleção de Formato e Fechar (Apenas na Tela) */}
@@ -30502,8 +30331,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       type="button"
                       onClick={() => setFormatoImpressao('termica')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${formatoImpressao === 'termica'
-                          ? 'bg-zinc-800 text-white shadow-sm'
-                          : 'text-zinc-600 hover:text-black'
+                        ? 'bg-zinc-800 text-white shadow-sm'
+                        : 'text-zinc-600 hover:text-black'
                         }`}
                     >
                       <Printer size={13} />
@@ -30513,8 +30342,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       type="button"
                       onClick={() => setFormatoImpressao('a4')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${formatoImpressao === 'a4'
-                          ? 'bg-[#6A0DAD] text-white shadow-sm'
-                          : 'text-zinc-600 hover:text-black'
+                        ? 'bg-[#6A0DAD] text-white shadow-sm'
+                        : 'text-zinc-600 hover:text-black'
                         }`}
                     >
                       <FileText size={13} />
@@ -30527,8 +30356,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   type="button"
                   onClick={() => setPdvReciboAtivo(false)}
                   className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${formatoImpressao === 'a4'
-                      ? 'bg-zinc-100 border-zinc-300 hover:border-red-500 text-zinc-600 hover:text-red-600'
-                      : 'bg-surface border-border hover:border-destructive text-muted-foreground hover:text-destructive'
+                    ? 'bg-zinc-100 border-zinc-300 hover:border-red-500 text-zinc-600 hover:text-red-600'
+                    : 'bg-surface border-border hover:border-destructive text-muted-foreground hover:text-destructive'
                     }`}
                   title="Fechar"
                 >
@@ -30778,8 +30607,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         {/* 3. Cabeçalho no Modelo Térmico (80mm) */}
                         <div className="text-center space-y-1">
                           <span className={`text-[10px] border px-2.5 py-0.5 rounded-full font-bold uppercase print:hidden ${isAvista
-                              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                              : 'bg-primary/15 text-primary border-primary/30'
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : 'bg-primary/15 text-primary border-primary/30'
                             }`}>
                             {isAvista ? 'Recibo à Vista (80mm)' : 'Recibo Detalhado (80mm)'}
                           </span>
@@ -31265,8 +31094,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     type="button"
                     onClick={() => dispararImpressao('termica')}
                     className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${formatoImpressao === 'termica'
-                        ? 'bg-zinc-900 hover:bg-zinc-800 text-white border-zinc-600 shadow-md ring-1 ring-zinc-500'
-                        : 'bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 border-zinc-800'
+                      ? 'bg-zinc-900 hover:bg-zinc-800 text-white border-zinc-600 shadow-md ring-1 ring-zinc-500'
+                      : 'bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 border-zinc-800'
                       }`}
                   >
                     <Printer size={15} />
@@ -31277,8 +31106,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     type="button"
                     onClick={() => dispararImpressao('a4')}
                     className={`flex-1 min-w-[190px] py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border ${formatoImpressao === 'a4'
-                        ? 'bg-[#6A0DAD] hover:bg-[#500885] text-white border-[#8B2BE2]/50 shadow-md shadow-[#6A0DAD]/20 ring-1 ring-[#8B2BE2]'
-                        : 'bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#A78BFA] border-[#6A0DAD]/40'
+                      ? 'bg-[#6A0DAD] hover:bg-[#500885] text-white border-[#8B2BE2]/50 shadow-md shadow-[#6A0DAD]/20 ring-1 ring-[#8B2BE2]'
+                      : 'bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/30 text-[#A78BFA] border-[#6A0DAD]/40'
                       }`}
                   >
                     <FileText size={15} />
