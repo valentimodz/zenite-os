@@ -19,7 +19,9 @@ import {
   Sparkles,
   SlidersHorizontal,
   ExternalLink,
-  History
+  History,
+  Store,
+  ChevronUp
 } from 'lucide-react';
 import { formatCurrency, formatarMoeda } from '../utils/currencyUtils';
 
@@ -55,6 +57,7 @@ export default function ConsultaEstoque({
   // 3. Estado do Modal de IMEIs Disponíveis
   const [modalImeisAberto, setModalImeisAberto] = useState(false);
   const [produtoImeisModal, setProdutoImeisModal] = useState(null);
+  const [filialImeisModal, setFilialImeisModal] = useState(null);
   const [imeisDoProdutoModal, setImeisDoProdutoModal] = useState([]);
 
   // Debounce na busca de texto
@@ -153,11 +156,11 @@ export default function ConsultaEstoque({
     carregarDadosEstoque();
   }, [carregarDadosEstoque]);
 
-  // 5. Agrupamento e Consolidação dos Produtos
+  // 5. Agrupamento Base dos Modelos de Produtos (Catálogo + Produtos Físicos)
   const produtosConsolidados = useMemo(() => {
     const mapa = new Map();
 
-    // 1º Passo: Alimentar com o Catálogo Mestre
+    // 1º Passo: Catálogo Mestre
     (produtosCatalogo || []).forEach(cat => {
       const nomeNorm = String(cat.nome || '').trim();
       if (!nomeNorm) return;
@@ -181,7 +184,7 @@ export default function ConsultaEstoque({
       });
     });
 
-    // 2º Passo: Adicionar ou complementar com itens da tabela 'produtos'
+    // 2º Passo: Produtos Físicos
     (produtos || []).forEach(prod => {
       const nomeNorm = String(prod.nome || '').trim();
       if (!nomeNorm) return;
@@ -217,8 +220,9 @@ export default function ConsultaEstoque({
     return Array.from(mapa.values());
   }, [produtos, produtosCatalogo]);
 
-  // 6. Cálculo Dinâmico de Quantidades (Na Filial Selecionada & Na Rede)
-  const itensCalculados = useMemo(() => {
+  // 6. Cálculo dos Saldos por Filial para cada Produto
+  // Cada item recebe: totalRede + detalhamentoPorFilial [{ filial_id, filial_nome, quantidade }]
+  const produtosComSaldosPorFilial = useMemo(() => {
     return produtosConsolidados.map(item => {
       const produtoIds = new Set();
       if (item.id) produtoIds.add(String(item.id));
@@ -226,59 +230,135 @@ export default function ConsultaEstoque({
         if (p.id) produtoIds.add(String(p.id));
       });
 
-      let qtdFilial = 0;
+      // Mapear saldos para cada filial cadastrada
       let qtdRede = 0;
+      const saldosFiliaisMap = new Map();
+
+      // Inicializa todas as filiais cadastradas com 0
+      filiais.forEach(f => {
+        saldosFiliaisMap.set(String(f.id), {
+          filial_id: String(f.id),
+          filial_nome: f.nome,
+          quantidade: 0
+        });
+      });
 
       if (item.isCelular) {
+        // Contabiliza IMEIs disponíveis por filial
         const imeisDoItem = (imeisDisponiveis || []).filter(im => {
-          if (im.produto_id && produtoIds.has(String(im.produto_id))) return true;
-          return false;
+          return im.produto_id && produtoIds.has(String(im.produto_id));
         });
 
         if (imeisDoItem.length > 0) {
           qtdRede = imeisDoItem.length;
-          if (filialSelecionada === 'TODAS') {
-            qtdFilial = qtdRede;
-          } else {
-            qtdFilial = imeisDoItem.filter(im => String(im.filial_id || '') === String(filialSelecionada)).length;
-          }
+          imeisDoItem.forEach(im => {
+            const fId = String(im.filial_id || '');
+            if (saldosFiliaisMap.has(fId)) {
+              saldosFiliaisMap.get(fId).quantidade += 1;
+            } else if (fId) {
+              const filObj = filiais.find(f => String(f.id) === fId);
+              saldosFiliaisMap.set(fId, {
+                filial_id: fId,
+                filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
+                quantidade: 1
+              });
+            }
+          });
         } else {
+          // Fallback para quantidade numérica direta em produtos
           item.itensFisicos.forEach(p => {
             const q = Number(p.quantidade || 0);
             qtdRede += q;
-            if (filialSelecionada !== 'TODAS' && String(p.filial_id || '') === String(filialSelecionada)) {
-              qtdFilial += q;
+            const fId = String(p.filial_id || '');
+            if (saldosFiliaisMap.has(fId)) {
+              saldosFiliaisMap.get(fId).quantidade += q;
+            } else if (fId) {
+              const filObj = filiais.find(f => String(f.id) === fId);
+              saldosFiliaisMap.set(fId, {
+                filial_id: fId,
+                filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
+                quantidade: q
+              });
             }
           });
-          if (filialSelecionada === 'TODAS') {
-            qtdFilial = qtdRede;
-          }
         }
       } else {
+        // Acessórios / Gerais: soma as quantidades da tabela 'produtos'
         item.itensFisicos.forEach(p => {
           const q = Number(p.quantidade || 0);
           qtdRede += q;
-          if (filialSelecionada !== 'TODAS' && String(p.filial_id || '') === String(filialSelecionada)) {
-            qtdFilial += q;
+          const fId = String(p.filial_id || '');
+          if (saldosFiliaisMap.has(fId)) {
+            saldosFiliaisMap.get(fId).quantidade += q;
+          } else if (fId) {
+            const filObj = filiais.find(f => String(f.id) === fId);
+            saldosFiliaisMap.set(fId, {
+              filial_id: fId,
+              filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
+              quantidade: q
+            });
           }
         });
-        if (filialSelecionada === 'TODAS') {
-          qtdFilial = qtdRede;
-        }
       }
+
+      const detalhamentoPorFilial = Array.from(saldosFiliaisMap.values());
 
       return {
         ...item,
-        qtdFilial,
         qtdRede,
-        statusEstoque: qtdFilial === 0 ? 'ZERADO' : qtdFilial < 5 ? 'CRITICO' : 'DISPONIVEL'
+        detalhamentoPorFilial
       };
     });
-  }, [produtosConsolidados, imeisDisponiveis, filialSelecionada]);
+  }, [produtosConsolidados, imeisDisponiveis, filiais]);
 
-  // 7. Filtros de Interface (Busca Textual, Categoria e Pílulas de Status)
+  // 7. Desdobramento dos Cards:
+  // Se filialSelecionada === 'TODAS': desdobra para exibir um card individual para cada filial (com destaque do nome da filial e quantidade exata daquela filial)
+  // Se filialSelecionada !== 'TODAS': exibe o card daquela filial selecionada
+  const cardsDesdobrados = useMemo(() => {
+    const lista = [];
+
+    produtosComSaldosPorFilial.forEach(prod => {
+      if (filialSelecionada === 'TODAS') {
+        // Desdobra em um card por filial cadastrada
+        filiais.forEach(f => {
+          const saldoFilial = prod.detalhamentoPorFilial.find(df => String(df.filial_id) === String(f.id))?.quantidade || 0;
+          const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
+
+          lista.push({
+            ...prod,
+            cardKey: `${prod.id}_${f.id}`,
+            filialIdCard: String(f.id),
+            filialNomeCard: f.nome,
+            qtdFilial: saldoFilial,
+            statusEstoque,
+            isMultiLojaDesdobrado: true
+          });
+        });
+      } else {
+        // Exibe somente para a filial ativa selecionada
+        const fObj = filiais.find(f => String(f.id) === String(filialSelecionada));
+        const fNome = fObj ? fObj.nome : 'Filial Selecionada';
+        const saldoFilial = prod.detalhamentoPorFilial.find(df => String(df.filial_id) === String(filialSelecionada))?.quantidade || 0;
+        const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
+
+        lista.push({
+          ...prod,
+          cardKey: `${prod.id}_${filialSelecionada}`,
+          filialIdCard: String(filialSelecionada),
+          filialNomeCard: fNome,
+          qtdFilial: saldoFilial,
+          statusEstoque,
+          isMultiLojaDesdobrado: false
+        });
+      }
+    });
+
+    return lista;
+  }, [produtosComSaldosPorFilial, filialSelecionada, filiais]);
+
+  // 8. Filtros de Interface (Busca Textual, Categoria e Status de Estoque)
   const itensFiltrados = useMemo(() => {
-    return itensCalculados.filter(item => {
+    return cardsDesdobrados.filter(item => {
       // Filtro de Categoria
       if (categoriaSelecionada !== 'TODAS') {
         const catItem = String(item.categoria || '').toUpperCase();
@@ -296,32 +376,33 @@ export default function ConsultaEstoque({
         const nome = String(item.nome || '').toLowerCase();
         const sku = String(item.sku || '').toLowerCase();
         const barcode = String(item.codigo_barras || '').toLowerCase();
+        const filial = String(item.filialNomeCard || '').toLowerCase();
 
-        const match = nome.includes(termo) || sku.includes(termo) || barcode.includes(termo);
+        const match = nome.includes(termo) || sku.includes(termo) || barcode.includes(termo) || filial.includes(termo);
         if (!match) return false;
       }
 
       return true;
     });
-  }, [itensCalculados, categoriaSelecionada, statusFiltro, buscaDebounced]);
+  }, [cardsDesdobrados, categoriaSelecionada, statusFiltro, buscaDebounced]);
 
   // Contadores para as Pílulas de Status
   const contadores = useMemo(() => {
-    let todos = itensCalculados.length;
+    let todos = cardsDesdobrados.length;
     let critico = 0;
     let zerado = 0;
     let disponivel = 0;
 
-    itensCalculados.forEach(i => {
+    cardsDesdobrados.forEach(i => {
       if (i.qtdFilial === 0) zerado++;
       else if (i.qtdFilial < 5) critico++;
       else disponivel++;
     });
 
     return { todos, critico, zerado, disponivel };
-  }, [itensCalculados]);
+  }, [cardsDesdobrados]);
 
-  // Abrir Modal de IMEIs para o Produto
+  // Abrir Modal de IMEIs para o Produto e Filial do Card
   const handleAbrirImeis = (item) => {
     const produtoIds = new Set();
     if (item.id) produtoIds.add(String(item.id));
@@ -329,22 +410,24 @@ export default function ConsultaEstoque({
       if (p.id) produtoIds.add(String(p.id));
     });
 
+    const targetFilialId = item.filialIdCard;
     const imeisRelacionados = (imeisDisponiveis || []).filter(im => {
       const matchProd = im.produto_id && produtoIds.has(String(im.produto_id));
       if (!matchProd) return false;
 
-      if (filialSelecionada !== 'TODAS') {
-        return String(im.filial_id || '') === String(filialSelecionada);
+      if (targetFilialId && targetFilialId !== 'TODAS') {
+        return String(im.filial_id || '') === String(targetFilialId);
       }
       return true;
     });
 
     setProdutoImeisModal(item);
+    setFilialImeisModal(item.filialNomeCard);
     setImeisDoProdutoModal(imeisRelacionados);
     setModalImeisAberto(true);
   };
 
-  // Nome da filial ativa selecionada para display
+  // Nome da filial ativa selecionada para display no cabeçalho
   const nomeFilialAtiva = useMemo(() => {
     if (filialSelecionada === 'TODAS') return 'Todas as Filiais (Rede Completa)';
     const f = filiais.find(fil => String(fil.id) === String(filialSelecionada));
@@ -378,7 +461,7 @@ export default function ConsultaEstoque({
             type="button"
             onClick={carregarDadosEstoque}
             disabled={loading}
-            className="flex items-center gap-2 px-3.5 py-2 bg-black/60 hover:bg-[#1a1226] border border-[#33254d] hover:border-[#8B5CF6]/60 text-purple-300 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            className="flex items-center gap-2 px-3.5 py-2 bg-black/60 hover:bg-[#1a1226] border border-[#33254d] hover:border-[#8B5CF6]/60 text-purple-300 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer"
             title="Recarregar Dados"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin text-[#8B5CF6]' : ''} />
@@ -456,7 +539,7 @@ export default function ConsultaEstoque({
             <button
               type="button"
               onClick={() => setStatusFiltro('TODOS')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
                 statusFiltro === 'TODOS'
                   ? 'bg-[#8B5CF6] border-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/30'
                   : 'bg-black/50 border-[#282830] text-gray-400 hover:text-white hover:border-gray-600'
@@ -473,7 +556,7 @@ export default function ConsultaEstoque({
             <button
               type="button"
               onClick={() => setStatusFiltro('CRITICO')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
                 statusFiltro === 'CRITICO'
                   ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/20'
                   : 'bg-black/50 border-[#282830] text-amber-400/70 hover:text-amber-300 hover:border-amber-500/40'
@@ -490,7 +573,7 @@ export default function ConsultaEstoque({
             <button
               type="button"
               onClick={() => setStatusFiltro('ZERADO')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
                 statusFiltro === 'ZERADO'
                   ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-md shadow-rose-500/20'
                   : 'bg-black/50 border-[#282830] text-rose-400/70 hover:text-rose-300 hover:border-rose-500/40'
@@ -507,7 +590,7 @@ export default function ConsultaEstoque({
             <button
               type="button"
               onClick={() => setStatusFiltro('DISPONIVEL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
                 statusFiltro === 'DISPONIVEL'
                   ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-500/20'
                   : 'bg-black/50 border-[#282830] text-emerald-400/70 hover:text-emerald-300 hover:border-emerald-500/40'
@@ -523,12 +606,12 @@ export default function ConsultaEstoque({
 
           {/* Indicador de Filtro Ativo */}
           <div className="text-[11px] text-gray-400 font-medium">
-            Exibindo <span className="text-white font-bold">{itensFiltrados.length}</span> produtos em <span className="text-[#A78BFA] font-semibold">{nomeFilialAtiva}</span>
+            Exibindo <span className="text-white font-bold">{itensFiltrados.length}</span> cards em <span className="text-[#A78BFA] font-semibold">{nomeFilialAtiva}</span>
           </div>
         </div>
       </div>
 
-      {/* 3. Cards dos Produtos (Grid Responsivo) */}
+      {/* 3. Cards dos Produtos (Grid Responsivo Desdobrado por Filial) */}
       {loading ? (
         <div className="py-20 text-center flex flex-col items-center justify-center space-y-3">
           <RefreshCw size={32} className="animate-spin text-[#8B5CF6]" />
@@ -551,7 +634,7 @@ export default function ConsultaEstoque({
                 setCategoriaSelecionada('TODAS');
                 setStatusFiltro('TODOS');
               }}
-              className="mt-2 px-4 py-2 bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5"
+              className="mt-2 px-4 py-2 bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <X size={14} />
               <span>Limpar Todos os Filtros</span>
@@ -567,52 +650,61 @@ export default function ConsultaEstoque({
 
             return (
               <div
-                key={item.id + item.nome}
+                key={item.cardKey}
                 className="bg-[#0e0e11] border border-[#202028] hover:border-[#8B5CF6]/50 rounded-2xl p-5 flex flex-col justify-between gap-4 transition-all duration-200 group hover:shadow-xl hover:shadow-[#8B5CF6]/5 relative overflow-hidden"
               >
-                {/* Linha 1: Badge de Categoria e Preço de Venda */}
+                {/* Linha Superior: Nome da Filial em Destaque + Categoria */}
                 <div>
+                  {/* Destaque no Topo do Card: NOME DA FILIAL */}
+                  <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-[#1b1b22]">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Store size={14} className="text-[#8B5CF6] shrink-0" />
+                      <span className="text-xs font-black uppercase tracking-wider text-purple-200 truncate">
+                        [{item.filialNomeCard}]
+                      </span>
+                    </div>
+                    <span className="text-sm font-mono font-extrabold text-emerald-400 shrink-0">
+                      {formatCurrency(item.preco)}
+                    </span>
+                  </div>
+
+                  {/* Badges de Categoria e SKU */}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] bg-[#1a1228] text-purple-300 border border-[#3b255e] px-2.5 py-0.5 rounded-md font-bold uppercase tracking-wider flex items-center gap-1">
                       {item.isCelular ? <Smartphone size={11} className="text-[#8B5CF6]" /> : <Tag size={11} className="text-[#8B5CF6]" />}
                       {item.categoria || 'Geral'}
                     </span>
-                    <span className="text-sm font-mono font-extrabold text-emerald-400">
-                      {formatCurrency(item.preco)}
-                    </span>
-                  </div>
-
-                  {/* Nome do Produto em Destaque e SKU */}
-                  <h3 className="text-sm font-extrabold text-white mt-2.5 group-hover:text-purple-300 transition-colors line-clamp-2">
-                    {item.nome}
-                  </h3>
-                  <div className="flex items-center gap-2 mt-1">
                     <span className="text-[11px] text-gray-500 font-mono">
                       SKU: <strong className="text-gray-400">{item.sku || 'N/D'}</strong>
                     </span>
-                    {item.codigo_barras && (
-                      <span className="text-[10px] text-gray-500 font-mono border-l border-gray-800 pl-2">
-                        EAN: {item.codigo_barras}
-                      </span>
-                    )}
                   </div>
+
+                  {/* Nome do Produto em Destaque */}
+                  <h3 className="text-sm font-extrabold text-white mt-2 group-hover:text-purple-300 transition-colors line-clamp-2">
+                    {item.nome}
+                  </h3>
+                  {item.codigo_barras && (
+                    <span className="text-[10px] text-gray-500 font-mono mt-0.5 block">
+                      EAN: {item.codigo_barras}
+                    </span>
+                  )}
                 </div>
 
                 {/* Caixa de Destaque de Estoque */}
-                <div className="bg-black/60 border border-[#22222a] rounded-xl p-3.5 space-y-2.5">
-                  {/* Na Filial Selecionada */}
+                <div className="bg-black/60 border border-[#22222a] rounded-xl p-3.5 space-y-3">
+                  {/* Saldo nesta Filial */}
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                        Na Filial Selecionada
+                        Estoque nesta Filial
                       </span>
-                      <span className="text-xs text-gray-500 truncate max-w-[140px] block font-medium">
-                        {filialSelecionada === 'TODAS' ? 'Média / Rede' : nomeFilialAtiva}
+                      <span className="text-xs text-[#A78BFA] font-bold truncate max-w-[150px] block">
+                        {item.filialNomeCard}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <span className="text-lg font-extrabold text-white font-mono">
+                      <span className="text-xl font-extrabold text-white font-mono">
                         {item.qtdFilial} <span className="text-[11px] text-gray-400 font-sans">un</span>
                       </span>
 
@@ -632,6 +724,43 @@ export default function ConsultaEstoque({
                           DISPONÍVEL
                         </span>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Seção "Detalhamento por Filial" (Saldos em toda a rede) */}
+                  <div className="border-t border-[#1a1a22] pt-2.5 space-y-1.5">
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+                      Detalhamento por Filial:
+                    </span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {item.detalhamentoPorFilial.map(df => {
+                        const isCurrentFilialCard = String(df.filial_id) === String(item.filialIdCard);
+                        return (
+                          <div
+                            key={df.filial_id}
+                            className={`flex items-center justify-between px-2 py-1 rounded text-[11px] border ${
+                              isCurrentFilialCard
+                                ? 'bg-purple-950/40 border-purple-800/50 text-white font-bold'
+                                : 'bg-black/40 border-[#1f1f26] text-gray-400'
+                            }`}
+                          >
+                            <span className="truncate max-w-[95px]" title={df.filial_nome}>
+                              {df.filial_nome}
+                            </span>
+                            <span
+                              className={`font-mono text-xs font-bold ${
+                                df.quantidade === 0
+                                  ? 'text-rose-400/80'
+                                  : df.quantidade < 5
+                                  ? 'text-amber-400'
+                                  : 'text-emerald-400'
+                              }`}
+                            >
+                              {df.quantidade} un
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -656,10 +785,10 @@ export default function ConsultaEstoque({
                     <button
                       type="button"
                       onClick={() => handleAbrirImeis(item)}
-                      className="w-full bg-[#1b122c] hover:bg-[#281845] border border-[#8B5CF6]/50 hover:border-[#8B5CF6] text-purple-300 hover:text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-sm active:scale-98"
+                      className="w-full bg-[#1b122c] hover:bg-[#281845] border border-[#8B5CF6]/50 hover:border-[#8B5CF6] text-purple-300 hover:text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-sm active:scale-98 cursor-pointer"
                     >
                       <QrCode size={14} className="text-[#8B5CF6]" />
-                      <span>Ver IMEIs Disponíveis</span>
+                      <span>Ver IMEIs em {item.filialNomeCard}</span>
                     </button>
                   ) : (
                     <div className="grid grid-cols-2 gap-2">
@@ -670,7 +799,7 @@ export default function ConsultaEstoque({
                             onOpenDetalhesProduto(item.itensFisicos?.[0] || item);
                           }
                         }}
-                        className="w-full bg-black/60 hover:bg-[#1a1226] border border-[#2b2b36] hover:border-[#8B5CF6]/50 text-gray-300 hover:text-white font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all"
+                        className="w-full bg-black/60 hover:bg-[#1a1226] border border-[#2b2b36] hover:border-[#8B5CF6]/50 text-gray-300 hover:text-white font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                         title="Ver histórico e ajustes"
                       >
                         <History size={13} className="text-[#8B5CF6]" />
@@ -684,7 +813,7 @@ export default function ConsultaEstoque({
                             onNavigateToTransferencias();
                           }
                         }}
-                        className="w-full bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 hover:text-white font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all"
+                        className="w-full bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 hover:text-white font-bold py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                         title="Solicitar transferência entre filiais"
                       >
                         <ArrowRightLeft size={13} className="text-[#8B5CF6]" />
@@ -712,7 +841,7 @@ export default function ConsultaEstoque({
                   {produtoImeisModal?.nome}
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Filtrando por: <strong className="text-purple-300">{nomeFilialAtiva}</strong>
+                  Filial: <strong className="text-purple-300">[{filialImeisModal || nomeFilialAtiva}]</strong>
                 </p>
               </div>
               <button
@@ -720,9 +849,10 @@ export default function ConsultaEstoque({
                 onClick={() => {
                   setModalImeisAberto(false);
                   setProdutoImeisModal(null);
+                  setFilialImeisModal(null);
                   setImeisDoProdutoModal([]);
                 }}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors"
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -775,9 +905,10 @@ export default function ConsultaEstoque({
                 onClick={() => {
                   setModalImeisAberto(false);
                   setProdutoImeisModal(null);
+                  setFilialImeisModal(null);
                   setImeisDoProdutoModal([]);
                 }}
-                className="px-4 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-[#8B5CF6]/20"
+                className="px-4 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-[#8B5CF6]/20 cursor-pointer"
               >
                 Fechar
               </button>
