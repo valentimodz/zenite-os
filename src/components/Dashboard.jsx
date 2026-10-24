@@ -1407,6 +1407,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [pdvMetodoPagamento, setPdvMetodoPagamento] = useState('pix'); // 'pix' | 'cartao' | 'dinheiro' | 'troca'
   const [pdvUsadoList, setPdvUsadoList] = useState([]); // Lista de aparelhos dados na troca
   const [pdvUsadoProdutoSelecionado, setPdvUsadoProdutoSelecionado] = useState(null);
+  const [pendenteUsadoProdutoSelecionado, setPendenteUsadoProdutoSelecionado] = useState(null);
   const [pdvUsadoNomeProduto, setPdvUsadoNomeProduto] = useState('');
   const [pdvUsadoSugestoes, setPdvUsadoSugestoes] = useState([]);
   const [pdvUsadoImei, setPdvUsadoImei] = useState('');
@@ -14490,13 +14491,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // 2. Se houver dados preenchidos no formulário direto pdvUsado*
     const pendenteUsadoImei = (pdvUsadoImei || '').trim();
     const pendenteUsadoValor = parseFloat(pdvUsadoValor) || 0;
-    const pendenteUsadoNome = (pdvUsadoNomeProduto || pdvUsadoProdutoSelecionado?.nome || '').trim();
+    const produtoUsadoEfetivo = pdvUsadoProdutoSelecionado || pendenteUsadoProdutoSelecionado || null;
+    const pendenteUsadoNome = (pdvUsadoNomeProduto || produtoUsadoEfetivo?.nome || '').trim();
 
-    if ((pendenteUsadoNome || pendenteUsadoProdutoSelecionado) && pendenteUsadoValor > 0) {
+    if ((pendenteUsadoNome || produtoUsadoEfetivo) && pendenteUsadoValor > 0) {
       const imeiOuGen = pendenteUsadoImei || `USADO-${Date.now()}`;
       if (!effectiveUsadoList.some(u => u.imei === imeiOuGen)) {
         const itemAutoAdicionado = {
-          produto: pdvUsadoProdutoSelecionado || { nome: pendenteUsadoNome, tipo: 'SEMINOVO' },
+          produto: produtoUsadoEfetivo || { nome: pendenteUsadoNome, tipo: 'SEMINOVO' },
           imei: imeiOuGen,
           cor: pdvUsadoCor.trim() || 'Padrão',
           bateria: parseInt(pdvUsadoBateria, 10) || 100,
