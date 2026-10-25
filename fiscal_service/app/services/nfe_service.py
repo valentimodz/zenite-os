@@ -146,13 +146,24 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     valor_tributos_aprox=Decimal("0.00")
                 )
             
-            # Registrar nota na fonte de dados
-            _fonte_dados.adicionar_objeto(nfe)
-
             # 5. Serializar e Assinar XML
             homologacao_bool = (int(ambiente) == 2)
             serializador = SerializacaoXML(_fonte_dados, homologacao=homologacao_bool)
             xml_nao_assinado = serializador.exportar()
+
+            # Verificação defensiva: garantir que a raiz <NFe> não possui Id e que existe apenas 1 <infNFe> com Id
+            if xml_nao_assinado.attrib.get("Id"):
+                del xml_nao_assinado.attrib["Id"]
+
+            nodes_with_id = xml_nao_assinado.xpath("//*[@Id]")
+            if len(nodes_with_id) > 1:
+                # Mantém apenas o primeiro <infNFe> e remove Id dos nós excedentes ou da raiz
+                first_inf_nfe = xml_nao_assinado.find(".//{*}infNFe") or nodes_with_id[0]
+                for node in nodes_with_id:
+                    if node != first_inf_nfe:
+                        if "Id" in node.attrib:
+                            del node.attrib["Id"]
+
             xml_assinado = certificado.assinar(xml_nao_assinado)
             
             # 6. Comunicação com a SEFAZ-PA (SVRS)
