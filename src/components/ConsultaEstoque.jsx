@@ -552,17 +552,17 @@ export default function ConsultaEstoque({
   }, [filialSelecionada, listaFiliais]);
 
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="w-full max-w-7xl mx-auto overflow-x-hidden space-y-6 animate-fadeIn pb-12">
       {/* 1. Menu e Cabeçalho */}
-      <div className="bg-gradient-to-r from-[#0d0914] via-[#120d1c] to-[#0a0a0a] border border-[#8B5CF6]/30 p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xl relative overflow-hidden">
+      <div className="bg-gradient-to-r from-[#0d0914] via-[#120d1c] to-[#0a0a0a] border border-[#8B5CF6]/30 p-4 md:p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xl relative overflow-hidden w-full">
         <div className="absolute -right-10 -bottom-10 w-44 h-44 bg-[#8B5CF6]/10 rounded-full blur-3xl pointer-events-none" />
-        <div>
+        <div className="w-full md:w-auto">
           <div className="flex items-center gap-2.5">
-            <div className="p-2.5 bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 rounded-xl text-[#A78BFA] shadow-sm">
+            <div className="p-2.5 bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 rounded-xl text-[#A78BFA] shadow-sm shrink-0">
               <Package size={22} className="text-[#8B5CF6]" />
             </div>
             <div>
-              <h2 className="text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
+              <h2 className="text-lg md:text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
                 Posição de Estoque & Auditoria
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
@@ -573,12 +573,12 @@ export default function ConsultaEstoque({
         </div>
 
         {/* Botão de Atualização Rápida */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 w-full md:w-auto justify-end">
           <button
             type="button"
             onClick={carregarDadosEstoque}
             disabled={loading}
-            className="flex items-center gap-2 px-3.5 py-2 bg-black/60 hover:bg-[#1a1226] border border-[#33254d] hover:border-[#8B5CF6]/60 text-purple-300 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer"
+            className="flex items-center justify-center gap-2 px-3.5 py-2 bg-black/60 hover:bg-[#1a1226] border border-[#33254d] hover:border-[#8B5CF6]/60 text-purple-300 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer w-full md:w-auto"
             title="Recarregar Dados"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin text-[#8B5CF6]' : ''} />
@@ -588,10 +588,10 @@ export default function ConsultaEstoque({
       </div>
 
       {/* 2. Barra de Filtros e Busca */}
-      <div className="bg-[#0e0e11] border border-[#222228] rounded-2xl p-5 space-y-4 shadow-lg">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5">
+      <div className="w-full bg-[#0e0e11] border border-[#222228] rounded-2xl p-4 md:p-5 space-y-4 shadow-lg">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3.5 w-full">
           {/* Campo de Busca em Tempo Real */}
-          <div className="md:col-span-5 relative">
+          <div className="w-full md:flex-1 relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
             <input
               type="text"
@@ -613,12 +613,12 @@ export default function ConsultaEstoque({
           </div>
 
           {/* Dropdown de Filiais */}
-          <div className="md:col-span-4 relative">
+          <div className="w-full md:w-64 relative">
             <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8B5CF6] pointer-events-none" size={15} />
             <select
               value={filialSelecionada}
               onChange={(e) => setFilialSelecionada(e.target.value)}
-              className="w-full bg-black/70 border border-[#282830] focus:border-[#8B5CF6] text-xs text-white rounded-xl pl-10 pr-8 py-2.5 outline-none font-semibold cursor-pointer appearance-none transition-all"
+              className="w-full bg-black/70 border border-[#282830] focus:border-[#8B5CF6] text-xs text-white rounded-xl pl-10 pr-8 py-2.5 outline-none font-semibold cursor-pointer appearance-none transition-all truncate"
             >
               <option value="TODAS">🏢 Todas as Filiais (Rede Completa)</option>
               {listaFiliais.map(f => (
@@ -631,12 +631,12 @@ export default function ConsultaEstoque({
           </div>
 
           {/* Dropdown de Categorias */}
-          <div className="md:col-span-3 relative">
+          <div className="w-full md:w-56 relative">
             <Filter className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8B5CF6] pointer-events-none" size={15} />
             <select
               value={categoriaSelecionada}
               onChange={(e) => setCategoriaSelecionada(e.target.value)}
-              className="w-full bg-black/70 border border-[#282830] focus:border-[#8B5CF6] text-xs text-white rounded-xl pl-10 pr-8 py-2.5 outline-none font-semibold cursor-pointer appearance-none transition-all"
+              className="w-full bg-black/70 border border-[#282830] focus:border-[#8B5CF6] text-xs text-white rounded-xl pl-10 pr-8 py-2.5 outline-none font-semibold cursor-pointer appearance-none transition-all truncate"
             >
               <option value="TODAS">Todas as Categorias</option>
               {categoriasLista.map(cat => (
@@ -650,13 +650,13 @@ export default function ConsultaEstoque({
         </div>
 
         {/* Pílulas/Abas de Status de Estoque (Filtro Rápido em 1 clique) */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#1f1f26]">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2 border-t border-[#1f1f26] w-full">
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
             {/* Todos os Itens */}
             <button
               type="button"
               onClick={() => setStatusFiltro('TODOS')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
                 statusFiltro === 'TODOS'
                   ? 'bg-[#8B5CF6] border-[#8B5CF6] text-white shadow-md shadow-[#8B5CF6]/30'
                   : 'bg-black/50 border-[#282830] text-gray-400 hover:text-white hover:border-gray-600'
@@ -673,7 +673,7 @@ export default function ConsultaEstoque({
             <button
               type="button"
               onClick={() => setStatusFiltro('CRITICO')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
                 statusFiltro === 'CRITICO'
                   ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/20'
                   : 'bg-black/50 border-[#282830] text-amber-400/70 hover:text-amber-300 hover:border-amber-500/40'
@@ -690,7 +690,7 @@ export default function ConsultaEstoque({
             <button
               type="button"
               onClick={() => setStatusFiltro('ZERADO')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
                 statusFiltro === 'ZERADO'
                   ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-md shadow-rose-500/20'
                   : 'bg-black/50 border-[#282830] text-rose-400/70 hover:text-rose-300 hover:border-rose-500/40'
@@ -707,7 +707,7 @@ export default function ConsultaEstoque({
             <button
               type="button"
               onClick={() => setStatusFiltro('DISPONIVEL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
                 statusFiltro === 'DISPONIVEL'
                   ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-500/20'
                   : 'bg-black/50 border-[#282830] text-emerald-400/70 hover:text-emerald-300 hover:border-emerald-500/40'
@@ -722,7 +722,7 @@ export default function ConsultaEstoque({
           </div>
 
           {/* Indicador de Filtro Ativo */}
-          <div className="text-[11px] text-gray-400 font-medium">
+          <div className="text-[11px] text-gray-400 font-medium w-full md:w-auto text-left md:text-right pt-1 md:pt-0">
             Exibindo <span className="text-white font-bold">{itensFiltrados.length}</span> cards em <span className="text-[#A78BFA] font-semibold">{nomeFilialAtiva}</span>
           </div>
         </div>
@@ -760,7 +760,7 @@ export default function ConsultaEstoque({
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {cardsExibidos.map((item) => {
             const isEsgotado = item.qtdFilial === 0;
             const isCritico = item.qtdFilial > 0 && item.qtdFilial < 5;
