@@ -6025,12 +6025,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
       }
 
+      const localAmbiente = localStorage.getItem(`fiscal_ambiente_${tenantId}`);
+
       if (loadedConfig) {
         setFiscalCnpj(loadedConfig.cnpj || '');
         setFiscalInscricaoEstadual(loadedConfig.inscricao_estadual || '');
         setFiscalInscricaoMunicipal(loadedConfig.inscricao_municipal || '');
         setFiscalRegimeTributario(loadedConfig.regime_tributario || 'Simples Nacional');
-        setFiscalAmbiente(String(loadedConfig.ambiente || '2'));
+        setFiscalAmbiente(String(loadedConfig.ambiente || localAmbiente || '2'));
         setFiscalCertificadoA1Url(loadedConfig.certificado_a1_url || '');
         setFiscalCertificadoSenha(loadedConfig.certificado_senha || loadedConfig.certificado_senha_criptografada ? '••••••••' : '');
       } else {
@@ -6038,7 +6040,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         setFiscalInscricaoEstadual('');
         setFiscalInscricaoMunicipal('');
         setFiscalRegimeTributario('Simples Nacional');
-        setFiscalAmbiente('2');
+        setFiscalAmbiente(localAmbiente || '2');
         setFiscalCertificadoA1Url('');
         setFiscalCertificadoSenha('');
       }
@@ -6096,6 +6098,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         console.warn('API local falhou, executando fallback direto via Supabase:', errApi);
       }
 
+      // Salvar ambiente escolhido nas preferências do navegador / tenant
+      localStorage.setItem(`fiscal_ambiente_${tenantId}`, String(fiscalAmbiente || '2'));
+
       // Fallback direto via Supabase
       if (!saveSuccess) {
         const supabasePayload = {
@@ -6104,17 +6109,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           inscricao_estadual: fiscalInscricaoEstadual || null,
           inscricao_municipal: fiscalInscricaoMunicipal || null,
           regime_tributario: fiscalRegimeTributario,
-          ambiente: Number(fiscalAmbiente || 2),
           certificado_a1_url: fiscalCertificadoA1Url || null
         };
         if (fiscalCertificadoSenha && fiscalCertificadoSenha !== '••••••••') {
           supabasePayload.certificado_senha_criptografada = fiscalCertificadoSenha;
         }
-        const { error: sbErr } = await supabase
+
+        // Tenta salvar com a coluna ambiente; se o schema do Supabase não possuir a coluna, tenta sem ela
+        let { error: sbErr } = await supabase
           .from('configuracoes_fiscais')
-          .upsert(supabasePayload, { onConflict: 'tenant_id' });
+          .upsert({ ...supabasePayload, ambiente: Number(fiscalAmbiente || 2) }, { onConflict: 'tenant_id' });
         
-        if (sbErr) throw sbErr;
+        if (sbErr && sbErr.message?.includes('ambiente')) {
+          console.warn('Coluna ambiente não existe na tabela configuracoes_fiscais, salvando campos padrão:', sbErr.message);
+          const { error: sbErrRetry } = await supabase
+            .from('configuracoes_fiscais')
+            .upsert(supabasePayload, { onConflict: 'tenant_id' });
+          if (sbErrRetry) throw sbErrRetry;
+        } else if (sbErr) {
+          throw sbErr;
+        }
       }
 
       alert('Configurações fiscais e Certificado Digital A1 salvos com sucesso!');

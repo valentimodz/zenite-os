@@ -166,12 +166,15 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
         Number(venda.valor_boleto || 0)
     ) || 0);
 
+    const localAmbiente = typeof localStorage !== 'undefined' ? localStorage.getItem(`fiscal_ambiente_${empresaId}`) : null;
+    const ambienteFinal = Number(ambiente || configFiscal.ambiente || localAmbiente || 2);
+
     const payload = {
         venda_id: venda.id,
         numero_nfe: numeroNfe,
         serie: 1,
         natureza_operacao: 'Venda de mercadoria adquirida ou recebida de terceiros',
-        ambiente: Number(ambiente || configFiscal.ambiente || 2),
+        ambiente: ambienteFinal,
         forma_pagamento: venda.forma_pagamento || 'DINHEIRO',
         emitente: {
             cnpj: filial?.cnpj || configFiscal.cnpj || empresa?.cnpj || '00000000000000',
