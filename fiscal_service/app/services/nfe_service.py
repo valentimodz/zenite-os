@@ -127,6 +127,92 @@ def extrair_resultado_sefaz(resposta_envio) -> tuple[bool, str, str, str]:
     else:
         return False, n_prot, c_stat, f"Rejeição SEFAZ [{c_stat}]: {x_motivo}"
 
+def sanitizar_campo_fiscal(texto: str, max_len: int = 60, default: str = "") -> str:
+    """
+    Higieniza strings para o schema XML da SEFAZ:
+    - Remove acentos e caracteres especiais incompatíveis (ex: º, ª, °)
+    - Substitui múltiplos espaços em branco
+    - Trunca estritamente no tamanho máximo permitido pelo schema (padrão 60 caracteres)
+    """
+    import unicodedata
+    import re
+    if not texto:
+        return default
+    
+    # Substituições comuns de abreviações brasileiras (ex: nº -> n, º -> vazio ou n)
+    s = str(texto)
+    s = re.sub(r"[nN][º°]\s*", "n ", s)
+    s = s.replace("º", "").replace("ª", "a").replace("°", "")
+    # Normalizar Unicode para remover acentos
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    # Remover caracteres não alfanuméricos ou de pontuação básica
+    s = re.sub(r"[^a-zA-Z0-9\s,.\-_/]", " ", s)
+    # Limpar espaços duplicados
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:max_len].strip() if s else default
+
+def extrair_partes_endereco(logradouro_completo: str, numero_original: str = None) -> tuple[str, str, str]:
+    """
+    Separa de forma inteligente logradouros extensos contendo número e complemento.
+    Garante:
+    * xLgr: Apenas o logradouro, estritamente <= 60 caracteres
+    * nro: Número ou "S/N", estritamente <= 60 caracteres
+    * xCpl: Complemento, estritamente <= 60 caracteres
+    """
+    import re
+    raw = str(logradouro_completo or "Rua Principal").strip()
+    numero = str(numero_original or "").strip()
+    complemento = ""
+
+    # Se já foi fornecido um número explícito válido
+    if numero and numero not in ("S/N", "SN", ""):
+        # Se couber em 60 caracteres
+        if len(raw) <= 60:
+            return sanitizar_campo_fiscal(raw, 60, "Rua Principal"), \
+                   sanitizar_campo_fiscal(numero, 60, "S/N"), \
+                   ""
+        # Se for longo, tenta quebrar na primeira vírgula para manter logradouro limpo
+        partes = [p.strip() for p in raw.split(",") if p.strip()]
+        if len(partes) >= 2:
+            return sanitizar_campo_fiscal(partes[0], 60, "Rua Principal"), \
+                   sanitizar_campo_fiscal(numero, 60, "S/N"), \
+                   sanitizar_campo_fiscal(", ".join(partes[1:]), 60)
+        return sanitizar_campo_fiscal(raw[:60], 60, "Rua Principal"), \
+               sanitizar_campo_fiscal(numero, 60, "S/N"), \
+               sanitizar_campo_fiscal(raw[60:], 60)
+
+    # Caso NÃO tenha número explícito (ou veio S/N):
+    # Se contém vírgulas:
+    partes = [p.strip() for p in raw.split(",") if p.strip()]
+    if len(partes) >= 2:
+        x_lgr = partes[0]
+        resto = ", ".join(partes[1:])
+        # Tenta achar número explícito no resto (ex: "nº 123", "km 03")
+        match_num = re.search(r"\b(?:n[º°]?|numero)\s*(\d+)\b", resto, re.IGNORECASE)
+        if match_num:
+            numero = match_num.group(1)
+            resto = resto.replace(match_num.group(0), "").strip()
+        else:
+            numero = "S/N"
+        complemento = resto
+    else:
+        # String única sem vírgulas
+        # Procura por "nº 123" ou "n 123"
+        match_num = re.search(r"\b(?:n[º°]?|numero)\s*(\d+)\b", raw, re.IGNORECASE)
+        if match_num:
+            x_lgr = raw[:match_num.start()].strip()
+            numero = match_num.group(1)
+            complemento = raw[match_num.end():].strip()
+        else:
+            x_lgr = raw[:60].strip()
+            numero = "S/N"
+            complemento = raw[60:].strip() if len(raw) > 60 else ""
+
+    return sanitizar_campo_fiscal(x_lgr, 60, "Rua Principal"), \
+           sanitizar_campo_fiscal(numero, 60, "S/N"), \
+           sanitizar_campo_fiscal(complemento, 60)
+
 def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
     """
     Monta o documento fiscal modelo 55, assina com o Certificado A1 do emissor
@@ -155,34 +241,61 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             _fonte_dados.limpar_dados()
 
             # 2. Configurar Emitente (Empresa vendedora)
+            # Higienização e separação rigorosa de endereço (limite estrito de 60 chars no xLgr, nro, xCpl, xBairro)
+            lgr_emit, nro_emit, cpl_emit = extrair_partes_endereco(
+                req.emitente.logradouro or "Rodovia BR 155",
+                req.emitente.numero or "S/N"
+            )
+            # Se o usuário informou complemento explícito no emitente, priorizar ele sanitizado
+            if getattr(req.emitente, 'complemento', None):
+                cpl_emit = sanitizar_campo_fiscal(req.emitente.complemento, 60)
+
+            clean_cnpj_emit = "".join(filter(str.isdigit, req.emitente.cnpj or ""))
+            clean_ie_emit = "".join(filter(str.isalnum, req.emitente.inscricao_estadual or ""))
+            clean_cep_emit = "".join(filter(str.isdigit, req.emitente.cep or "68500000")).zfill(8)[:8]
+
             emitente = Emitente(
-                razao_social=req.emitente.razao_social,
-                nome_fantasia=req.emitente.nome_fantasia or req.emitente.razao_social,
-                cnpj=req.emitente.cnpj.replace('.', '').replace('/', '').replace('-', ''),
-                inscricao_estadual=req.emitente.inscricao_estadual.replace('.', '').replace('-', ''),
-                codigo_de_regime_tributario=str(req.emitente.regime_tributario),
-                endereco_logradouro=req.emitente.logradouro or "Rua Principal",
-                endereco_numero=req.emitente.numero or "S/N",
-                endereco_bairro=req.emitente.bairro or "Centro",
-                endereco_municipio=req.emitente.municipio or "Maraba",
+                razao_social=sanitizar_campo_fiscal(req.emitente.razao_social, 60, "EMPRESA"),
+                nome_fantasia=sanitizar_campo_fiscal(req.emitente.nome_fantasia or req.emitente.razao_social, 60, "EMPRESA"),
+                cnpj=clean_cnpj_emit,
+                inscricao_estadual=clean_ie_emit if clean_ie_emit.upper() != "ISENTO" else "ISENTO",
+                codigo_de_regime_tributario=str(req.emitente.regime_tributario or 1),
+                endereco_logradouro=lgr_emit,
+                endereco_numero=nro_emit,
+                endereco_complemento=cpl_emit or None,
+                endereco_bairro=sanitizar_campo_fiscal(req.emitente.bairro or "Nova Maraba", 60, "Centro"),
+                endereco_municipio="Maraba",
                 endereco_uf="PA",
-                endereco_cep=req.emitente.cep.replace('-', '') if req.emitente.cep else "68500000",
+                endereco_cep=clean_cep_emit,
                 endereco_pais="1058"
             )
             
             # 3. Configurar Destinatário (Cliente)
-            doc_cliente = req.cliente.cpf_cnpj.replace('.', '').replace('/', '').replace('-', '') if req.cliente.cpf_cnpj else ""
+            # Higienização de endereço do cliente
+            lgr_cli, nro_cli, cpl_cli = extrair_partes_endereco(
+                req.cliente.logradouro or "Rua Principal",
+                req.cliente.numero or "S/N"
+            )
+            if getattr(req.cliente, 'complemento', None):
+                cpl_cli = sanitizar_campo_fiscal(req.cliente.complemento, 60)
+
+            doc_cliente = "".join(filter(str.isdigit, req.cliente.cpf_cnpj or ""))
+            clean_cep_cli = "".join(filter(str.isdigit, req.cliente.cep or "68500000")).zfill(8)[:8]
+            mun_cli = sanitizar_campo_fiscal(req.cliente.municipio or "Maraba", 60, "Maraba")
+            uf_cli = (req.cliente.uf or "PA").strip().upper()[:2]
+
             cliente = Cliente(
-                razao_social=req.cliente.nome,
+                razao_social=sanitizar_campo_fiscal(req.cliente.nome, 60, "NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL" if ambiente == "2" else "CONSUMIDOR"),
                 tipo_documento="CPF" if len(doc_cliente) <= 11 else "CNPJ",
                 numero_documento=doc_cliente,
                 email=req.cliente.email,
-                endereco_logradouro=req.cliente.logradouro or "Rua Principal",
-                endereco_numero=req.cliente.numero or "S/N",
-                endereco_bairro=req.cliente.bairro or "Centro",
-                endereco_municipio=req.cliente.municipio or "Maraba",
-                endereco_uf=req.cliente.uf or "PA",
-                endereco_cep=req.cliente.cep.replace('-', '') if req.cliente.cep else "68500000",
+                endereco_logradouro=lgr_cli,
+                endereco_numero=nro_cli,
+                endereco_complemento=cpl_cli or None,
+                endereco_bairro=sanitizar_campo_fiscal(req.cliente.bairro or "Centro", 60, "Centro"),
+                endereco_municipio=mun_cli,
+                endereco_uf=uf_cli,
+                endereco_cep=clean_cep_cli,
                 endereco_pais="1058",
                 indicador_ie=9 # 9 = Não Contribuinte
             )
