@@ -247,6 +247,20 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             # 1. Configurar Certificado e Assinatura
             certificado = AssinaturaA1(cert_path, req.certificado_senha)
             
+            # Inspecionar dados do Certificado Digital A1 do emitente
+            try:
+                from cryptography.hazmat.primitives.serialization import pkcs12 as p12_mod
+                with open(cert_path, "rb") as fp_c:
+                    c_bytes = fp_c.read()
+                s_bytes = req.certificado_senha.encode() if isinstance(req.certificado_senha, str) else req.certificado_senha
+                _, cert_obj, _ = p12_mod.load_key_and_certificates(c_bytes, s_bytes)
+                if cert_obj:
+                    cert_subject = cert_obj.subject.rfc4514_string()
+                    print(f"\n[CERTIFICADO A1 INFO] Subject: {cert_subject}")
+                    logger.info(f"[CERTIFICADO A1 INFO] Subject: {cert_subject}")
+            except Exception as e_cert_inf:
+                logger.warning(f"Não foi possível ler subject do certificado: {e_cert_inf}")
+
             # Limpar fonte de dados em memória antes de serializar nova nota
             _fonte_dados.limpar_dados()
 
@@ -315,25 +329,9 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             import re
 
             dh_emi = datetime.now()
-            c_uf = "15"  # Pará
-            aamm = dh_emi.strftime("%y%m")  # ex: "2610"
-            cnpj_limpo = re.sub(r"\D", "", req.emitente.cnpj)[:14].zfill(14)
-            modelo = "55"
-            serie_formatada = f"{int(req.serie):03d}"
-            nnf_formatado = f"{int(req.numero_nfe):09d}"
-            tp_emis = "1"
-            # O cNF é gerado UMA ÚNICA VEZ e guardado na variável:
-            c_nf = f"{random.randint(10000000, 99999999):08d}"
-
-            # Monta rigorosamente os 43 dígitos base:
-            chave43 = f"{c_uf}{aamm}{cnpj_limpo}{modelo}{serie_formatada}{nnf_formatado}{tp_emis}{c_nf}"
-            assert len(chave43) == 43, f"Chave base precisa ter 43 dígitos, tem {len(chave43)}"
-
-            # Cálculo do Módulo 11 oficial
-            c_dv = calcular_dv_nfe(chave43)
-            chave_44 = f"{chave43}{c_dv}"
-            print(f"[DEBUG FISCAL] Chave: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
-            logger.info(f"[DEBUG FISCAL] Chave: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
+            c_nf_aleatorio = f"{random.randint(10000000, 99999999):08d}"
+            # Município do fato gerador: código IBGE de Marabá (1504208) ou código informado
+            cod_mun_fg = getattr(req.emitente, 'codigo_municipio', None) or "1504208"
 
             nfe = NotaFiscal(
                 emitente=emitente,
@@ -342,16 +340,15 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 natureza_operacao=req.natureza_operacao,
                 forma_pagamento="0", # 0 = Pagamento à vista
                 modelo="55",         # 55 = NF-e
-                serie=str(req.serie),
-                numero_nf=str(req.numero_nfe),
+                serie=str(int(req.serie)),
+                numero_nf=str(int(req.numero_nfe)),
                 data_emissao=dh_emi,
                 data_saida_entrada=dh_emi,
                 tipo_documento=1,    # 1 = Saída
-                municipio="1501402", # Belém / SVRS
+                municipio=str(cod_mun_fg), # Código IBGE do fato gerador
                 tipo_impressao_danfe=1, # 1 = Retrato
                 forma_emissao="1",   # 1 = Normal
-                codigo_numerico_aleatorio=c_nf,
-                dv_codigo_numerico_aleatorio=c_dv,
+                codigo_numerico_aleatorio=c_nf_aleatorio,
                 cliente_final=1,     # 1 = Consumidor Final
                 indicador_destino=1, # 1 = Operação interna (PA)
                 indicador_presenca=1, # 1 = Presencial no estabelecimento
@@ -437,14 +434,12 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 
                 det_nodes = pag_el.xpath("./*[local-name()='detPag']")
                 if not det_nodes:
-                    # Se por algum motivo o nó pag estava vazio, injeta o detPag completo
                     det_el = etree.SubElement(pag_el, f"{pfx}detPag")
                     etree.SubElement(det_el, f"{pfx}indPag").text = str(ind_pag_val)
                     etree.SubElement(det_el, f"{pfx}tPag").text = codigo_tpag
                     etree.SubElement(det_el, f"{pfx}vPag").text = f"{valor_pagamento:.2f}"
                 else:
                     for det_el in det_nodes:
-                        # Garante que indPag seja a primeira tag em detPag
                         if not det_el.xpath("./*[local-name()='indPag']"):
                             ind_el = etree.Element(f"{pfx}indPag")
                             ind_el.text = str(ind_pag_val)
@@ -459,20 +454,20 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             if xml_nao_assinado.attrib.get("Id"):
                 del xml_nao_assinado.attrib["Id"]
 
-            # Garantir atributo Id='NFe...' estritamente no elemento infNFe com exatamente 44 dígitos
+            # Extrair a chave oficial diretamente da tag <infNFe Id="NFe..."> serializada
             inf_nfe_elem = xml_nao_assinado.find(".//{*}infNFe")
-            if inf_nfe_elem is not None:
-                inf_nfe_elem.attrib["Id"] = f"NFe{chave_44}"
+            if inf_nfe_elem is None:
+                inf_nfe_elem = xml_nao_assinado.find("infNFe")
 
-            # Garantir que os campos cNF e cDV da tag <ide> coincidam exatamente com a chave de 44 dígitos
-            for cnf_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cNF']"):
-                cnf_node.text = str(c_nf).strip()[:8]
-            for cdv_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cDV']"):
-                cdv_node.text = str(c_dv).strip()[:1]
-            for serie_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='serie']"):
-                serie_node.text = str(int(req.serie))
-            for nnf_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='nNF']"):
-                nnf_node.text = str(int(req.numero_nfe))
+            id_attr = inf_nfe_elem.attrib.get("Id", "") if inf_nfe_elem is not None else ""
+            chave_44 = id_attr.replace("NFe", "").strip()
+            
+            # Se por ventura a chave estiver ausente, recalcula via identificador_unico
+            if not chave_44 or len(chave_44) != 44:
+                id_unico = nfe.identificador_unico
+                chave_44 = id_unico.replace("NFe", "").strip()
+                if inf_nfe_elem is not None:
+                    inf_nfe_elem.attrib["Id"] = f"NFe{chave_44}"
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
