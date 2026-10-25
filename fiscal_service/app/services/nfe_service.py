@@ -466,9 +466,13 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
 
             # Garantir que os campos cNF e cDV da tag <ide> coincidam exatamente com a chave de 44 dígitos
             for cnf_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cNF']"):
-                cnf_node.text = c_nf
+                cnf_node.text = str(c_nf).strip()[:8]
             for cdv_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cDV']"):
-                cdv_node.text = c_dv
+                cdv_node.text = str(c_dv).strip()[:1]
+            for serie_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='serie']"):
+                serie_node.text = str(int(req.serie))
+            for nnf_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='nNF']"):
+                nnf_node.text = str(int(req.numero_nfe))
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
@@ -493,6 +497,16 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
 
             xml_assinado = certificado.assinar(xml_nao_assinado)
             
+            # Auditoria do XML Final Enviado (tag <ide>)
+            try:
+                ide_str = etree.tostring(xml_assinado.xpath("//*[local-name()='ide']")[0], encoding="utf-8").decode("utf-8")
+                print("\n--- [XML FINAL TRANSMITIDO - TAG IDE] ---")
+                print(ide_str)
+                print("------------------------------------------\n")
+                logger.info(f"\n--- [XML FINAL TRANSMITIDO - TAG IDE] ---\n{ide_str}\n------------------------------------------\n")
+            except Exception as e:
+                logger.warning(f"Não foi possível extrair a tag ide para log: {e}")
+
             # 6. Comunicação com a SEFAZ-PA (SVRS)
             comunicador = ComunicacaoSefaz(
                 uf="PA",
