@@ -58,6 +58,9 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             # 1. Configurar Certificado e Assinatura
             certificado = AssinaturaA1(cert_path, req.certificado_senha)
             
+            # Limpar fonte de dados em memória antes de serializar nova nota
+            _fonte_dados.limpar_dados()
+
             # 2. Configurar Emitente (Empresa vendedora)
             emitente = Emitente(
                 razao_social=req.emitente.razao_social,
@@ -65,13 +68,13 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 cnpj=req.emitente.cnpj.replace('.', '').replace('/', '').replace('-', ''),
                 inscricao_estadual=req.emitente.inscricao_estadual.replace('.', '').replace('-', ''),
                 codigo_de_regime_tributario=str(req.emitente.regime_tributario),
-                logradouro=req.emitente.logradouro or "Rua Principal",
-                numero=req.emitente.numero or "S/N",
-                bairro=req.emitente.bairro or "Centro",
-                municipio=req.emitente.municipio or "Belem",
-                uf="PA",
-                cep=req.emitente.cep.replace('-', '') if req.emitente.cep else "66000000",
-                codigo_municipio=req.emitente.codigo_municipio or "1501402"
+                endereco_logradouro=req.emitente.logradouro or "Rua Principal",
+                endereco_numero=req.emitente.numero or "S/N",
+                endereco_bairro=req.emitente.bairro or "Centro",
+                endereco_municipio=req.emitente.municipio or "Maraba",
+                endereco_uf="PA",
+                endereco_cep=req.emitente.cep.replace('-', '') if req.emitente.cep else "68500000",
+                endereco_pais="1058"
             )
             
             # 3. Configurar Destinatário (Cliente)
@@ -81,13 +84,13 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 tipo_documento="CPF" if len(doc_cliente) <= 11 else "CNPJ",
                 numero_documento=doc_cliente,
                 email=req.cliente.email,
-                logradouro=req.cliente.logradouro or "Rua Principal",
-                numero=req.cliente.numero or "S/N",
-                bairro=req.cliente.bairro or "Centro",
-                municipio=req.cliente.municipio or "Belem",
-                uf=req.cliente.uf or "PA",
-                cep=req.cliente.cep.replace('-', '') if req.cliente.cep else "66000000",
-                codigo_municipio=req.cliente.codigo_municipio or "1501402",
+                endereco_logradouro=req.cliente.logradouro or "Rua Principal",
+                endereco_numero=req.cliente.numero or "S/N",
+                endereco_bairro=req.cliente.bairro or "Centro",
+                endereco_municipio=req.cliente.municipio or "Maraba",
+                endereco_uf=req.cliente.uf or "PA",
+                endereco_cep=req.cliente.cep.replace('-', '') if req.cliente.cep else "68500000",
+                endereco_pais="1058",
                 indicador_ie=9 # 9 = Não Contribuinte
             )
             
@@ -98,17 +101,17 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 cliente=cliente,
                 uf="PA",
                 natureza_operacao=req.natureza_operacao,
-                forma_pagamento=0, # 0 = Pagamento à vista
-                modelo="55",       # 55 = NF-e
+                forma_pagamento="0", # 0 = Pagamento à vista
+                modelo="55",         # 55 = NF-e
                 serie=str(req.serie),
                 numero_nf=str(req.numero_nfe),
                 data_emissao=data_emissao,
                 data_saida_entrada=data_emissao,
-                tipo_documento=1,  # 1 = Saída
-                municipio="1501402", # Belém
+                tipo_documento=1,    # 1 = Saída
+                municipio="1501402", # Belém / SVRS
                 tipo_impressao_danfe=1, # 1 = Retrato
-                forma_emissao=1,   # 1 = Normal
-                cliente_final=1,   # 1 = Consumidor Final
+                forma_emissao="1",   # 1 = Normal
+                cliente_final=1,     # 1 = Consumidor Final
                 indicador_destino=1, # 1 = Operação interna (PA)
                 indicador_presenca=1, # 1 = Presencial no estabelecimento
                 finalidade_emissao=1, # 1 = NF-e normal
@@ -134,17 +137,27 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     unidade_tributavel=item.ucom,
                     quantidade_tributavel=qtd_dec,
                     valor_unitario_tributavel=vunit_dec,
-                    ind_total=1
+                    ind_total=1,
+                    icms_csosn="102",
+                    icms_modalidade="102",
+                    icms_origem="0",
+                    pis_modalidade="07",
+                    cofins_modalidade="07",
+                    valor_tributos_aprox=Decimal("0.00")
                 )
             
+            # Registrar nota na fonte de dados
+            _fonte_dados.adicionar_objeto(nfe)
+
             # 5. Serializar e Assinar XML
-            serializador = SerializacaoXML()
-            xml_nao_assinado = serializador.exportar(nfe)
+            homologacao_bool = (int(ambiente) == 2)
+            serializador = SerializacaoXML(_fonte_dados, homologacao=homologacao_bool)
+            xml_nao_assinado = serializador.exportar()
             xml_assinado = certificado.assinar(xml_nao_assinado)
             
             # 6. Comunicação com a SEFAZ-PA (SVRS)
             comunicador = ComunicacaoSefaz(uf="PA", certificado=certificado, ambiente=ambiente)
-            resposta_envio = comunicador.autorizacao(xml=xml_assinado, id_lote=req.venda_id[:15])
+            resposta_envio = comunicador.autorizacao(modelo="55", nota_fiscal=xml_assinado, id_lote=1)
             
             logger.info(f"Resposta bruta da SEFAZ: {resposta_envio}")
             
