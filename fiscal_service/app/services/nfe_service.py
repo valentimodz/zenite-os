@@ -116,19 +116,24 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             )
             
             # Adicionar produtos / serviços
+            from decimal import Decimal
             for idx, item in enumerate(req.itens, start=1):
+                qtd_dec = Decimal(str(round(float(item.quantidade or 1.0), 4)))
+                vunit_dec = Decimal(str(round(float(item.valor_unitario or 0.0), 2)))
+                vtot_dec = Decimal(str(round(float(item.valor_total or (float(qtd_dec) * float(vunit_dec))), 2)))
+
                 nfe.adicionar_produto_servico(
                     codigo=item.codigo,
                     descricao=item.nome[:120],
                     ncm=item.ncm.replace('.', ''),
                     cfop=item.cfop,
                     unidade_comercial=item.ucom,
-                    quantidade_comercial=item.quantidade,
-                    valor_unitario_comercial=item.valor_unitario,
-                    valor_total_bruto=item.valor_total,
+                    quantidade_comercial=qtd_dec,
+                    valor_unitario_comercial=vunit_dec,
+                    valor_total_bruto=vtot_dec,
                     unidade_tributavel=item.ucom,
-                    quantidade_tributavel=item.quantidade,
-                    valor_unitario_tributavel=item.valor_unitario,
+                    quantidade_tributavel=qtd_dec,
+                    valor_unitario_tributavel=vunit_dec,
                     ind_total=1
                 )
             
