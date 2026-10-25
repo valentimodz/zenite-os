@@ -6036,7 +6036,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         setFiscalCertificadoA1Url(loadedConfig.certificado_a1_url || '');
         setFiscalCertificadoSenha(loadedConfig.certificado_senha || loadedConfig.certificado_senha_criptografada ? '••••••••' : '');
       } else {
-        setFiscalCnpj('');
+        const fallbackCnpj = company?.cnpj || '';
+        setFiscalCnpj(fallbackCnpj);
         setFiscalInscricaoEstadual('');
         setFiscalInscricaoMunicipal('');
         setFiscalRegimeTributario('Simples Nacional');
@@ -6221,10 +6222,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   useEffect(() => {
-    if (company?.id && company.id !== 'MASTER') {
-      fetchFiscalConfig(company.id);
+    const targetId = company?.id || profile?.empresa_id || profile?.filiais?.empresa_id || activeEmpresaId;
+    if (targetId && targetId !== 'MASTER') {
+      fetchFiscalConfig(targetId);
     }
-  }, [company?.id]);
+  }, [company?.id, profile?.empresa_id, activeEmpresaId]);
 
   const fetchFiliais = async (empresaId) => {
     try {
