@@ -516,8 +516,18 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             )
             resposta_envio = comunicador.autorizacao(modelo="nfe", nota_fiscal=xml_assinado, id_lote=1)
             
-            logger.info(f"Resposta bruta da SEFAZ: {resposta_envio}")
-            
+            # Log da resposta completa da SEFAZ para diagnóstico de rejeição
+            try:
+                if isinstance(resposta_envio, tuple) and len(resposta_envio) > 1:
+                    raw_resp = resposta_envio[1]
+                    raw_text = getattr(raw_resp, 'text', '') or getattr(raw_resp, 'content', b'').decode('utf-8', errors='ignore')
+                    print("\n--- [RESPOSTA BRUTA RETORNO SEFAZ] ---")
+                    print(raw_text)
+                    print("--------------------------------------\n")
+                    logger.info(f"\n--- [RESPOSTA BRUTA RETORNO SEFAZ] ---\n{raw_text}\n--------------------------------------\n")
+            except Exception as e_log:
+                logger.warning(f"Erro ao extrair log bruto SEFAZ: {e_log}")
+
             # Extrair resultado e número oficial do protocolo da SEFAZ
             sucesso_sefaz, n_protocolo, c_stat, motivo_msg = extrair_resultado_sefaz(resposta_envio)
             
