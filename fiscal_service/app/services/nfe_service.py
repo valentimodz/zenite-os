@@ -40,23 +40,10 @@ def calcular_dv_nfe(chave43: str) -> str:
     """
     Calcula o Dígito Verificador (cDV) de 1 dígito para a chave de 43 dígitos da NF-e
     utilizando a regra oficial do Módulo 11 da SEFAZ:
-    - Pesos de 2 a 9 da direita para a esquerda
-    - Multiplica cada dígito pelo peso correspondente e soma
-    - resto = soma % 11
-    - dv = 11 - resto
-    - Se dv in (0, 10, 11), retorna '0', senão retorna str(dv)
     """
-    pesos = [2, 3, 4, 5, 6, 7, 8, 9]
-    soma = 0
-    peso_idx = 0
-    for digito in reversed(chave43):
-        soma += int(digito) * pesos[peso_idx]
-        peso_idx = (peso_idx + 1) % len(pesos)
+    soma = sum(int(digito) * peso for digito, peso in zip(reversed(chave43), [2, 3, 4, 5, 6, 7, 8, 9] * 6))
     resto = soma % 11
-    dv = 11 - resto
-    if dv in (0, 10, 11):
-        return "0"
-    return str(dv)
+    return "0" if resto in (0, 1) else str(11 - resto)
 
 def calcular_chave_acesso_44(c_uf: str, data_emissao: datetime, cnpj: str, mod: str, serie: int, n_nf: int, tp_emis: str = "1", c_nf: str = None) -> tuple[str, str, str]:
     """
@@ -318,18 +305,32 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             )
             
             # 4. Instanciar Nota Fiscal (Modelo 55) com Chave Oficial de 44 dígitos
-            data_emissao = datetime.now()
-            
-            # Gerar Chave de Acesso Oficial de exatamente 44 dígitos
-            chave_44, c_nf, cdv = calcular_chave_acesso_44(
-                c_uf="15",
-                data_emissao=data_emissao,
-                cnpj=req.emitente.cnpj,
-                mod="55",
-                serie=req.serie,
-                n_nf=req.numero_nfe,
-                tp_emis="1"
-            )
+            import random
+            import re
+
+            dh_emi = datetime.now()
+            c_uf = "15"  # Pará
+            aamm = dh_emi.strftime("%y%m")  # ex: "2610"
+            cnpj_limpo = re.sub(r"\D", "", req.emitente.cnpj)[:14].zfill(14)
+            modelo = "55"
+            serie_formatada = f"{int(req.serie):03d}"
+            nnf_formatado = f"{int(req.numero_nfe):09d}"
+            tp_emis = "1"
+            # O cNF é gerado UMA ÚNICA VEZ e guardado na variável:
+            c_nf = f"{random.randint(10000000, 99999999):08d}"
+
+            # Monta rigorosamente os 43 dígitos base:
+            chave43 = f"{c_uf}{aamm}{cnpj_limpo}{modelo}{serie_formatada}{nnf_formatado}{tp_emis}{c_nf}"
+            assert len(chave43) == 43, f"Chave base precisa ter 43 dígitos, tem {len(chave43)}"
+
+            # Cálculo do Módulo 11 oficial
+            soma = sum(int(digito) * peso for digito, peso in zip(reversed(chave43), [2, 3, 4, 5, 6, 7, 8, 9] * 6))
+            resto = soma % 11
+            c_dv = "0" if resto in (0, 1) else str(11 - resto)
+
+            chave_44 = f"{chave43}{c_dv}"
+            print(f"[DEBUG FISCAL] Chave: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
+            logger.info(f"[DEBUG FISCAL] Chave: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
 
             nfe = NotaFiscal(
                 emitente=emitente,
@@ -340,14 +341,14 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 modelo="55",         # 55 = NF-e
                 serie=str(req.serie),
                 numero_nf=str(req.numero_nfe),
-                data_emissao=data_emissao,
-                data_saida_entrada=data_emissao,
+                data_emissao=dh_emi,
+                data_saida_entrada=dh_emi,
                 tipo_documento=1,    # 1 = Saída
                 municipio="1501402", # Belém / SVRS
                 tipo_impressao_danfe=1, # 1 = Retrato
                 forma_emissao="1",   # 1 = Normal
                 codigo_numerico_aleatorio=c_nf,
-                dv_codigo_numerico_aleatorio=cdv,
+                dv_codigo_numerico_aleatorio=c_dv,
                 cliente_final=1,     # 1 = Consumidor Final
                 indicador_destino=1, # 1 = Operação interna (PA)
                 indicador_presenca=1, # 1 = Presencial no estabelecimento
@@ -468,7 +469,7 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     cnf_node.text = c_nf
                 cdv_node = ide_elem.find("{*}cDV")
                 if cdv_node is not None:
-                    cdv_node.text = cdv
+                    cdv_node.text = c_dv
 
             # Remove qualquer outro nó duplicado que contenha Id
             nodes_with_id = xml_nao_assinado.xpath("//*[@Id]")
