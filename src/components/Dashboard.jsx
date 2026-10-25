@@ -749,6 +749,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [selectedFaturasCompany, setSelectedFaturasCompany] = useState(null);
   const [companyFaturas, setCompanyFaturas] = useState([]);
   const [isFiscalLoading, setIsFiscalLoading] = useState(false);
+  const [modalNfePdf, setModalNfePdf] = useState(null); // { chave, pdfUrl }
   const [loadingAdmin, setLoadingAdmin] = useState(false);
 
   // --- VEXTRON LAB: MURAL E DIAGNÓSTICO ---
@@ -6136,8 +6137,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         throw new Error(data?.motivo || 'Falha ao emitir nota fiscal na SEFAZ.');
       }
 
-      alert(`NF-e emitida com sucesso!\nChave: ${data.chave_acesso}`);
-
       const pdfUrl = data.pdf_url;
       setPdvReciboDados(prev => ({
         ...prev,
@@ -6146,38 +6145,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         nfe_status: 'EMITIDA'
       }));
 
-      // Abrir pré-visualização ou download imediato da DANFE (PDF)
-      if (pdfUrl) {
-        if (pdfUrl.startsWith('data:application/pdf;base64,')) {
-          // Converter data URL para Blob para abrir em nova aba sem bloqueio de pop-up
-          try {
-            const byteCharacters = atob(pdfUrl.split(',')[1]);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: 'application/pdf' });
-            const blobUrl = URL.createObjectURL(blob);
-            
-            // Tenta abrir em nova aba
-            const newWindow = window.open(blobUrl, '_blank');
-            if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-              // Se o navegador bloqueou o pop-up, baixa o arquivo diretamente
-              const link = document.createElement('a');
-              link.href = blobUrl;
-              link.download = `DANFE_${data.chave_acesso || 'NFE'}.pdf`;
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-            }
-          } catch (e) {
-            window.open(pdfUrl, '_blank');
-          }
-        } else {
-          window.open(pdfUrl, '_blank');
-        }
-      }
+      // Abrir Modal amigável com opção para visualizar e baixar o PDF da Nota Fiscal
+      setModalNfePdf({
+        chave: data.chave_acesso,
+        pdfUrl: pdfUrl
+      });
 
     } catch (err) {
       console.error('Erro ao emitir NF-e:', err);
@@ -31566,29 +31538,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       <button
                         type="button"
                         onClick={() => {
-                          const url = pdvReciboDados.nfe_pdf_url;
-                          if (url.startsWith('data:application/pdf;base64,')) {
-                            const byteCharacters = atob(url.split(',')[1]);
-                            const byteNumbers = new Array(byteCharacters.length);
-                            for (let i = 0; i < byteCharacters.length; i++) {
-                              byteNumbers[i] = byteCharacters.charCodeAt(i);
-                            }
-                            const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
-                            const blobUrl = URL.createObjectURL(blob);
-                            const w = window.open(blobUrl, '_blank');
-                            if (!w) {
-                              const a = document.createElement('a');
-                              a.href = blobUrl;
-                              a.download = `DANFE_${pdvReciboDados.nfe_id || 'NFE'}.pdf`;
-                              a.click();
-                            }
-                          } else {
-                            window.open(url, '_blank');
-                          }
+                          setModalNfePdf({
+                            chave: pdvReciboDados.nfe_id,
+                            pdfUrl: pdvReciboDados.nfe_pdf_url
+                          });
                         }}
-                        className="bg-purple-900/60 hover:bg-purple-800 border border-purple-700/60 text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 text-white shadow-md cursor-pointer"
+                        className="bg-[#6A0DAD] hover:bg-[#500885] border border-purple-500/50 text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 text-white shadow-md shadow-[#6A0DAD]/30 cursor-pointer"
                       >
-                        <FileText size={14} /> 📄 Ver DANFE (PDF)
+                        <FileText size={14} /> 📄 Ver DANFE / Baixar PDF
                       </button>
                     )}
                   </div>
@@ -31817,6 +31774,130 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   className="px-4 py-2 bg-surface hover:bg-surface-elevated border border-border text-foreground font-bold text-xs rounded-xl transition-all cursor-pointer"
                 >
                   Cancelar
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* MODAL PARA VISUALIZAR E BAIXAR O PDF DA NOTA FISCAL (DANFE) */}
+        {modalNfePdf && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn font-sans">
+            <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-2xl w-full p-6 sm:p-7 space-y-6 shadow-2xl relative animate-scaleIn">
+              
+              {/* Botão de Fechar */}
+              <button
+                type="button"
+                onClick={() => setModalNfePdf(null)}
+                className="absolute right-4 top-4 p-1.5 rounded-lg bg-surface border border-border hover:border-destructive text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <X size={16} />
+              </button>
+
+              {/* Cabeçalho de Sucesso */}
+              <div className="text-center space-y-2">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-950/30">
+                  <CheckCircle2 size={32} />
+                </div>
+                <h3 className="text-xl font-extrabold text-foreground tracking-tight">
+                  NF-e Emitida com Sucesso!
+                </h3>
+                <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                  A Nota Fiscal Eletrônica (Modelo 55) foi homologada pela SEFAZ. Você pode baixar o PDF da DANFE ou abrir diretamente no navegador.
+                </p>
+              </div>
+
+              {/* Box com Chave de Acesso */}
+              <div className="bg-surface-elevated/60 border border-border/80 rounded-xl p-3.5 space-y-1.5 text-center">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                  Chave de Acesso SEFAZ
+                </span>
+                <span className="font-mono font-bold text-xs sm:text-sm text-primary break-all select-all block bg-surface/80 py-1.5 px-2 rounded-lg border border-border/60">
+                  {modalNfePdf.chave || '---'}
+                </span>
+              </div>
+
+              {/* Ações: Baixar PDF / Abrir em Nova Aba */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = modalNfePdf.pdfUrl;
+                    if (!url) return;
+                    if (url.startsWith('data:application/pdf;base64,')) {
+                      try {
+                        const byteCharacters = atob(url.split(',')[1]);
+                        const byteNumbers = new Array(byteCharacters.length);
+                        for (let i = 0; i < byteCharacters.length; i++) {
+                          byteNumbers[i] = byteCharacters.charCodeAt(i);
+                        }
+                        const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
+                        const blobUrl = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = blobUrl;
+                        link.download = `DANFE_${modalNfePdf.chave || 'NFE'}.pdf`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      } catch (e) {
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `DANFE_${modalNfePdf.chave || 'NFE'}.pdf`;
+                        link.click();
+                      }
+                    } else {
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = `DANFE_${modalNfePdf.chave || 'NFE'}.pdf`;
+                      link.target = '_blank';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }
+                  }}
+                  className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-emerald-950/30 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Download size={16} /> Baixar DANFE em PDF
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = modalNfePdf.pdfUrl;
+                    if (!url) return;
+                    if (url.startsWith('data:application/pdf;base64,')) {
+                      try {
+                        const byteCharacters = atob(url.split(',')[1]);
+                        const byteNumbers = new Array(byteCharacters.length);
+                        for (let i = 0; i < byteCharacters.length; i++) {
+                          byteNumbers[i] = byteCharacters.charCodeAt(i);
+                        }
+                        const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
+                        const blobUrl = URL.createObjectURL(blob);
+                        window.open(blobUrl, '_blank');
+                      } catch (e) {
+                        window.open(url, '_blank');
+                      }
+                    } else {
+                      window.open(url, '_blank');
+                    }
+                  }}
+                  className="w-full py-3.5 px-4 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-[#6A0DAD]/20 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <FileText size={16} /> Visualizar em Nova Aba
+                </button>
+              </div>
+
+              {/* Botão de Concluir */}
+              <div className="pt-2 border-t border-border flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setModalNfePdf(null)}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-surface hover:bg-surface-elevated border border-border text-foreground font-bold text-xs rounded-xl transition-all cursor-pointer text-center"
+                >
+                  Concluir / Fechar
                 </button>
               </div>
 

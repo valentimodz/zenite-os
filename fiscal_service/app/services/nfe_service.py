@@ -25,9 +25,12 @@ def extrair_ou_baixar_certificado(req: EmitirNfeRequest) -> str:
             resp.raise_for_status()
             tmp_cert.write(resp.content)
         else:
-            raise ValueError("Nenhum certificado A1 fornecido (certificado_a1_b64 ou certificado_a1_url).")
+            return None
         tmp_cert.flush()
         return tmp_cert.name
+    except Exception as e:
+        logger.warning(f"Não foi possível extrair o certificado A1: {e}")
+        return None
     finally:
         tmp_cert.close()
 
