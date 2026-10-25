@@ -6048,7 +6048,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
   const handleSaveFiscalConfig = async (e) => {
     e.preventDefault();
-    if (!company?.id) return;
+    const tenantId = company?.id || profile?.empresa_id || profile?.filiais?.empresa_id || activeEmpresaId;
+    if (!tenantId) {
+      alert('Erro: Empresa não identificada para salvar as configurações.');
+      return;
+    }
     setIsSavingFiscalConfig(true);
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -6120,8 +6124,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
   const handleUploadCertificado = async (file) => {
     if (!file) return;
-    if (!company?.id) {
-      alert('Erro: Empresa não identificada.');
+    const targetCompanyId = company?.id || profile?.empresa_id || profile?.filiais?.empresa_id || activeEmpresaId;
+    if (!targetCompanyId) {
+      alert('Erro: Empresa não identificada. Por favor, recarregue a página ou selecione uma filial.');
       return;
     }
 
@@ -6134,7 +6139,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     setCertificadoUploadLoading(true);
     try {
-      const folder = company.id;
+      const folder = targetCompanyId;
       // Nome do arquivo com caracteres especiais limpos
       const filename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
       const filePath = `${folder}/${filename}`;
@@ -25496,7 +25501,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     )}
 
                     {/* CARD DE CONFIGURAÇÕES FISCAIS (Oculto para GERENTE) */}
-                    {['SUPER_ADMIN', 'OWNER', 'ADMIN'].includes(profile?.role) && company?.id && company.id !== 'MASTER' && (
+                    {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id || activeEmpresaId) && (company?.id || profile?.empresa_id || activeEmpresaId) !== 'MASTER' && (
                       <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
                         <div>
                           <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -26695,7 +26700,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     </div>
 
                     {/* CARD DE CONFIGURAÇÕES FISCAIS & CERTIFICADO DIGITAL A1 */}
-                    {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id) && company?.id !== 'MASTER' && (
+                    {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id || activeEmpresaId) && (company?.id || profile?.empresa_id || activeEmpresaId) !== 'MASTER' && (
                       <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 rounded-xl p-6 space-y-6 shadow-xl shadow-purple-950/20">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-[#222222] pb-4">
                           <div>
