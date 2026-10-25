@@ -13,7 +13,8 @@ export async function atualizarVendaAposCriacao({
     cliente,
     vendedor,
     formaPagamento,
-    trainee
+    trainee,
+    usedDevice
 }) {
     if (!vendaId) {
         throw new Error('ID da venda não fornecido para atualização.');
@@ -46,13 +47,33 @@ export async function atualizarVendaAposCriacao({
         // Trainee
         trainee_id: trainee?.id || null,
         trainee_nome: trainee?.nome || null,
-        teve_participacao_trainee: Boolean(trainee?.id)
+        teve_participacao_trainee: Boolean(trainee?.id),
+
+        // Aparelho Usado na Troca (Trade-in)
+        used_produto_nome: usedDevice?.produto_nome || usedDevice?.nome || null,
+        used_imei: usedDevice?.imei || null,
+        used_valor_avaliacao: Number(usedDevice?.valor_avaliacao ?? usedDevice?.valor ?? 0) || 0
     };
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
         .from('vendas')
         .update(payload)
         .eq('id', vendaId);
+
+    // Fallback resiliente caso as colunas used_* ainda não existam no schema remoto
+    if (error && (error.code === '42703' || String(error.message).includes('used_'))) {
+        console.warn('⚠️ [vendasService] Colunas used_* não encontradas em vendas, tentando update sem used_*:', error.message);
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.used_produto_nome;
+        delete fallbackPayload.used_imei;
+        delete fallbackPayload.used_valor_avaliacao;
+        const retryRes = await supabase
+            .from('vendas')
+            .update(fallbackPayload)
+            .eq('id', vendaId);
+        data = retryRes.data;
+        error = retryRes.error;
+    }
 
     if (error) {
         console.error('❌ [vendasService.atualizarVendaAposCriacao]:', error);

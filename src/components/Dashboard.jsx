@@ -1356,6 +1356,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [pdvTrocaCapacidade, setPdvTrocaCapacidade] = useState('');
   const [pdvTrocaCor, setPdvTrocaCor] = useState('');
   const [pdvTrocaImei, setPdvTrocaImei] = useState('');
+  const [pdvTrocaCategoria, setPdvTrocaCategoria] = useState('Usados');
   const [pdvTrocaValor, setPdvTrocaValor] = useState('');
   const [pdvTrocaEntradaEstoque, setPdvTrocaEntradaEstoque] = useState(true);
 
@@ -1517,6 +1518,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       setPdvTrocaCapacidade('');
       setPdvTrocaCor('');
       setPdvTrocaImei('');
+      setPdvTrocaCategoria('Usados');
       setPdvTrocaValor('');
     }
   }, [temIphoneNoCarrinho, pdvUsadoList.length, pdvListaPagamentos, pdvNovoMetodo, pdvMetodoPagamento]);
@@ -13889,6 +13891,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setPdvTrocaCapacidade('');
     setPdvTrocaCor('');
     setPdvTrocaImei('');
+    setPdvTrocaCategoria('Usados');
     setPdvTrocaValor('');
     setPdvTrocaEntradaEstoque(true);
     setIsQuickClientFormOpen(true);
@@ -14372,7 +14375,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       // Sucesso! Adicionar à lista
       playBeepSucesso();
       const novoUsado = {
-        produto: pdvUsadoProdutoSelecionado,
+        produto: {
+          ...(pdvUsadoProdutoSelecionado || {}),
+          nome: pdvUsadoProdutoSelecionado?.nome || pdvUsadoNomeProduto || 'Aparelho Usado',
+          tipo: pdvUsadoProdutoSelecionado?.tipo || 'APARELHO',
+          categoria: pdvUsadoProdutoSelecionado?.categoria || 'Usados'
+        },
+        categoria: pdvUsadoProdutoSelecionado?.categoria || 'Usados',
         imei,
         cor: pdvUsadoCor,
         bateria: parseInt(pdvUsadoBateria, 10),
@@ -14445,6 +14454,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       : parseFloat(String(pdvTrocaValor || '').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
     const pendenteTrocaCor = (pdvTrocaCor || 'Padrão').trim();
     const pendenteTrocaCapacidade = (pdvTrocaCapacidade || '').trim();
+    const pendenteTrocaCategoria = (pdvTrocaCategoria || 'Usados').trim() || 'Usados';
 
     if (pendenteTrocaModelo && pendenteTrocaValor > 0) {
       const imeiOuGen = pendenteTrocaImei || `USADO-${Date.now()}`;
@@ -14452,12 +14462,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const itemAutoAdicionado = {
           produto: {
             nome: [pendenteTrocaModelo, pendenteTrocaCapacidade].filter(Boolean).join(' ') || pendenteTrocaModelo,
-            tipo: 'SEMINOVO'
+            tipo: 'APARELHO',
+            categoria: pendenteTrocaCategoria,
+            condicao: 'USADO'
           },
+          categoria: pendenteTrocaCategoria,
+          tipo: 'APARELHO',
+          condicao: 'USADO',
           imei: imeiOuGen,
           cor: pendenteTrocaCor,
           bateria: 100,
           valor: pendenteTrocaValor,
+          valor_avaliacao: pendenteTrocaValor,
           obs: `Entrada automática via PDV: ${[pendenteTrocaModelo, pendenteTrocaCapacidade, pendenteTrocaCor].filter(Boolean).join(' ')}`
         };
         effectiveUsadoList.push(itemAutoAdicionado);
@@ -14480,6 +14496,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               cor: pendenteTrocaCor,
               imei: pendenteTrocaImei,
               valor: pendenteTrocaValor,
+              categoria: pendenteTrocaCategoria,
               dar_entrada_estoque: pdvTrocaEntradaEstoque
             }
           };
@@ -14498,11 +14515,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const imeiOuGen = pendenteUsadoImei || `USADO-${Date.now()}`;
       if (!effectiveUsadoList.some(u => u.imei === imeiOuGen)) {
         const itemAutoAdicionado = {
-          produto: produtoUsadoEfetivo || { nome: pendenteUsadoNome, tipo: 'SEMINOVO' },
+          produto: produtoUsadoEfetivo || {
+            nome: pendenteUsadoNome,
+            tipo: 'APARELHO',
+            categoria: produtoUsadoEfetivo?.categoria || 'Usados',
+            condicao: 'USADO'
+          },
+          categoria: produtoUsadoEfetivo?.categoria || 'Usados',
+          tipo: 'APARELHO',
+          condicao: 'USADO',
           imei: imeiOuGen,
           cor: pdvUsadoCor.trim() || 'Padrão',
           bateria: parseInt(pdvUsadoBateria, 10) || 100,
           valor: pendenteUsadoValor,
+          valor_avaliacao: pendenteUsadoValor,
           obs: pdvUsadoObs || ''
         };
         effectiveUsadoList.push(itemAutoAdicionado);
@@ -14518,12 +14544,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (!effectiveUsadoList.some(u => u.imei === tImei)) {
             const tNome = [pag.troca_dados.modelo, pag.troca_dados.capacidade].filter(Boolean).join(' ') || pag.troca_dados.modelo || 'Aparelho Entrada';
             const tValor = parseFloat(pag.troca_dados.valor) || parseFloat(pag.valor) || 0;
+            const tCat = pag.troca_dados.categoria || 'Usados';
             effectiveUsadoList.push({
-              produto: { nome: tNome, tipo: 'SEMINOVO' },
+              produto: {
+                nome: tNome,
+                tipo: 'APARELHO',
+                categoria: tCat,
+                condicao: 'USADO'
+              },
+              categoria: tCat,
+              tipo: 'APARELHO',
+              condicao: 'USADO',
               imei: tImei,
               cor: pag.troca_dados.cor || 'Padrão',
               bateria: 100,
               valor: tValor,
+              valor_avaliacao: tValor,
               obs: 'Entrada de Aparelho via Pagamento Multiplo'
             });
           }
@@ -15340,7 +15376,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               trainee: {
                 id: resolvedTraineeId,
                 nome: resolvedTraineeNome
-              }
+              },
+              usedDevice: (effectiveUsadoList && effectiveUsadoList.length > 0) ? {
+                produto_nome: effectiveUsadoList.map(u => u.produto?.nome || u.nome).filter(Boolean).join(', ') || null,
+                imei: effectiveUsadoList.map(u => u.imei).filter(Boolean).join(', ') || null,
+                valor_avaliacao: valorUsadoTotal || effectiveUsadoList.reduce((acc, u) => acc + (Number(u.valor_avaliacao ?? u.valor) || 0), 0)
+              } : null
             });
           } catch (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA]:", updateVendaErr);
@@ -15723,87 +15764,153 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         } catch (e) { }
       }
 
-      // 3. Persistência de Entrada de Aparelho no Estoque para pagamentos via "📱 ENTRADA DE APARELHO"
-      if (pdvListaPagamentos && pdvListaPagamentos.length > 0) {
-        for (const pag of pdvListaPagamentos) {
-          if (pag.metodo === 'troca' && pag.troca_dados && pag.troca_dados.dar_entrada_estoque) {
-            try {
+      // 3. Persistência de Entrada de Aparelho no Estoque para pagamentos via "📱 ENTRADA DE APARELHO" (Trade-In / Troca)
+      try {
+        const itensParaDarEntrada = [];
+
+        // Coleta itens de troca vindos da lista de pagamentos
+        if (pdvListaPagamentos && pdvListaPagamentos.length > 0) {
+          for (const pag of pdvListaPagamentos) {
+            if (pag.metodo === 'troca' && pag.troca_dados && pag.troca_dados.dar_entrada_estoque) {
               const valorAvaliado = Number(parseFloat(pag.troca_dados.valor) || parseFloat(pag.valor) || 0);
               const modeloNome = (pag.troca_dados.modelo || 'Aparelho Seminovo').trim();
               const corSeminovo = (pag.troca_dados.cor || 'Padrão').trim();
               const capacidadeSeminovo = (pag.troca_dados.capacidade || '').trim();
               const imeiSeminovo = (pag.troca_dados.imei || '').replace(/\D/g, '').trim();
+              const categoriaSeminovo = (pag.troca_dados.categoria || pdvTrocaCategoria || 'Usados').trim() || 'Usados';
+              const nomeCompletoProduto = [modeloNome, capacidadeSeminovo].filter(Boolean).join(' ') || modeloNome;
 
-              const nomeCompletoProduto = [modeloNome, capacidadeSeminovo].filter(Boolean).join(' ');
-
-              // 1. Localizar ou cadastrar o produto na tabela produtos da filial atual
-              let produtoIdAlvo = null;
-              const { data: prodExistente } = await supabase
-                .from('produtos')
-                .select('id, quantidade')
-                .eq('empresa_id', obterUuidPuro(empresaId))
-                .eq('filial_id', obterUuidPuro(activeFilialId))
-                .ilike('nome', nomeCompletoProduto)
-                .maybeSingle();
-
-              if (prodExistente && prodExistente.id) {
-                produtoIdAlvo = obterUuidPuro(prodExistente.id);
-                // Incrementar quantidade do produto
-                await supabase
-                  .from('produtos')
-                  .update({
-                    quantidade: (prodExistente.quantidade || 0) + 1,
-                    preco_custo: valorAvaliado > 0 ? valorAvaliado : undefined,
-                    tipo: 'SEMINOVO'
-                  })
-                  .eq('id', produtoIdAlvo);
-              } else {
-                const { data: novoProduto, error: prodErr } = await supabase
-                  .from('produtos')
-                  .insert({
-                    empresa_id: obterUuidPuro(empresaId),
-                    filial_id: obterUuidPuro(activeFilialId),
-                    nome: nomeCompletoProduto,
-                    tipo: 'SEMINOVO',
-                    categoria: 'CELULAR',
-                    preco_custo: valorAvaliado,
-                    preco: valorAvaliado,
-                    quantidade: 1
-                  })
-                  .select('id')
-                  .single();
-
-                if (!prodErr && novoProduto) {
-                  produtoIdAlvo = obterUuidPuro(novoProduto.id);
-                }
-              }
-
-              // 2. Se possuir IMEI (ou produtoIdAlvo), inserir o registro na tabela imeis
-              if (produtoIdAlvo) {
-                const imeiPayload = {
-                  empresa_id: obterUuidPuro(empresaId),
-                  filial_id: obterUuidPuro(activeFilialId),
-                  produto_id: obterUuidPuro(produtoIdAlvo),
-                  imei: imeiSeminovo || `SEMINOVO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                  status: 'DISPONIVEL',
-                  vendido: false,
-                  cor: corSeminovo,
-                  preco_custo: valorAvaliado,
-                  preco_compra: valorAvaliado,
-                  preco_venda: valorAvaliado,
-                  tipo: 'SEMINOVO'
-                };
-
-                const { error: imeiErr } = await supabase.from('imeis').insert(imeiPayload);
-                if (imeiErr) {
-                  console.warn("Aviso ao cadastrar IMEI de seminovo no estoque:", imeiErr);
-                }
-              }
-            } catch (errTrocaEstoque) {
-              console.error("Erro ao dar entrada do seminovo no estoque:", errTrocaEstoque);
+              itensParaDarEntrada.push({
+                nome: nomeCompletoProduto,
+                cor: corSeminovo,
+                imei: imeiSeminovo,
+                valor: valorAvaliado,
+                categoria: categoriaSeminovo
+              });
             }
           }
         }
+
+        // Também garante a inclusão de itens de effectiveUsadoList caso não tenham sido processados ainda
+        if (effectiveUsadoList && effectiveUsadoList.length > 0) {
+          for (const u of effectiveUsadoList) {
+            const imeiU = (u.imei || '').replace(/\D/g, '').trim();
+            const jaExiste = itensParaDarEntrada.some(it => it.imei && imeiU && it.imei === imeiU);
+            if (!jaExiste) {
+              const valorU = Number(u.valor_avaliacao ?? u.valor ?? 0);
+              const nomeU = (u.produto?.nome || u.nome || 'Aparelho Usado').trim();
+              const catU = (u.categoria || u.produto?.categoria || pdvTrocaCategoria || 'Usados').trim() || 'Usados';
+              itensParaDarEntrada.push({
+                nome: nomeU,
+                cor: (u.cor || 'Padrão').trim(),
+                imei: imeiU,
+                valor: valorU,
+                categoria: catU
+              });
+            }
+          }
+        }
+
+        for (const itemEntrada of itensParaDarEntrada) {
+          try {
+            const valorAvaliado = Number(itemEntrada.valor || 0);
+            const nomeCompletoProduto = itemEntrada.nome;
+            const corSeminovo = itemEntrada.cor || 'Padrão';
+            const imeiSeminovo = itemEntrada.imei;
+            const categoriaProduto = (itemEntrada.categoria || 'Usados').trim() || 'Usados';
+
+            // 1. Localizar ou cadastrar o produto na tabela produtos da filial ativa
+            let produtoIdAlvo = null;
+            const { data: prodExistente } = await supabase
+              .from('produtos')
+              .select('id, quantidade, categoria')
+              .eq('empresa_id', obterUuidPuro(empresaId))
+              .eq('filial_id', obterUuidPuro(activeFilialId))
+              .ilike('nome', nomeCompletoProduto)
+              .maybeSingle();
+
+            if (prodExistente && prodExistente.id) {
+              produtoIdAlvo = obterUuidPuro(prodExistente.id);
+              // Incrementar quantidade do produto e garantir dados de seminovo
+              await supabase
+                .from('produtos')
+                .update({
+                  quantidade: (prodExistente.quantidade || 0) + 1,
+                  preco_custo: valorAvaliado > 0 ? valorAvaliado : undefined,
+                  tipo: 'APARELHO',
+                  condicao: 'USADO',
+                  categoria: prodExistente.categoria || categoriaProduto
+                })
+                .eq('id', produtoIdAlvo);
+            } else {
+              const payloadNovoProduto = {
+                empresa_id: obterUuidPuro(empresaId),
+                filial_id: obterUuidPuro(activeFilialId),
+                nome: nomeCompletoProduto,
+                tipo: 'APARELHO',
+                categoria: categoriaProduto,
+                condicao: 'USADO',
+                preco: valorAvaliado,
+                preco_custo: valorAvaliado,
+                quantidade: 1,
+                imei: imeiSeminovo || null
+              };
+
+              let { data: novoProduto, error: prodErr } = await supabase
+                .from('produtos')
+                .insert(payloadNovoProduto)
+                .select('id')
+                .single();
+
+              // Fallback caso a tabela produtos não possua coluna 'condicao' ou 'imei'
+              if (prodErr && (prodErr.code === '42703' || String(prodErr.message).includes('condicao') || String(prodErr.message).includes('imei'))) {
+                console.warn('⚠️ [PDV Troca] Fallback no insert de produto usado sem campos extras:', prodErr.message);
+                const fallbackProdPayload = { ...payloadNovoProduto };
+                delete fallbackProdPayload.condicao;
+                delete fallbackProdPayload.imei;
+                const retryProd = await supabase
+                  .from('produtos')
+                  .insert(fallbackProdPayload)
+                  .select('id')
+                  .single();
+                novoProduto = retryProd.data;
+                prodErr = retryProd.error;
+              }
+
+              if (!prodErr && novoProduto) {
+                produtoIdAlvo = obterUuidPuro(novoProduto.id);
+              } else if (prodErr) {
+                console.error("❌ [PDV Troca] Falha ao inserir produto usado na tabela produtos:", prodErr);
+              }
+            }
+
+            // 2. Se possuir IMEI (ou produtoIdAlvo), inserir o registro na tabela imeis
+            if (produtoIdAlvo) {
+              const imeiPayload = {
+                empresa_id: obterUuidPuro(empresaId),
+                filial_id: obterUuidPuro(activeFilialId),
+                produto_id: obterUuidPuro(produtoIdAlvo),
+                imei: imeiSeminovo || `SEMINOVO-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                status: 'DISPONIVEL',
+                vendido: false,
+                cor: corSeminovo,
+                preco_custo: valorAvaliado,
+                preco_compra: valorAvaliado,
+                preco_venda: valorAvaliado,
+                tipo: 'SEMINOVO'
+              };
+
+              const { error: imeiErr } = await supabase.from('imeis').insert(imeiPayload);
+              if (imeiErr) {
+                console.warn("Aviso ao cadastrar IMEI de seminovo no estoque:", imeiErr);
+              }
+            }
+          } catch (errTrocaItem) {
+            console.error("Erro ao dar entrada do item de troca no estoque:", errTrocaItem);
+          }
+        }
+      } catch (errTrocaEstoqueGeral) {
+        console.error("Erro geral na rotina de entrada de troca no estoque:", errTrocaEstoqueGeral);
       }
 
       setModalSucessoVenda({ venda: createdVendaIds, dadosRecibo });
@@ -20152,6 +20259,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         cor: pdvTrocaCor.trim(),
                         imei: imeiSanitizado,
                         valor: valorSanitizado,
+                        categoria: (pdvTrocaCategoria || 'Usados').trim() || 'Usados',
                         dar_entrada_estoque: pdvTrocaEntradaEstoque
                       } : null
                     };
@@ -20165,6 +20273,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       setPdvTrocaCapacidade('');
                       setPdvTrocaCor('');
                       setPdvTrocaImei('');
+                      setPdvTrocaCategoria('Usados');
                       setPdvTrocaValor('');
                       setPdvTrocaEntradaEstoque(true);
                       setPdvNovoMetodo('pix');
