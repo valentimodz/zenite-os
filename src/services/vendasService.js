@@ -127,14 +127,17 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
         throw new Error('Venda não possui vínculo com nenhuma empresa/tenant.');
     }
 
-    // 2. Carregar os dados da empresa e as configurações fiscais (incluindo certificado A1)
-    const [empresaRes, configFiscalRes] = await Promise.all([
+    // 2. Carregar os dados da empresa, filial (se houver) e as configurações fiscais (incluindo certificado A1)
+    const filialId = venda.filial_id;
+    const [empresaRes, configFiscalRes, filialRes] = await Promise.all([
         supabase.from('companies').select('*').eq('id', empresaId).single(),
-        supabase.from('configuracoes_fiscais').select('*').eq('tenant_id', empresaId).maybeSingle()
+        supabase.from('configuracoes_fiscais').select('*').eq('tenant_id', empresaId).maybeSingle(),
+        filialId ? supabase.from('filiais').select('*').eq('id', filialId).maybeSingle() : Promise.resolve({ data: null })
     ]);
 
     const empresa = empresaRes.data;
     const configFiscal = configFiscalRes.data;
+    const filial = filialRes?.data || null;
 
     if (!configFiscal || !configFiscal.certificado_senha_criptografada) {
         throw new Error('Configuração fiscal incompleta ou certificado digital A1 não configurado para esta empresa.');
@@ -167,16 +170,22 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
         venda_id: venda.id,
         numero_nfe: numeroNfe,
         serie: 1,
-        natureza_operacao: 'VENDA DE MERCADORIA',
+        natureza_operacao: 'Venda de mercadoria adquirida ou recebida de terceiros',
         ambiente: ambiente,
         forma_pagamento: venda.forma_pagamento || 'DINHEIRO',
         emitente: {
-            cnpj: configFiscal.cnpj || empresa?.cnpj || '00000000000000',
-            razao_social: empresa?.razao_social || empresa?.name || 'Empresa Emissora',
-            nome_fantasia: empresa?.name || null,
-            inscricao_estadual: configFiscal.inscricao_estadual || 'ISENTO',
+            cnpj: filial?.cnpj || configFiscal.cnpj || empresa?.cnpj || '00000000000000',
+            razao_social: filial?.razao_social || empresa?.razao_social || empresa?.name || 'Empresa Emissora',
+            nome_fantasia: filial?.nome || empresa?.name || null,
+            inscricao_estadual: filial?.inscricao_estadual || configFiscal.inscricao_estadual || 'ISENTO',
             regime_tributario: configFiscal.regime_tributario === 'Lucro Presumido' ? '3' : '1',
-            uf: 'PA'
+            logradouro: filial?.logradouro || filial?.endereco || configFiscal.logradouro || 'Rua Principal',
+            numero: filial?.numero || configFiscal.numero || 'S/N',
+            bairro: filial?.bairro || configFiscal.bairro || 'Centro',
+            municipio: filial?.cidade || filial?.municipio || configFiscal.municipio || 'Marabá',
+            uf: filial?.estado || filial?.uf || 'PA',
+            cep: filial?.cep || configFiscal.cep || '68500000',
+            telefone: filial?.telefone || filial?.whatsapp || empresa?.telefone || null
         },
         cliente: {
             nome: venda.cliente_nome || 'Consumidor Final',
