@@ -339,10 +339,12 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             
             # Adicionar produtos / serviços
             from decimal import Decimal
+            total_produtos_calculado = Decimal("0.00")
             for idx, item in enumerate(req.itens, start=1):
                 qtd_dec = Decimal(str(round(float(item.quantidade or 1.0), 4)))
                 vunit_dec = Decimal(str(round(float(item.valor_unitario or 0.0), 2)))
                 vtot_dec = Decimal(str(round(float(item.valor_total or (float(qtd_dec) * float(vunit_dec))), 2)))
+                total_produtos_calculado += vtot_dec
 
                 nfe.adicionar_produto_servico(
                     codigo=item.codigo,
@@ -365,10 +367,71 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     valor_tributos_aprox=Decimal("0.00")
                 )
             
-            # 5. Serializar e Assinar XML
+            # 5. Adicionar Grupo de Pagamento (NF-e 4.00)
+            # Mapeamento do tipo de pagamento para o código oficial da SEFAZ
+            mapa_pagamento = {
+                "DINHEIRO": "01",
+                "CHEQUE": "02",
+                "CARTAO_CREDITO": "03",
+                "CARTAO_DEBITO": "04",
+                "CREDITO_LOJA": "05",
+                "VALE_ALIMENTACAO": "10",
+                "VALE_REFEICAO": "11",
+                "VALE_PRESENTE": "12",
+                "VALE_COMBUSTIVEL": "13",
+                "DUPLICATA_MERCANTIL": "14",
+                "BOLETO": "15",
+                "DEPOSITO_BANCARIO": "16",
+                "PIX": "17",
+                "TRANSFERENCIA": "18",
+                "FIDELIDADE": "19",
+                "SEM_PAGAMENTO": "90",
+                "OUTROS": "99",
+            }
+            forma_upper = (req.forma_pagamento or "DINHEIRO").upper().strip()
+            codigo_tpag = mapa_pagamento.get(forma_upper, "01")
+            ind_pag_val = 0 # 0 = À Vista, 1 = A Prazo
+
+            # Total da nota a ser pago
+            valor_pagamento = total_produtos_calculado if total_produtos_calculado > 0 else Decimal("0.00")
+            nfe.valor_troco = Decimal("0.00")
+            nfe.adicionar_pagamento(
+                t_pag=codigo_tpag,
+                v_pag=valor_pagamento,
+                ind_pag=ind_pag_val
+            )
+
+            # 6. Serializar e Assinar XML
             homologacao_bool = (int(ambiente) == 2)
             serializador = SerializacaoXML(_fonte_dados, homologacao=homologacao_bool)
             xml_nao_assinado = serializador.exportar()
+
+            # Validação e Correção Estrutural da Tag <pag> para NF-e 4.00
+            from lxml import etree
+            pag_nodes = xml_nao_assinado.xpath("//*[local-name()='pag']")
+            for pag_el in pag_nodes:
+                ns_uri = etree.QName(pag_el).namespace
+                pfx = f"{{{ns_uri}}}" if ns_uri else ""
+                
+                det_nodes = pag_el.xpath("./*[local-name()='detPag']")
+                if not det_nodes:
+                    # Se por algum motivo o nó pag estava vazio, injeta o detPag completo
+                    det_el = etree.SubElement(pag_el, f"{pfx}detPag")
+                    etree.SubElement(det_el, f"{pfx}indPag").text = str(ind_pag_val)
+                    etree.SubElement(det_el, f"{pfx}tPag").text = codigo_tpag
+                    etree.SubElement(det_el, f"{pfx}vPag").text = f"{valor_pagamento:.2f}"
+                else:
+                    for det_el in det_nodes:
+                        # Garante que indPag seja a primeira tag em detPag
+                        if not det_el.xpath("./*[local-name()='indPag']"):
+                            ind_el = etree.Element(f"{pfx}indPag")
+                            ind_el.text = str(ind_pag_val)
+                            det_el.insert(0, ind_el)
+
+                # Garante a tag <vTroco> obrigatoria na NF-e 4.00 ao final de <pag>
+                if not pag_el.xpath("./*[local-name()='vTroco']"):
+                    vtroco_el = etree.SubElement(pag_el, f"{pfx}vTroco")
+                    vtroco_el.text = "0.00"
 
             # Garantir que a raiz <NFe> não possui Id
             if xml_nao_assinado.attrib.get("Id"):
