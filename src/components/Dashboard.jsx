@@ -14,7 +14,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { emitirNfseStub } from '../services/fiscal';
 import { generatePromoCopyAI, getStaticPromoFallback } from '../services/groqService';
-import { atualizarVendaAposCriacao } from '../services/vendasService';
+import { atualizarVendaAposCriacao, emitirNfeVenda } from '../services/vendasService';
 import { hasFeature } from '../utils/featureFlags';
 import SaasDashboard from '../pages/SaaS/SaasDashboard';
 import SaasTenants from '../pages/SaaS/SaasTenants';
@@ -6114,48 +6114,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   const handleEmitirNfePdv = async (reciboDados) => {
-    if (!hasFeature(company, 'emitir_nfe') && profile?.role !== 'SUPER_ADMIN') {
-      alert('Recurso Indisponível: O plano atual da sua empresa (START/PRO) não possui suporte para Emissão de NF-e. Faça um upgrade para o plano ULTIMATE para utilizar esta funcionalidade.');
+    const isMasterOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'OWNER'].includes(profile?.role) || company?.id === 'MASTER';
+    if (!isMasterOrAdmin && !hasFeature(company, 'emitir_nfe')) {
+      alert('Recurso Indisponível: O plano atual da sua empresa não possui suporte para Emissão de NF-e. Faça um upgrade para utilizar esta funcionalidade.');
       return;
     }
+
+    if (!reciboDados?.venda_id) {
+      alert('Aviso: Venda não identificada para emissão de nota fiscal.');
+      return;
+    }
+
     setIsFiscalLoading(true);
     try {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      const token = currentSession?.access_token;
-      if (!token) {
-        alert('Erro: Sessão não encontrada. Por favor, faça login novamente.');
-        return;
-      }
-
-      const { ok, data, error: fetchErr } = await safeFetchJson('/api/fiscal/emitir-nfe-pdv', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          venda_id: reciboDados.venda_id,
-          cliente_cpf_cnpj: reciboDados.cliente_cpf_cnpj,
-          cliente_nome: reciboDados.cliente_nome,
-          cliente_email: reciboDados.cliente_email
-        })
+      const data = await emitirNfeVenda({
+        vendaId: reciboDados.venda_id,
+        ambiente: 2 // 2 = Homologação SEFAZ-PA (ou 1 para Produção)
       });
 
-      if (!ok || !data) {
-        throw new Error(fetchErr || 'Falha ao emitir nota fiscal.');
+      if (!data || !data.sucesso) {
+        throw new Error(data?.motivo || 'Falha ao emitir nota fiscal na SEFAZ.');
       }
 
-      alert(`NF-e emitida com sucesso!\nChave: ${data.nfe_id}`);
+      alert(`NF-e emitida com sucesso!\nChave: ${data.chave_acesso}`);
 
       setPdvReciboDados(prev => ({
         ...prev,
-        nfe_id: data.nfe_id,
-        nfe_pdf_url: data.nfe_pdf_url,
+        nfe_id: data.chave_acesso,
+        nfe_pdf_url: data.pdf_url,
         nfe_status: 'EMITIDA'
       }));
 
-      if (data.nfe_pdf_url) {
-        window.open(data.nfe_pdf_url, '_blank');
+      if (data.pdf_url) {
+        window.open(data.pdf_url, '_blank');
       }
 
     } catch (err) {

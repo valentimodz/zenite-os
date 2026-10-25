@@ -6,7 +6,8 @@ export const PLAN_FEATURES = {
     'pdv',
     'clientes',
     'estoque',
-    'ranking'
+    'ranking',
+    'emitir_nfe'
   ],
   PRO: [
     'pdv',
@@ -14,7 +15,8 @@ export const PLAN_FEATURES = {
     'estoque',
     'ranking',
     'troca_celular',
-    'relatorios_avancados'
+    'relatorios_avancados',
+    'emitir_nfe'
   ],
   ULTIMATE: [
     'pdv',
