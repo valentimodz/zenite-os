@@ -6115,20 +6115,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           supabasePayload.certificado_senha_criptografada = fiscalCertificadoSenha;
         }
 
-        // Tenta salvar com a coluna ambiente; se o schema do Supabase não possuir a coluna, tenta sem ela
-        let { error: sbErr } = await supabase
+        // Salva apenas as colunas válidas no Supabase (ambiente fica preservado no localStorage)
+        const { error: sbErr } = await supabase
           .from('configuracoes_fiscais')
-          .upsert({ ...supabasePayload, ambiente: Number(fiscalAmbiente || 2) }, { onConflict: 'tenant_id' });
+          .upsert(supabasePayload, { onConflict: 'tenant_id' });
         
-        if (sbErr && sbErr.message?.includes('ambiente')) {
-          console.warn('Coluna ambiente não existe na tabela configuracoes_fiscais, salvando campos padrão:', sbErr.message);
-          const { error: sbErrRetry } = await supabase
-            .from('configuracoes_fiscais')
-            .upsert(supabasePayload, { onConflict: 'tenant_id' });
-          if (sbErrRetry) throw sbErrRetry;
-        } else if (sbErr) {
-          throw sbErr;
-        }
+        if (sbErr) throw sbErr;
       }
 
       alert('Configurações fiscais e Certificado Digital A1 salvos com sucesso!');
