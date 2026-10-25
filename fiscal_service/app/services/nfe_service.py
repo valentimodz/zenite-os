@@ -36,7 +36,29 @@ def extrair_ou_baixar_certificado(req: EmitirNfeRequest) -> str:
         except Exception:
             pass
 
-def calcular_chave_acesso_44(c_uf: str, data_emissao: datetime, cnpj: str, mod: str, serie: int, n_nf: int, tp_emis: str = "1", c_nf: str = None) -> tuple[str, str]:
+def calcular_dv_nfe(chave43: str) -> str:
+    """
+    Calcula o Dígito Verificador (cDV) de 1 dígito para a chave de 43 dígitos da NF-e
+    utilizando a regra oficial do Módulo 11 da SEFAZ:
+    - Pesos de 2 a 9 da direita para a esquerda
+    - Multiplica cada dígito pelo peso correspondente e soma
+    - resto = soma % 11
+    - dv = 11 - resto
+    - Se dv in (0, 10, 11), retorna '0', senão retorna str(dv)
+    """
+    pesos = [2, 3, 4, 5, 6, 7, 8, 9]
+    soma = 0
+    peso_idx = 0
+    for digito in reversed(chave43):
+        soma += int(digito) * pesos[peso_idx]
+        peso_idx = (peso_idx + 1) % len(pesos)
+    resto = soma % 11
+    dv = 11 - resto
+    if dv in (0, 10, 11):
+        return "0"
+    return str(dv)
+
+def calcular_chave_acesso_44(c_uf: str, data_emissao: datetime, cnpj: str, mod: str, serie: int, n_nf: int, tp_emis: str = "1", c_nf: str = None) -> tuple[str, str, str]:
     """
     Monta a Chave de Acesso oficial da NF-e com exatamente 44 dígitos numéricos:
     - cUF (2): Código da UF (ex: 15 para PA)
@@ -47,7 +69,8 @@ def calcular_chave_acesso_44(c_uf: str, data_emissao: datetime, cnpj: str, mod: 
     - nNF (9): Número da nota fiscal com zeros à esquerda
     - tpEmis (1): Tipo de emissão (1 = Normal)
     - cNF (8): Código numérico aleatório de 8 dígitos
-    - cDV (1): Dígito verificador módulo 11
+    - cDV (1): Dígito verificador módulo 11 oficial
+    Retorna (chave_44, c_nf, cdv)
     """
     import random
     clean_cnpj = "".join(filter(str.isdigit, cnpj)).zfill(14)
@@ -60,15 +83,9 @@ def calcular_chave_acesso_44(c_uf: str, data_emissao: datetime, cnpj: str, mod: 
         c_nf = str(random.randint(10000000, 99999999))
     
     chave_43 = f"{c_uf.zfill(2)}{aamm}{clean_cnpj}{mod_str}{serie_str}{nnf_str}{tp_emis_str}{c_nf}"
-    
-    # Cálculo Módulo 11
-    pesos = [2, 3, 4, 5, 6, 7, 8, 9] * 6
-    soma = sum(int(ch) * pesos[i] for i, ch in enumerate(reversed(chave_43)))
-    resto = soma % 11
-    cdv = "0" if resto in (0, 1) else str(11 - resto)
-    
+    cdv = calcular_dv_nfe(chave_43)
     chave_44 = f"{chave_43}{cdv}"
-    return chave_44, c_nf
+    return chave_44, c_nf, cdv
 
 def extrair_resultado_sefaz(resposta_envio) -> tuple[bool, str, str, str]:
     """
@@ -304,7 +321,7 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             data_emissao = datetime.now()
             
             # Gerar Chave de Acesso Oficial de exatamente 44 dígitos
-            chave_44, c_nf = calcular_chave_acesso_44(
+            chave_44, c_nf, cdv = calcular_chave_acesso_44(
                 c_uf="15",
                 data_emissao=data_emissao,
                 cnpj=req.emitente.cnpj,
@@ -330,6 +347,7 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 tipo_impressao_danfe=1, # 1 = Retrato
                 forma_emissao="1",   # 1 = Normal
                 codigo_numerico_aleatorio=c_nf,
+                dv_codigo_numerico_aleatorio=cdv,
                 cliente_final=1,     # 1 = Consumidor Final
                 indicador_destino=1, # 1 = Operação interna (PA)
                 indicador_presenca=1, # 1 = Presencial no estabelecimento
@@ -441,6 +459,16 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             inf_nfe_elem = xml_nao_assinado.find(".//{*}infNFe")
             if inf_nfe_elem is not None:
                 inf_nfe_elem.attrib["Id"] = f"NFe{chave_44}"
+
+            # Garantir que os campos cNF e cDV da tag <ide> coincidam exatamente com a chave de 44 dígitos
+            ide_elem = xml_nao_assinado.find(".//{*}ide")
+            if ide_elem is not None:
+                cnf_node = ide_elem.find("{*}cNF")
+                if cnf_node is not None:
+                    cnf_node.text = c_nf
+                cdv_node = ide_elem.find("{*}cDV")
+                if cdv_node is not None:
+                    cdv_node.text = cdv
 
             # Remove qualquer outro nó duplicado que contenha Id
             nodes_with_id = xml_nao_assinado.xpath("//*[@Id]")
