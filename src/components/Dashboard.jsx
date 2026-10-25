@@ -6138,15 +6138,45 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       alert(`NF-e emitida com sucesso!\nChave: ${data.chave_acesso}`);
 
+      const pdfUrl = data.pdf_url;
       setPdvReciboDados(prev => ({
         ...prev,
         nfe_id: data.chave_acesso,
-        nfe_pdf_url: data.pdf_url,
+        nfe_pdf_url: pdfUrl,
         nfe_status: 'EMITIDA'
       }));
 
-      if (data.pdf_url) {
-        window.open(data.pdf_url, '_blank');
+      // Abrir pré-visualização ou download imediato da DANFE (PDF)
+      if (pdfUrl) {
+        if (pdfUrl.startsWith('data:application/pdf;base64,')) {
+          // Converter data URL para Blob para abrir em nova aba sem bloqueio de pop-up
+          try {
+            const byteCharacters = atob(pdfUrl.split(',')[1]);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/pdf' });
+            const blobUrl = URL.createObjectURL(blob);
+            
+            // Tenta abrir em nova aba
+            const newWindow = window.open(blobUrl, '_blank');
+            if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+              // Se o navegador bloqueou o pop-up, baixa o arquivo diretamente
+              const link = document.createElement('a');
+              link.href = blobUrl;
+              link.download = `DANFE_${data.chave_acesso || 'NFE'}.pdf`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }
+          } catch (e) {
+            window.open(pdfUrl, '_blank');
+          }
+        } else {
+          window.open(pdfUrl, '_blank');
+        }
       }
 
     } catch (err) {
@@ -31528,19 +31558,38 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               {/* Botões de Ação na Tela (conforme Item 4 do user request) */}
               <div className="flex flex-col gap-2 pt-2 print:hidden border-t border-border/60">
                 {pdvReciboDados.nfe_status === 'EMITIDA' ? (
-                  <div className="flex gap-2 w-full">
-                    <div className="flex-1 bg-green-950/20 border border-green-800/40 text-green-400 font-bold py-3 rounded text-xs flex items-center justify-center gap-1.5">
-                      <CheckCircle2 size={14} /> NF-e Emitida com Sucesso
+                  <div className="flex flex-col sm:flex-row gap-2 w-full">
+                    <div className="flex-1 bg-green-950/30 border border-green-800/50 text-green-400 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm">
+                      <CheckCircle2 size={15} /> NF-e Emitida com Sucesso
                     </div>
                     {pdvReciboDados.nfe_pdf_url && (
-                      <a
-                        href={pdvReciboDados.nfe_pdf_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="bg-black hover:bg-[#111111] border border-[#222222] text-xs font-bold py-3 px-4 rounded transition-all flex items-center justify-center gap-1.5 text-white"
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const url = pdvReciboDados.nfe_pdf_url;
+                          if (url.startsWith('data:application/pdf;base64,')) {
+                            const byteCharacters = atob(url.split(',')[1]);
+                            const byteNumbers = new Array(byteCharacters.length);
+                            for (let i = 0; i < byteCharacters.length; i++) {
+                              byteNumbers[i] = byteCharacters.charCodeAt(i);
+                            }
+                            const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
+                            const blobUrl = URL.createObjectURL(blob);
+                            const w = window.open(blobUrl, '_blank');
+                            if (!w) {
+                              const a = document.createElement('a');
+                              a.href = blobUrl;
+                              a.download = `DANFE_${pdvReciboDados.nfe_id || 'NFE'}.pdf`;
+                              a.click();
+                            }
+                          } else {
+                            window.open(url, '_blank');
+                          }
+                        }}
+                        className="bg-purple-900/60 hover:bg-purple-800 border border-purple-700/60 text-xs font-bold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-1.5 text-white shadow-md cursor-pointer"
                       >
-                        <Download size={14} /> Ver PDF da Nota
-                      </a>
+                        <FileText size={14} /> 📄 Ver DANFE (PDF)
+                      </button>
                     )}
                   </div>
                 ) : ['VENDEDOR', 'GERENTE'].includes(profile?.role) ? (
