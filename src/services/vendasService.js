@@ -252,15 +252,19 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
 
         return data;
     } catch (networkErr) {
-        console.error('❌ [vendasService.emitirNfeVenda] Falha na comunicação com o micro-serviço:', networkErr);
+        console.error('❌ [vendasService.emitirNfeVenda] Falha na comunicação com o micro-serviço fiscal:', networkErr);
+        const isOffline = networkErr.message?.includes('Failed to fetch') || networkErr.name === 'TypeError';
+        const msgAmigavel = isOffline
+            ? 'O Micro-serviço Fiscal local (porta 8000) não está em execução. Execute "start_service.bat" na pasta fiscal_service.'
+            : networkErr.message;
         await supabase
             .from('vendas')
             .update({
                 nfe_status: 'ERRO',
-                nfe_erro_detalhe: `Falha de conexão com o serviço fiscal: ${networkErr.message}`
+                nfe_erro_detalhe: `Falha de conexão com o serviço fiscal: ${msgAmigavel}`
             })
             .eq('id', vendaId);
-        throw networkErr;
+        throw new Error(msgAmigavel);
     }
 }
 
