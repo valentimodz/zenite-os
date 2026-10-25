@@ -6062,7 +6062,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return;
       }
 
-      const tenantId = company.id || profile?.empresa_id;
       const payload = {
         tenant_id: tenantId,
         cnpj: fiscalCnpj,
