@@ -167,8 +167,13 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             xml_assinado = certificado.assinar(xml_nao_assinado)
             
             # 6. Comunicação com a SEFAZ-PA (SVRS)
-            comunicador = ComunicacaoSefaz(uf="PA", certificado=certificado, ambiente=ambiente)
-            resposta_envio = comunicador.autorizacao(modelo="55", nota_fiscal=xml_assinado, id_lote=1)
+            comunicador = ComunicacaoSefaz(
+                uf="PA",
+                certificado=cert_path,
+                certificado_senha=req.certificado_senha,
+                homologacao=homologacao_bool
+            )
+            resposta_envio = comunicador.autorizacao(modelo="nfe", nota_fiscal=xml_assinado, id_lote=1)
             
             logger.info(f"Resposta bruta da SEFAZ: {resposta_envio}")
             
