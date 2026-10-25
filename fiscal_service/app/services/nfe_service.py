@@ -37,13 +37,19 @@ def extrair_ou_baixar_certificado(req: EmitirNfeRequest) -> str:
             pass
 
 def calcular_dv_nfe(chave43: str) -> str:
-    """
-    Calcula o Dígito Verificador (cDV) de 1 dígito para a chave de 43 dígitos da NF-e
-    utilizando a regra oficial do Módulo 11 da SEFAZ:
-    """
-    soma = sum(int(digito) * peso for digito, peso in zip(reversed(chave43), [2, 3, 4, 5, 6, 7, 8, 9] * 6))
+    """Calcula o dígito verificador da NF-e (Módulo 11 oficial SEFAZ)."""
+    pesos = [2, 3, 4, 5, 6, 7, 8, 9]
+    soma = 0
+    peso_idx = 0
+    for digito in reversed(chave43):
+        soma += int(digito) * pesos[peso_idx]
+        peso_idx = (peso_idx + 1) % len(pesos)
+    
     resto = soma % 11
-    return "0" if resto in (0, 1) else str(11 - resto)
+    dv = 11 - resto
+    if dv in (0, 10, 11):
+        return "0"
+    return str(dv)
 
 def calcular_chave_acesso_44(c_uf: str, data_emissao: datetime, cnpj: str, mod: str, serie: int, n_nf: int, tp_emis: str = "1", c_nf: str = None) -> tuple[str, str, str]:
     """
@@ -324,10 +330,7 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             assert len(chave43) == 43, f"Chave base precisa ter 43 dígitos, tem {len(chave43)}"
 
             # Cálculo do Módulo 11 oficial
-            soma = sum(int(digito) * peso for digito, peso in zip(reversed(chave43), [2, 3, 4, 5, 6, 7, 8, 9] * 6))
-            resto = soma % 11
-            c_dv = "0" if resto in (0, 1) else str(11 - resto)
-
+            c_dv = calcular_dv_nfe(chave43)
             chave_44 = f"{chave43}{c_dv}"
             print(f"[DEBUG FISCAL] Chave: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
             logger.info(f"[DEBUG FISCAL] Chave: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
@@ -462,14 +465,25 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 inf_nfe_elem.attrib["Id"] = f"NFe{chave_44}"
 
             # Garantir que os campos cNF e cDV da tag <ide> coincidam exatamente com a chave de 44 dígitos
-            ide_elem = xml_nao_assinado.find(".//{*}ide")
-            if ide_elem is not None:
-                cnf_node = ide_elem.find("{*}cNF")
-                if cnf_node is not None:
-                    cnf_node.text = c_nf
-                cdv_node = ide_elem.find("{*}cDV")
-                if cdv_node is not None:
-                    cdv_node.text = c_dv
+            for cnf_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cNF']"):
+                cnf_node.text = c_nf
+            for cdv_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cDV']"):
+                cdv_node.text = c_dv
+
+            # Log de conferência dos campos antes de assinar
+            cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
+            dhemi_conf = xml_nao_assinado.xpath("//*[local-name()='dhEmi']/text()")
+            cnpj_conf = xml_nao_assinado.xpath("//*[local-name()='emit']/*[local-name()='CNPJ']/text()")
+            mod_conf = xml_nao_assinado.xpath("//*[local-name()='mod']/text()")
+            serie_conf = xml_nao_assinado.xpath("//*[local-name()='serie']/text()")
+            nnf_conf = xml_nao_assinado.xpath("//*[local-name()='nNF']/text()")
+            tpemis_conf = xml_nao_assinado.xpath("//*[local-name()='tpEmis']/text()")
+            cnf_conf = xml_nao_assinado.xpath("//*[local-name()='cNF']/text()")
+            cdv_conf = xml_nao_assinado.xpath("//*[local-name()='cDV']/text()")
+            inf_id_conf = xml_nao_assinado.xpath("//*[local-name()='infNFe']/@Id")
+
+            logger.info(f"[CONFERENCIA XML] cUF={cuf_conf} dhEmi={dhemi_conf} CNPJ={cnpj_conf} mod={mod_conf} serie={serie_conf} nNF={nnf_conf} tpEmis={tpemis_conf} cNF={cnf_conf} cDV={cdv_conf} infId={inf_id_conf}")
+            print(f"[CONFERENCIA XML] cUF={cuf_conf} dhEmi={dhemi_conf} CNPJ={cnpj_conf} mod={mod_conf} serie={serie_conf} nNF={nnf_conf} tpEmis={tpemis_conf} cNF={cnf_conf} cDV={cdv_conf} infId={inf_id_conf}")
 
             # Remove qualquer outro nó duplicado que contenha Id
             nodes_with_id = xml_nao_assinado.xpath("//*[@Id]")
