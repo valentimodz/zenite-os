@@ -14,7 +14,8 @@ export async function atualizarVendaAposCriacao({
     vendedor,
     formaPagamento,
     trainee,
-    usedDevice
+    usedDevice,
+    valoresPagamento
 }) {
     if (!vendaId) {
         throw new Error('ID da venda não fornecido para atualização.');
@@ -43,6 +44,11 @@ export async function atualizarVendaAposCriacao({
         // Pagamento
         forma_pagamento: String(formaPagamento || 'DINHEIRO').toUpperCase().trim(),
         metodo_pagamento: String(formaPagamento || 'DINHEIRO').toUpperCase().trim(),
+        valor_pix: Number(valoresPagamento?.valor_pix || 0),
+        valor_cartao: Number(valoresPagamento?.valor_cartao || 0),
+        valor_dinheiro: Number(valoresPagamento?.valor_dinheiro || 0),
+        valor_boleto: Number(valoresPagamento?.valor_boleto || 0),
+        valor_troca: Number(valoresPagamento?.valor_troca || 0),
 
         // Trainee
         trainee_id: trainee?.id || null,
@@ -60,13 +66,22 @@ export async function atualizarVendaAposCriacao({
         .update(payload)
         .eq('id', vendaId);
 
-    // Fallback resiliente caso as colunas used_* ainda não existam no schema remoto
-    if (error && (error.code === '42703' || String(error.message).includes('used_'))) {
-        console.warn('⚠️ [vendasService] Colunas used_* não encontradas em vendas, tentando update sem used_*:', error.message);
+    // Fallback resiliente caso as colunas de valor_* ou used_* não existam no schema remoto
+    if (error && (error.code === '42703' || String(error.message).includes('used_') || String(error.message).includes('valor_'))) {
+        console.warn('⚠️ [vendasService] Colunas não encontradas em vendas, tentando update com fallback:', error.message);
         const fallbackPayload = { ...payload };
-        delete fallbackPayload.used_produto_nome;
-        delete fallbackPayload.used_imei;
-        delete fallbackPayload.used_valor_avaliacao;
+        if (String(error.message).includes('used_')) {
+            delete fallbackPayload.used_produto_nome;
+            delete fallbackPayload.used_imei;
+            delete fallbackPayload.used_valor_avaliacao;
+        }
+        if (String(error.message).includes('valor_pix') || String(error.message).includes('valor_cartao') || String(error.message).includes('valor_dinheiro')) {
+            delete fallbackPayload.valor_pix;
+            delete fallbackPayload.valor_cartao;
+            delete fallbackPayload.valor_dinheiro;
+            delete fallbackPayload.valor_boleto;
+            delete fallbackPayload.valor_troca;
+        }
         const retryRes = await supabase
             .from('vendas')
             .update(fallbackPayload)

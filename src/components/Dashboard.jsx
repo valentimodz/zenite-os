@@ -7549,26 +7549,46 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     vendasSessaoDetalhe.forEach(sale => {
       const val = parseFloat(sale.valor_total || 0);
       const mp = (sale.metodo_pagamento || sale.forma_pagamento || '').toLowerCase();
-      const descTroca = parseFloat(sale.valor_desconto_troca || sale.used_valor_avaliacao || 0);
+      const descTroca = parseFloat(sale.valor_desconto_troca || sale.used_valor_avaliacao || sale.valor_troca || 0);
 
-      if (mp === 'especie' || mp === 'dinheiro' || mp === 'dinero') {
-        especie += val;
-      } else if (mp.includes('cartao') || mp.includes('credito') || mp.includes('debito')) {
-        cartao += val;
-      } else if (mp === 'pix') {
-        pix += val;
-      } else if (mp === 'boleto') {
-        boleto += val;
-        const finNome = (sale.financeira || sale.financeira_parceira || sale.metodo_detalhe || 'Outra').trim();
-        contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + val;
-      } else if (mp === 'troca') {
-        troca += val;
+      const vPixCol = Number(sale.valor_pix || 0);
+      const vCartaoCol = Number(sale.valor_cartao || 0);
+      const vDinheiroCol = Number(sale.valor_dinheiro || 0);
+      const vBoletoCol = Number(sale.valor_boleto || 0);
+      const vTrocaCol = Number(sale.valor_troca || 0);
+      const temColunasValores = (vPixCol > 0 || vCartaoCol > 0 || vDinheiroCol > 0 || vBoletoCol > 0 || vTrocaCol > 0);
+
+      if (temColunasValores) {
+        pix += vPixCol;
+        cartao += vCartaoCol;
+        especie += vDinheiroCol;
+        boleto += vBoletoCol;
+        troca += (vTrocaCol > 0 ? vTrocaCol : descTroca);
+        if (vBoletoCol > 0) {
+          const finNome = (sale.financeira || sale.financeira_parceira || sale.metodo_detalhe || 'Outra').trim();
+          contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + vBoletoCol;
+        }
       } else {
-        cartao += val;
-      }
+        if (mp === 'especie' || mp === 'dinheiro' || mp === 'dinero') {
+          especie += Number(sale.valor_dinheiro || val);
+        } else if (mp.includes('cartao') || mp.includes('credito') || mp.includes('debito')) {
+          cartao += Number(sale.valor_cartao || val);
+        } else if (mp === 'pix' || mp.includes('pix')) {
+          pix += Number(sale.valor_pix || val);
+        } else if (mp === 'boleto' || mp.includes('financ') || mp.includes('payjoy') || mp.includes('aiva') || mp.includes('watu') || mp.includes('ume')) {
+          const vB = Number(sale.valor_boleto || val);
+          boleto += vB;
+          const finNome = (sale.financeira || sale.financeira_parceira || sale.metodo_detalhe || 'Outra').trim();
+          contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + vB;
+        } else if (mp === 'troca') {
+          troca += Number(sale.valor_troca || val);
+        } else {
+          cartao += val;
+        }
 
-      if (descTroca > 0 && mp !== 'troca') {
-        troca += descTroca;
+        if (descTroca > 0 && mp !== 'troca') {
+          troca += descTroca;
+        }
       }
     });
 
@@ -15381,7 +15401,52 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 produto_nome: effectiveUsadoList.map(u => u.produto?.nome || u.nome).filter(Boolean).join(', ') || null,
                 imei: effectiveUsadoList.map(u => u.imei).filter(Boolean).join(', ') || null,
                 valor_avaliacao: valorUsadoTotal || effectiveUsadoList.reduce((acc, u) => acc + (Number(u.valor_avaliacao ?? u.valor) || 0), 0)
-              } : null
+              } : null,
+              valoresPagamento: (() => {
+                const totalItem = Number(valorTotalNovo || 0);
+                const proporcaoItem = subtotalCart > 0 ? (totalItem / subtotalCart) : 1;
+
+                if (pagamentosAdicionados.length > 0) {
+                  // Se houver pagamentos fracionados/múltiplos, distribui proporcionalmente para o item
+                  return {
+                    valor_pix: Number((vPix * proporcaoItem).toFixed(2)),
+                    valor_cartao: Number((vCartao * proporcaoItem).toFixed(2)),
+                    valor_dinheiro: Number((vDinheiro * proporcaoItem).toFixed(2)),
+                    valor_boleto: Number((vBoleto * proporcaoItem).toFixed(2)),
+                    valor_troca: Number(((valorUsadoTotal || 0) * proporcaoItem).toFixed(2))
+                  };
+                }
+
+                // Pagamento único direto
+                const metodo = String(metodoEfetivo || formaPagamentoFinal || 'DINHEIRO').toLowerCase();
+                let pPix = 0;
+                let pCartao = 0;
+                let pDinheiro = 0;
+                let pBoleto = 0;
+                let pTroca = 0;
+
+                if (metodo.includes('pix')) {
+                  pPix = totalItem;
+                } else if (metodo.includes('cart') || metodo.includes('cred') || metodo.includes('deb')) {
+                  pCartao = totalItem;
+                } else if (metodo.includes('dinheiro') || metodo.includes('vista') || metodo.includes('especie')) {
+                  pDinheiro = totalItem;
+                } else if (metodo.includes('boleto') || metodo.includes('financ') || metodo.includes('payjoy') || metodo.includes('aiva') || metodo.includes('watu') || metodo.includes('ume')) {
+                  pBoleto = totalItem;
+                } else if (metodo.includes('troca')) {
+                  pTroca = totalItem;
+                } else {
+                  pDinheiro = totalItem;
+                }
+
+                return {
+                  valor_pix: Number(pPix.toFixed(2)),
+                  valor_cartao: Number(pCartao.toFixed(2)),
+                  valor_dinheiro: Number(pDinheiro.toFixed(2)),
+                  valor_boleto: Number(pBoleto.toFixed(2)),
+                  valor_troca: Number(pTroca.toFixed(2))
+                };
+              })()
             });
           } catch (updateVendaErr) {
             console.error("❌ [ERRO AO ATUALIZAR VENDA]:", updateVendaErr);
@@ -16480,9 +16545,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           ? sale.vendas_pagamentos
           : (Array.isArray(sale.pagamentos) && sale.pagamentos.length > 0 ? sale.pagamentos : null);
 
-        const descTroca = parseFloat(sale.valor_desconto_troca || sale.used_valor_avaliacao || 0);
+        const descTroca = parseFloat(sale.valor_desconto_troca || sale.used_valor_avaliacao || sale.valor_troca || 0);
 
-        if (pagamentos && pagamentos.length > 0) {
+        const vPixCol = Number(sale.valor_pix || 0);
+        const vCartaoCol = Number(sale.valor_cartao || 0);
+        const vDinheiroCol = Number(sale.valor_dinheiro || 0);
+        const vBoletoCol = Number(sale.valor_boleto || 0);
+        const vTrocaCol = Number(sale.valor_troca || 0);
+        const temColunasValores = (vPixCol > 0 || vCartaoCol > 0 || vDinheiroCol > 0 || vBoletoCol > 0 || vTrocaCol > 0);
+
+        if (temColunasValores) {
+          pix += vPixCol;
+          cartao += vCartaoCol;
+          especie += vDinheiroCol;
+          boleto += vBoletoCol;
+          troca += (vTrocaCol > 0 ? vTrocaCol : descTroca);
+          if (vBoletoCol > 0) {
+            const finNome = (sale.financeira || sale.financeira_parceira || sale.metodo_detalhe || 'Outra').trim();
+            contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + vBoletoCol;
+          }
+        } else if (pagamentos && pagamentos.length > 0) {
           pagamentos.forEach(p => {
             const pVal = parseFloat(p.valor_pago ?? p.valor ?? 0);
             if (pVal <= 0) return;
@@ -16517,17 +16599,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           );
 
           if (norm === 'dinheiro') {
-            especie += val;
+            especie += Number(sale.valor_dinheiro || val);
           } else if (norm === 'cartao') {
-            cartao += val;
+            cartao += Number(sale.valor_cartao || val);
           } else if (norm === 'pix') {
-            pix += val;
+            pix += Number(sale.valor_pix || val);
           } else if (norm === 'financiadora') {
-            boleto += val;
+            const vBol = Number(sale.valor_boleto || val);
+            boleto += vBol;
             const finNome = (sale.financeira || sale.financeira_parceira || sale.metodo_detalhe || 'Outra').trim();
-            contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + val;
+            contratosFinanciadoras[finNome] = (contratosFinanciadoras[finNome] || 0) + vBol;
           } else if (norm === 'troca') {
-            troca += val;
+            troca += Number(sale.valor_troca || val);
           } else {
             cartao += val;
           }
@@ -16571,6 +16654,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           id,
           valor_total,
           valor,
+          valor_pix,
+          valor_cartao,
+          valor_dinheiro,
+          valor_boleto,
+          valor_troca,
           metodo_pagamento,
           forma_pagamento,
           pagamentos,
@@ -16596,7 +16684,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         console.warn('Aviso ao consultar vendas com vendas_pagamentos, tentando consulta simplificada:', error);
         let queryFallback = supabase
           .from('vendas')
-          .select('id, valor_total, valor, metodo_pagamento, forma_pagamento, pagamentos, financeira, financeira_parceira, created_at, status, filial_id, vendedor_id')
+          .select('id, valor_total, valor, valor_pix, valor_cartao, valor_dinheiro, valor_boleto, valor_troca, metodo_pagamento, forma_pagamento, pagamentos, financeira, financeira_parceira, created_at, status, filial_id, vendedor_id')
           .gte('created_at', inicioDoDia.toISOString())
           .lte('created_at', fimDoDia.toISOString())
           .neq('status', 'CANCELADA');
@@ -16610,6 +16698,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         if (!errFallback && Array.isArray(vFallback)) {
           vendasDia = vFallback;
           error = null;
+        } else if (errFallback) {
+          // Fallback extra se o banco não tiver as novas colunas
+          const { data: vBasic } = await supabase
+            .from('vendas')
+            .select('id, valor_total, valor, metodo_pagamento, forma_pagamento, pagamentos, financeira, financeira_parceira, created_at, status, filial_id, vendedor_id')
+            .gte('created_at', inicioDoDia.toISOString())
+            .lte('created_at', fimDoDia.toISOString())
+            .neq('status', 'CANCELADA');
+          if (Array.isArray(vBasic)) {
+            vendasDia = vBasic;
+            error = null;
+          }
         }
       }
 
@@ -16652,9 +16752,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           ? venda.vendas_pagamentos
           : (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0 ? venda.pagamentos : null);
 
-        const descTroca = parseFloat(venda.valor_desconto_troca || venda.used_valor_avaliacao || 0);
+        const descTroca = parseFloat(venda.valor_desconto_troca || venda.used_valor_avaliacao || venda.valor_troca || 0);
 
-        if (pagamentosArray && pagamentosArray.length > 0) {
+        // Se a venda tiver colunas explícitas de pagamento preenchidas (valor_pix, valor_cartao, valor_dinheiro, etc.)
+        const vPixCol = Number(venda.valor_pix || 0);
+        const vCartaoCol = Number(venda.valor_cartao || 0);
+        const vDinheiroCol = Number(venda.valor_dinheiro || 0);
+        const vBoletoCol = Number(venda.valor_boleto || 0);
+        const vTrocaCol = Number(venda.valor_troca || 0);
+        const temColunasValores = (vPixCol > 0 || vCartaoCol > 0 || vDinheiroCol > 0 || vBoletoCol > 0 || vTrocaCol > 0);
+
+        if (temColunasValores) {
+          totalPix += vPixCol;
+          totalCartao += vCartaoCol;
+          totalDinheiro += vDinheiroCol;
+          totalFinanciadoras += vBoletoCol;
+          totalTroca += (vTrocaCol > 0 ? vTrocaCol : descTroca);
+        } else if (pagamentosArray && pagamentosArray.length > 0) {
           pagamentosArray.forEach((p) => {
             const pForma = String(p.forma_pagamento || p.metodo_pagamento || p.forma || p.metodo || '').toUpperCase();
             const pValor = Number(p.valor_pago ?? p.valor ?? 0);
@@ -16678,19 +16792,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             totalTroca += descTroca;
           }
         } else {
+          // Apuração somando valor_total com base na forma_pagamento (ou fallback das colunas)
           const forma = String(venda.forma_pagamento || venda.metodo_pagamento || '').toUpperCase();
           const valor = Number(venda.valor_total ?? venda.valor ?? 0);
 
           if (forma.includes('PIX')) {
-            totalPix += valor;
+            totalPix += Number(venda.valor_pix || valor);
           } else if (forma.includes('CART') || forma.includes('CRED') || forma.includes('DEB')) {
-            totalCartao += valor;
+            totalCartao += Number(venda.valor_cartao || valor);
           } else if (forma.includes('DINHEIRO') || forma.includes('VISTA') || forma.includes('ESPÉCIE') || forma.includes('ESPECIE')) {
-            totalDinheiro += valor;
+            totalDinheiro += Number(venda.valor_dinheiro || valor);
           } else if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CARNE') || forma.includes('PAYJOY') || forma.includes('AIVA') || forma.includes('WATU') || forma.includes('UME')) {
-            totalFinanciadoras += valor;
+            totalFinanciadoras += Number(venda.valor_boleto || valor);
           } else if (forma.includes('TROCA')) {
-            totalTroca += valor;
+            totalTroca += Number(venda.valor_troca || valor);
           } else {
             // Caso caia numa categoria mista ou array de pagamentos múltiplos:
             if (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0) {
