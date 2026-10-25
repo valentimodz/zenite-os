@@ -23057,12 +23057,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       {/* MAIN CONTAINER (100% LARGURA EM MOBILE, SCROLL INTERNO ISOLADO) */}
       <div className={`flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden bg-background print:overflow-visible print:h-auto print:min-h-0 print:block print:p-0 print:m-0 ${pdvReciboAtivo ? 'print:contents' : ''}`}>
         {/* SLENDER FIXED NAVBAR */}
-        <header className="border-b border-border bg-surface py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden transition-colors">
-          <div className="flex items-center gap-2">
+        <header className="border-b border-border bg-surface flex items-center justify-between gap-2 px-3 py-2 w-full overflow-hidden h-14 shrink-0 z-20 print:hidden transition-colors">
+          <div className="flex items-center gap-1.5 min-w-0">
             {/* ÍCONE HAMBÚRGUER MOBILE */}
             <button
               onClick={() => setIsMobileMenuOpen(true)}
-              className="p-1.5 rounded-lg border border-border text-foreground-muted hover:text-foreground bg-surface hover:bg-surface-elevated transition-all mr-1 md:hidden"
+              className="p-1.5 rounded-lg border border-border text-foreground-muted hover:text-foreground bg-surface hover:bg-surface-elevated transition-all shrink-0 md:hidden"
               title="Abrir Menu Principal"
             >
               <Menu size={18} />
@@ -23072,21 +23072,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             {!sidebarOpen && (
               <button
                 onClick={() => { setSidebarOpen(true); localStorage.setItem('zenite_sidebar_open', 'true'); }}
-                className="hidden md:block p-1 rounded-lg border border-border text-foreground-muted hover:text-foreground bg-surface hover:bg-surface-elevated transition-all mr-2"
+                className="hidden md:block p-1 rounded-lg border border-border text-foreground-muted hover:text-foreground bg-surface hover:bg-surface-elevated transition-all mr-2 shrink-0"
                 title="Expandir Menu"
               >
                 <Menu size={16} />
               </button>
             )}
 
-            <span className="text-xs bg-muted text-muted-foreground border border-border px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider">
+            <span className="text-xs bg-muted text-muted-foreground border border-border px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider truncate hidden sm:inline">
               {getViewLabel()}
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {profile?.role === 'SUPER_ADMIN' && (
-              <div className="flex items-center gap-2 mr-2">
+              <div className="flex items-center gap-2 mr-1 sm:mr-2">
                 {window.location.pathname === '/super-admin' ? (
                   <>
                     <button
@@ -23108,15 +23108,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     className="text-xs bg-[#6A0DAD]/10 hover:bg-[#6A0DAD]/20 text-purple-400 hover:text-purple-300 border border-[#6A0DAD]/30 rounded px-2.5 py-1.5 font-medium transition-all flex items-center gap-1"
                   >
                     <Shield size={12} />
-                    Painel Super Admin
+                    <span className="hidden sm:inline">Painel Super Admin</span>
                   </button>
                 )}
               </div>
             )}
-            <div className="flex flex-col text-right">
-              <span className="text-xs font-bold text-foreground leading-tight">{getTopRightHeaderName()}</span>
-              <span className="text-[10px] text-foreground-muted font-medium">
-                {profile?.nome} | {profile?.role}
+            <div className="flex flex-col text-right max-w-[100px] sm:max-w-xs truncate min-w-0">
+              <span className="text-xs font-bold text-foreground leading-tight truncate" title={getTopRightHeaderName()}>
+                {getTopRightHeaderName()}
+              </span>
+              <span className="text-[10px] text-foreground-muted font-medium truncate" title={`${profile?.nome || ''} | ${profile?.role || ''}`}>
+                <span className="truncate">{profile?.nome?.split(' ')?.[0] || profile?.nome}</span>
+                <span className="hidden sm:inline"> | {profile?.role}</span>
               </span>
             </div>
 
@@ -23124,7 +23127,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             <button
               type="button"
               onClick={toggleTheme}
-              className="p-1.5 rounded-lg border border-border bg-surface text-foreground-muted hover:text-foreground hover:border-[#6A0DAD] transition-all cursor-pointer shadow-sm flex items-center justify-center"
+              className="p-1.5 rounded-lg border border-border bg-surface text-foreground-muted hover:text-foreground hover:border-[#6A0DAD] transition-all cursor-pointer shadow-sm flex items-center justify-center shrink-0"
               title={isDark ? "Ativar Modo Claro" : "Ativar Modo Escuro"}
             >
               {isDark ? (
@@ -23136,10 +23139,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
             <button
               onClick={handleSignOut}
-              className="flex items-center gap-1.5 border border-border hover:border-red-800/60 hover:text-red-400 bg-surface px-3 py-1.5 rounded-md text-xs font-semibold text-foreground transition-all cursor-pointer"
+              className="flex items-center gap-1.5 border border-border hover:border-red-800/60 hover:text-red-400 bg-surface px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-semibold text-foreground transition-all cursor-pointer shrink-0"
+              title="Sair do Sistema"
             >
               <LogOut size={12} />
-              <span>Sair</span>
+              <span className="hidden sm:inline">Sair</span>
             </button>
           </div>
         </header>
