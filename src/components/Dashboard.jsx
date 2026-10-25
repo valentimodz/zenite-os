@@ -22828,7 +22828,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   return (
-    <div className="h-screen w-full bg-background text-foreground font-sans flex overflow-hidden selection:bg-[#6A0DAD] selection:text-white transition-colors duration-200">
+    <div className="h-screen w-full bg-background text-foreground font-sans flex overflow-hidden selection:bg-[#6A0DAD] selection:text-white transition-colors duration-200 print:h-auto print:overflow-visible print:block print:static">
       {/* DRAWER MOBILE SIDEBAR OVERLAY */}
       {isMobileMenuOpen && (
         <div className="fixed inset-0 z-50 flex md:hidden print:hidden animate-fadeIn">
@@ -23055,7 +23055,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       </aside>
 
       {/* MAIN CONTAINER (100% LARGURA EM MOBILE, SCROLL INTERNO ISOLADO) */}
-      <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden bg-background">
+      <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden bg-background print:overflow-visible print:h-auto print:min-h-0 print:block">
         {/* SLENDER FIXED NAVBAR */}
         <header className="border-b border-border bg-surface py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden transition-colors">
           <div className="flex items-center gap-2">
@@ -23145,7 +23145,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         </header>
 
         {/* SCROLLABLE MAIN CONTENT AREA (ÚNICO SCROLL VERTICAL) */}
-        <div className="flex-1 overflow-y-auto min-w-0 w-full flex flex-col relative scroll-smooth">
+        <div className="flex-1 overflow-y-auto min-w-0 w-full flex flex-col relative scroll-smooth print:overflow-visible print:h-auto print:min-h-0 print:block">
           {/* Global notice banner inside content container */}
           {globalNotices.filter(n => n.active).length > 0 && profile?.role !== 'SUPER_ADMIN' && (
             <div className="bg-[#6A0DAD] text-white p-2.5 text-center text-xs font-medium flex items-center justify-center gap-2 relative z-10 shadow-md shrink-0">
@@ -30563,7 +30563,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         {/* MODAL DE RECIBO DE VENDA CONSOLIDADO (TÉRMICA 80MM VS RELATÓRIO A4) */}
         {pdvReciboAtivo && pdvReciboDados && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:p-0 print:m-0 print:bg-white print:block print:static print:overflow-visible print:h-auto print:min-h-0">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:static print:h-auto print:w-full print:bg-transparent print:p-0 print:overflow-visible">
             {/* Injeção Dinâmica de @page para Precisão Milimétrica do Navegador */}
             <style dangerouslySetInnerHTML={{
               __html: formatoImpressao === 'a4'
@@ -30573,7 +30573,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
             <div
               id="area-cupom-impressao"
-              className={`w-full space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:m-0 print:shadow-none print:static print:overflow-visible print:h-auto transition-all ${formatoImpressao === 'a4'
+              className={`w-full space-y-6 relative shadow-2xl print:static print:m-0 print:p-0 print:w-full print:max-w-none print:shadow-none print:break-before-avoid print:border-none print:bg-white print:text-black print:overflow-visible print:h-auto transition-all ${formatoImpressao === 'a4'
                 ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8'
                 : 'max-w-md modo-termica bg-card text-card-foreground border border-border rounded-2xl p-6'
                 }`}

@@ -152,11 +152,21 @@ html.light textarea:focus {
     color: #000000 !important;
   }
 
-  /* Remove restrições e altura fixa de qualquer container pai na árvore */
+  /* Remove restrições, altura fixa e overflow travado de qualquer container pai na árvore */
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   div,
   main,
-  section {
+  section,
+  aside,
+  article,
+  header {
     max-height: none !important;
+    overflow: visible !important;
   }
 
   /* Esconde todo o layout do sistema (telas, modais, menus, botões) */
@@ -174,6 +184,8 @@ html.light textarea:focus {
     position: static !important;
     float: none !important;
     margin: 0 auto !important;
+    padding: 0 !important;
+    width: 100% !important;
     box-shadow: none !important;
     border: none !important;
     background: #ffffff !important;
@@ -181,6 +193,8 @@ html.light textarea:focus {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
     page-break-inside: avoid;
     break-inside: avoid;
   }
