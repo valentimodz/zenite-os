@@ -5994,22 +5994,43 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     try {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const token = currentSession?.access_token;
-      if (!token) return;
 
-      const res = await safeFetchJson(`/api/fiscal/configuracoes?tenant_id=${tenantId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
+      let loadedConfig = null;
+      if (token) {
+        try {
+          const res = await safeFetchJson(`/api/fiscal/configuracoes?tenant_id=${tenantId}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (res.ok && res.data?.success && res.data?.config) {
+            loadedConfig = res.data.config;
+          }
+        } catch (apiErr) {
+          console.warn('Busca de config fiscal via API falhou, consultando Supabase diretamente:', apiErr);
         }
-      });
-      if (res.ok && res.data?.success && res.data?.config) {
-        const config = res.data.config;
-        setFiscalCnpj(config.cnpj || '');
-        setFiscalInscricaoEstadual(config.inscricao_estadual || '');
-        setFiscalInscricaoMunicipal(config.inscricao_municipal || '');
-        setFiscalRegimeTributario(config.regime_tributario || 'Simples Nacional');
-        setFiscalCertificadoA1Url(config.certificado_a1_url || '');
-        setFiscalCertificadoSenha(config.certificado_senha ? '••••••••' : '');
+      }
+
+      // Fallback direto via Supabase caso a API interna não esteja rodando (ex: produção Vercel)
+      if (!loadedConfig) {
+        const { data: sbConfig } = await supabase
+          .from('configuracoes_fiscais')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+        if (sbConfig) {
+          loadedConfig = sbConfig;
+        }
+      }
+
+      if (loadedConfig) {
+        setFiscalCnpj(loadedConfig.cnpj || '');
+        setFiscalInscricaoEstadual(loadedConfig.inscricao_estadual || '');
+        setFiscalInscricaoMunicipal(loadedConfig.inscricao_municipal || '');
+        setFiscalRegimeTributario(loadedConfig.regime_tributario || 'Simples Nacional');
+        setFiscalCertificadoA1Url(loadedConfig.certificado_a1_url || '');
+        setFiscalCertificadoSenha(loadedConfig.certificado_senha || loadedConfig.certificado_senha_criptografada ? '••••••••' : '');
       } else {
         setFiscalCnpj('');
         setFiscalInscricaoEstadual('');
@@ -6037,8 +6058,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         return;
       }
 
+      const tenantId = company.id || profile?.empresa_id;
       const payload = {
-        tenant_id: company.id,
+        tenant_id: tenantId,
         cnpj: fiscalCnpj,
         inscricao_estadual: fiscalInscricaoEstadual,
         inscricao_municipal: fiscalInscricaoMunicipal,
@@ -6050,20 +6072,44 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         payload.certificado_senha = fiscalCertificadoSenha;
       }
 
-      const { ok, data, error: fetchErr } = await safeFetchJson('/api/fiscal/configuracoes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!ok || !data) {
-        throw new Error(fetchErr || 'Falha ao salvar configurações fiscais.');
+      let saveSuccess = false;
+      try {
+        const { ok, data } = await safeFetchJson('/api/fiscal/configuracoes', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+        if (ok && data?.success) {
+          saveSuccess = true;
+        }
+      } catch (errApi) {
+        console.warn('API local falhou, executando fallback direto via Supabase:', errApi);
       }
 
-      alert('Configurações fiscais salvas com sucesso!');
+      // Fallback direto via Supabase
+      if (!saveSuccess) {
+        const supabasePayload = {
+          tenant_id: tenantId,
+          cnpj: fiscalCnpj,
+          inscricao_estadual: fiscalInscricaoEstadual || null,
+          inscricao_municipal: fiscalInscricaoMunicipal || null,
+          regime_tributario: fiscalRegimeTributario,
+          certificado_a1_url: fiscalCertificadoA1Url || null
+        };
+        if (fiscalCertificadoSenha && fiscalCertificadoSenha !== '••••••••') {
+          supabasePayload.certificado_senha_criptografada = fiscalCertificadoSenha;
+        }
+        const { error: sbErr } = await supabase
+          .from('configuracoes_fiscais')
+          .upsert(supabasePayload, { onConflict: 'tenant_id' });
+        
+        if (sbErr) throw sbErr;
+      }
+
+      alert('Configurações fiscais e Certificado Digital A1 salvos com sucesso!');
     } catch (err) {
       console.error('Erro ao salvar configurações fiscais:', err);
       alert('Erro: ' + err.message);
@@ -26647,6 +26693,180 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         Gerencie seus dados de acesso pessoais e os parâmetros globais da empresa.
                       </p>
                     </div>
+
+                    {/* CARD DE CONFIGURAÇÕES FISCAIS & CERTIFICADO DIGITAL A1 */}
+                    {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN', 'RH', 'RH_ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id) && company?.id !== 'MASTER' && (
+                      <div className="bg-[#0A0A0A] border border-[#6A0DAD]/30 rounded-xl p-6 space-y-6 shadow-xl shadow-purple-950/20">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-[#222222] pb-4">
+                          <div>
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                              <Award size={20} className="text-[#6A0DAD]" />
+                              Configurações Fiscais & Certificado Digital A1
+                            </h3>
+                            <p className="text-xs text-gray-400 mt-1">
+                              Configure o CNPJ emitente, Inscrição Estadual, Regime Tributário e envie seu Certificado A1 (.pfx / .p12) para emitir notas fiscais com validade jurídica na SEFAZ.
+                            </p>
+                          </div>
+                          <span className="text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider bg-purple-950/40 text-purple-300 border border-purple-800/40">
+                            SEFAZ / NF-e Modelo 55
+                          </span>
+                        </div>
+
+                        {isLoadingFiscalConfig ? (
+                          <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
+                            <Loader2 size={20} className="animate-spin text-[#6A0DAD]" />
+                            <span className="text-xs font-medium">Carregando dados fiscais da empresa...</span>
+                          </div>
+                        ) : (
+                          <form onSubmit={handleSaveFiscalConfig} className="space-y-5">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                  CNPJ Emitente <span className="text-red-500">*</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  value={fiscalCnpj}
+                                  onChange={(e) => setFiscalCnpj(e.target.value)}
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                                  placeholder="00.000.000/0001-00"
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                  Inscrição Estadual (IE)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={fiscalInscricaoEstadual}
+                                  onChange={(e) => setFiscalInscricaoEstadual(e.target.value)}
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                                  placeholder="Ex: 159118344 ou ISENTO"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                  Inscrição Municipal (IM)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={fiscalInscricaoMunicipal}
+                                  onChange={(e) => setFiscalInscricaoMunicipal(e.target.value)}
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg text-white px-4 py-2.5 text-sm outline-none transition-all font-mono"
+                                  placeholder="Inscrição Municipal"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                  Regime Tributário <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={fiscalRegimeTributario}
+                                  onChange={(e) => setFiscalRegimeTributario(e.target.value)}
+                                  className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg text-white px-4 py-2.5 text-sm outline-none transition-all cursor-pointer"
+                                >
+                                  <option value="Simples Nacional">Simples Nacional (ME / EPP)</option>
+                                  <option value="Lucro Presumido">Lucro Presumido</option>
+                                </select>
+                              </div>
+
+                              <div className="md:col-span-2">
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                  Arquivo do Certificado Digital A1 (.pfx / .p12)
+                                </label>
+
+                                {certificadoUploadLoading ? (
+                                  <div className="w-full bg-black/40 border border-dashed border-[#6A0DAD]/40 rounded-xl p-5 flex flex-col items-center justify-center gap-2 h-[88px] transition-all">
+                                    <Loader2 className="animate-spin text-[#6A0DAD]" size={24} />
+                                    <span className="text-xs text-purple-300 font-medium">Enviando e armazenando certificado seguro...</span>
+                                  </div>
+                                ) : fiscalCertificadoA1Url ? (
+                                  <div className="w-full bg-[#0A0515] border border-[#6A0DAD]/40 rounded-xl p-4 flex items-center justify-between gap-3 h-[88px] transition-all shadow-md shadow-purple-950/20">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="p-2.5 bg-[#6A0DAD]/20 text-[#A78BFA] border border-[#6A0DAD]/40 rounded-lg">
+                                        <Lock size={20} />
+                                      </div>
+                                      <div className="min-w-0 flex flex-col">
+                                        <span className="text-xs font-bold text-white truncate">
+                                          {getCertificadoFileName(fiscalCertificadoA1Url)}
+                                        </span>
+                                        <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1.5 mt-0.5">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+                                          Certificado A1 Ativo e Vinculado
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFiscalCertificadoA1Url('')}
+                                      className="text-xs bg-red-950/40 hover:bg-red-900/50 border border-red-800/50 hover:border-red-600 text-red-300 rounded-lg px-3.5 py-2 font-bold transition-all whitespace-nowrap cursor-pointer"
+                                    >
+                                      Substituir
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="relative group">
+                                    <input
+                                      type="file"
+                                      accept=".pfx, .p12"
+                                      onChange={(e) => handleUploadCertificado(e.target.files?.[0])}
+                                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                    />
+                                    <div className="w-full bg-black hover:bg-[#6A0DAD]/10 border border-dashed border-[#333333] group-hover:border-[#6A0DAD] rounded-xl p-5 flex flex-col items-center justify-center gap-1.5 h-[88px] transition-all cursor-pointer">
+                                      <UploadCloud className="text-gray-400 group-hover:text-[#A78BFA] transition-colors" size={24} />
+                                      <span className="text-xs text-gray-300 group-hover:text-white font-medium transition-colors text-center">
+                                        Clique ou arraste para enviar seu arquivo do Certificado (.pfx, .p12)
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                  Senha do Certificado Digital A1
+                                </label>
+                                <div className="relative">
+                                  <input
+                                    type={showCertPassword ? "text" : "password"}
+                                    value={fiscalCertificadoSenha}
+                                    onChange={(e) => setFiscalCertificadoSenha(e.target.value)}
+                                    className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded-lg text-white pl-4 pr-10 py-2.5 text-sm outline-none transition-all font-mono"
+                                    placeholder="Senha do certificado A1"
+                                    autoComplete="new-password"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowCertPassword(!showCertPassword)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                                    title={showCertPassword ? "Ocultar Senha" : "Exibir Senha"}
+                                  >
+                                    {showCertPassword ? <Eye size={16} /> : <Lock size={16} />}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex items-end">
+                                <button
+                                  type="submit"
+                                  disabled={isSavingFiscalConfig}
+                                  className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-5 rounded-lg transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-[#6A0DAD]/30 cursor-pointer"
+                                >
+                                  <Save size={16} />
+                                  {isSavingFiscalConfig ? 'Salvando Configurações...' : 'Salvar Configurações Fiscais & Certificado'}
+                                </button>
+                              </div>
+                            </div>
+                          </form>
+                        )}
+                      </div>
+                    )}
 
                     {/* CARD DE PERFIL / MEUS DADOS DE ACESSO */}
                     <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
