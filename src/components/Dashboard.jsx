@@ -23055,7 +23055,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       </aside>
 
       {/* MAIN CONTAINER (100% LARGURA EM MOBILE, SCROLL INTERNO ISOLADO) */}
-      <div className="flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden bg-background print:overflow-visible print:h-auto print:min-h-0 print:block">
+      <div className={`flex-1 flex flex-col h-full min-w-0 w-full overflow-hidden bg-background print:overflow-visible print:h-auto print:min-h-0 print:block print:p-0 print:m-0 ${pdvReciboAtivo ? 'print:contents' : ''}`}>
         {/* SLENDER FIXED NAVBAR */}
         <header className="border-b border-border bg-surface py-3 px-4 sm:px-6 md:px-12 flex justify-between items-center h-14 shrink-0 z-20 print:hidden transition-colors">
           <div className="flex items-center gap-2">
@@ -23155,7 +23155,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           )}
 
           {/* FLUID CONTENT AREA */}
-          <main className="flex-1 p-6 md:p-8 w-full max-w-[1600px] mx-auto min-w-0">
+          <main className={`flex-1 p-6 md:p-8 w-full max-w-[1600px] mx-auto min-w-0 ${pdvReciboAtivo ? 'print:hidden' : ''}`}>
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20 gap-4">
                 <div className="w-12 h-12 border-4 border-[#6A0DAD] border-t-transparent rounded-full animate-spin"></div>
@@ -30563,7 +30563,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         {/* MODAL DE RECIBO DE VENDA CONSOLIDADO (TÉRMICA 80MM VS RELATÓRIO A4) */}
         {pdvReciboAtivo && pdvReciboDados && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:static print:h-auto print:w-full print:bg-transparent print:p-0 print:overflow-visible">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:static print:h-auto print:min-h-0 print:p-0 print:m-0 print:bg-transparent print:overflow-visible">
             {/* Injeção Dinâmica de @page para Precisão Milimétrica do Navegador */}
             <style dangerouslySetInnerHTML={{
               __html: formatoImpressao === 'a4'
@@ -30573,8 +30573,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
             <div
               id="area-cupom-impressao"
-              className={`w-full space-y-6 relative shadow-2xl print:static print:m-0 print:p-0 print:w-full print:max-w-none print:shadow-none print:break-before-avoid print:border-none print:bg-white print:text-black print:overflow-visible print:h-auto transition-all ${formatoImpressao === 'a4'
-                ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8'
+              className={`w-full space-y-6 print:space-y-2 relative shadow-2xl print:static print:m-0 print:p-0 print:w-full print:max-w-none print:shadow-none print:break-before-avoid print:border-none print:bg-white print:text-black print:overflow-visible print:h-auto print:min-h-0 transition-all ${formatoImpressao === 'a4'
+                ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8 print:p-2'
                 : 'max-w-md modo-termica bg-card text-card-foreground border border-border rounded-2xl p-6'
                 }`}
             >
@@ -31059,75 +31059,75 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       /* ========================================================
                          LAYOUT 2: RELATÓRIO / TERMO EXTENDIDO (A4)
                          ======================================================== */
-                      <div className="space-y-6 text-xs font-sans text-black bg-white print:bg-white print:text-black">
+                      <div className="space-y-6 print:space-y-2 text-xs font-sans text-black bg-white print:bg-white print:text-black">
                         {/* 2. Montar o Cabeçalho Oficial no Modelo A4 */}
-                        <div className="flex items-start justify-between border-b-2 border-black pb-4 mb-4">
-                          <div className="flex items-center gap-4">
+                        <div className="flex items-start justify-between border-b-2 border-black pb-4 print:pb-2 mb-4 print:mb-2">
+                          <div className="flex items-center gap-4 print:gap-3">
                             {logoLoja ? (
                               <img
                                 src={logoLoja}
                                 alt={nomeLoja}
-                                className="h-16 max-w-[160px] object-contain"
+                                className="h-16 print:h-11 max-w-[160px] object-contain"
                                 crossOrigin="anonymous"
                               />
                             ) : (
-                              <h1 className="text-2xl font-black tracking-tight text-black">{nomeLoja}</h1>
+                              <h1 className="text-2xl print:text-lg font-black tracking-tight text-black">{nomeLoja}</h1>
                             )}
                             <div>
-                              <h2 className="text-base font-bold text-black uppercase">{nomeLoja}</h2>
-                              <p className="text-xs text-zinc-800 max-w-sm leading-snug">{enderecoLoja}</p>
+                              <h2 className="text-base print:text-sm font-bold text-black uppercase">{nomeLoja}</h2>
+                              <p className="text-xs print:text-[10px] text-zinc-800 max-w-sm leading-snug">{enderecoLoja}</p>
                             </div>
                           </div>
 
-                          <div className="text-right text-xs text-zinc-900 space-y-0.5">
+                          <div className="text-right text-xs print:text-[10px] text-zinc-900 space-y-0.5">
                             <p><span className="font-bold">CNPJ:</span> {cnpjLoja}</p>
                             {telefoneLoja && <p><span className="font-bold">Contato:</span> {telefoneLoja}</p>}
                             <p><span className="font-bold">Emissão:</span> {formatarDataHora(pdvReciboDados.data)}</p>
-                            <p className="font-mono text-[11px] text-zinc-600">Venda #{idVendaFormatado}</p>
+                            <p className="font-mono text-[11px] print:text-[10px] text-zinc-600">Venda #{idVendaFormatado}</p>
                           </div>
                         </div>
 
                         {/* Identificação das Partes (Cliente & Operação) */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-4 print:gap-2">
                           {/* Dados do Cliente */}
-                          <div className="border border-black rounded-lg p-3 bg-white text-black space-y-1">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-black block border-b border-black pb-1">
+                          <div className="border border-black rounded-lg p-3 print:p-2 bg-white text-black space-y-1 print:space-y-0.5">
+                            <span className="text-[10px] print:text-[9px] font-bold uppercase tracking-wider text-black block border-b border-black pb-1 print:pb-0.5">
                               Identificação do Cliente / Destinatário
                             </span>
-                            <p className="font-bold text-sm text-black">
+                            <p className="font-bold text-sm print:text-xs text-black">
                               {nomeCliente}
                             </p>
-                            <p className="text-xs text-black">
+                            <p className="text-xs print:text-[10px] text-black">
                               <strong className="font-bold">CPF/CNPJ:</strong> {clienteCpfCnpj || 'Não informado'}
                             </p>
                             {clienteTelefone && (
-                              <p className="text-xs text-black">
+                              <p className="text-xs print:text-[10px] text-black">
                                 <strong className="font-bold">Telefone:</strong> {clienteTelefone}
                               </p>
                             )}
                             {clienteEmail && (
-                              <p className="text-xs text-black">
+                              <p className="text-xs print:text-[10px] text-black">
                                 <strong className="font-bold">E-mail:</strong> {clienteEmail}
                               </p>
                             )}
                           </div>
 
                           {/* Dados da Operação */}
-                          <div className="border border-black rounded-lg p-3 bg-white text-black space-y-1">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-black block border-b border-black pb-1">
+                          <div className="border border-black rounded-lg p-3 print:p-2 bg-white text-black space-y-1 print:space-y-0.5">
+                            <span className="text-[10px] print:text-[9px] font-bold uppercase tracking-wider text-black block border-b border-black pb-1 print:pb-0.5">
                               Dados da Operação Comercial
                             </span>
-                            <p className="text-xs text-black">
+                            <p className="text-xs print:text-[10px] text-black">
                               <strong className="font-bold">Vendedor(a):</strong> {nomeVendedor}
                             </p>
-                            <p className="text-xs text-black">
+                            <p className="text-xs print:text-[10px] text-black">
                               <strong className="font-bold">Filial Emissora:</strong> {nomeLoja}
                             </p>
-                            <p className="text-xs text-black">
+                            <p className="text-xs print:text-[10px] text-black">
                               <strong className="font-bold">Tipo de Documento:</strong> {isAvista ? 'Venda À Vista (Simplificado)' : 'Venda Detalhada'}
                             </p>
                             {pdvReciboDados.is_trainee && (
-                              <p className="text-xs font-semibold text-black">
+                              <p className="text-xs print:text-[10px] font-semibold text-black">
                                 Atendimento com participação de Trainee
                               </p>
                             )}
@@ -31135,18 +31135,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </div>
 
                         {/* 4. Tabela de Produtos (100% de largura, text-black, sem tons claros) */}
-                        <div className="space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-black block">
+                        <div className="space-y-1 print:space-y-0.5">
+                          <span className="text-[10px] print:text-[9px] font-bold uppercase tracking-wider text-black block">
                             Produtos / Itens Adquiridos
                           </span>
-                          <table className="w-full border-collapse text-left text-xs">
+                          <table className="w-full border-collapse text-left text-xs print:text-[10.5px]">
                             <thead>
-                              <tr className="bg-zinc-100 print:bg-transparent border-y-2 border-black text-[11px] font-bold uppercase text-black">
-                                <th className="py-2.5 px-3 w-12 text-center text-black">ITEM</th>
-                                <th className="py-2.5 px-3 text-black">PRODUTO / IMEI</th>
-                                <th className="py-2.5 px-3 w-16 text-center text-black">QTD</th>
-                                <th className="py-2.5 px-3 w-32 text-right text-black">VALOR UNIT.</th>
-                                <th className="py-2.5 px-3 w-32 text-right text-black">TOTAL</th>
+                              <tr className="bg-zinc-100 print:bg-transparent border-y-2 border-black text-[11px] print:text-[9.5px] font-bold uppercase text-black">
+                                <th className="py-2.5 print:py-1 px-3 print:px-2 w-12 text-center text-black">ITEM</th>
+                                <th className="py-2.5 print:py-1 px-3 print:px-2 text-black">PRODUTO / IMEI</th>
+                                <th className="py-2.5 print:py-1 px-3 print:px-2 w-16 text-center text-black">QTD</th>
+                                <th className="py-2.5 print:py-1 px-3 print:px-2 w-32 text-right text-black">VALOR UNIT.</th>
+                                <th className="py-2.5 print:py-1 px-3 print:px-2 w-32 text-right text-black">TOTAL</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-zinc-300 print:divide-zinc-400">
@@ -31177,25 +31177,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 );
                                 return (
                                   <tr key={idx} className="print-item-linha print-avoid-break">
-                                    <td className="py-2.5 px-3 text-center font-bold text-black">
+                                    <td className="py-2.5 print:py-1 px-3 print:px-2 text-center font-bold text-black">
                                       {idx + 1}
                                     </td>
-                                    <td className="py-2.5 px-3">
-                                      <span className="font-bold text-black text-xs block">
+                                    <td className="py-2.5 print:py-1 px-3 print:px-2">
+                                      <span className="font-bold text-black text-xs print:text-[10.5px] block leading-tight">
                                         {nomeProduto}
                                       </span>
-                                      <div className="text-[11px] font-mono text-zinc-800">
+                                      <div className="text-[11px] print:text-[9.5px] font-mono text-zinc-800 leading-tight">
                                         {imeiProduto && <span>IMEI: {imeiProduto} </span>}
                                         {corProduto && <span>• Cor: {corProduto}</span>}
                                       </div>
                                     </td>
-                                    <td className="py-2.5 px-3 text-center font-medium text-black">
+                                    <td className="py-2.5 print:py-1 px-3 print:px-2 text-center font-medium text-black">
                                       {itemQtd} un.
                                     </td>
-                                    <td className="py-2.5 px-3 text-right font-mono text-black">
+                                    <td className="py-2.5 print:py-1 px-3 print:px-2 text-right font-mono text-black">
                                       R$ {precoUnitario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
-                                    <td className="py-2.5 px-3 text-right font-mono font-bold text-black">
+                                    <td className="py-2.5 print:py-1 px-3 print:px-2 text-right font-mono font-bold text-black">
                                       R$ {subtotalItem.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
                                   </tr>
@@ -31207,28 +31207,28 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                         {/* Aparelhos Recebidos na Troca se houver */}
                         {pdvReciboDados.trocas && pdvReciboDados.trocas.length > 0 && (
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-black block">
+                          <div className="space-y-1 print:space-y-0.5">
+                            <span className="text-[10px] print:text-[9px] font-bold uppercase tracking-wider text-black block">
                               Aparelho(s) Recebido(s) na Troca (Trade-in)
                             </span>
-                            <table className="w-full border-collapse text-left text-xs border border-black rounded-lg overflow-hidden">
+                            <table className="w-full border-collapse text-left text-xs print:text-[10px] border border-black rounded-lg overflow-hidden">
                               <thead>
-                                <tr className="bg-zinc-100 print:bg-transparent border-b border-black text-[10px] font-bold uppercase text-black">
-                                  <th className="py-2 px-3 text-black">APARELHO</th>
-                                  <th className="py-2 px-3 text-black">IMEI</th>
-                                  <th className="py-2 px-3 text-black">ESTADO / BATERIA</th>
-                                  <th className="py-2 px-3 text-right text-black">VALOR DEDUZIDO</th>
+                                <tr className="bg-zinc-100 print:bg-transparent border-b border-black text-[10px] print:text-[9px] font-bold uppercase text-black">
+                                  <th className="py-2 print:py-1 px-3 print:px-2 text-black">APARELHO</th>
+                                  <th className="py-2 print:py-1 px-3 print:px-2 text-black">IMEI</th>
+                                  <th className="py-2 print:py-1 px-3 print:px-2 text-black">ESTADO / BATERIA</th>
+                                  <th className="py-2 print:py-1 px-3 print:px-2 text-right text-black">VALOR DEDUZIDO</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-zinc-300 print:divide-zinc-400">
                                 {pdvReciboDados.trocas.map((troca, idx) => (
                                   <tr key={idx}>
-                                    <td className="py-2 px-3 font-bold text-black">{troca.nome}</td>
-                                    <td className="py-2 px-3 font-mono text-zinc-800">{troca.imei}</td>
-                                    <td className="py-2 px-3 text-zinc-800">
+                                    <td className="py-2 print:py-1 px-3 print:px-2 font-bold text-black">{troca.nome}</td>
+                                    <td className="py-2 print:py-1 px-3 print:px-2 font-mono text-zinc-800">{troca.imei}</td>
+                                    <td className="py-2 print:py-1 px-3 print:px-2 text-zinc-800">
                                       Cor: {troca.cor} · Bateria: {troca.bateria}% {troca.obs ? `(${troca.obs})` : ''}
                                     </td>
-                                    <td className="py-2 px-3 text-right font-mono font-bold text-black">
+                                    <td className="py-2 print:py-1 px-3 print:px-2 text-right font-mono font-bold text-black">
                                       - R$ {Number(troca.valor_avaliacao || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                                     </td>
                                   </tr>
@@ -31239,8 +31239,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         )}
 
                         {/* Totais e Pagamentos alinhados à direita */}
-                        <div className="flex justify-end pt-2">
-                          <div className="w-80 space-y-1.5 text-xs text-black">
+                        <div className="flex justify-end pt-2 print:pt-1">
+                          <div className="w-80 print:w-72 space-y-1.5 print:space-y-0.5 text-xs print:text-[10.5px] text-black">
                             <div className="flex justify-between text-black">
                               <span>Subtotal dos Produtos:</span>
                               <span className="font-mono font-semibold">R$ {subtotalExibido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
@@ -31261,42 +31261,42 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 <span className="font-mono font-semibold">{parcelamentoTexto}</span>
                               </div>
                             )}
-                            <div className="border-t-2 border-black pt-2 mt-2 flex justify-between text-sm font-extrabold text-black">
+                            <div className="border-t-2 border-black pt-2 print:pt-1 mt-2 print:mt-1 flex justify-between text-sm print:text-xs font-extrabold text-black">
                               <span>VALOR TOTAL PAGO:</span>
-                              <span className="font-mono text-base">R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                              <span className="font-mono text-base print:text-sm">R$ {totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                             </div>
                           </div>
                         </div>
 
                         {/* 4. BLOCO "TERMO DE GARANTIA E CONDIÇÕES DE COMPRA" (Alto Contraste P&B) */}
-                        <div className="border border-black rounded p-3 bg-white text-black my-4 print:border-black print:bg-white">
-                          <div className="text-xs font-black uppercase text-black flex items-center gap-1.5 mb-1">
+                        <div className="border border-black rounded p-3 print:p-2 bg-white text-black my-4 print:my-1.5 print:border-black print:bg-white print-avoid-break">
+                          <div className="text-xs print:text-[10px] font-black uppercase text-black flex items-center gap-1.5 mb-1 print:mb-0.5">
                             <span>🛡️ TERMO DE GARANTIA LEGAL</span>
                           </div>
-                          <p className="text-[11px] text-black font-normal leading-relaxed whitespace-pre-wrap">
+                          <p className="text-[11px] print:text-[9px] text-black font-normal leading-relaxed print:leading-snug whitespace-pre-wrap">
                             {textoGarantiaExibido}
                           </p>
                         </div>
 
                         {/* Campo para Assinatura do Cliente */}
-                        <div className="mt-8 pt-4 border-t border-black">
-                          <div className="grid grid-cols-2 gap-12 text-center text-xs text-black">
+                        <div className="mt-8 print:mt-3 pt-4 print:pt-2 border-t border-black print-avoid-break">
+                          <div className="grid grid-cols-2 gap-12 print:gap-8 text-center text-xs print:text-[10px] text-black">
                             <div>
-                              <div className="border-b border-black pb-10 mb-2"></div>
+                              <div className="border-b border-black pb-10 print:pb-6 mb-2 print:mb-1"></div>
                               <p className="font-bold text-black">{nomeLoja}</p>
-                              <p className="text-[10px] text-zinc-700 print:text-black">Vendedor(a): {nomeVendedor}</p>
+                              <p className="text-[10px] print:text-[9px] text-zinc-700 print:text-black">Vendedor(a): {nomeVendedor}</p>
                             </div>
                             <div>
-                              <div className="border-b border-black pb-10 mb-2"></div>
+                              <div className="border-b border-black pb-10 print:pb-6 mb-2 print:mb-1"></div>
                               <p className="font-bold text-black">
                                 {nomeCliente !== 'Consumidor Final' ? nomeCliente : 'Assinatura do Cliente / Recebido'}
                               </p>
-                              <p className="text-[10px] text-zinc-700 print:text-black">
+                              <p className="text-[10px] print:text-[9px] text-zinc-700 print:text-black">
                                 {clienteCpfCnpj && clienteCpfCnpj !== 'Não informado' ? `CPF/CNPJ: ${clienteCpfCnpj}` : 'Recebido em perfeitas condições'}
                               </p>
                             </div>
                           </div>
-                          <p className="text-[9px] text-center text-zinc-600 print:text-black mt-4">
+                          <p className="text-[9px] print:text-[8px] text-center text-zinc-600 print:text-black mt-4 print:mt-1.5">
                             Documento emitido para conferência e garantia de compra · Zênite OS
                           </p>
                         </div>
