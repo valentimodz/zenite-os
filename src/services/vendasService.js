@@ -171,7 +171,7 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
         numero_nfe: numeroNfe,
         serie: 1,
         natureza_operacao: 'Venda de mercadoria adquirida ou recebida de terceiros',
-        ambiente: ambiente,
+        ambiente: Number(ambiente || configFiscal.ambiente || 2),
         forma_pagamento: venda.forma_pagamento || 'DINHEIRO',
         emitente: {
             cnpj: filial?.cnpj || configFiscal.cnpj || empresa?.cnpj || '00000000000000',

@@ -1366,6 +1366,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [fiscalInscricaoEstadual, setFiscalInscricaoEstadual] = useState('');
   const [fiscalInscricaoMunicipal, setFiscalInscricaoMunicipal] = useState('');
   const [fiscalRegimeTributario, setFiscalRegimeTributario] = useState('Simples Nacional');
+  const [fiscalAmbiente, setFiscalAmbiente] = useState('2'); // 1 = Produção (Valor Fiscal Real), 2 = Homologação (Testes)
   const [fiscalCertificadoA1Url, setFiscalCertificadoA1Url] = useState('');
   const [fiscalCertificadoSenha, setFiscalCertificadoSenha] = useState('');
   const [showCertPassword, setShowCertPassword] = useState(false);
@@ -6029,6 +6030,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         setFiscalInscricaoEstadual(loadedConfig.inscricao_estadual || '');
         setFiscalInscricaoMunicipal(loadedConfig.inscricao_municipal || '');
         setFiscalRegimeTributario(loadedConfig.regime_tributario || 'Simples Nacional');
+        setFiscalAmbiente(String(loadedConfig.ambiente || '2'));
         setFiscalCertificadoA1Url(loadedConfig.certificado_a1_url || '');
         setFiscalCertificadoSenha(loadedConfig.certificado_senha || loadedConfig.certificado_senha_criptografada ? '••••••••' : '');
       } else {
@@ -6036,6 +6038,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         setFiscalInscricaoEstadual('');
         setFiscalInscricaoMunicipal('');
         setFiscalRegimeTributario('Simples Nacional');
+        setFiscalAmbiente('2');
         setFiscalCertificadoA1Url('');
         setFiscalCertificadoSenha('');
       }
@@ -6068,6 +6071,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         inscricao_estadual: fiscalInscricaoEstadual,
         inscricao_municipal: fiscalInscricaoMunicipal,
         regime_tributario: fiscalRegimeTributario,
+        ambiente: Number(fiscalAmbiente || 2),
         certificado_a1_url: fiscalCertificadoA1Url
       };
 
@@ -6100,6 +6104,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           inscricao_estadual: fiscalInscricaoEstadual || null,
           inscricao_municipal: fiscalInscricaoMunicipal || null,
           regime_tributario: fiscalRegimeTributario,
+          ambiente: Number(fiscalAmbiente || 2),
           certificado_a1_url: fiscalCertificadoA1Url || null
         };
         if (fiscalCertificadoSenha && fiscalCertificadoSenha !== '••••••••') {
@@ -6180,7 +6185,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     try {
       const data = await emitirNfeVenda({
         vendaId: reciboDados.venda_id,
-        ambiente: 2 // 2 = Homologação SEFAZ-PA (ou 1 para Produção)
+        ambiente: Number(fiscalAmbiente || 2) // 1 = Produção Oficial SEFAZ, 2 = Homologação
       });
 
       if (!data || !data.sucesso) {
@@ -26711,9 +26716,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               Configure o CNPJ emitente, Inscrição Estadual, Regime Tributário e envie seu Certificado A1 (.pfx / .p12) para emitir notas fiscais com validade jurídica na SEFAZ.
                             </p>
                           </div>
-                          <span className="text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider bg-purple-950/40 text-purple-300 border border-purple-800/40">
-                            SEFAZ / NF-e Modelo 55
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border ${
+                              fiscalAmbiente === '1'
+                                ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/40 shadow-sm shadow-emerald-950/50'
+                                : 'bg-purple-950/40 text-purple-300 border-purple-800/40'
+                            }`}>
+                              {fiscalAmbiente === '1' ? '● SEFAZ: PRODUÇÃO OFICIAL' : '○ SEFAZ: HOMOLOGAÇÃO (TESTES)'}
+                            </span>
+                            <span className="text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider bg-neutral-900 text-gray-400 border border-neutral-800">
+                              NF-e Modelo 55
+                            </span>
+                          </div>
                         </div>
 
                         {isLoadingFiscalConfig ? (
@@ -26831,7 +26845,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                                  Ambiente de Emissão SEFAZ <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                  value={fiscalAmbiente}
+                                  onChange={(e) => setFiscalAmbiente(e.target.value)}
+                                  className={`w-full bg-black border rounded-lg px-4 py-2.5 text-sm outline-none transition-all cursor-pointer font-bold ${
+                                    fiscalAmbiente === '1'
+                                      ? 'border-emerald-500 text-emerald-400 focus:border-emerald-400'
+                                      : 'border-[#6A0DAD]/60 text-purple-300 focus:border-[#6A0DAD]'
+                                  }`}
+                                >
+                                  <option value="2">Homologação (Ambiente de Testes / Sem Valor Fiscal)</option>
+                                  <option value="1">PRODUÇÃO (Com Validade Fiscal Jurídica na SEFAZ)</option>
+                                </select>
+                                <span className={`text-[11px] block mt-1.5 font-medium ${fiscalAmbiente === '1' ? 'text-emerald-400' : 'text-gray-400'}`}>
+                                  {fiscalAmbiente === '1'
+                                    ? '● Modo Oficial: As notas emitidas terão validade fiscal perante a SEFAZ e Receita Federal.'
+                                    : '○ Modo Teste: Para validação de dados e formato sem geração de débitos fiscais.'}
+                                </span>
+                              </div>
+
                               <div>
                                 <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
                                   Senha do Certificado Digital A1
@@ -26856,11 +26893,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 </div>
                               </div>
 
-                              <div className="flex items-end">
+                              <div className="flex items-start md:items-end">
                                 <button
                                   type="submit"
                                   disabled={isSavingFiscalConfig}
-                                  className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-5 rounded-lg transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-[#6A0DAD]/30 cursor-pointer"
+                                  className="w-full bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-5 rounded-lg transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-[#6A0DAD]/30 cursor-pointer h-[42px]"
                                 >
                                   <Save size={16} />
                                   {isSavingFiscalConfig ? 'Salvando Configurações...' : 'Salvar Configurações Fiscais & Certificado'}
