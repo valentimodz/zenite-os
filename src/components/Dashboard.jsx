@@ -30563,17 +30563,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         {/* MODAL DE RECIBO DE VENDA CONSOLIDADO (TÉRMICA 80MM VS RELATÓRIO A4) */}
         {pdvReciboAtivo && pdvReciboDados && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:p-0 print:m-0 print:bg-white print:block print:static">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 overflow-y-auto animate-fadeIn print:p-0 print:m-0 print:bg-white print:block print:static print:overflow-visible print:h-auto print:min-h-0">
             {/* Injeção Dinâmica de @page para Precisão Milimétrica do Navegador */}
             <style dangerouslySetInnerHTML={{
               __html: formatoImpressao === 'a4'
-                ? `@media print { @page { size: A4 portrait !important; margin: 15mm !important; } }`
+                ? `@media print { @page { size: A4 portrait !important; margin: 8mm !important; } }`
                 : `@media print { @page { size: 80mm auto !important; margin: 0 !important; } }`
             }} />
 
             <div
               id="area-cupom-impressao"
-              className={`w-full space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:shadow-none transition-all ${formatoImpressao === 'a4'
+              className={`w-full space-y-6 relative shadow-2xl print:border-none print:bg-white print:text-black print:p-0 print:m-0 print:shadow-none print:static print:overflow-visible print:h-auto transition-all ${formatoImpressao === 'a4'
                 ? 'max-w-4xl modo-a4 bg-white text-black border border-zinc-300 rounded-2xl p-6 sm:p-8'
                 : 'max-w-md modo-termica bg-card text-card-foreground border border-border rounded-2xl p-6'
                 }`}
@@ -30968,7 +30968,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 (precoUnitario * itemQtd)
                               );
                               return (
-                                <div key={idx} className={`pt-1.5 ${idx === 0 ? 'pt-0' : ''}`}>
+                                <div key={idx} className={`pt-1.5 print-item-linha print-avoid-break ${idx === 0 ? 'pt-0' : ''}`}>
                                   <div className="flex justify-between items-start gap-2 font-bold text-zinc-100 print:text-black">
                                     <span className="break-words flex-1">
                                       {nomeProduto}
@@ -31176,7 +31176,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   (precoUnitario * itemQtd)
                                 );
                                 return (
-                                  <tr key={idx}>
+                                  <tr key={idx} className="print-item-linha print-avoid-break">
                                     <td className="py-2.5 px-3 text-center font-bold text-black">
                                       {idx + 1}
                                     </td>

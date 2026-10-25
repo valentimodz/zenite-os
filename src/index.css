@@ -133,22 +133,47 @@ html.light textarea:focus {
 }
 
 /* Regras de Impressão de Alta Fidelidade: Térmica 80mm vs Relatório A4 */
+@page {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
 @media print {
+  /* Reset crucial de raiz e contêineres para mobile/tablet e desktop */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Remove restrições e altura fixa de qualquer container pai na árvore */
+  div,
+  main,
+  section {
+    max-height: none !important;
+  }
+
   /* Esconde todo o layout do sistema (telas, modais, menus, botões) */
   body * {
     visibility: hidden;
   }
 
   /* Exibe estritamente o contêiner do cupom/comprovante */
-  #area-cupom-impressao, #area-cupom-impressao * {
+  #area-cupom-impressao,
+  #area-cupom-impressao * {
     visibility: visible;
   }
 
   #area-cupom-impressao {
-    position: absolute;
-    left: 0;
-    top: 0;
-    page-break-inside: avoid;
+    position: static !important;
+    float: none !important;
+    margin: 0 auto !important;
     box-shadow: none !important;
     border: none !important;
     background: #ffffff !important;
@@ -156,6 +181,18 @@ html.light textarea:focus {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     color-adjust: exact !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Previne quebra de página indesejada dentro de itens, tabelas e termos */
+  tr,
+  th,
+  td,
+  .print-item-linha,
+  .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   /* -------------------------------------------
@@ -165,7 +202,7 @@ html.light textarea:focus {
   body:not(.print-modo-a4) {
     width: 80mm !important;
     max-width: 80mm !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 0 !important;
     background: #fff !important;
     color: #000 !important;
@@ -179,7 +216,7 @@ html.light textarea:focus {
     width: 80mm !important;
     max-width: 80mm !important;
     margin: 0 auto !important;
-    padding: 4mm !important;
+    padding: 2mm 3mm !important;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
     font-size: 10.5px !important;
     line-height: 1.25 !important;
@@ -204,14 +241,14 @@ html.light textarea:focus {
 
   #area-cupom-impressao.modo-a4,
   body.print-modo-a4 #area-cupom-impressao {
-    position: relative !important;
+    position: static !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-size: 12px !important;
-    line-height: 1.4 !important;
+    line-height: 1.35 !important;
     color: #000000 !important;
   }
 
