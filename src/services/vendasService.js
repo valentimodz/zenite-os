@@ -97,3 +97,170 @@ export async function atualizarVendaAposCriacao({
 
     return data;
 }
+
+/**
+ * Emite Nota Fiscal Eletrônica (NF-e modelo 55) via micro-serviço Python (FastAPI + PyNFe)
+ * para a SEFAZ-PA (SVRS), utilizando o Certificado A1 configurado para o Tenant.
+ *
+ * @param {Object} params
+ * @param {string} params.vendaId ID da venda no Supabase
+ * @param {number} [params.ambiente] 1=Produção, 2=Homologação (default: 2)
+ */
+export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
+    if (!vendaId) {
+        throw new Error('ID da venda não fornecido para emissão fiscal.');
+    }
+
+    // 1. Carregar os dados completos da venda
+    const { data: venda, error: vendaErr } = await supabase
+        .from('vendas')
+        .select('*')
+        .eq('id', vendaId)
+        .single();
+
+    if (vendaErr || !venda) {
+        throw new Error(`Erro ao obter dados da venda para emissão: ${vendaErr?.message || 'Venda não encontrada'}`);
+    }
+
+    const empresaId = venda.empresa_id;
+    if (!empresaId) {
+        throw new Error('Venda não possui vínculo com nenhuma empresa/tenant.');
+    }
+
+    // 2. Carregar os dados da empresa e as configurações fiscais (incluindo certificado A1)
+    const [empresaRes, configFiscalRes] = await Promise.all([
+        supabase.from('companies').select('*').eq('id', empresaId).single(),
+        supabase.from('configuracoes_fiscais').select('*').eq('tenant_id', empresaId).maybeSingle()
+    ]);
+
+    const empresa = empresaRes.data;
+    const configFiscal = configFiscalRes.data;
+
+    if (!configFiscal || !configFiscal.certificado_senha_criptografada) {
+        throw new Error('Configuração fiscal incompleta ou certificado digital A1 não configurado para esta empresa.');
+    }
+
+    // 3. Obter URL do certificado A1 (se for bucket privado, gera URL assinada temporária)
+    let certUrl = configFiscal.certificado_a1_url;
+    if (certUrl && !certUrl.startsWith('http')) {
+        const { data: signedData } = await supabase.storage
+            .from('fiscal-certificates')
+            .createSignedUrl(certUrl, 120); // 120 segundos
+        if (signedData?.signedUrl) {
+            certUrl = signedData.signedUrl;
+        }
+    }
+
+    // 4. Montar o payload para a rota do micro-serviço FastAPI
+    const fiscalServiceBaseUrl = (import.meta.env.VITE_FISCAL_SERVICE_URL || 'http://localhost:8000').replace(/\/$/, '');
+    
+    // Gerar um número sequencial de NF-e caso não exista
+    const numeroNfe = Number(venda.nfe_numero || Math.floor(1000 + Math.random() * 9000));
+    const valorTotal = Number(venda.valor_total || (
+        Number(venda.valor_pix || 0) +
+        Number(venda.valor_cartao || 0) +
+        Number(venda.valor_dinheiro || 0) +
+        Number(venda.valor_boleto || 0)
+    ) || 0);
+
+    const payload = {
+        venda_id: venda.id,
+        numero_nfe: numeroNfe,
+        serie: 1,
+        natureza_operacao: 'VENDA DE MERCADORIA',
+        ambiente: ambiente,
+        forma_pagamento: venda.forma_pagamento || 'DINHEIRO',
+        emitente: {
+            cnpj: configFiscal.cnpj || empresa?.cnpj || '00000000000000',
+            razao_social: empresa?.razao_social || empresa?.name || 'Empresa Emissora',
+            nome_fantasia: empresa?.name || null,
+            inscricao_estadual: configFiscal.inscricao_estadual || 'ISENTO',
+            regime_tributario: configFiscal.regime_tributario === 'Lucro Presumido' ? '3' : '1',
+            uf: 'PA'
+        },
+        cliente: {
+            nome: venda.cliente_nome || 'Consumidor Final',
+            cpf_cnpj: venda.cliente_cpf_cnpj || '00000000000',
+            email: venda.cliente_email || null,
+            telefone: venda.cliente_telefone || null,
+            uf: 'PA'
+        },
+        itens: [
+            {
+                codigo: venda.imei || venda.id.slice(0, 8),
+                nome: venda.produto_nome || 'Produto / Mercadoria',
+                ncm: '85171300', // Padrão telecomunicações/smartphones
+                cfop: '5102',
+                ucom: 'UN',
+                quantidade: 1.0,
+                valor_unitario: valorTotal,
+                valor_total: valorTotal,
+                imei: venda.imei || null
+            }
+        ],
+        certificado_a1_url: certUrl,
+        certificado_senha: configFiscal.certificado_senha_criptografada
+    };
+
+    // 5. Enviar ao micro-serviço Python
+    try {
+        const response = await fetch(`${fiscalServiceBaseUrl}/api/v1/nfe/emitir`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errBody = await response.text();
+            throw new Error(`Micro-serviço fiscal respondeu com status ${response.status}: ${errBody}`);
+        }
+
+        const data = await response.json();
+
+        // 6. Atualizar a venda no Supabase com o resultado da SEFAZ
+        if (data.sucesso && data.chave_acesso) {
+            await supabase
+                .from('vendas')
+                .update({
+                    nfe_status: 'EMITIDA',
+                    nfe_id: data.chave_acesso,
+                    nfe_pdf_url: data.pdf_url || null,
+                    nfe_xml_url: data.xml_url || null,
+                    nfe_erro_detalhe: null
+                })
+                .eq('id', vendaId);
+        } else {
+            await supabase
+                .from('vendas')
+                .update({
+                    nfe_status: 'ERRO',
+                    nfe_erro_detalhe: data.motivo || 'Erro não especificado na transmissão SEFAZ.'
+                })
+                .eq('id', vendaId);
+        }
+
+        return data;
+    } catch (networkErr) {
+        console.error('❌ [vendasService.emitirNfeVenda] Falha na comunicação com o micro-serviço:', networkErr);
+        await supabase
+            .from('vendas')
+            .update({
+                nfe_status: 'ERRO',
+                nfe_erro_detalhe: `Falha de conexão com o serviço fiscal: ${networkErr.message}`
+            })
+            .eq('id', vendaId);
+        throw networkErr;
+    }
+}
+
+/**
+ * Consulta o status operacional dos servidores da SEFAZ-PA (SVRS)
+ */
+export async function consultarStatusSefazPa() {
+    const fiscalServiceBaseUrl = (import.meta.env.VITE_FISCAL_SERVICE_URL || 'http://localhost:8000').replace(/\/$/, '');
+    const res = await fetch(`${fiscalServiceBaseUrl}/api/v1/nfe/status-sefaz`);
+    if (!res.ok) throw new Error('Não foi possível consultar o status da SEFAZ.');
+    return await res.json();
+}
