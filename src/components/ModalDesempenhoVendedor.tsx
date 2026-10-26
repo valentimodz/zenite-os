@@ -19,7 +19,8 @@ import {
   ChevronDown,
   ChevronUp,
   Users,
-  Filter
+  Filter,
+  Gem
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
@@ -313,6 +314,48 @@ export const isAcessorio = (venda: any): boolean => {
       const iProd = (item.produto_nome || item.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
       return termosAcessorios.some(termo => iCat.includes(termo) || iProd.includes(termo));
     });
+  }
+
+  return false;
+};
+
+// Helper robusto para identificar se um item ou venda é de Produto Especial / Fora de Meta (Apple, Sony/Consoles, JBL, etc.)
+export const isProdutoEspecial = (itemOuVenda: any): boolean => {
+  if (!itemOuVenda) return false;
+  if (itemOuVenda.fora_meta === true || itemOuVenda.foraMeta === true) return true;
+
+  const nome = (
+    itemOuVenda.produto_nome ||
+    itemOuVenda.nome ||
+    itemOuVenda.descricao ||
+    itemOuVenda.produtos_descricao ||
+    itemOuVenda.itens_resumo ||
+    itemOuVenda.produtos?.nome ||
+    ''
+  ).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+
+  const categoria = (
+    itemOuVenda.categoria ||
+    itemOuVenda.produtos?.categoria ||
+    ''
+  ).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+
+  const termosEspeciais = [
+    // Linha Apple
+    'IPHONE', 'APPLE', 'IPAD', 'MACBOOK', 'APPLE WATCH', 'IMAC', 'AIRTAG',
+    // Consoles & Games
+    'PLAYSTATION', 'PS5', 'PS4', 'XBOX', 'NINTENDO', 'CONSOLE', 'DRONE', 'SONY',
+    // Áudio JBL & Premium
+    'JBL', 'BOOMBOX', 'PARTYBOX', 'XTREME', 'CHARGE 5', 'FLIP 6', 'GO 3', 'CLIP 4'
+  ];
+
+  if (termosEspeciais.some(t => categoria.includes(t) || nome.includes(t))) {
+    return true;
+  }
+
+  // Se tiver array de itens aninhados
+  if (Array.isArray(itemOuVenda.itens_venda) && itemOuVenda.itens_venda.length > 0) {
+    return itemOuVenda.itens_venda.some((it: any) => isProdutoEspecial(it));
   }
 
   return false;
@@ -1083,6 +1126,36 @@ itens_venda (*)
         : (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : 0)) * 100
     ) / 100;
 
+    // 5. CÁLCULO DE PRODUTOS ESPECIAIS & ALTO TICKET / FORA DE META (Linha Apple, Consoles, JBL, etc.)
+    let totalFaturadoEspeciais = 0;
+    let quantidadeItensEspeciais = 0;
+
+    sales.forEach((v: any) => {
+      const status = String(v.status || '').toUpperCase().trim();
+      if (status === 'CANCELADA' || status === 'CANCELADO') return;
+
+      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
+      if (itens.length > 0) {
+        itens.forEach((item: any) => {
+          if (isProdutoEspecial(item)) {
+            const qtd = Number(item.quantidade || 1) || 1;
+            const val = Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * qtd) || 0);
+            totalFaturadoEspeciais += val;
+            quantidadeItensEspeciais += qtd;
+          }
+        });
+      } else if (isProdutoEspecial(v)) {
+        const qtd = Number(v.quantidade || 1) || 1;
+        const val = Number(v.valor_total || v.valor || 0);
+        totalFaturadoEspeciais += val;
+        quantidadeItensEspeciais += qtd;
+      }
+    });
+
+    const ticketMedioEspeciais = quantidadeItensEspeciais > 0
+      ? totalFaturadoEspeciais / quantidadeItensEspeciais
+      : 0;
+
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 
     // Recálculo do Progresso (%) Proporcional
@@ -1288,7 +1361,10 @@ itens_venda (*)
       faturadoTitular: faturadoTitularSolo,
       faturadoTrainee: faturadoComApoioTrainee,
       faturadoTitularSolo,
-      faturadoComApoioTrainee,
+      // Produtos Especiais & Alto Ticket (Fora de Meta)
+      totalFaturadoEspeciais,
+      quantidadeItensEspeciais,
+      ticketMedioEspeciais,
       // Geral
       totalAVista,
       progressoTotal,
@@ -1684,6 +1760,92 @@ itens_venda (*)
               </div>
             </div>
 
+          </div>
+
+          {/* CARD ANALÍTICO: PRODUTOS ESPECIAIS & ALTO TICKET (FORA DE META) */}
+          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-amber-500/40 rounded-xl p-5 shadow-xl transition-all relative overflow-hidden group">
+            {/* Efeito Glow Sutil de Fundo */}
+            <div className="absolute -top-16 -right-16 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/10 transition-all duration-700"></div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1A1A1A] pb-3.5 relative z-10">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                    <Gem size={15} />
+                  </div>
+                  <h4 className="text-sm font-extrabold text-amber-300 uppercase tracking-wider">
+                    PRODUTOS ESPECIAIS & ALTO TICKET
+                  </h4>
+                </div>
+                <p className="text-[11px] text-gray-400 pl-9">
+                  Linha Apple, Consoles, Caixas JBL e Eletrônicos Premium
+                </p>
+              </div>
+
+              <div className="self-start sm:self-auto px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 uppercase tracking-wide">
+                Sem Meta Operacional / Faturamento Direto
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 relative z-10">
+              {/* Valor Principal em Destaque */}
+              <div className="bg-[#111111] border border-[#1E1E1E] rounded-xl p-4 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                  Total Faturado no Período
+                </span>
+                <div className="mt-2">
+                  <span className="text-2xl sm:text-3xl font-black text-amber-400 font-mono block tracking-tight">
+                    R$ {dashboardInfo.totalFaturadoEspeciais.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-gray-400 mt-1 block">
+                    Volume bruto comercializado na competência
+                  </span>
+                </div>
+              </div>
+
+              {/* Unidades Vendidas & Ticket Médio */}
+              <div className="bg-[#111111] border border-[#1E1E1E] rounded-xl p-4 grid grid-cols-2 gap-2 text-center font-mono">
+                <div className="flex flex-col justify-center border-r border-[#222222] pr-2">
+                  <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider block">
+                    Unidades Vendidas
+                  </span>
+                  <span className="text-xl sm:text-2xl font-black text-white mt-1 block">
+                    {dashboardInfo.quantidadeItensEspeciais} <span className="text-xs font-normal text-gray-400">un.</span>
+                  </span>
+                  <span className="text-[9px] text-gray-400 mt-0.5 block">Itens especiais</span>
+                </div>
+
+                <div className="flex flex-col justify-center pl-2">
+                  <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider block">
+                    Ticket Médio
+                  </span>
+                  <span className="text-base sm:text-lg font-black text-amber-300 mt-1 block">
+                    R$ {dashboardInfo.ticketMedioEspeciais.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[9px] text-gray-400 mt-0.5 block">Por item vendido</span>
+                </div>
+              </div>
+
+              {/* Status de Comissão e Regra Aplicada */}
+              <div className="bg-[#111111] border border-[#1E1E1E] rounded-xl p-4 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    Regra de Remuneração
+                  </span>
+                  <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 font-bold uppercase">
+                    Ativa
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1">
+                  <span className="text-xs font-bold text-gray-200 block">
+                    Comissão fixa por unidade / Faturamento direto
+                  </span>
+                  <p className="text-[10.5px] text-gray-400 leading-snug">
+                    R$ 15,00 fixos por aparelho Apple, Console ou Caixa JBL. Não interfere nem pontua nas metas operacionais de Boleto ou Acessórios.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* GRÁFICOS DINÂMICOS DO COLABORADOR */}
