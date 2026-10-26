@@ -512,59 +512,55 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             for cnpj_node in xml_nao_assinado.xpath("//*[local-name()='emit']/*[local-name()='CNPJ']"):
                 cnpj_node.text = cnpj_oficial
 
-            # Garantir tags <cEAN>, <cEANTrib>, <xProd> e a ordenação oficial estrita do schema NF-e 4.00 em <prod>
-            # Ordem canônica do schema:
-            # cProd -> cEAN -> xProd -> NCM -> NVE -> CEST -> indEscala -> CNPJFab -> cBenef -> EX_TIPI -> CFOP -> uCom -> qCom -> vUnCom -> vProd -> cEANTrib -> uTrib -> qTrib -> vUnTrib ...
-            ordem_schema_prod = [
-                "cProd", "cEAN", "xProd", "NCM", "NVE", "CEST", "indEscala", "CNPJFab", "cBenef",
-                "EX_TIPI", "CFOP", "uCom", "qCom", "vUnCom", "vProd", "cEANTrib", "uTrib", "qTrib",
-                "vUnTrib", "vFrete", "vSeg", "vDesc", "vOutro", "indTot", "DI", "detExport", "xPed",
-                "nItemPed", "nFCI", "rastro", "arma", "comb", "med", "veicProd"
-            ]
+            # Forçar SEM GTIN em 100% dos itens do XML no padrão estrito da NF-e 4.00
+            for prod in xml_nao_assinado.xpath("//*[local-name()='prod']"):
+                ns = etree.QName(prod).namespace
+                pfx = f"{{{ns}}}" if ns else ""
 
-            prod_nodes = xml_nao_assinado.xpath("//*[local-name()='prod']")
-            for prod_el in prod_nodes:
-                ns_uri_p = etree.QName(prod_el).namespace
-                pfx_p = f"{{{ns_uri_p}}}" if ns_uri_p else ""
+                # 1. Remove qualquer cEAN existente para evitar duplicidade ou tag vazia
+                for old_cean in prod.xpath("./*[local-name()='cEAN']"):
+                    prod.remove(old_cean)
 
-                # 1. cEAN (sempre SEM GTIN)
-                cean_nodes = prod_el.xpath("./*[local-name()='cEAN']")
-                if cean_nodes:
-                    cean_nodes[0].text = "SEM GTIN"
+                # Cria a tag cEAN com SEM GTIN
+                elem_cean = etree.Element(f"{pfx}cEAN")
+                elem_cean.text = "SEM GTIN"
+
+                # Insere obrigatoriamente antes de xProd (ou logo após cProd)
+                xprod_nodes = prod.xpath("./*[local-name()='xProd']")
+                if xprod_nodes:
+                    xprod_nodes[0].addprevious(elem_cean)
                 else:
-                    cean_el = etree.Element(f"{pfx_p}cEAN")
-                    cean_el.text = "SEM GTIN"
-                    prod_el.append(cean_el)
+                    cprod_nodes = prod.xpath("./*[local-name()='cProd']")
+                    if cprod_nodes:
+                        idx_cp = prod.index(cprod_nodes[0])
+                        prod.insert(idx_cp + 1, elem_cean)
+                    else:
+                        prod.insert(0, elem_cean)
 
-                # 2. cEANTrib (sempre SEM GTIN)
-                ceantrib_nodes = prod_el.xpath("./*[local-name()='cEANTrib']")
-                if ceantrib_nodes:
-                    ceantrib_nodes[0].text = "SEM GTIN"
+                # 2. Remove qualquer cEANTrib existente
+                for old_trib in prod.xpath("./*[local-name()='cEANTrib']"):
+                    prod.remove(old_trib)
+
+                # Cria a tag cEANTrib com SEM GTIN
+                elem_trib = etree.Element(f"{pfx}cEANTrib")
+                elem_trib.text = "SEM GTIN"
+
+                # Insere obrigatoriamente antes de uTrib (ou logo após vProd)
+                utrib_nodes = prod.xpath("./*[local-name()='uTrib']")
+                if utrib_nodes:
+                    utrib_nodes[0].addprevious(elem_trib)
                 else:
-                    ceantrib_el = etree.Element(f"{pfx_p}cEANTrib")
-                    ceantrib_el.text = "SEM GTIN"
-                    prod_el.append(ceantrib_el)
+                    vprod_nodes = prod.xpath("./*[local-name()='vProd']")
+                    if vprod_nodes:
+                        idx_vp = prod.index(vprod_nodes[0])
+                        prod.insert(idx_vp + 1, elem_trib)
+                    else:
+                        prod.append(elem_trib)
 
-                # 3. Sanitização do texto do xProd no XML
-                for xprod_node in prod_el.xpath("./*[local-name()='xProd']"):
-                    raw_xp = xprod_node.text or ""
-                    clean_xp = " ".join(raw_xp.replace("\n", " ").replace("\r", " ").split())[:120].strip()
-                    xprod_node.text = sanitizar_campo_fiscal(clean_xp, 120, "PRODUTO DIVERSO")
-
-                # 4. Reordenação estrita de todos os nós filhos de <prod>
-                filhos_prod = list(prod_el)
-                def get_prod_tag_idx(child):
-                    tag_name = etree.QName(child).localname
-                    try:
-                        return ordem_schema_prod.index(tag_name)
-                    except ValueError:
-                        return 999
-
-                filhos_prod.sort(key=get_prod_tag_idx)
-                for f in filhos_prod:
-                    prod_el.remove(f)
-                for f in filhos_prod:
-                    prod_el.append(f)
+            # 3. Log visual obrigatório do produto final transmitido
+            for idx, p in enumerate(xml_nao_assinado.xpath("//*[local-name()='prod']")):
+                xml_p_str = etree.tostring(p, encoding="utf-8").decode("utf-8")
+                print(f"\n[TAG PROD #{idx+1} FINAL ENVIADA]:\n{xml_p_str}\n")
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
