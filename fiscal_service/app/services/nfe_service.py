@@ -540,7 +540,13 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 else:
                     ceantrib_el = etree.Element(f"{pfx_p}cEANTrib")
                     ceantrib_el.text = "SEM GTIN"
-                    prod_el.append(ceantrib_el)
+                    # No schema oficial NF-e 4.00, cEANTrib vem imediatamente após vProd
+                    vprod_nodes = prod_el.xpath("./*[local-name()='vProd']")
+                    if vprod_nodes:
+                        idx_vp = prod_el.index(vprod_nodes[0])
+                        prod_el.insert(idx_vp + 1, ceantrib_el)
+                    else:
+                        prod_el.append(ceantrib_el)
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
