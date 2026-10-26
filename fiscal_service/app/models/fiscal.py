@@ -45,8 +45,8 @@ class EmitenteFiscalModel(BaseModel):
 
 class EmitirNfeRequest(BaseModel):
     venda_id: str
-    numero_nfe: int
-    serie: int = Field(default=1)
+    numero_nfe: Optional[int] = Field(default=None, description="Número da NF-e (se None, calculado atomicamente via next_nfe_number)")
+    serie: int = Field(default=2, description="Série da NF-e (Fixada em 2)")
     natureza_operacao: str = Field(default="VENDA DE MERCADORIA")
     ambiente: Optional[int] = Field(default=None, description="1=Produção, 2=Homologação. Se omitido, usa o do servidor")
     forma_pagamento: str = Field(default="DINHEIRO")

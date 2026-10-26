@@ -182,8 +182,8 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
 
     const payload = {
         venda_id: venda.id,
-        numero_nfe: numeroNfe,
-        serie: 1,
+        numero_nfe: null, // Deixa o microserviço fiscal determinar atomicamente via next_nfe_number
+        serie: 2,         // Série 2 Fixa
         natureza_operacao: 'Venda de mercadoria adquirida ou recebida de terceiros',
         ambiente: ambienteFinal,
         forma_pagamento: venda.forma_pagamento || 'DINHEIRO',
@@ -248,11 +248,15 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
 
         // 6. Atualizar a venda no Supabase com o resultado da SEFAZ
         if (data.sucesso && data.chave_acesso) {
+            const numeroFinalNfe = parseInt(data.numero_nfe || 918, 10);
+            const serieFinalNfe = parseInt(data.serie || 2, 10);
+
             await supabase
                 .from('vendas')
                 .update({
                     nfe_status: 'EMITIDA',
                     nfe_id: data.chave_acesso,
+                    nfe_numero: numeroFinalNfe,
                     nfe_pdf_url: data.pdf_url || null,
                     nfe_xml_url: data.xml_url || null,
                     nfe_erro_detalhe: null
@@ -267,8 +271,8 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
                         empresa_id: empresaId,
                         filial_id: filialId || null,
                         venda_id: vendaId,
-                        numero_nfe: numeroNfe,
-                        serie: 1,
+                        numero_nfe: numeroFinalNfe,
+                        serie: serieFinalNfe,
                         chave_acesso: data.chave_acesso,
                         protocolo_autorizacao: data.protocolo || null,
                         status: 'AUTORIZADA',

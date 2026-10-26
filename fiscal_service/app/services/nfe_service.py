@@ -79,6 +79,50 @@ def calcular_chave_acesso_44(
 
     return chave_44, c_nf, cdv
 
+import threading
+
+# Lock de concorrência para garantir que emissões simultâneas não causem duplicidade de numeração
+_NFE_NUMBER_LOCK = threading.Lock()
+
+def next_nfe_number(serie: int = 2) -> int:
+    """
+    Determina o próximo número sequencial da NF-e para a Série especificada.
+    Conforme diretriz oficial:
+      - Filtra estritamente por serie = 2
+      - Lógica SQL equivalente: SELECT COALESCE(MAX(numero_nfe), 917) + 1 FROM public.notas_fiscais WHERE serie = 2;
+      - Se nenhuma nota com serie = 2 existir, retorna exatamente 918.
+    """
+    with _NFE_NUMBER_LOCK:
+        try:
+            # Configuração das credenciais do Supabase
+            sb_url = getattr(settings, 'supabase_url', None) or os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL') or 'https://rrrkryuvjyvartixidsu.supabase.co'
+            sb_key = getattr(settings, 'supabase_service_role_key', None) or os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_ANON_KEY') or os.getenv('VITE_SUPABASE_ANON_KEY') or 'sb_publishable_xfj5CgFhEpeBIiOqnD2Eow_WJ3I3j-l'
+
+            url = f"{sb_url.rstrip('/')}/rest/v1/notas_fiscais?select=numero_nfe&serie=eq.{serie}&order=numero_nfe.desc&limit=1"
+            headers = {
+                "apikey": sb_key,
+                "Authorization": f"Bearer {sb_key}",
+                "Content-Type": "application/json"
+            }
+
+            resp = requests.get(url, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                dados = resp.json()
+                if isinstance(dados, list) and len(dados) > 0 and dados[0].get('numero_nfe') is not None:
+                    maior_numero = int(dados[0]['numero_nfe'])
+                    proximo = max(maior_numero, 917) + 1
+                    logger.info(f"[NUMERACAO NFE] Ultima nota serie {serie}: {maior_numero}. Proximo numero calculado: {proximo}")
+                    return proximo
+            else:
+                logger.warning(f"[NUMERACAO NFE] Erro ao consultar notas_fiscais no Supabase (status {resp.status_code}): {resp.text}")
+        except Exception as e_num:
+            logger.error(f"[NUMERACAO NFE] Falha na consulta de numeração no banco: {e_num}", exc_info=True)
+
+        # Fallback seguro: se a tabela ainda não tiver nenhuma nota com serie = 2 (ou erro na consulta), inicia em 918
+        logger.info(f"[NUMERACAO NFE] Nenhuma nota anterior encontrada para serie {serie}. Iniciando em 918.")
+        return 918
+
+
 def extrair_resultado_sefaz(resposta_envio) -> tuple[bool, str, str, str]:
     """
     Analisa a resposta da SEFAZ (tupla, xml ou objeto requests.Response)
@@ -231,8 +275,18 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
     try:
         cert_path = extrair_ou_baixar_certificado(req)
         ambiente = req.ambiente or settings.sefaz_ambiente
-        
-        logger.info(f"Iniciando emissão de NF-e modelo 55 para venda {req.venda_id} - Ambiente: {ambiente} (1=Prod, 2=Homolog)")
+
+        # Garantir Série 2 fixa e obter número sequencial atomicamente
+        serie_fiscal = 2
+        req.serie = serie_fiscal
+
+        if not req.numero_nfe or int(req.numero_nfe) <= 0:
+            numero_nfe_fiscal = next_nfe_number(serie=serie_fiscal)
+            req.numero_nfe = numero_nfe_fiscal
+        else:
+            numero_nfe_fiscal = int(req.numero_nfe)
+
+        logger.info(f"Iniciando emissão de NF-e modelo 55 para venda {req.venda_id} - Série: {serie_fiscal}, Número: {numero_nfe_fiscal} - Ambiente: {ambiente} (1=Prod, 2=Homolog)")
         
         try:
             from pynfe.processamento.serializacao import SerializacaoXML
@@ -333,14 +387,27 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             # Município do fato gerador: código IBGE de Marabá (1504208) ou código informado
             cod_mun_fg = getattr(req.emitente, 'codigo_municipio', None) or "1504208"
 
+            # Garantir Série 2 fixa e obter número sequencial atomicamente
+            serie_fiscal = 2
+            req.serie = serie_fiscal
+
+            if not req.numero_nfe or int(req.numero_nfe) <= 0:
+                numero_nfe_fiscal = next_nfe_number(serie=serie_fiscal)
+                req.numero_nfe = numero_nfe_fiscal
+            else:
+                numero_nfe_fiscal = int(req.numero_nfe)
+
+            logger.info(f"[EMISSAO NFE] Venda {req.venda_id} vinculada a Serie {serie_fiscal} e Numero {numero_nfe_fiscal}")
+            print(f"[EMISSAO NFE] Venda {req.venda_id} vinculada a Serie {serie_fiscal} e Numero {numero_nfe_fiscal}")
+
             # Monta rigorosamente a Chave de Acesso oficial via calcular_chave_acesso_44 usando o cnpj_oficial unificado
             chave_44, c_nf, c_dv = calcular_chave_acesso_44(
                 c_uf="15",
                 data_emissao=dh_emi,
                 cnpj=cnpj_oficial,
                 mod="55",
-                serie=int(req.serie),
-                n_nf=int(req.numero_nfe),
+                serie=serie_fiscal,
+                n_nf=numero_nfe_fiscal,
                 tp_emis="1"
             )
 
@@ -354,8 +421,8 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 natureza_operacao=req.natureza_operacao,
                 forma_pagamento="0", # 0 = Pagamento à vista
                 modelo="55",         # 55 = NF-e
-                serie=str(int(req.serie)),
-                numero_nf=str(int(req.numero_nfe)),
+                serie=str(serie_fiscal),
+                numero_nf=str(numero_nfe_fiscal),
                 data_emissao=dh_emi,
                 data_saida_entrada=dh_emi,
                 tipo_documento=1,    # 1 = Saída
@@ -509,7 +576,9 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             for cdv_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cDV']"):
                 cdv_node.text = str(c_dv).strip()
             for serie_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='serie']"):
-                serie_node.text = str(int(req.serie))
+                serie_node.text = str(serie_fiscal)
+            for nnf_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='nNF']"):
+                nnf_node.text = str(numero_nfe_fiscal)
             for cnpj_node in xml_nao_assinado.xpath("//*[local-name()='emit']/*[local-name()='CNPJ']"):
                 cnpj_node.text = cnpj_oficial
 
