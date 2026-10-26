@@ -387,14 +387,12 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
 
                 # Tratamento obrigatório de GTIN (Regras SEFAZ 883 e 884)
                 item_dict = item.dict() if hasattr(item, "dict") else (item.model_dump() if hasattr(item, "model_dump") else getattr(item, "__dict__", {}))
-                ean_raw = str(item_dict.get("codigo_barras") or item_dict.get("ean") or getattr(item, "codigo_barras", None) or getattr(item, "ean", None) or "").strip()
-                # Um GTIN válido tem 8, 12, 13 ou 14 dígitos numéricos
-                if ean_raw.isdigit() and len(ean_raw) in (8, 12, 13, 14):
-                    c_ean = ean_raw
-                else:
-                    c_ean = "SEM GTIN"
+                ean_valor = str(item_dict.get("codigo_barras") or item_dict.get("ean") or getattr(item, "codigo_barras", None) or getattr(item, "ean", None) or "").strip()
+                if not (ean_valor.isdigit() and len(ean_valor) in (8, 12, 13, 14)):
+                    ean_valor = "SEM GTIN"
 
-                c_ean_trib = c_ean
+                c_ean = ean_valor
+                c_ean_trib = ean_valor
 
                 prod_obj = nfe.adicionar_produto_servico(
                     codigo=item.codigo,
@@ -420,11 +418,12 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     cofins_modalidade="07",
                     valor_tributos_aprox=Decimal("0.00")
                 )
-                # Garantia explícita nos atributos do produto
-                setattr(prod_obj, "ean", c_ean)
-                setattr(prod_obj, "ean_tributavel", c_ean_trib)
-                setattr(prod_obj, "codigo_de_barras", c_ean)
-                setattr(prod_obj, "codigo_de_barras_tributavel", c_ean_trib)
+                # Atribuição explícita ao objeto do produto (PyNFe)
+                prod_obj.codigo_de_barras = ean_valor
+                prod_obj.codigo_de_barras_tributavel = ean_valor
+                prod_obj.ean = ean_valor
+                prod_obj.ean_tributavel = ean_valor
+                setattr(prod_obj, "valor_tributos_aprox", Decimal("0.00"))
             
             # 5. Adicionar Grupo de Pagamento (NF-e 4.00)
             # Mapeamento do tipo de pagamento para o código oficial da SEFAZ
@@ -566,15 +565,18 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
 
             xml_assinado = certificado.assinar(xml_nao_assinado)
             
-            # Auditoria do XML Final Enviado (tag <ide>)
+            # Auditoria do XML Final Enviado (tag <ide> e tags <det>)
             try:
                 ide_str = etree.tostring(xml_assinado.xpath("//*[local-name()='ide']")[0], encoding="utf-8").decode("utf-8")
-                print("\n--- [XML FINAL TRANSMITIDO - TAG IDE] ---")
+                det_nodes_list = xml_assinado.xpath("//*[local-name()='det']")
+                det_str = "\n".join(etree.tostring(dn, encoding="utf-8").decode("utf-8") for dn in det_nodes_list)
+                print("\n--- [XML FINAL TRANSMITIDO - TAG IDE & DET] ---")
                 print(ide_str)
-                print("------------------------------------------\n")
-                logger.info(f"\n--- [XML FINAL TRANSMITIDO - TAG IDE] ---\n{ide_str}\n------------------------------------------\n")
+                print(det_str)
+                print("------------------------------------------------\n")
+                logger.info(f"\n--- [XML FINAL TRANSMITIDO - TAG IDE & DET] ---\n{ide_str}\n{det_str}\n------------------------------------------------\n")
             except Exception as e:
-                logger.warning(f"Não foi possível extrair a tag ide para log: {e}")
+                logger.warning(f"Não foi possível extrair a tag ide/det para log: {e}")
 
             # 6. Comunicação com a SEFAZ-PA (SVRS)
             comunicador = ComunicacaoSefaz(
