@@ -1,4 +1,6 @@
 import os
+import re
+import random
 import base64
 import tempfile
 import requests
@@ -327,9 +329,6 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             )
             
             # 4. Instanciar Nota Fiscal (Modelo 55) com Chave Oficial de 44 dígitos
-            import random
-            import re
-
             dh_emi = datetime.now()
             # Município do fato gerador: código IBGE de Marabá (1504208) ou código informado
             cod_mun_fg = getattr(req.emitente, 'codigo_municipio', None) or "1504208"
