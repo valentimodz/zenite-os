@@ -177,7 +177,7 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
         ambiente: ambienteFinal,
         forma_pagamento: venda.forma_pagamento || 'DINHEIRO',
         emitente: {
-            cnpj: filial?.cnpj || configFiscal.cnpj || empresa?.cnpj || '00000000000000',
+            cnpj: configFiscal.cnpj || filial?.cnpj || empresa?.cnpj || '51450569000190',
             razao_social: filial?.razao_social || empresa?.razao_social || empresa?.name || 'Empresa Emissora',
             nome_fantasia: filial?.nome || empresa?.name || null,
             inscricao_estadual: filial?.inscricao_estadual || configFiscal.inscricao_estadual || 'ISENTO',

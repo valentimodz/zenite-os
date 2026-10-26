@@ -271,14 +271,19 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             if getattr(req.emitente, 'complemento', None):
                 cpl_emit = sanitizar_campo_fiscal(req.emitente.complemento, 60)
 
-            clean_cnpj_emit = "".join(filter(str.isdigit, req.emitente.cnpj or ""))
+            # Unificar a fonte do CNPJ Emitente com base na configuração fiscal / matriz do certificado
+            cnpj_raw = getattr(req.emitente, 'cnpj', None) or ""
+            cnpj_limpo_emit = re.sub(r"\D", "", str(cnpj_raw))
+            # Se o CNPJ não foi informado ou não possui 14 dígitos, usa a matriz padrão do certificado A1
+            cnpj_oficial = cnpj_limpo_emit[:14].zfill(14) if len(cnpj_limpo_emit) == 14 else "51450569000190"
+
             clean_ie_emit = "".join(filter(str.isalnum, req.emitente.inscricao_estadual or ""))
             clean_cep_emit = "".join(filter(str.isdigit, req.emitente.cep or "68500000")).zfill(8)[:8]
 
             emitente = Emitente(
                 razao_social=sanitizar_campo_fiscal(req.emitente.razao_social, 60, "EMPRESA"),
                 nome_fantasia=sanitizar_campo_fiscal(req.emitente.nome_fantasia or req.emitente.razao_social, 60, "EMPRESA"),
-                cnpj=clean_cnpj_emit,
+                cnpj=cnpj_oficial,
                 inscricao_estadual=clean_ie_emit if clean_ie_emit.upper() != "ISENTO" else "ISENTO",
                 codigo_de_regime_tributario=str(req.emitente.regime_tributario or 1),
                 endereco_logradouro=lgr_emit,
@@ -329,19 +334,19 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             # Município do fato gerador: código IBGE de Marabá (1504208) ou código informado
             cod_mun_fg = getattr(req.emitente, 'codigo_municipio', None) or "1504208"
 
-            # Monta rigorosamente a Chave de Acesso oficial via calcular_chave_acesso_44
+            # Monta rigorosamente a Chave de Acesso oficial via calcular_chave_acesso_44 usando o cnpj_oficial unificado
             chave_44, c_nf, c_dv = calcular_chave_acesso_44(
                 c_uf="15",
                 data_emissao=dh_emi,
-                cnpj=req.emitente.cnpj,
+                cnpj=cnpj_oficial,
                 mod="55",
                 serie=int(req.serie),
                 n_nf=int(req.numero_nfe),
                 tp_emis="1"
             )
 
-            logger.info(f"[GERACAO FISCAL] Chave Oficial 44: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
-            print(f"[GERACAO FISCAL] Chave Oficial 44: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
+            print(f"[ALINHAMENTO CNPJ] Emitente XML: {cnpj_oficial} | Chave: {chave_44}")
+            logger.info(f"[ALINHAMENTO CNPJ] Emitente XML: {cnpj_oficial} | Chave: {chave_44}")
 
             nfe = NotaFiscal(
                 emitente=emitente,
@@ -366,6 +371,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 finalidade_emissao=1, # 1 = NF-e normal
                 consumidor_presenca=1
             )
+            
+            # Garante que identificador_unico retorne a chave oficial calculada
+            setattr(nfe, "identificador", chave_44)
+            setattr(nfe, "chave_acesso", chave_44)
             
             # Adicionar produtos / serviços
             from decimal import Decimal
@@ -477,6 +486,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 cnf_node.text = str(c_nf).strip()
             for cdv_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cDV']"):
                 cdv_node.text = str(c_dv).strip()
+            for serie_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='serie']"):
+                serie_node.text = str(int(req.serie))
+            for cnpj_node in xml_nao_assinado.xpath("//*[local-name()='emit']/*[local-name()='CNPJ']"):
+                cnpj_node.text = cnpj_oficial
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
