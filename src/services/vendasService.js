@@ -247,6 +247,29 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
                     nfe_erro_detalhe: null
                 })
                 .eq('id', vendaId);
+
+            // Persistir registro detalhado na tabela public.notas_fiscais
+            try {
+                await supabase
+                    .from('notas_fiscais')
+                    .insert({
+                        empresa_id: empresaId,
+                        filial_id: filialId || null,
+                        venda_id: vendaId,
+                        numero_nfe: numeroNfe,
+                        serie: 1,
+                        chave_acesso: data.chave_acesso,
+                        protocolo_autorizacao: data.protocolo || null,
+                        status: 'AUTORIZADA',
+                        cliente_nome: venda.cliente_nome || 'Consumidor Final',
+                        cliente_documento: venda.cliente_cpf_cnpj || venda.cliente_cpf || null,
+                        valor_total: valorTotal,
+                        danfe_pdf_url: data.pdf_url || null,
+                        xml_conteudo: data.xml_conteudo || null
+                    });
+            } catch (nfPersistErr) {
+                console.error('⚠️ [vendasService] Erro ao persistir em notas_fiscais:', nfPersistErr);
+            }
         } else {
             await supabase
                 .from('vendas')

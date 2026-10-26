@@ -9,7 +9,7 @@ import {
   TrendingUp, Calendar, Eye, RefreshCw, Check, X, ClipboardList, Trash2, ChevronDown, ChevronRight,
   Truck, Loader2, Printer, Edit2, FileText, Download, CheckCircle, AlertTriangle, Megaphone, Bug, List,
   MessageSquare, Save, Key, HelpCircle, CreditCard, Menu, ChevronLeft, Settings, LayoutDashboard, Lock, UploadCloud, Barcode, BookmarkPlus, MessageCircle, Sparkles, Copy, Zap, Camera, Share2, Filter, Clock, Image as ImageIcon,
-  Sun, Moon, Layers, RotateCcw, ListChecks, Target, SlidersHorizontal
+  Sun, Moon, Layers, RotateCcw, ListChecks, Target, SlidersHorizontal, FileCode
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { emitirNfseStub } from '../services/fiscal';
@@ -43,6 +43,7 @@ import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
 import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
+import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
 
 const extrairNumero = (valor) => {
@@ -2564,6 +2565,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         const merged = resolverDadosFilial(dbFilial || filialContext, hintNome);
 
+        // Blindagem contra duplicidade: Checar se a venda já possui NF-e AUTORIZADA em notas_fiscais
+        let nfeJaEmitida = null;
+        if (pdvReciboDados.venda_id) {
+          try {
+            const { data: nfeExistente } = await supabase
+              .from('notas_fiscais')
+              .select('id, numero_nfe, chave_acesso, danfe_pdf_url, status')
+              .eq('venda_id', pdvReciboDados.venda_id)
+              .in('status', ['AUTORIZADA', 'EMITIDA'])
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            
+            if (nfeExistente) {
+              nfeJaEmitida = nfeExistente;
+            }
+          } catch (nfeCheckErr) {
+            console.warn('Aviso ao consultar notas_fiscais para blindagem de duplicidade:', nfeCheckErr);
+          }
+        }
+
         if (isMounted) {
           setPdvReciboDados(prev => {
             if (!prev) return prev;
@@ -2573,7 +2595,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               filial_logo: merged.logo || prev.filial_logo || null,
               filial_cnpj: merged.cnpj || prev.filial_cnpj || '',
               filial_endereco: merged.endereco || prev.filial_endereco || '',
-              filial_telefone: merged.telefone || prev.filial_telefone || ''
+              filial_telefone: merged.telefone || prev.filial_telefone || '',
+              ...(nfeJaEmitida ? {
+                nfe_status: 'EMITIDA',
+                nfe_id: nfeJaEmitida.chave_acesso || prev.nfe_id,
+                nfe_numero: nfeJaEmitida.numero_nfe || prev.nfe_numero,
+                nfe_pdf_url: nfeJaEmitida.danfe_pdf_url || prev.nfe_pdf_url
+              } : {})
             };
           });
         }
@@ -2583,7 +2611,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     })();
 
     return () => { isMounted = false; };
-  }, [pdvReciboAtivo, pdvReciboDados?.filial_id, activeFilialId]);
+  }, [pdvReciboAtivo, pdvReciboDados?.filial_id, pdvReciboDados?.venda_id, activeFilialId]);
 
   const restoreDraft = () => {
     if (draftDataToRestore) {
@@ -22907,6 +22935,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       case 'metas': return 'Minhas Metas & Comissões';
       case 'fechamentos': return 'Relatórios & Fechamentos';
       case 'fechamento': return 'Fechamento de Caixa';
+      case 'fiscal': return 'Gestão Fiscal & NF-e';
       case 'configuracoes': return 'Configurações';
       default: return 'Zênite';
     }
@@ -23058,14 +23087,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         items.push(sidebarItem('metas', 'Minhas Metas & Comissões', Award));
       }
 
-      // 10. Relatórios & Fechamentos
+      // 10. NFe / Fiscal
+      if (['ADMIN', 'GERENTE', 'OWNER', 'DONO', 'SUPER_ADMIN', 'ADMINISTRADOR'].includes(String(currentRole || '').toUpperCase())) {
+        items.push(sidebarItem('fiscal', 'NFe / Fiscal', FileCode));
+      }
+
+      // 11. Relatórios & Fechamentos
       if (['ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(currentRole)) {
         items.push(sidebarItem('fechamentos', 'Relatórios & Fechamentos', ClipboardList));
       } else if (currentRole === 'VENDEDOR') {
         items.push(sidebarItem('fechamento', 'Fechamento de Caixa', ClipboardList));
       }
 
-      // 11. Contas a Receber & Conciliação (Exclusivo DONO / ADMIN / ADMINISTRADOR)
+      // 12. Contas a Receber & Conciliação (Exclusivo DONO / ADMIN / ADMINISTRADOR)
       const podeVerContasAReceber = (
         ['DONO', 'ADMIN', 'ADMINISTRADOR', 'OWNER', 'SUPER_ADMIN'].includes(String(currentRole || '').toUpperCase()) ||
         userEmail === 'valentimodz2@gmail.com'
@@ -23075,12 +23109,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         items.push(sidebarItem('contas_a_receber', 'Contas a Receber', DollarSign));
       }
 
-      // 12. Configurações - Oculto para DONO
+      // 13. Configurações - Oculto para DONO
       if (currentRole !== 'DONO') {
         items.push(sidebarItem('configuracoes', 'Configurações', Settings));
       }
 
-      // 13. Assinatura & Faturas - Oculto para DONO
+      // 14. Assinatura & Faturas - Oculto para DONO
       if (!isGerente && (['OWNER', 'ADMIN'].includes(currentRole) || isAdmin) && currentRole !== 'DONO') {
         items.push(sidebarItem('assinatura', 'Assinatura & Faturas', CreditCard));
       }
@@ -23097,8 +23131,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
       if (currentRole === 'DONO') {
         const key = item.key;
-        // O Dono deve ver apenas: Dashboard (Home), Relatórios & Fechamentos, Auditoria de Descontos, Auditoria Vendas & Crédito, Equipe e Contas a Receber
-        const permitidosDono = ['gestao', 'fechamentos', 'descontos', 'auditoria_credito', 'equipe', 'contas_a_receber'];
+        // O Dono deve ver apenas: Dashboard (Home), Relatórios & Fechamentos, Auditoria de Descontos, Auditoria Vendas & Crédito, NFe / Fiscal, Equipe e Contas a Receber
+        const permitidosDono = ['gestao', 'fechamentos', 'fiscal', 'descontos', 'auditoria_credito', 'equipe', 'contas_a_receber'];
         if (!permitidosDono.includes(key)) {
           return false;
         }
@@ -28910,6 +28944,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 {/* AUDITORIA DE VENDAS & CRÉDITO */}
                 {(activeTab === 'auditoria_credito' || currentView === 'auditoria_credito') && ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE'].includes(profile?.role) && renderAuditoriaCredito()}
 
+                {/* GESTÃO FISCAL & NF-E */}
+                {(activeTab === 'fiscal' || currentView === 'fiscal') &&
+                  ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'GERENTE', 'ADMINISTRADOR'].includes(String(profile?.role || '').toUpperCase()) && (
+                    <NotasFiscaisView profile={profile} company={company} filiais={filiais} />
+                  )}
+
                 {/* CONTAS A RECEBER & CONCILIAÇÃO DE FINANCEIRAS (EXCLUSIVO DONO / ADMIN) */}
                 {(activeTab === 'contas_a_receber' || currentView === 'contas_a_receber') &&
                   ['ADMIN', 'SUPER_ADMIN', 'OWNER', 'DONO', 'ADMINISTRADOR'].includes(String(profile?.role || '').toUpperCase()) && (
@@ -31801,7 +31841,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 {pdvReciboDados.nfe_status === 'EMITIDA' ? (
                   <div className="flex flex-col sm:flex-row gap-2 w-full">
                     <div className="flex-1 bg-green-950/30 border border-green-800/50 text-green-400 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm">
-                      <CheckCircle2 size={15} /> NF-e Emitida com Sucesso
+                      <CheckCircle2 size={15} /> NF-e Autorizada {pdvReciboDados.nfe_numero ? `(Nº ${pdvReciboDados.nfe_numero})` : ''}
                     </div>
                     {pdvReciboDados.nfe_pdf_url && (
                       <button
