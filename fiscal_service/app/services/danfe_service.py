@@ -1,13 +1,32 @@
 import os
 import io
 import re
+from pathlib import Path
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.graphics.barcode import createBarcodeDrawing
 from app.models.fiscal import EmitirNfeRequest
+
+def obter_caminho_logo_filial(nome_filial: str) -> str | None:
+    """
+    Localiza dinamicamente o arquivo físico do logotipo da filial ou usa o fallback padrão.
+    """
+    base_dir = Path(__file__).resolve().parent.parent.parent / "assets" / "logos"
+    nome_limpo = (nome_filial or "").lower().strip()
+    
+    if "cred" in nome_limpo or "cell" in nome_limpo:
+        logo_path = base_dir / "credcell.png"
+    elif "monkey" in nome_limpo or "partage" in nome_limpo:
+        logo_path = base_dir / "monkeyshop.png"
+    else:
+        logo_path = base_dir / "default.png"
+        
+    if logo_path.exists():
+        return str(logo_path)
+    return None
 
 def _format_cnpj_cpf(val: str) -> str:
     if not val:
@@ -208,7 +227,10 @@ def gerar_danfe_pdf_bytes(req: EmitirNfeRequest, chave_acesso: str, protocolo: s
     # =========================================================================
     # 1. CABEÇALHO PRINCIPAL DA DANFE (EMITENTE, DANFE QUADRO, CÓDIGO DE BARRAS)
     # =========================================================================
-    # Emitente (Col 1: 220 pt)
+    # Emitente e Logotipo da Filial (Col 1: 220 pt)
+    identificador_filial = req.filial_nome or req.emitente.nome_fantasia or req.emitente.razao_social or ""
+    caminho_logo = obter_caminho_logo_filial(identificador_filial)
+
     nome_fantasia_txt = f"<b>{req.emitente.nome_fantasia.upper()}</b><br/>" if req.emitente.nome_fantasia else ""
     emitente_html = f"""{nome_fantasia_txt}<b>{razao_social}</b><br/>
 <font size=6.5>
@@ -217,7 +239,28 @@ def gerar_danfe_pdf_bytes(req: EmitirNfeRequest, chave_acesso: str, protocolo: s
 CEP: {_format_cep(req.emitente.cep)} {(' - FONE: ' + req.emitente.telefone) if req.emitente.telefone else ''}
 </font>
 """
-    col1_emitente = Paragraph(emitente_html, ParagraphStyle('EmitenteP', parent=styles['Normal'], fontName='Helvetica', fontSize=7.0, leading=8.5, alignment=1))
+    p_emitente_info = Paragraph(emitente_html, ParagraphStyle('EmitenteP', parent=styles['Normal'], fontName='Helvetica', fontSize=7.0, leading=8.5, alignment=1))
+
+    if caminho_logo and os.path.exists(caminho_logo):
+        try:
+            # Imagem do logotipo proporcionalmente ajustada para o cabeçalho
+            img_logo = Image(caminho_logo, width=110, height=36, kind='proportional')
+            col1_emitente = Table(
+                [[img_logo], [p_emitente_info]],
+                colWidths=[216]
+            )
+            col1_emitente.setStyle(TableStyle([
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('TOPPADDING', (0,0), (-1,-1), 1),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ]))
+        except Exception:
+            col1_emitente = p_emitente_info
+    else:
+        col1_emitente = p_emitente_info
 
     # DANFE Quadro Central (Col 2: 95 pt)
     danfe_quadro_html = f"""<font size=11><b>DANFE</b></font><br/>
