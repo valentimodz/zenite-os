@@ -385,8 +385,14 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 vtot_dec = Decimal(str(round(float(item.valor_total or (float(qtd_dec) * float(vunit_dec))), 2)))
                 total_produtos_calculado += vtot_dec
 
+                # Higienização da descrição do produto (xProd)
+                desc_bruta = str(item_dict.get("nome") or getattr(item, "nome", None) or item_dict.get("descricao") or "PRODUTO DIVERSO")
+                x_prod_limpo = " ".join(desc_bruta.replace("\n", " ").replace("\r", " ").split())[:120].strip()
+                if not x_prod_limpo:
+                    x_prod_limpo = "PRODUTO DIVERSO"
+                x_prod_limpo = sanitizar_campo_fiscal(x_prod_limpo, 120, "PRODUTO DIVERSO")
+
                 # Tratamento obrigatório de GTIN (Regras SEFAZ 883 e 884)
-                item_dict = item.dict() if hasattr(item, "dict") else (item.model_dump() if hasattr(item, "model_dump") else getattr(item, "__dict__", {}))
                 ean_raw = str(item_dict.get("codigo_barras") or item_dict.get("ean") or getattr(item, "codigo_barras", None) or getattr(item, "ean", None) or "").strip()
                 if ean_raw.isdigit() and len(ean_raw) in (8, 12, 13, 14):
                     valor_gtin = ean_raw
@@ -395,7 +401,7 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
 
                 prod_obj = nfe.adicionar_produto_servico(
                     codigo=str(item_dict.get("codigo") or getattr(item, "codigo", "1")),
-                    descricao=str(item_dict.get("nome") or getattr(item, "nome", "PRODUTO"))[:120],
+                    descricao=x_prod_limpo,
                     ncm=str(item_dict.get("ncm") or getattr(item, "ncm", "85171300")).replace('.', ''),
                     cfop=str(item_dict.get("cfop") or getattr(item, "cfop", "5102")),
                     unidade_comercial=str(item_dict.get("ucom") or getattr(item, "ucom", "UN")),
@@ -422,6 +428,7 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 prod_obj.codigo_de_barras_tributavel = valor_gtin
                 prod_obj.ean = valor_gtin
                 prod_obj.ean_tributavel = valor_gtin
+                prod_obj.descricao = x_prod_limpo
                 setattr(prod_obj, "valor_tributos_aprox", Decimal("0.00"))
             
             # 5. Adicionar Grupo de Pagamento (NF-e 4.00)
@@ -509,12 +516,22 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             for cnpj_node in xml_nao_assinado.xpath("//*[local-name()='emit']/*[local-name()='CNPJ']"):
                 cnpj_node.text = cnpj_oficial
 
-            # Garantir tags <cEAN> e <cEANTrib> em todos os produtos do XML (Regras SEFAZ 883 e 884)
+            # Garantir tags <cEAN>, <cEANTrib>, <xProd> e a ordenação oficial estrita do schema NF-e 4.00 em <prod>
+            # Ordem canônica do schema:
+            # cProd -> cEAN -> xProd -> NCM -> NVE -> CEST -> indEscala -> CNPJFab -> cBenef -> EX_TIPI -> CFOP -> uCom -> qCom -> vUnCom -> vProd -> cEANTrib -> uTrib -> qTrib -> vUnTrib ...
+            ordem_schema_prod = [
+                "cProd", "cEAN", "xProd", "NCM", "NVE", "CEST", "indEscala", "CNPJFab", "cBenef",
+                "EX_TIPI", "CFOP", "uCom", "qCom", "vUnCom", "vProd", "cEANTrib", "uTrib", "qTrib",
+                "vUnTrib", "vFrete", "vSeg", "vDesc", "vOutro", "indTot", "DI", "detExport", "xPed",
+                "nItemPed", "nFCI", "rastro", "arma", "comb", "med", "veicProd"
+            ]
+
             prod_nodes = xml_nao_assinado.xpath("//*[local-name()='prod']")
             for prod_el in prod_nodes:
                 ns_uri_p = etree.QName(prod_el).namespace
                 pfx_p = f"{{{ns_uri_p}}}" if ns_uri_p else ""
 
+                # 1. cEAN
                 cean_nodes = prod_el.xpath("./*[local-name()='cEAN']")
                 if cean_nodes:
                     val_cean = (cean_nodes[0].text or "").strip()
@@ -523,14 +540,9 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 else:
                     cean_el = etree.Element(f"{pfx_p}cEAN")
                     cean_el.text = "SEM GTIN"
-                    # Inserir logo após cProd se existir
-                    cprod_nodes = prod_el.xpath("./*[local-name()='cProd']")
-                    if cprod_nodes:
-                        idx_cp = prod_el.index(cprod_nodes[0])
-                        prod_el.insert(idx_cp + 1, cean_el)
-                    else:
-                        prod_el.insert(0, cean_el)
+                    prod_el.append(cean_el)
 
+                # 2. cEANTrib
                 ceantrib_nodes = prod_el.xpath("./*[local-name()='cEANTrib']")
                 if ceantrib_nodes:
                     val_ceantrib = (ceantrib_nodes[0].text or "").strip()
@@ -539,13 +551,28 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 else:
                     ceantrib_el = etree.Element(f"{pfx_p}cEANTrib")
                     ceantrib_el.text = "SEM GTIN"
-                    # No schema oficial NF-e 4.00, cEANTrib vem imediatamente após vProd
-                    vprod_nodes = prod_el.xpath("./*[local-name()='vProd']")
-                    if vprod_nodes:
-                        idx_vp = prod_el.index(vprod_nodes[0])
-                        prod_el.insert(idx_vp + 1, ceantrib_el)
-                    else:
-                        prod_el.append(ceantrib_el)
+                    prod_el.append(ceantrib_el)
+
+                # 3. Sanitização do texto do xProd no XML
+                for xprod_node in prod_el.xpath("./*[local-name()='xProd']"):
+                    raw_xp = xprod_node.text or ""
+                    clean_xp = " ".join(raw_xp.replace("\n", " ").replace("\r", " ").split())[:120].strip()
+                    xprod_node.text = sanitizar_campo_fiscal(clean_xp, 120, "PRODUTO DIVERSO")
+
+                # 4. Reordenação estrita de todos os nós filhos de <prod>
+                filhos_prod = list(prod_el)
+                def get_prod_tag_idx(child):
+                    tag_name = etree.QName(child).localname
+                    try:
+                        return ordem_schema_prod.index(tag_name)
+                    except ValueError:
+                        return 999
+
+                filhos_prod.sort(key=get_prod_tag_idx)
+                for f in filhos_prod:
+                    prod_el.remove(f)
+                for f in filhos_prod:
+                    prod_el.append(f)
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
