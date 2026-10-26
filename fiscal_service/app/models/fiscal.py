@@ -11,6 +11,8 @@ class ItemVendaModel(BaseModel):
     valor_unitario: float
     valor_total: float
     imei: Optional[str] = None
+    codigo_barras: Optional[str] = None
+    ean: Optional[str] = None
 
 class ClienteFiscalModel(BaseModel):
     nome: str

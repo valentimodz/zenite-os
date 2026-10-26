@@ -385,7 +385,18 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 vtot_dec = Decimal(str(round(float(item.valor_total or (float(qtd_dec) * float(vunit_dec))), 2)))
                 total_produtos_calculado += vtot_dec
 
-                nfe.adicionar_produto_servico(
+                # Tratamento obrigatório de GTIN (Regras SEFAZ 883 e 884)
+                item_dict = item.dict() if hasattr(item, "dict") else (item.model_dump() if hasattr(item, "model_dump") else getattr(item, "__dict__", {}))
+                ean_raw = str(item_dict.get("codigo_barras") or item_dict.get("ean") or getattr(item, "codigo_barras", None) or getattr(item, "ean", None) or "").strip()
+                # Um GTIN válido tem 8, 12, 13 ou 14 dígitos numéricos
+                if ean_raw.isdigit() and len(ean_raw) in (8, 12, 13, 14):
+                    c_ean = ean_raw
+                else:
+                    c_ean = "SEM GTIN"
+
+                c_ean_trib = c_ean
+
+                prod_obj = nfe.adicionar_produto_servico(
                     codigo=item.codigo,
                     descricao=item.nome[:120],
                     ncm=item.ncm.replace('.', ''),
@@ -397,6 +408,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     unidade_tributavel=item.ucom,
                     quantidade_tributavel=qtd_dec,
                     valor_unitario_tributavel=vunit_dec,
+                    ean=c_ean,
+                    ean_tributavel=c_ean_trib,
+                    codigo_de_barras=c_ean,
+                    codigo_de_barras_tributavel=c_ean_trib,
                     ind_total=1,
                     icms_csosn="102",
                     icms_modalidade="102",
@@ -405,6 +420,11 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     cofins_modalidade="07",
                     valor_tributos_aprox=Decimal("0.00")
                 )
+                # Garantia explícita nos atributos do produto
+                setattr(prod_obj, "ean", c_ean)
+                setattr(prod_obj, "ean_tributavel", c_ean_trib)
+                setattr(prod_obj, "codigo_de_barras", c_ean)
+                setattr(prod_obj, "codigo_de_barras_tributavel", c_ean_trib)
             
             # 5. Adicionar Grupo de Pagamento (NF-e 4.00)
             # Mapeamento do tipo de pagamento para o código oficial da SEFAZ
@@ -490,6 +510,38 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 serie_node.text = str(int(req.serie))
             for cnpj_node in xml_nao_assinado.xpath("//*[local-name()='emit']/*[local-name()='CNPJ']"):
                 cnpj_node.text = cnpj_oficial
+
+            # Garantir tags <cEAN> e <cEANTrib> em todos os produtos do XML (Regras SEFAZ 883 e 884)
+            prod_nodes = xml_nao_assinado.xpath("//*[local-name()='prod']")
+            for prod_el in prod_nodes:
+                ns_uri_p = etree.QName(prod_el).namespace
+                pfx_p = f"{{{ns_uri_p}}}" if ns_uri_p else ""
+
+                cean_nodes = prod_el.xpath("./*[local-name()='cEAN']")
+                if cean_nodes:
+                    val_cean = (cean_nodes[0].text or "").strip()
+                    if not (val_cean.isdigit() and len(val_cean) in (8, 12, 13, 14)):
+                        cean_nodes[0].text = "SEM GTIN"
+                else:
+                    cean_el = etree.Element(f"{pfx_p}cEAN")
+                    cean_el.text = "SEM GTIN"
+                    # Inserir logo após cProd se existir
+                    cprod_nodes = prod_el.xpath("./*[local-name()='cProd']")
+                    if cprod_nodes:
+                        idx_cp = prod_el.index(cprod_nodes[0])
+                        prod_el.insert(idx_cp + 1, cean_el)
+                    else:
+                        prod_el.insert(0, cean_el)
+
+                ceantrib_nodes = prod_el.xpath("./*[local-name()='cEANTrib']")
+                if ceantrib_nodes:
+                    val_ceantrib = (ceantrib_nodes[0].text or "").strip()
+                    if not (val_ceantrib.isdigit() and len(val_ceantrib) in (8, 12, 13, 14)):
+                        ceantrib_nodes[0].text = "SEM GTIN"
+                else:
+                    ceantrib_el = etree.Element(f"{pfx_p}cEANTrib")
+                    ceantrib_el.text = "SEM GTIN"
+                    prod_el.append(ceantrib_el)
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")

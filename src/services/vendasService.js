@@ -207,7 +207,9 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
                 quantidade: 1.0,
                 valor_unitario: valorTotal,
                 valor_total: valorTotal,
-                imei: venda.imei || null
+                imei: venda.imei || null,
+                codigo_barras: venda.codigo_barras || venda.ean || 'SEM GTIN',
+                ean: venda.ean || venda.codigo_barras || 'SEM GTIN'
             }
         ],
         certificado_a1_url: certUrl,
