@@ -387,29 +387,28 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
 
                 # Tratamento obrigatório de GTIN (Regras SEFAZ 883 e 884)
                 item_dict = item.dict() if hasattr(item, "dict") else (item.model_dump() if hasattr(item, "model_dump") else getattr(item, "__dict__", {}))
-                ean_valor = str(item_dict.get("codigo_barras") or item_dict.get("ean") or getattr(item, "codigo_barras", None) or getattr(item, "ean", None) or "").strip()
-                if not (ean_valor.isdigit() and len(ean_valor) in (8, 12, 13, 14)):
-                    ean_valor = "SEM GTIN"
-
-                c_ean = ean_valor
-                c_ean_trib = ean_valor
+                ean_raw = str(item_dict.get("codigo_barras") or item_dict.get("ean") or getattr(item, "codigo_barras", None) or getattr(item, "ean", None) or "").strip()
+                if ean_raw.isdigit() and len(ean_raw) in (8, 12, 13, 14):
+                    valor_gtin = ean_raw
+                else:
+                    valor_gtin = "SEM GTIN"
 
                 prod_obj = nfe.adicionar_produto_servico(
-                    codigo=item.codigo,
-                    descricao=item.nome[:120],
-                    ncm=item.ncm.replace('.', ''),
-                    cfop=item.cfop,
-                    unidade_comercial=item.ucom,
+                    codigo=str(item_dict.get("codigo") or getattr(item, "codigo", "1")),
+                    descricao=str(item_dict.get("nome") or getattr(item, "nome", "PRODUTO"))[:120],
+                    ncm=str(item_dict.get("ncm") or getattr(item, "ncm", "85171300")).replace('.', ''),
+                    cfop=str(item_dict.get("cfop") or getattr(item, "cfop", "5102")),
+                    unidade_comercial=str(item_dict.get("ucom") or getattr(item, "ucom", "UN")),
                     quantidade_comercial=qtd_dec,
                     valor_unitario_comercial=vunit_dec,
                     valor_total_bruto=vtot_dec,
-                    unidade_tributavel=item.ucom,
+                    unidade_tributavel=str(item_dict.get("ucom") or getattr(item, "ucom", "UN")),
                     quantidade_tributavel=qtd_dec,
                     valor_unitario_tributavel=vunit_dec,
-                    ean=c_ean,
-                    ean_tributavel=c_ean_trib,
-                    codigo_de_barras=c_ean,
-                    codigo_de_barras_tributavel=c_ean_trib,
+                    ean=valor_gtin,
+                    ean_tributavel=valor_gtin,
+                    codigo_de_barras=valor_gtin,
+                    codigo_de_barras_tributavel=valor_gtin,
                     ind_total=1,
                     icms_csosn="102",
                     icms_modalidade="102",
@@ -419,10 +418,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     valor_tributos_aprox=Decimal("0.00")
                 )
                 # Atribuição explícita ao objeto do produto (PyNFe)
-                prod_obj.codigo_de_barras = ean_valor
-                prod_obj.codigo_de_barras_tributavel = ean_valor
-                prod_obj.ean = ean_valor
-                prod_obj.ean_tributavel = ean_valor
+                prod_obj.codigo_de_barras = valor_gtin
+                prod_obj.codigo_de_barras_tributavel = valor_gtin
+                prod_obj.ean = valor_gtin
+                prod_obj.ean_tributavel = valor_gtin
                 setattr(prod_obj, "valor_tributos_aprox", Decimal("0.00"))
             
             # 5. Adicionar Grupo de Pagamento (NF-e 4.00)
