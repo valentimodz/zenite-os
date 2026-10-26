@@ -39,45 +39,42 @@ def extrair_ou_baixar_certificado(req: EmitirNfeRequest) -> str:
 def calcular_dv_nfe(chave43: str) -> str:
     """Calcula o dígito verificador da NF-e (Módulo 11 oficial SEFAZ)."""
     pesos = [2, 3, 4, 5, 6, 7, 8, 9]
-    soma = 0
-    peso_idx = 0
-    for digito in reversed(chave43):
-        soma += int(digito) * pesos[peso_idx]
-        peso_idx = (peso_idx + 1) % len(pesos)
-    
+    soma = sum(int(digito) * pesos[i % len(pesos)] for i, digito in enumerate(reversed(chave43)))
     resto = soma % 11
-    dv = 11 - resto
-    if dv in (0, 10, 11):
+    if resto in (0, 1):
         return "0"
-    return str(dv)
+    return str(11 - resto)
 
-def calcular_chave_acesso_44(c_uf: str, data_emissao: datetime, cnpj: str, mod: str, serie: int, n_nf: int, tp_emis: str = "1", c_nf: str = None) -> tuple[str, str, str]:
-    """
-    Monta a Chave de Acesso oficial da NF-e com exatamente 44 dígitos numéricos:
-    - cUF (2): Código da UF (ex: 15 para PA)
-    - AAMM (4): Ano e mês da emissão (ex: 2610)
-    - CNPJ (14): CNPJ emitente sem pontuação
-    - mod (2): Modelo (55)
-    - serie (3): Série da nota com zeros à esquerda (ex: 001)
-    - nNF (9): Número da nota fiscal com zeros à esquerda
-    - tpEmis (1): Tipo de emissão (1 = Normal)
-    - cNF (8): Código numérico aleatório de 8 dígitos
-    - cDV (1): Dígito verificador módulo 11 oficial
-    Retorna (chave_44, c_nf, cdv)
-    """
-    import random
-    clean_cnpj = "".join(filter(str.isdigit, cnpj)).zfill(14)
+
+def calcular_chave_acesso_44(
+    c_uf: str,
+    data_emissao,
+    cnpj: str,
+    mod: str,
+    serie: int,
+    n_nf: int,
+    tp_emis: str = "1",
+    c_nf: str = None,
+):
+    clean_cnpj = "".join(filter(str.isdigit, str(cnpj))).zfill(14)[:14]
     aamm = data_emissao.strftime("%y%m")
     mod_str = str(mod).zfill(2)
     serie_str = str(serie).zfill(3)
     nnf_str = str(n_nf).zfill(9)
     tp_emis_str = str(tp_emis)
+
     if not c_nf or len(str(c_nf)) != 8:
-        c_nf = str(random.randint(10000000, 99999999))
-    
-    chave_43 = f"{c_uf.zfill(2)}{aamm}{clean_cnpj}{mod_str}{serie_str}{nnf_str}{tp_emis_str}{c_nf}"
-    cdv = calcular_dv_nfe(chave_43)
-    chave_44 = f"{chave_43}{cdv}"
+        import random
+
+        c_nf = f"{random.randint(10000000, 99999999):08d}"
+
+    chave43 = f"{c_uf}{aamm}{clean_cnpj}{mod_str}{serie_str}{nnf_str}{tp_emis_str}{c_nf}"
+    if len(chave43) != 43:
+        raise ValueError(f"Chave base precisa ter 43 dígitos, possui {len(chave43)}: {chave43}")
+
+    cdv = calcular_dv_nfe(chave43)
+    chave_44 = f"{chave43}{cdv}"
+
     return chave_44, c_nf, cdv
 
 def extrair_resultado_sefaz(resposta_envio) -> tuple[bool, str, str, str]:
@@ -329,9 +326,22 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             import re
 
             dh_emi = datetime.now()
-            c_nf_aleatorio = f"{random.randint(10000000, 99999999):08d}"
             # Município do fato gerador: código IBGE de Marabá (1504208) ou código informado
             cod_mun_fg = getattr(req.emitente, 'codigo_municipio', None) or "1504208"
+
+            # Monta rigorosamente a Chave de Acesso oficial via calcular_chave_acesso_44
+            chave_44, c_nf, c_dv = calcular_chave_acesso_44(
+                c_uf="15",
+                data_emissao=dh_emi,
+                cnpj=req.emitente.cnpj,
+                mod="55",
+                serie=int(req.serie),
+                n_nf=int(req.numero_nfe),
+                tp_emis="1"
+            )
+
+            logger.info(f"[GERACAO FISCAL] Chave Oficial 44: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
+            print(f"[GERACAO FISCAL] Chave Oficial 44: {chave_44} | cNF: {c_nf} | cDV: {c_dv}")
 
             nfe = NotaFiscal(
                 emitente=emitente,
@@ -348,7 +358,8 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 municipio=str(cod_mun_fg), # Código IBGE do fato gerador
                 tipo_impressao_danfe=1, # 1 = Retrato
                 forma_emissao="1",   # 1 = Normal
-                codigo_numerico_aleatorio=c_nf_aleatorio,
+                codigo_numerico_aleatorio=c_nf,
+                dv_codigo_numerico_aleatorio=c_dv,
                 cliente_final=1,     # 1 = Consumidor Final
                 indicador_destino=1, # 1 = Operação interna (PA)
                 indicador_presenca=1, # 1 = Presencial no estabelecimento
@@ -454,20 +465,18 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             if xml_nao_assinado.attrib.get("Id"):
                 del xml_nao_assinado.attrib["Id"]
 
-            # Extrair a chave oficial diretamente da tag <infNFe Id="NFe..."> serializada
+            # Garantir Id oficial na tag infNFe e campos cNF e cDV estritamente sincronizados
             inf_nfe_elem = xml_nao_assinado.find(".//{*}infNFe")
             if inf_nfe_elem is None:
                 inf_nfe_elem = xml_nao_assinado.find("infNFe")
 
-            id_attr = inf_nfe_elem.attrib.get("Id", "") if inf_nfe_elem is not None else ""
-            chave_44 = id_attr.replace("NFe", "").strip()
-            
-            # Se por ventura a chave estiver ausente, recalcula via identificador_unico
-            if not chave_44 or len(chave_44) != 44:
-                id_unico = nfe.identificador_unico
-                chave_44 = id_unico.replace("NFe", "").strip()
-                if inf_nfe_elem is not None:
-                    inf_nfe_elem.attrib["Id"] = f"NFe{chave_44}"
+            if inf_nfe_elem is not None:
+                inf_nfe_elem.attrib["Id"] = f"NFe{chave_44}"
+
+            for cnf_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cNF']"):
+                cnf_node.text = str(c_nf).strip()
+            for cdv_node in xml_nao_assinado.xpath("//*[local-name()='ide']/*[local-name()='cDV']"):
+                cdv_node.text = str(c_dv).strip()
 
             # Log de conferência dos campos antes de assinar
             cuf_conf = xml_nao_assinado.xpath("//*[local-name()='cUF']/text()")
