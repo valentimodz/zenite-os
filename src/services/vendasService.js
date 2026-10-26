@@ -31,7 +31,9 @@ export async function atualizarVendaAposCriacao({
         // Dados do Cliente
         cliente_id: cliente?.id || null,
         cliente_nome: cliente?.nome || 'Consumidor Final',
-        cliente_cpf_cnpj: cliente?.cpfCnpj || null,
+        cliente_documento: cliente?.cpfCnpj || cliente?.documento || cliente?.cpf || null,
+        cliente_cpf: cliente?.cpfCnpj || cliente?.documento || cliente?.cpf || null,
+        cliente_cpf_cnpj: cliente?.cpfCnpj || cliente?.documento || cliente?.cpf || null,
         cliente_telefone: cliente?.telefone || null,
         cliente_email: cliente?.email || null,
 
@@ -66,10 +68,19 @@ export async function atualizarVendaAposCriacao({
         .update(payload)
         .eq('id', vendaId);
 
-    // Fallback resiliente caso as colunas de valor_* ou used_* não existam no schema remoto
-    if (error && (error.code === '42703' || String(error.message).includes('used_') || String(error.message).includes('valor_'))) {
+    // Fallback resiliente caso as colunas opcionais (valor_*, used_*, cliente_documento, cliente_cpf) não existam no schema remoto
+    if (error && (error.code === '42703' || String(error.message).includes('used_') || String(error.message).includes('valor_') || String(error.message).includes('cliente_'))) {
         console.warn('⚠️ [vendasService] Colunas não encontradas em vendas, tentando update com fallback:', error.message);
         const fallbackPayload = { ...payload };
+        if (String(error.message).includes('cliente_documento')) {
+            delete fallbackPayload.cliente_documento;
+        }
+        if (String(error.message).includes('cliente_cpf') && !String(error.message).includes('cliente_cpf_cnpj')) {
+            delete fallbackPayload.cliente_cpf;
+        }
+        if (String(error.message).includes('cliente_telefone')) {
+            delete fallbackPayload.cliente_telefone;
+        }
         if (String(error.message).includes('used_')) {
             delete fallbackPayload.used_produto_nome;
             delete fallbackPayload.used_imei;

@@ -17178,7 +17178,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               categoria
             ),
             vendas_pagamentos (*),
-            clientes (
+            clientes:cliente_id (
               id,
               nome,
               cpf,
@@ -17214,6 +17214,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
         if (vendaBanco && !vendaErr) {
           venda = { ...venda, ...vendaBanco };
+        }
+
+        // Se vendas_pagamentos estiver ausente ou vazio, busca explicitamente na tabela vendas_pagamentos
+        if (!venda.vendas_pagamentos || venda.vendas_pagamentos.length === 0) {
+          try {
+            const { data: pagsData } = await supabase
+              .from('vendas_pagamentos')
+              .select('*')
+              .eq('venda_id', venda.id);
+            if (Array.isArray(pagsData) && pagsData.length > 0) {
+              venda.vendas_pagamentos = pagsData;
+            }
+          } catch (ePags) {
+            console.warn('Aviso ao consultar vendas_pagamentos por venda_id:', ePags);
+          }
         }
       } catch (errVenda) {
         console.warn('Aviso ao consultar venda completa para recibo:', errVenda);
@@ -31214,36 +31229,39 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   (venda.cliente_cpf_cnpj && (c.cpf_cnpj === venda.cliente_cpf_cnpj || c.cpf === venda.cliente_cpf_cnpj))
                 );
 
+                // Ordem de resolução: venda.cliente_nome || venda.clientes?.nome || 'CONSUMIDOR FINAL'
                 const nomeCliente =
-                  (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) ||
-                  venda.cliente?.nome ||
-                  venda.cliente?.razao_social ||
-                  (typeof venda.cliente === 'string' ? venda.cliente : null) ||
-                  venda.nome_cliente ||
-                  venda.clientes?.nome ||
-                  venda.clientes?.razao_social ||
-                  clienteObjRecibo?.nome ||
-                  clienteObjRecibo?.razao_social ||
-                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.nome ||
                   venda.cliente_nome ||
-                  'Consumidor Final';
+                  venda.clientes?.nome ||
+                  venda.cliente?.nome ||
+                  clienteObjRecibo?.nome ||
+                  'CONSUMIDOR FINAL';
 
-                const clienteCpfCnpj =
+                const clienteDocBruto =
+                  venda.cliente_documento ||
                   venda.cliente_cpf ||
                   venda.cliente_cpf_cnpj ||
+                  venda.clientes?.cpf ||
+                  venda.clientes?.cpf_cnpj ||
                   venda.cliente?.cpf ||
                   venda.cliente?.cnpj ||
-                  venda.cliente?.cpf_cnpj ||
-                  venda.cpf ||
-                  venda.cpf_cliente ||
-                  venda.clientes?.cpf_cnpj ||
-                  venda.clientes?.cpf ||
-                  clienteObjRecibo?.cpf_cnpj ||
                   clienteObjRecibo?.cpf ||
-                  clienteObjRecibo?.cnpj ||
-                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf_cnpj ||
-                  (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.cpf ||
+                  clienteObjRecibo?.cpf_cnpj ||
                   '';
+
+                const mascararDocumento = (doc) => {
+                  if (!doc || typeof doc !== 'string') return '';
+                  const limpo = doc.replace(/\D/g, '');
+                  if (limpo.length === 11) {
+                    return `***.${limpo.substring(3, 6)}.${limpo.substring(6, 9)}-**`;
+                  }
+                  if (limpo.length === 14) {
+                    return `${limpo.substring(0, 2)}.${limpo.substring(2, 5)}.${limpo.substring(5, 8)}/${limpo.substring(8, 12)}-${limpo.substring(12, 14)}`;
+                  }
+                  return doc;
+                };
+
+                const clienteCpfCnpj = mascararDocumento(clienteDocBruto);
 
                 const clienteTelefone =
                   venda.cliente_telefone ||
@@ -31325,24 +31343,43 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 let descricaoPagamento = '';
                 let parcelamentoTexto = '';
 
-                const listaPagsRecibo = (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0)
-                  ? venda.pagamentos
-                  : (Array.isArray(fin.pagamentos) && fin.pagamentos.length > 0)
-                    ? fin.pagamentos
-                    : (Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
-                      ? venda.vendas_pagamentos
+                // Leitura da tabela de parcelas/pagamentos múltiplos (vendas_pagamentos ou coluna JSON)
+                const rawPags = (Array.isArray(venda.vendas_pagamentos) && venda.vendas_pagamentos.length > 0)
+                  ? venda.vendas_pagamentos
+                  : (Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0)
+                    ? venda.pagamentos
+                    : (Array.isArray(fin.pagamentos) && fin.pagamentos.length > 0)
+                      ? fin.pagamentos
                       : [];
+
+                const listaPagsRecibo = rawPags.map(p => {
+                  const f = p.forma || p.metodo || p.metodo_pagamento || p.label || 'PAGAMENTO';
+                  const val = Number(p.valor || p.valor_pago || 0);
+                  const parc = Number(p.parcelas || 1);
+                  return { forma: f, valor: val, parcelas: parc };
+                }).filter(p => p.valor > 0 || rawPags.length === 1);
 
                 if (listaPagsRecibo.length > 1) {
                   descricaoPagamento = listaPagsRecibo
                     .map((p) => {
-                      const f = p.forma || p.metodo || p.metodo_pagamento || p.label || 'PAGAMENTO';
-                      const val = Number(p.valor || p.valor_pago || 0);
-                      return `${String(f).toUpperCase()}: R$ ${val.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                      const f = String(p.forma).toUpperCase();
+                      const valStr = p.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                      const parcStr = p.parcelas > 1 ? ` (${p.parcelas}x)` : '';
+                      return `${f}${parcStr}: R$ ${valStr}`;
                     })
                     .join(' | ');
-                  if (parcelasNum > 1) {
+                  if (parcelasNum > 1 && !descricaoPagamento.includes('x)')) {
                     parcelamentoTexto = `${parcelasNum}x de R$ ${(totalGeral / parcelasNum).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+                  }
+                } else if (listaPagsRecibo.length === 1 && listaPagsRecibo[0].valor > 0) {
+                  const unico = listaPagsRecibo[0];
+                  const f = String(unico.forma).toUpperCase();
+                  const valStr = unico.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                  const parcStr = unico.parcelas > 1 ? ` (${unico.parcelas}x)` : (parcelasNum > 1 ? ` (${parcelasNum}x)` : '');
+                  descricaoPagamento = `${f}${parcStr}: R$ ${valStr}`;
+                  if ((unico.parcelas > 1 || parcelasNum > 1) && !parcelamentoTexto) {
+                    const pTotal = unico.parcelas > 1 ? unico.parcelas : parcelasNum;
+                    parcelamentoTexto = `${pTotal}x de R$ ${(totalGeral / pTotal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
                   }
                 } else if (fin.metodo === 'troca' || mNorm.includes('troca')) {
                   if (fin.saldo_pagar > 0) {
@@ -31446,13 +31483,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <div className="flex justify-between">
                               <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">CLIENTE:</span>
                               <span className="text-zinc-100 print:text-black font-bold uppercase text-right max-w-[180px] truncate">
-                                {venda.cliente_nome || venda.clientes?.nome || nomeCliente || 'Consumidor Final'}
+                                {venda.cliente_nome || venda.clientes?.nome || 'CONSUMIDOR FINAL'}
                               </span>
                             </div>
-                            {(clienteCpfCnpj || venda.cliente_cpf_cnpj || venda.clientes?.cpf_cnpj) && (
+                            {clienteCpfCnpj && (
                               <div className="flex justify-between text-[11px] text-zinc-400 print:text-black">
                                 <span>CPF/CNPJ:</span>
-                                <span>{venda.cliente_cpf_cnpj || venda.clientes?.cpf_cnpj || clienteCpfCnpj}</span>
+                                <span>{clienteCpfCnpj}</span>
                               </div>
                             )}
                             {clienteTelefone && (
