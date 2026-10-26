@@ -393,11 +393,19 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 x_prod_limpo = sanitizar_campo_fiscal(x_prod_limpo, 120, "PRODUTO DIVERSO")
 
                 # Tratamento obrigatório de GTIN (Regras SEFAZ 883 e 884)
-                ean_raw = str(item_dict.get("codigo_barras") or item_dict.get("ean") or getattr(item, "codigo_barras", None) or getattr(item, "ean", None) or "").strip()
-                if ean_raw.isdigit() and len(ean_raw) in (8, 12, 13, 14):
-                    valor_gtin = ean_raw
+                raw_ean = str(
+                    item_dict.get("codigo_barras")
+                    or item_dict.get("ean")
+                    or getattr(item, "codigo_barras", "")
+                    or getattr(item, "ean", "")
+                    or ""
+                ).strip()
+
+                # IMEI tem 15 dígitos e NÃO é GTIN; se for IMEI ou vazio, usa SEM GTIN
+                if raw_ean.isdigit() and len(raw_ean) in (8, 12, 13, 14):
+                    valor_ean_final = raw_ean
                 else:
-                    valor_gtin = "SEM GTIN"
+                    valor_ean_final = "SEM GTIN"
 
                 prod_obj = nfe.adicionar_produto_servico(
                     codigo=str(item_dict.get("codigo") or getattr(item, "codigo", "1")),
@@ -411,10 +419,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     unidade_tributavel=str(item_dict.get("ucom") or getattr(item, "ucom", "UN")),
                     quantidade_tributavel=qtd_dec,
                     valor_unitario_tributavel=vunit_dec,
-                    ean=valor_gtin,
-                    ean_tributavel=valor_gtin,
-                    codigo_de_barras=valor_gtin,
-                    codigo_de_barras_tributavel=valor_gtin,
+                    ean=valor_ean_final,
+                    ean_tributavel=valor_ean_final,
+                    codigo_de_barras=valor_ean_final,
+                    codigo_de_barras_tributavel=valor_ean_final,
                     ind_total=1,
                     icms_csosn="102",
                     icms_modalidade="102",
@@ -424,10 +432,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     valor_tributos_aprox=Decimal("0.00")
                 )
                 # Atribuição explícita ao objeto do produto (PyNFe)
-                prod_obj.codigo_de_barras = valor_gtin
-                prod_obj.codigo_de_barras_tributavel = valor_gtin
-                prod_obj.ean = valor_gtin
-                prod_obj.ean_tributavel = valor_gtin
+                prod_obj.codigo_de_barras = valor_ean_final
+                prod_obj.codigo_de_barras_tributavel = valor_ean_final
+                prod_obj.ean = valor_ean_final
+                prod_obj.ean_tributavel = valor_ean_final
                 prod_obj.descricao = x_prod_limpo
                 setattr(prod_obj, "valor_tributos_aprox", Decimal("0.00"))
             
