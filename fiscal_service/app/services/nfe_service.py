@@ -384,6 +384,8 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 vtot_dec = Decimal(str(round(float(item.valor_total or (float(qtd_dec) * float(vunit_dec))), 2)))
                 total_produtos_calculado += vtot_dec
 
+                item_dict = item.dict() if hasattr(item, "dict") else (item.model_dump() if hasattr(item, "model_dump") else getattr(item, "__dict__", {}))
+
                 # Higienização da descrição do produto (xProd)
                 desc_bruta = str(item_dict.get("nome") or getattr(item, "nome", None) or item_dict.get("descricao") or "PRODUTO DIVERSO")
                 x_prod_limpo = " ".join(desc_bruta.replace("\n", " ").replace("\r", " ").split())[:120].strip()
