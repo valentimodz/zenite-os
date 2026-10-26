@@ -392,20 +392,8 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     x_prod_limpo = "PRODUTO DIVERSO"
                 x_prod_limpo = sanitizar_campo_fiscal(x_prod_limpo, 120, "PRODUTO DIVERSO")
 
-                # Tratamento obrigatório de GTIN (Regras SEFAZ 883 e 884)
-                raw_ean = str(
-                    item_dict.get("codigo_barras")
-                    or item_dict.get("ean")
-                    or getattr(item, "codigo_barras", "")
-                    or getattr(item, "ean", "")
-                    or ""
-                ).strip()
-
-                # IMEI tem 15 dígitos e NÃO é GTIN; se for IMEI ou vazio, usa SEM GTIN
-                if raw_ean.isdigit() and len(raw_ean) in (8, 12, 13, 14):
-                    valor_ean_final = raw_ean
-                else:
-                    valor_ean_final = "SEM GTIN"
+                # Forçar SEM GTIN incondicionalmente em 100% dos itens da nota
+                valor_ean_final = "SEM GTIN"
 
                 prod_obj = nfe.adicionar_produto_servico(
                     codigo=str(item_dict.get("codigo") or getattr(item, "codigo", "1")),
@@ -419,10 +407,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     unidade_tributavel=str(item_dict.get("ucom") or getattr(item, "ucom", "UN")),
                     quantidade_tributavel=qtd_dec,
                     valor_unitario_tributavel=vunit_dec,
-                    ean=valor_ean_final,
-                    ean_tributavel=valor_ean_final,
-                    codigo_de_barras=valor_ean_final,
-                    codigo_de_barras_tributavel=valor_ean_final,
+                    ean="SEM GTIN",
+                    ean_tributavel="SEM GTIN",
+                    codigo_de_barras="SEM GTIN",
+                    codigo_de_barras_tributavel="SEM GTIN",
                     ind_total=1,
                     icms_csosn="102",
                     icms_modalidade="102",
@@ -432,10 +420,10 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                     valor_tributos_aprox=Decimal("0.00")
                 )
                 # Atribuição explícita ao objeto do produto (PyNFe)
-                prod_obj.codigo_de_barras = valor_ean_final
-                prod_obj.codigo_de_barras_tributavel = valor_ean_final
-                prod_obj.ean = valor_ean_final
-                prod_obj.ean_tributavel = valor_ean_final
+                prod_obj.codigo_de_barras = "SEM GTIN"
+                prod_obj.codigo_de_barras_tributavel = "SEM GTIN"
+                prod_obj.ean = "SEM GTIN"
+                prod_obj.ean_tributavel = "SEM GTIN"
                 prod_obj.descricao = x_prod_limpo
                 setattr(prod_obj, "valor_tributos_aprox", Decimal("0.00"))
             
@@ -539,23 +527,19 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 ns_uri_p = etree.QName(prod_el).namespace
                 pfx_p = f"{{{ns_uri_p}}}" if ns_uri_p else ""
 
-                # 1. cEAN
+                # 1. cEAN (sempre SEM GTIN)
                 cean_nodes = prod_el.xpath("./*[local-name()='cEAN']")
                 if cean_nodes:
-                    val_cean = (cean_nodes[0].text or "").strip()
-                    if not (val_cean.isdigit() and len(val_cean) in (8, 12, 13, 14)):
-                        cean_nodes[0].text = "SEM GTIN"
+                    cean_nodes[0].text = "SEM GTIN"
                 else:
                     cean_el = etree.Element(f"{pfx_p}cEAN")
                     cean_el.text = "SEM GTIN"
                     prod_el.append(cean_el)
 
-                # 2. cEANTrib
+                # 2. cEANTrib (sempre SEM GTIN)
                 ceantrib_nodes = prod_el.xpath("./*[local-name()='cEANTrib']")
                 if ceantrib_nodes:
-                    val_ceantrib = (ceantrib_nodes[0].text or "").strip()
-                    if not (val_ceantrib.isdigit() and len(val_ceantrib) in (8, 12, 13, 14)):
-                        ceantrib_nodes[0].text = "SEM GTIN"
+                    ceantrib_nodes[0].text = "SEM GTIN"
                 else:
                     ceantrib_el = etree.Element(f"{pfx_p}cEANTrib")
                     ceantrib_el.text = "SEM GTIN"
