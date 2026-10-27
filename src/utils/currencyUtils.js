@@ -139,45 +139,41 @@ export const calcularParcelaComRepasse = (
 };
 
 /**
- * Calcula a lista completa de opções de parcelamento no cartão (1x a 18x)
- * aplicando a regra de repasse de encargos ao cliente.
- * Se a taxa cadastrada no banco for o fator líquido (ex: 96.06%), converte para taxa real (100 - fator).
+ * Calcula o parcelamento da Cred Shop (1x a 10x ou até o limite configurado)
+ * onde a coluna `taxa` armazena os coeficientes líquidos (ex.: 95.15, 93.30).
+ * 1. fator = Number(taxa) / 100
+ * 2. valorTotal = valorOriginal / fator
+ * 3. valorParcela = valorTotal / numeroParcelas
  */
-export const calcularOpcoesParcelamento = (
+export const calcularParcelamentoCredShop = (
   valorOriginal,
-  listaTaxas = []
+  taxas = []
 ) => {
   const vOriginal = Number(valorOriginal) || 0;
-  const taxas = Array.isArray(listaTaxas) ? listaTaxas : [];
+  if (!vOriginal || vOriginal <= 0) return [];
 
-  // Garante parcelas de 1 a 18 com fallback caso alguma não esteja cadastrada
-  const itens = Array.from({ length: 18 }, (_, i) => {
-    const num = i + 1;
-    const feeObj = taxas.find(t => (Number(t.parcela) === num || Number(t.parcelas) === num));
-    const taxaInformada = feeObj ? Number(feeObj.taxa) : (1.5 + (num - 1));
-    return {
-      parcela: num,
-      taxa: taxaInformada
-    };
-  });
+  const lista = Array.isArray(taxas) ? taxas : [];
 
-  return itens.map(item => {
-    const taxaNum = Number(item.taxa || 0);
-    // Se a taxa cadastrada for o fator líquido (ex: 96.06), converte para taxa real: (100 - fator)
-    const taxaReal = taxaNum > 50 ? (100 - taxaNum) : taxaNum;
+  return lista
+    .filter(t => t.parcela >= 1 && t.parcela <= 10)
+    .sort((a, b) => a.parcela - b.parcela)
+    .map(item => {
+      const taxaNum = Number(item.taxa || 100);
 
-    const divisor = 1 - (taxaReal / 100);
-    const totalFinal = divisor > 0 && vOriginal > 0 ? (vOriginal / divisor) : vOriginal;
-    const valorPorParcela = totalFinal > 0 ? (totalFinal / item.parcela) : 0;
+      // Converte o fator (ex: 95.15 vira 0.9515)
+      const fator = taxaNum > 1 ? taxaNum / 100 : taxaNum;
 
-    return {
-      parcelas: item.parcela,
-      taxaAplicada: taxaReal,
-      valorParcela: Number(valorPorParcela.toFixed(2)),
-      totalCobrado: Number(totalFinal.toFixed(2)),
-      label: `${item.parcela}x de ${valorPorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (Total: ${totalFinal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`
-    };
-  });
+      const totalFinal = fator > 0 ? (vOriginal / fator) : vOriginal;
+      const valorPorParcela = totalFinal / item.parcela;
+
+      return {
+        parcelas: item.parcela,
+        totalCobrado: Number(totalFinal.toFixed(2)),
+        valorParcela: Number(valorPorParcela.toFixed(2)),
+        label: `${item.parcela}x de ${valorPorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (Total: ${totalFinal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`
+      };
+    });
 };
+
 
 

@@ -41,7 +41,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
-import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse, calcularOpcoesParcelamento } from '../utils/currencyUtils';
+import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse, calcularParcelamentoCredShop } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
@@ -14866,16 +14866,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ? ((pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].parcelas : pdvCartaoParcelas) || 1)
       : 1;
 
-    // Calcular juros/taxas do cartão se aplicável (fórmula de repasse da taxa: valor / (1 - taxa/100))
-    let feePercent = 0;
+    // Calcular juros/taxas do cartão se aplicável (fórmula Cred Shop: valor / fator_liquido)
+    let feeFactor = 1;
     if (isCartaoEfetivo) {
       const feeObj = taxasCartao.find(t => (t.parcela === parcelasEfetivo || t.parcelas === parcelasEfetivo));
-      const rawFee = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (parcelasEfetivo - 1));
-      feePercent = rawFee > 50 ? (100 - rawFee) : rawFee;
+      const rawFee = feeObj ? parseFloat(feeObj.taxa) : 100;
+      const fator = rawFee > 1 ? (rawFee / 100) : rawFee;
+      feeFactor = (fator > 0) ? (1 / fator) : 1;
     }
-    const feeFactor = (feePercent > 0 && (1 - (feePercent / 100)) > 0)
-      ? (1 / (1 - (feePercent / 100)))
-      : 1;
 
     // Checagem Poka-Yoke de Inadimplência do Cliente
     const clienteAlvo = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
@@ -20633,7 +20631,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               >
                                 {(() => {
                                   const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
-                                  const opcoes = calcularOpcoesParcelamento(valBase, taxasCartao);
+                                  const opcoes = calcularParcelamentoCredShop(valBase, taxasCartao);
                                   return opcoes.map((opt) => (
                                     <option key={opt.parcelas} value={opt.parcelas}>
                                       {opt.label}
