@@ -41,7 +41,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
-import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro } from '../utils/currencyUtils';
+import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
@@ -14866,13 +14866,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ? ((pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].parcelas : pdvCartaoParcelas) || 1)
       : 1;
 
-    // Calcular juros/taxas do cartão se aplicável
+    // Calcular juros/taxas do cartão se aplicável (fórmula de repasse da taxa: valor / (1 - taxa/100))
     let feePercent = 0;
     if (isCartaoEfetivo) {
       const feeObj = taxasCartao.find(t => (t.parcela === parcelasEfetivo || t.parcelas === parcelasEfetivo));
       feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (parcelasEfetivo - 1));
     }
-    const feeFactor = 1 + (feePercent / 100);
+    const feeFactor = (feePercent > 0 && (1 - (feePercent / 100)) > 0)
+      ? (1 / (1 - (feePercent / 100)))
+      : 1;
 
     // Checagem Poka-Yoke de Inadimplência do Cliente
     const clienteAlvo = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
@@ -20632,8 +20634,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
                                   const feeObj = taxasCartao.find(t => (t.parcela === n || t.parcelas === n));
                                   const feePct = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (n - 1));
-                                  const totalCalc = valBase > 0 ? (valBase * (1 + (feePct / 100))) : 0;
-                                  const parcelaCalc = totalCalc > 0 ? (totalCalc / n) : 0;
+                                  const { total: totalCalc, parcela: parcelaCalc } = calcularParcelaComRepasse(valBase, feePct, n);
                                   return (
                                     <option key={n} value={n}>
                                       {n}x parcelas de R$ {parcelaCalc.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Total: R$ {totalCalc.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})

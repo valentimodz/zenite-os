@@ -105,3 +105,32 @@ export const obterUuidPuro = (id) => {
   const uuidMatch = id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   return uuidMatch ? uuidMatch[0] : id.split('_')[0];
 };
+
+/**
+ * Calcula o valor com repasse da taxa da operadora de cartão e o valor da parcela.
+ * Fórmula correta para que a loja receba o valor original líquido:
+ * ValorTotalComTaxa = ValorOriginal / (1 - (taxaPercentual / 100))
+ * ValorDaParcela = ValorTotalComTaxa / numeroDeParcelas
+ */
+export const calcularParcelaComRepasse = (
+  valorOriginal,
+  taxaPercentual,
+  parcelas
+) => {
+  const vOriginal = Number(valorOriginal) || 0;
+  const numParcelas = parseInt(parcelas, 10) || 1;
+  const taxa = Number(taxaPercentual) || 0;
+
+  if (numParcelas <= 0 || vOriginal <= 0) return { total: 0, parcela: 0 };
+
+  // Evita divisão por zero ou números negativos caso a taxa seja >= 100
+  const fatorDivisao = 1 - (taxa / 100);
+  const totalComTaxa = fatorDivisao > 0 ? (vOriginal / fatorDivisao) : vOriginal;
+  const valorParcela = totalComTaxa / numParcelas;
+
+  return {
+    total: Number(totalComTaxa.toFixed(2)),
+    parcela: Number(valorParcela.toFixed(2))
+  };
+};
+
