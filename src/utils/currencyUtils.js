@@ -119,18 +119,65 @@ export const calcularParcelaComRepasse = (
 ) => {
   const vOriginal = Number(valorOriginal) || 0;
   const numParcelas = parseInt(parcelas, 10) || 1;
-  const taxa = Number(taxaPercentual) || 0;
+  const taxaNum = Number(taxaPercentual) || 0;
 
-  if (numParcelas <= 0 || vOriginal <= 0) return { total: 0, parcela: 0 };
+  if (numParcelas <= 0 || vOriginal <= 0) return { total: 0, parcela: 0, taxaAplicada: 0 };
+
+  // Se a taxa cadastrada for o fator líquido (ex: 96.06), converte para taxa real: (100 - fator)
+  const taxaReal = taxaNum > 50 ? (100 - taxaNum) : taxaNum;
 
   // Evita divisão por zero ou números negativos caso a taxa seja >= 100
-  const fatorDivisao = 1 - (taxa / 100);
+  const fatorDivisao = 1 - (taxaReal / 100);
   const totalComTaxa = fatorDivisao > 0 ? (vOriginal / fatorDivisao) : vOriginal;
   const valorParcela = totalComTaxa / numParcelas;
 
   return {
     total: Number(totalComTaxa.toFixed(2)),
-    parcela: Number(valorParcela.toFixed(2))
+    parcela: Number(valorParcela.toFixed(2)),
+    taxaAplicada: taxaReal
   };
 };
+
+/**
+ * Calcula a lista completa de opções de parcelamento no cartão (1x a 18x)
+ * aplicando a regra de repasse de encargos ao cliente.
+ * Se a taxa cadastrada no banco for o fator líquido (ex: 96.06%), converte para taxa real (100 - fator).
+ */
+export const calcularOpcoesParcelamento = (
+  valorOriginal,
+  listaTaxas = []
+) => {
+  const vOriginal = Number(valorOriginal) || 0;
+  const taxas = Array.isArray(listaTaxas) ? listaTaxas : [];
+
+  // Garante parcelas de 1 a 18 com fallback caso alguma não esteja cadastrada
+  const itens = Array.from({ length: 18 }, (_, i) => {
+    const num = i + 1;
+    const feeObj = taxas.find(t => (Number(t.parcela) === num || Number(t.parcelas) === num));
+    const taxaInformada = feeObj ? Number(feeObj.taxa) : (1.5 + (num - 1));
+    return {
+      parcela: num,
+      taxa: taxaInformada
+    };
+  });
+
+  return itens.map(item => {
+    const taxaNum = Number(item.taxa || 0);
+    // Se a taxa cadastrada for o fator líquido (ex: 96.06), converte para taxa real: (100 - fator)
+    const taxaReal = taxaNum > 50 ? (100 - taxaNum) : taxaNum;
+
+    const divisor = 1 - (taxaReal / 100);
+    const totalFinal = divisor > 0 && vOriginal > 0 ? (vOriginal / divisor) : vOriginal;
+    const valorPorParcela = totalFinal > 0 ? (totalFinal / item.parcela) : 0;
+
+    return {
+      parcelas: item.parcela,
+      taxaAplicada: taxaReal,
+      valorParcela: Number(valorPorParcela.toFixed(2)),
+      totalCobrado: Number(totalFinal.toFixed(2)),
+      label: `${item.parcela}x de ${valorPorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (Total: ${totalFinal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`
+    };
+  });
+};
+
 

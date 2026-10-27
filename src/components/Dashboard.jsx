@@ -41,7 +41,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
-import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse } from '../utils/currencyUtils';
+import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse, calcularOpcoesParcelamento } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
@@ -14870,7 +14870,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     let feePercent = 0;
     if (isCartaoEfetivo) {
       const feeObj = taxasCartao.find(t => (t.parcela === parcelasEfetivo || t.parcelas === parcelasEfetivo));
-      feePercent = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (parcelasEfetivo - 1));
+      const rawFee = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (parcelasEfetivo - 1));
+      feePercent = rawFee > 50 ? (100 - rawFee) : rawFee;
     }
     const feeFactor = (feePercent > 0 && (1 - (feePercent / 100)) > 0)
       ? (1 / (1 - (feePercent / 100)))
@@ -20630,17 +20631,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 }}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
-                                {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => {
+                                {(() => {
                                   const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
-                                  const feeObj = taxasCartao.find(t => (t.parcela === n || t.parcelas === n));
-                                  const feePct = feeObj ? parseFloat(feeObj.taxa) : (1.5 + (n - 1));
-                                  const { total: totalCalc, parcela: parcelaCalc } = calcularParcelaComRepasse(valBase, feePct, n);
-                                  return (
-                                    <option key={n} value={n}>
-                                      {n}x parcelas de R$ {parcelaCalc.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (Total: R$ {totalCalc.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                                  const opcoes = calcularOpcoesParcelamento(valBase, taxasCartao);
+                                  return opcoes.map((opt) => (
+                                    <option key={opt.parcelas} value={opt.parcelas}>
+                                      {opt.label}
                                     </option>
-                                  );
-                                })}
+                                  ));
+                                })()}
                               </select>
                             </div>
                           )}
