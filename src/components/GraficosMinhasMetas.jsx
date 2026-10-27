@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { TrendingUp, PieChart, Calendar, DollarSign, Sparkles, Award } from 'lucide-react';
+import { formatCurrency } from './ModalDesempenhoVendedor';
 
 export default function GraficosMinhasMetas({ metasInfo }) {
   const [hoveredDia, setHoveredDia] = useState(null);
@@ -62,13 +63,13 @@ export default function GraficosMinhasMetas({ metasInfo }) {
             <div className="bg-[#111] px-2.5 py-1 rounded-md border border-[#222] flex items-center gap-1.5">
               <span className="text-gray-500 text-[9px] uppercase font-bold">Melhor Dia:</span>
               <span className="text-emerald-400 font-bold font-mono">
-                {melhorDia.total > 0 ? `Dia ${melhorDia.dia} (R$ ${melhorDia.total.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })})` : '—'}
+                {melhorDia.total > 0 ? `Dia ${melhorDia.dia} (${formatCurrency(melhorDia.total)})` : '—'}
               </span>
             </div>
             <div className="bg-[#111] px-2.5 py-1 rounded-md border border-[#222] flex items-center gap-1.5">
               <span className="text-gray-500 text-[9px] uppercase font-bold">Média:</span>
               <span className="text-purple-300 font-bold font-mono">
-                R$ {mediaDiaria.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                {formatCurrency(mediaDiaria)}
               </span>
             </div>
           </div>
@@ -79,7 +80,7 @@ export default function GraficosMinhasMetas({ metasInfo }) {
           {hoveredDia && (
             <div className="absolute top-0 right-2 bg-purple-950/90 border border-purple-600/50 px-2.5 py-1 rounded text-[11px] font-bold text-white shadow-lg animate-fadeIn flex items-center gap-1.5 z-10 font-mono">
               <span className="text-purple-300 font-normal">Dia {hoveredDia.dia}:</span>
-              <span>R$ {hoveredDia.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              <span>{formatCurrency(hoveredDia.total)}</span>
             </div>
           )}
 
@@ -202,7 +203,7 @@ export default function GraficosMinhasMetas({ metasInfo }) {
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
             <span className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">Total</span>
             <span className="text-sm font-black text-white font-mono leading-tight">
-              R$ {totalVendasGeral.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              {formatCurrency(totalVendasGeral)}
             </span>
             <span className="text-[8px] text-[#A78BFA] font-bold">100% Realizado</span>
           </div>
@@ -218,7 +219,7 @@ export default function GraficosMinhasMetas({ metasInfo }) {
             </div>
             <div className="text-right font-mono">
               <span className="text-white font-bold text-[11px]">
-                R$ {totalBoletos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                {formatCurrency(totalBoletos)}
               </span>
               <span className="text-amber-400 text-[10px] ml-1.5 font-bold">({pctBoleto}%)</span>
             </div>
@@ -232,7 +233,7 @@ export default function GraficosMinhasMetas({ metasInfo }) {
             </div>
             <div className="text-right font-mono">
               <span className="text-white font-bold text-[11px]">
-                R$ {totalAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                {formatCurrency(totalAcessorios)}
               </span>
               <span className="text-pink-400 text-[10px] ml-1.5 font-bold">({pctAcessorios}%)</span>
             </div>
@@ -246,7 +247,7 @@ export default function GraficosMinhasMetas({ metasInfo }) {
             </div>
             <div className="text-right font-mono">
               <span className="text-white font-bold text-[11px]">
-                R$ {totalAVista.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                {formatCurrency(totalAVista)}
               </span>
               <span className="text-cyan-400 text-[10px] ml-1.5 font-bold">({pctAVista}%)</span>
             </div>

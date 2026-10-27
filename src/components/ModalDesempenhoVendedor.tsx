@@ -28,6 +28,23 @@ import { useMinhasMetasIndividual } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatarMoeda } from '../utils/currencyUtils';
 
+export const formatCurrency = (value?: number | string | null): string => {
+  if (value === undefined || value === null || value === '' || isNaN(Number(value))) {
+    return 'R$ 0,00';
+  }
+  return Number(value).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  });
+};
+
+export const formatPercent = (value?: number | null): string => {
+  if (value === undefined || value === null || isNaN(Number(value))) {
+    return '0%';
+  }
+  return `${Number(value).toFixed(1)}%`;
+};
+
 export interface MetaBanco {
   id?: string;
   vendedor_id?: string;
@@ -99,6 +116,43 @@ export interface Venda {
 }
 
 export type IVenda = Venda;
+
+export interface DashboardInfo {
+  mesReferencia: string;
+  isTrainee: boolean;
+  totalVendasGeral: number;
+  ticketMedio: number;
+  totalComissoes: number;
+  totalComissaoComoTitular: number;
+  totalComissaoComoTrainee: number;
+  comissaoTitularExclusiva: number;
+  totalComissaoGeradaParaTrainees: number;
+  extratoVendasComTrainee: any[];
+  metaTotal: number;
+  salesCount: number;
+  totalBoletos: number;
+  metaBoleto: number;
+  superMetaBoleto: number;
+  progressoBoleto: number;
+  badgeBoleto: any;
+  totalAcessorios: number;
+  realizadoAcessorios: number;
+  metaAcessorios: number;
+  superMetaAcessorios: number;
+  progressoAcessorios: number;
+  badgeAcessorios: any;
+  faturadoTitular: number;
+  faturadoTrainee: number;
+  faturadoComApoioTrainee: number;
+  faturadoTitularSolo: number;
+  totalFaturadoEspeciais: number;
+  quantidadeItensEspeciais: number;
+  ticketMedioEspeciais: number;
+  totalAVista: number;
+  progressoTotal: number;
+  evolucaoDiaria: { dia: number; total: number }[];
+  historico: any[];
+}
 
 export interface ModalDesempenhoVendedorProps {
   colaborador: ColaboradorDesempenho;
@@ -1360,7 +1414,8 @@ itens_venda (*)
       badgeAcessorios,
       faturadoTitular: faturadoTitularSolo,
       faturadoTrainee: faturadoComApoioTrainee,
-      faturadoTitularSolo,
+      faturadoComApoioTrainee: Number(faturadoComApoioTrainee || 0),
+      faturadoTitularSolo: Number(faturadoTitularSolo || 0),
       // Produtos Especiais & Alto Ticket (Fora de Meta)
       totalFaturadoEspeciais,
       quantidadeItensEspeciais,
@@ -1445,13 +1500,13 @@ itens_venda (*)
                   <Calendar size={13} className="text-[#6A0DAD]" />
                   Competência: <strong className="text-gray-200">{dashboardInfo.mesReferencia}</strong>
                 </span>
-                {(dashboardInfo.faturadoTitularSolo > 0 || dashboardInfo.faturadoComApoioTrainee > 0) && (
+                {((dashboardInfo?.faturadoTitularSolo ?? 0) > 0 || (dashboardInfo?.faturadoComApoioTrainee ?? 0) > 0) && (
                   <span className="inline-flex items-center gap-2">
                     <span className="text-gray-600">•</span>
                     <span className="text-purple-300 font-semibold">
-                      {dashboardInfo.isTrainee
-                        ? `Atuação como Trainee: R$ ${dashboardInfo.faturadoComApoioTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Vendas Diretas: R$ ${dashboardInfo.faturadoTitularSolo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-                        : `Titular Solo: R$ ${dashboardInfo.faturadoTitularSolo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Com Apoio Trainee: R$ ${dashboardInfo.faturadoComApoioTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                      {dashboardInfo?.isTrainee
+                        ? `Atuação como Trainee: R$ ${(dashboardInfo?.faturadoComApoioTrainee ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Vendas Diretas: R$ ${(dashboardInfo?.faturadoTitularSolo ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : `Titular Solo: R$ ${(dashboardInfo?.faturadoTitularSolo ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Com Apoio Trainee: R$ ${(dashboardInfo?.faturadoComApoioTrainee ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </span>
                   </span>
                 )}
@@ -1517,14 +1572,14 @@ itens_venda (*)
               </div>
               <div className="mt-3">
                 <span className="text-xl sm:text-2xl font-black text-white font-mono block">
-                  R$ {dashboardInfo.totalVendasGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatCurrency(dashboardInfo.totalVendasGeral)}
                 </span>
                 <span className="text-[11px] text-gray-400 mt-1 block">
                   {dashboardInfo.salesCount} {dashboardInfo.salesCount === 1 ? 'venda realizada' : 'vendas realizadas'}
                 </span>
-                {(dashboardInfo.faturadoTitularSolo > 0 || dashboardInfo.faturadoComApoioTrainee > 0) && (
+                {((dashboardInfo?.faturadoTitularSolo ?? 0) > 0 || (dashboardInfo?.faturadoComApoioTrainee ?? 0) > 0) && (
                   <span className="text-[10px] text-purple-300 mt-1 block font-medium">
-                    Titular Solo: R$ {dashboardInfo.faturadoTitularSolo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Com Apoio Trainee: R$ {dashboardInfo.faturadoComApoioTrainee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    Titular Solo: R$ {(dashboardInfo?.faturadoTitularSolo ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Com Apoio Trainee: R$ {(dashboardInfo?.faturadoComApoioTrainee ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 )}
               </div>
@@ -1540,7 +1595,7 @@ itens_venda (*)
               </div>
               <div className="mt-3">
                 <span className="text-xl sm:text-2xl font-black text-blue-400 font-mono block">
-                  R$ {dashboardInfo.ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatCurrency(dashboardInfo.ticketMedio)}
                 </span>
                 <span className="text-[11px] text-gray-400 mt-1 block">Média por transação faturada</span>
               </div>
@@ -1556,7 +1611,7 @@ itens_venda (*)
               </div>
               <div className="mt-3">
                 <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono block">
-                  R$ {(dashboardInfo.isTrainee ? dashboardInfo.totalComissoes : dashboardInfo.comissaoTitularExclusiva).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatCurrency(dashboardInfo.isTrainee ? dashboardInfo.totalComissoes : dashboardInfo.comissaoTitularExclusiva)}
                 </span>
                 <span className="text-[10px] text-gray-400 uppercase tracking-wider block font-semibold mt-0.5">
                   {dashboardInfo.isTrainee ? 'Comissão Trainee (Líquida)' : 'Comissão do Titular (Líquida)'}
@@ -1567,7 +1622,7 @@ itens_venda (*)
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-gray-300 font-medium">Comissão do Titular:</span>
                     <span className="font-mono font-bold text-emerald-400">
-                      R$ {dashboardInfo.comissaoTitularExclusiva.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatCurrency(dashboardInfo.comissaoTitularExclusiva)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-[11px]">
@@ -1575,7 +1630,7 @@ itens_venda (*)
                       {dashboardInfo.isTrainee ? 'Comissão Apoio/Trainee:' : 'Comissão Repassada aos Trainees:'}
                     </span>
                     <span className="font-mono font-bold text-purple-300">
-                      R$ {(dashboardInfo.isTrainee ? dashboardInfo.totalComissaoComoTrainee : dashboardInfo.totalComissaoGeradaParaTrainees).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatCurrency(dashboardInfo.isTrainee ? dashboardInfo.totalComissaoComoTrainee : dashboardInfo.totalComissaoGeradaParaTrainees)}
                     </span>
                   </div>
                 </div>
@@ -1592,16 +1647,16 @@ itens_venda (*)
               </div>
               <div className="mt-3">
                 <span className="text-xl sm:text-2xl font-black text-purple-300 font-mono block">
-                  R$ {dashboardInfo.metaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatCurrency(dashboardInfo.metaTotal)}
                 </span>
                 <div className="w-full bg-[#1A1A1A] rounded-full h-1.5 mt-2 overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-[#6A0DAD] to-purple-400 transition-all duration-700"
-                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.progressoTotal))}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, Number(dashboardInfo.progressoTotal) || 0))}%` }}
                   ></div>
                 </div>
                 <span className="text-[9px] text-purple-400/80 mt-1.5 block font-semibold">
-                  {dashboardInfo.progressoTotal}% • Boletos (R$ {dashboardInfo.metaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}) + Acessórios (R$ {dashboardInfo.metaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 0 })})
+                  {formatPercent(dashboardInfo.progressoTotal)} • Boletos ({formatCurrency(dashboardInfo.metaBoleto)}) + Acessórios ({formatCurrency(dashboardInfo.metaAcessorios)})
                 </span>
               </div>
             </div>
@@ -1668,13 +1723,13 @@ itens_venda (*)
                 <div>
                   <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
                   <span className="text-sm sm:text-base font-black text-amber-400 mt-0.5 block">
-                    R$ {dashboardInfo.totalBoletos.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(dashboardInfo.totalBoletos)}
                   </span>
                 </div>
                 <div className="border-x border-[#222222]">
                   <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
                   <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
-                    R$ {dashboardInfo.metaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(dashboardInfo.metaBoleto)}
                   </span>
                 </div>
                 <div>
@@ -1682,7 +1737,7 @@ itens_venda (*)
                     <Sparkles size={10} /> Super Meta
                   </span>
                   <span className="text-sm sm:text-base font-black text-purple-300 mt-0.5 block">
-                    R$ {dashboardInfo.superMetaBoleto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(dashboardInfo.superMetaBoleto)}
                   </span>
                 </div>
               </div>
@@ -1690,12 +1745,12 @@ itens_venda (*)
               <div className="space-y-1.5">
                 <div className="flex justify-between text-xs font-bold">
                   <span className="text-gray-400">Progresso do Objetivo</span>
-                  <span className="text-amber-400 font-mono">{dashboardInfo.progressoBoleto}% atingido</span>
+                  <span className="text-amber-400 font-mono">{formatPercent(dashboardInfo.progressoBoleto)} atingido</span>
                 </div>
                 <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
                   <div
                     className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-400 shadow-[0_0_10px_#f59e0b]"
-                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.progressoBoleto))}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, Number(dashboardInfo.progressoBoleto) || 0))}%` }}
                   ></div>
                 </div>
               </div>
@@ -1721,13 +1776,13 @@ itens_venda (*)
                 <div>
                   <span className="text-[9px] text-gray-400 uppercase font-bold block">Realizado</span>
                   <span className="text-sm sm:text-base font-black text-pink-400 mt-0.5 block">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(dashboardInfo.totalAcessorios || dashboardInfo.realizadoAcessorios || 0)}
+                    {formatCurrency(dashboardInfo.totalAcessorios || dashboardInfo.realizadoAcessorios || 0)}
                   </span>
                 </div>
                 <div className="border-x border-[#222222]">
                   <span className="text-[9px] text-gray-400 uppercase font-bold block">Objetivo</span>
                   <span className="text-sm sm:text-base font-black text-white mt-0.5 block">
-                    R$ {dashboardInfo.metaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(dashboardInfo.metaAcessorios)}
                   </span>
                 </div>
                 <div>
@@ -1735,7 +1790,7 @@ itens_venda (*)
                     <Sparkles size={10} /> Super Meta
                   </span>
                   <span className="text-sm sm:text-base font-black text-pink-300 mt-0.5 block">
-                    R$ {dashboardInfo.superMetaAcessorios.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(dashboardInfo.superMetaAcessorios)}
                   </span>
                 </div>
               </div>
@@ -1745,16 +1800,16 @@ itens_venda (*)
                   <span className="text-gray-400">Progresso do Objetivo</span>
                   <span className="text-pink-400 font-mono">
                     {(() => {
-                      const metaAcess = dashboardInfo.metaAcessorios || 10000;
-                      const percAcess = metaAcess > 0 ? ((dashboardInfo.totalAcessorios / metaAcess) * 100).toFixed(1) : '0';
-                      return `${percAcess}% atingido`;
+                      const metaAcess = Number(dashboardInfo.metaAcessorios) || 10000;
+                      const percAcess = metaAcess > 0 ? ((Number(dashboardInfo.totalAcessorios) / metaAcess) * 100) : 0;
+                      return `${formatPercent(percAcess)} atingido`;
                     })()}
                   </span>
                 </div>
                 <div className="w-full bg-[#161616] rounded-full h-3 overflow-hidden border border-[#222222]">
                   <div
                     className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-pink-600 via-pink-500 to-rose-400 shadow-[0_0_10px_#ec4899]"
-                    style={{ width: `${Math.min(100, Math.max(0, dashboardInfo.metaAcessorios > 0 ? (dashboardInfo.totalAcessorios / dashboardInfo.metaAcessorios) * 100 : 0))}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, Number(dashboardInfo.metaAcessorios) > 0 ? (Number(dashboardInfo.totalAcessorios) / Number(dashboardInfo.metaAcessorios)) * 100 : 0))}%` }}
                   ></div>
                 </div>
               </div>
@@ -1795,7 +1850,7 @@ itens_venda (*)
                 </span>
                 <div className="mt-2">
                   <span className="text-2xl sm:text-3xl font-black text-amber-400 font-mono block tracking-tight">
-                    R$ {dashboardInfo.totalFaturadoEspeciais.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(dashboardInfo.totalFaturadoEspeciais)}
                   </span>
                   <span className="text-[10px] text-gray-400 mt-1 block">
                     Volume bruto comercializado na competência
@@ -1820,7 +1875,7 @@ itens_venda (*)
                     Ticket Médio
                   </span>
                   <span className="text-base sm:text-lg font-black text-amber-300 mt-1 block">
-                    R$ {dashboardInfo.ticketMedioEspeciais.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(dashboardInfo.ticketMedioEspeciais)}
                   </span>
                   <span className="text-[9px] text-gray-400 mt-0.5 block">Por item vendido</span>
                 </div>
@@ -1906,7 +1961,7 @@ itens_venda (*)
                       const valorComissaoBruto = valorComissaoSalva !== undefined && valorComissaoSalva !== null && valorComissaoSalva !== ''
                         ? Number(valorComissaoSalva)
                         : Number(calcularComissaoItem(sale, dashboardInfo.isTrainee));
-                      const comissaoFormatada = valorComissaoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      const comissaoFormatada = formatCurrency(valorComissaoBruto);
 
                       const metodoRaw = String(sale.forma_pagamento || sale.metodo_pagamento || 'N/A').toUpperCase();
 
@@ -1970,7 +2025,7 @@ itens_venda (*)
                     </span>
                   </h4>
                   <span className="text-[11px] text-gray-400 mt-0.5 block">
-                    Total gerado/repassado aos trainees: <strong className="text-purple-300 font-mono">R$ {dashboardInfo.totalComissaoGeradaParaTrainees.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    Total gerado/repassado aos trainees: <strong className="text-purple-300 font-mono">{formatCurrency(dashboardInfo.totalComissaoGeradaParaTrainees)}</strong>
                   </span>
                 </div>
               </div>

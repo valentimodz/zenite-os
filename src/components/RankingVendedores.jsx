@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Award, RefreshCw, Calendar, Store, Filter, Eye, UserCheck, Info } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import ModalDesempenhoVendedor from './ModalDesempenhoVendedor';
+import ModalDesempenhoVendedor, { formatCurrency } from './ModalDesempenhoVendedor';
 import PeriodoSelector from './common/PeriodoSelector';
 import { useMetasRankings } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
@@ -514,17 +514,17 @@ export default function RankingVendedores({
               const nomeFilialExibicao = colab.filialNome || colab.filiais?.nome || 'Sem Filial';
               const temValoresMistos = colab.faturadoTitular > 0 && colab.faturadoTrainee > 0;
               const tooltipDetalhes = temValoresMistos
-                ? `Apoio Trainee: ${colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Titular: ${colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                ? `Apoio Trainee: ${formatCurrency(colab.faturadoTrainee)} | Titular: ${formatCurrency(colab.faturadoTitular)}`
                 : (colab.faturadoTrainee > 0
-                    ? `Apoio Trainee: ${colab.faturadoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
-                    : `Titular: ${colab.faturadoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+                    ? `Apoio Trainee: ${formatCurrency(colab.faturadoTrainee)}`
+                    : `Titular: ${formatCurrency(colab.faturadoTitular)}`);
 
               const pctEfetivoTitular = (colab.taxaEfetivaTitular * 100).toFixed(1).replace('.', ',');
               const tooltipComissao = temValoresMistos
-                ? `Titular (${pctEfetivoTitular}%): ${colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | Apoio Trainee (1,0%): ${colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                ? `Titular (${pctEfetivoTitular}%): ${formatCurrency(colab.comissaoTitular)} | Apoio Trainee (1,0%): ${formatCurrency(colab.comissaoTrainee)}`
                 : (colab.faturadoTrainee > 0
-                    ? `Apoio Trainee (1,0%): ${colab.comissaoTrainee.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
-                    : `Comissão Efetiva (${pctEfetivoTitular}%): ${colab.comissaoTitular.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+                    ? `Apoio Trainee (1,0%): ${formatCurrency(colab.comissaoTrainee)}`
+                    : `Comissão Efetiva (${pctEfetivoTitular}%): ${formatCurrency(colab.comissaoTitular)}`);
 
               return (
               <tr 
@@ -561,7 +561,7 @@ export default function RankingVendedores({
                 <td className="py-3 px-4 text-center font-mono font-bold text-gray-300 align-middle">{colab.transacoes}</td>
                 <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipDetalhes}>
                   <div className="inline-flex items-center justify-end gap-1.5 font-bold text-white">
-                    <span>{colab.volume.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <span>{formatCurrency(colab.volume)}</span>
                     {temValoresMistos && (
                       <span className="text-purple-400/80 hover:text-purple-300 cursor-help" title={tooltipDetalhes}>
                         <Info size={12} />
@@ -570,11 +570,11 @@ export default function RankingVendedores({
                   </div>
                 </td>
                 <td className="py-3 px-4 text-right font-mono text-cyan-400 font-medium align-middle">
-                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(colab.totalBoletos || 0)}
+                  {formatCurrency(colab.totalBoletos || 0)}
                 </td>
                 <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipComissao}>
                   <div className="inline-flex items-center justify-end gap-1.5 font-bold text-emerald-400">
-                    <span>{colab.comissaoAcumulada.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <span>{formatCurrency(colab.comissaoAcumulada)}</span>
                     {temValoresMistos && (
                       <span className="text-emerald-500/60 hover:text-emerald-400 cursor-help" title={tooltipComissao}>
                         <Info size={12} />

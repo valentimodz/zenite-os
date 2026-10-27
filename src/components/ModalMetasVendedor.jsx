@@ -4,6 +4,7 @@ import {
   CheckCircle2, Sparkles, User, RefreshCw, ShieldCheck, TrendingUp 
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { formatCurrency } from './ModalDesempenhoVendedor';
 
 export default function ModalMetasVendedor({ 
   vendedor, 
@@ -482,7 +483,7 @@ export default function ModalMetasVendedor({
               </span>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span className="text-xl font-black text-white font-mono">
-                  R$ {totalMetaCalculada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  {formatCurrency(totalMetaCalculada)}
                 </span>
                 <span className="text-xs text-gray-400 font-semibold">
                   ({isTrainee ? 'Trainee' : 'Boletos'} + Acessórios)
@@ -495,7 +496,7 @@ export default function ModalMetasVendedor({
                 <Sparkles size={11} /> Super Meta Total:
               </span>
               <span className="text-base font-black text-[#A78BFA] font-mono block mt-0.5">
-                R$ {totalSuperMetaCalculada.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                {formatCurrency(totalSuperMetaCalculada)}
               </span>
             </div>
           </div>
