@@ -41,7 +41,7 @@ import GraficosMinhasMetas from './GraficosMinhasMetas';
 import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
-import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse, calcularParcelamentoCredShop } from '../utils/currencyUtils';
+import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse, calcularOpcoesParcelamento, calcularParcelamentoCredShop, TAXAS_PADRAO_CREDISHOP } from '../utils/currencyUtils';
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
@@ -1338,6 +1338,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [isPdvClienteFieldsEditable, setIsPdvClienteFieldsEditable] = useState(false);
   const [pdvCart, setPdvCart] = useState([]);
   const [taxasCartao, setTaxasCartao] = useState([]);
+  const [taxasCrediShop, setTaxasCrediShop] = useState(TAXAS_PADRAO_CREDISHOP);
   const [isLoadingTaxas, setIsLoadingTaxas] = useState(false);
   const [isSavingTaxas, setIsSavingTaxas] = useState(false);
   const [tempTaxasMap, setTempTaxasMap] = useState({});
@@ -3035,6 +3036,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
       });
       fetchTaxasCartao(profile?.empresa_id || company?.id || activeEmpresaId);
+      fetchTaxasCrediShop(profile?.empresa_id || company?.id || activeEmpresaId);
       if (isVendedor) {
         fetchVendedorData(targetFilialId, session?.user?.id);
       }
@@ -11320,6 +11322,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       fetchCategorias(tenantId);
     } else if (view === 'configuracoes') {
       fetchTaxasCartao(tenantId);
+      fetchTaxasCrediShop(tenantId);
       fetchTenantSettings();
       fetchTeamMembers(tenantId);
     } else if (view === 'gestao' || view === 'estoque' || view === 'catalogo_mestre') {
@@ -13735,6 +13738,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   };
 
+  // Buscar taxas da Credi Shop com fallback estático (1x a 10x)
+  const fetchTaxasCrediShop = async (tenantId) => {
+    const targetEmpresaId = profile?.empresa_id || tenantId || company?.id || activeEmpresaId;
+    try {
+      let query = supabase.from('taxas_credishop').select('*').order('parcela', { ascending: true });
+      if (targetEmpresaId) {
+        query = query.or(`empresa_id.eq.${targetEmpresaId},empresa_id.is.null`);
+      }
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        setTaxasCrediShop(TAXAS_PADRAO_CREDISHOP);
+      } else {
+        const mapped = data.map(r => ({
+          parcela: Number(r.parcela || r.parcelas || 1),
+          fator: Number(r.fator ?? r.taxa ?? 100)
+        }));
+        setTaxasCrediShop(mapped.length > 0 ? mapped : TAXAS_PADRAO_CREDISHOP);
+      }
+    } catch (e) {
+      console.warn('Fallback automático para taxas padrão Credi Shop:', e);
+      setTaxasCrediShop(TAXAS_PADRAO_CREDISHOP);
+    }
+  };
+
   // Salvar taxas de cartão (Débito = 0 e Crédito de 1x a 18x) com upsert em empresa_id, parcela
   const handleSaveTaxasCartao = async (e) => {
     e.preventDefault();
@@ -14841,7 +14868,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       pagamentosAdicionados.forEach((p) => {
         const f = String(p.forma || p.metodo || '').toUpperCase();
         const v = Number(p.valor || 0);
-        if (f.includes('BOLETO') || f.includes('FINANC') || f.includes('CREDI')) vBoleto += v;
+        if (f.includes('CREDI_SHOP') || f.includes('CREDI SHOP')) vCartao += v;
+        else if (f.includes('BOLETO') || f.includes('FINANC') || f.includes('CREDI')) vBoleto += v;
         else if (f.includes('PIX')) vPix += v;
         else if (f.includes('DINHEIRO') || f.includes('VISTA')) vDinheiro += v;
         else if (f.includes('CART') || f.includes('CRED') || f.includes('DEB')) vCartao += v;
@@ -14861,18 +14889,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       : (temBoleto
         ? 'boleto'
         : (pagamentosAdicionados.length > 0 ? (pagamentosAdicionados[0].forma || pagamentosAdicionados[0].metodo) : (pdvMetodoPagamento || 'DINHEIRO')));
-    const isCartaoEfetivo = String(metodoEfetivo).toLowerCase() === 'cartao_credito' || String(metodoEfetivo).toLowerCase() === 'cartao';
+    const metodoLower = String(metodoEfetivo).toLowerCase();
+    const isCrediShopEfetivo = metodoLower === 'credi_shop';
+    const isCartaoEfetivo = metodoLower === 'cartao_credito' || metodoLower === 'cartao' || isCrediShopEfetivo;
     const parcelasEfetivo = isCartaoEfetivo
       ? ((pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].parcelas : pdvCartaoParcelas) || 1)
       : 1;
 
     // Calcular juros/taxas do cartão se aplicável (fórmula Cred Shop: valor / fator_liquido)
     let feeFactor = 1;
-    if (isCartaoEfetivo) {
-      const feeObj = taxasCartao.find(t => (t.parcela === parcelasEfetivo || t.parcelas === parcelasEfetivo));
-      const rawFee = feeObj ? parseFloat(feeObj.taxa) : 100;
+    if (isCrediShopEfetivo) {
+      const feeObj = taxasCrediShop.find(t => (Number(t.parcela) === Number(parcelasEfetivo) || Number(t.parcelas) === Number(parcelasEfetivo)));
+      const rawFee = feeObj ? parseFloat(feeObj.fator ?? feeObj.taxa) : 100;
       const fator = rawFee > 1 ? (rawFee / 100) : rawFee;
       feeFactor = (fator > 0) ? (1 / fator) : 1;
+    } else if (isCartaoEfetivo) {
+      const feeObj = taxasCartao.find(t => (Number(t.parcela) === Number(parcelasEfetivo) || Number(t.parcelas) === Number(parcelasEfetivo)));
+      const rawFee = feeObj ? parseFloat(feeObj.taxa) : 0;
+      const taxaNominal = rawFee > 1 ? rawFee / 100 : rawFee;
+      feeFactor = (taxaNominal < 1 && taxaNominal >= 0) ? (1 / (1 - taxaNominal)) : 1;
     }
 
     // Checagem Poka-Yoke de Inadimplência do Cliente
@@ -15203,6 +15238,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         'cartao': 'CARTÃO DE CRÉDITO',
         'cartao_credito': 'CARTÃO DE CRÉDITO',
         'cartao_debito': 'CARTÃO DE DÉBITO',
+        'credi_shop': 'CREDI SHOP',
         'dinheiro': 'DINHEIRO',
         'boleto': 'BOLETO',
         'troca': 'TROCA'
@@ -15597,17 +15633,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 'cartao': 'CARTAO_CREDITO',
                 'cartao_credito': 'CARTAO_CREDITO',
                 'cartao_debito': 'CARTAO_DEBITO',
+                'credi_shop': 'CREDI_SHOP',
                 'dinheiro': 'DINHEIRO',
                 'boleto': 'BOLETO',
                 'troca': 'TROCA'
               };
-              const metodoResolved = mapMetodo[pag.metodo?.toLowerCase()] || 'DINHEIRO';
+              const metodoResolved = mapMetodo[pag.metodo?.toLowerCase()] || (pag.metodo?.toUpperCase() === 'CREDI_SHOP' ? 'CREDI_SHOP' : 'DINHEIRO');
               const isBoletoPag = metodoResolved === 'BOLETO' || pag.metodo?.toUpperCase() === 'BOLETO';
+              const isParceladoPag = pag.metodo === 'cartao_credito' || pag.metodo === 'cartao' || pag.metodo === 'CREDI_SHOP' || pag.metodo === 'credi_shop';
               const vpPayload = {
                 venda_id: obterUuidPuro(rpcRes.venda_id),
                 valor_pago: pag.valor,
                 metodo_pagamento: metodoResolved,
-                parcelas: (pag.metodo === 'cartao_credito' || pag.metodo === 'cartao') ? (pag.parcelas || 1) : 1,
+                parcelas: isParceladoPag ? (pag.parcelas || 1) : 1,
                 financeira: isBoletoPag ? (pag.financeira || pag.metodo_detalhe || null) : null,
                 status_repasse: isBoletoPag ? 'PENDENTE' : null,
                 tenant_id: obterUuidPuro(company?.id || profile?.empresa_id || activeEmpresaId)
@@ -15631,11 +15669,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               'cartao': 'CARTAO_CREDITO',
               'cartao_credito': 'CARTAO_CREDITO',
               'cartao_debito': 'CARTAO_DEBITO',
+              'credi_shop': 'CREDI_SHOP',
               'dinheiro': 'DINHEIRO',
               'boleto': 'BOLETO',
               'troca': 'TROCA'
             };
-            const metodoResolved = mapMetodo[metodoEfetivo?.toLowerCase()] || 'DINHEIRO';
+            const metodoResolved = mapMetodo[metodoEfetivo?.toLowerCase()] || (metodoEfetivo?.toUpperCase() === 'CREDI_SHOP' ? 'CREDI_SHOP' : 'DINHEIRO');
             const isBoletoSingle = metodoResolved === 'BOLETO';
             const vpSinglePayload = {
               venda_id: obterUuidPuro(rpcRes.venda_id),
@@ -20448,6 +20487,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     else if (pdvNovoMetodo === 'dinheiro') labelMetodo = '💵 Dinheiro';
                     else if (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') labelMetodo = `💳 Crédito (${pdvNovoParcelas}x)`;
                     else if (pdvNovoMetodo === 'cartao_debito') labelMetodo = '💳 Débito (À Vista)';
+                    else if (pdvNovoMetodo === 'CREDI_SHOP' || pdvNovoMetodo === 'credi_shop') labelMetodo = `💳 CREDI SHOP (${pdvNovoParcelas}x)`;
                     else if (pdvNovoMetodo === 'boleto') {
                       financeiraFinal = pdvNovoFinanceira === 'Outra' ? (pdvOutraFinanceiraNome.trim() || 'Outra') : pdvNovoFinanceira;
                       labelMetodo = `📄 Boleto (${financeiraFinal})`;
@@ -20464,7 +20504,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       metodo: pdvNovoMetodo,
                       label: labelMetodo,
                       valor: valorSanitizado,
-                      parcelas: (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao') ? pdvNovoParcelas : 1,
+                      parcelas: (pdvNovoMetodo === 'cartao_credito' || pdvNovoMetodo === 'cartao' || pdvNovoMetodo === 'CREDI_SHOP' || pdvNovoMetodo === 'credi_shop') ? pdvNovoParcelas : 1,
                       financeira: financeiraFinal,
                       metodo_detalhe: financeiraFinal || (pdvNovoMetodo === 'troca' ? pdvTrocaModelo.trim() : null),
                       // Dados adicionais caso seja entrada de aparelho
@@ -20573,6 +20613,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               { value: 'cartao_credito', label: '💳 Crédito' },
                               { value: 'cartao_debito', label: '💳 Débito' },
                               { value: 'dinheiro', label: '💵 Dinheiro' },
+                              { value: 'CREDI_SHOP', label: '💳 CREDI SHOP' },
                               ...(eElegivelBoleto ? [{ value: 'boleto', label: '📄 Boleto' }] : []),
                               ...(temIphoneNoCarrinho ? [{ value: 'troca', label: '📱 ENTRADA DE APARELHO' }] : [])
                             ];
@@ -20586,11 +20627,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     onClick={() => {
                                       setPdvNovoMetodo(m.value);
                                       setPdvMetodoPagamento(m.value);
-                                      if (m.value === 'cartao_debito' || m.value !== 'cartao_credito') {
+                                      if (m.value === 'cartao_debito' || (m.value !== 'cartao_credito' && m.value !== 'CREDI_SHOP')) {
                                         setPdvNovoParcelas(1);
                                         setPdvCartaoParcelas(1);
                                       }
-                                      if (m.value === 'cartao_credito' || m.value === 'cartao') {
+                                      if (m.value === 'cartao_credito' || m.value === 'cartao' || m.value === 'CREDI_SHOP') {
                                         setPdvCartaoParcelas(pdvNovoParcelas || 1);
                                       }
                                       if (m.value === 'troca') {
@@ -20631,7 +20672,35 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                               >
                                 {(() => {
                                   const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
-                                  const opcoes = calcularParcelamentoCredShop(valBase, taxasCartao);
+                                  const opcoes = calcularOpcoesParcelamento(valBase, taxasCartao);
+                                  return opcoes.map((opt) => (
+                                    <option key={opt.parcelas} value={opt.parcelas}>
+                                      {opt.label}
+                                    </option>
+                                  ));
+                                })()}
+                              </select>
+                            </div>
+                          )}
+
+                          {/* Se for CREDI SHOP: Parcelas de 1x a 10x */}
+                          {(pdvNovoMetodo === 'CREDI_SHOP' || pdvNovoMetodo === 'credi_shop') && (
+                            <div className="space-y-1 animate-fadeIn">
+                              <label className="block text-[9px] font-bold text-primary uppercase tracking-wide">
+                                Opção de Parcelamento (CREDI SHOP)
+                              </label>
+                              <select
+                                value={pdvNovoParcelas}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  setPdvNovoParcelas(val);
+                                  setPdvCartaoParcelas(val);
+                                }}
+                                className="w-full bg-black border border-primary/50 focus:border-primary rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
+                              >
+                                {(() => {
+                                  const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
+                                  const opcoes = calcularParcelamentoCredShop(valBase, taxasCrediShop);
                                   return opcoes.map((opt) => (
                                     <option key={opt.parcelas} value={opt.parcelas}>
                                       {opt.label}

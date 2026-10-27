@@ -137,28 +137,61 @@ export const calcularParcelaComRepasse = (
     taxaAplicada: taxaReal
   };
 };
-
-/**
- * Calcula o parcelamento da Cred Shop (1x a 10x ou até o limite configurado)
- * onde a coluna `taxa` armazena os coeficientes líquidos (ex.: 95.15, 93.30).
- * 1. fator = Number(taxa) / 100
- * 2. valorTotal = valorOriginal / fator
- * 3. valorParcela = valorTotal / numeroParcelas
- */
-export const calcularParcelamentoCredShop = (
+export const calcularOpcoesParcelamento = (
   valorOriginal,
-  taxas = []
+  listaTaxas = []
 ) => {
   const vOriginal = Number(valorOriginal) || 0;
   if (!vOriginal || vOriginal <= 0) return [];
 
-  const lista = Array.isArray(taxas) ? taxas : [];
+  const lista = Array.isArray(listaTaxas) ? listaTaxas : [];
+  return Array.from({ length: 18 }, (_, i) => i + 1).map((n) => {
+    const feeObj = lista.find(t => (t.parcela === n || t.parcelas === n));
+    const taxaConfigurada = feeObj ? Number(feeObj.taxa) : (1.5 + (n - 1));
+    const { total, parcela } = calcularParcelaComRepasse(vOriginal, taxaConfigurada, n);
+
+    return {
+      parcelas: n,
+      totalCobrado: total,
+      valorParcela: parcela,
+      label: `${n}x de ${parcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (Total: ${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`
+    };
+  });
+};
+
+/**
+ * Coeficientes padrão da Credi Shop (1x a 10x)
+ * 1. fator = Number(fator) / 100
+ * 2. valorTotal = valorOriginal / fator
+ * 3. valorParcela = valorTotal / numeroParcelas
+ */
+export const TAXAS_PADRAO_CREDISHOP = [
+  { parcela: 1,  fator: 95.15 },
+  { parcela: 2,  fator: 93.30 },
+  { parcela: 3,  fator: 91.45 },
+  { parcela: 4,  fator: 89.60 },
+  { parcela: 5,  fator: 87.75 },
+  { parcela: 6,  fator: 85.90 },
+  { parcela: 7,  fator: 84.05 },
+  { parcela: 8,  fator: 82.20 },
+  { parcela: 9,  fator: 80.35 },
+  { parcela: 10, fator: 78.50 },
+];
+
+export const calcularParcelamentoCredShop = (
+  valorOriginal,
+  taxas = TAXAS_PADRAO_CREDISHOP
+) => {
+  const vOriginal = Number(valorOriginal) || 0;
+  if (!vOriginal || vOriginal <= 0) return [];
+
+  const lista = (Array.isArray(taxas) && taxas.length > 0) ? taxas : TAXAS_PADRAO_CREDISHOP;
 
   return lista
     .filter(t => t.parcela >= 1 && t.parcela <= 10)
     .sort((a, b) => a.parcela - b.parcela)
     .map(item => {
-      const taxaNum = Number(item.taxa || 100);
+      const taxaNum = Number(item.fator ?? item.taxa ?? 100);
 
       // Converte o fator (ex: 95.15 vira 0.9515)
       const fator = taxaNum > 1 ? taxaNum / 100 : taxaNum;
