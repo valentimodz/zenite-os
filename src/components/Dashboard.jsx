@@ -20,7 +20,6 @@ import SaasDashboard from '../pages/SaaS/SaasDashboard';
 import SaasTenants from '../pages/SaaS/SaasTenants';
 import SaasBilling from '../pages/SaaS/SaasBilling';
 import CameraScanner from './CameraScanner';
-import ImportadorVendasCSV from './ImportadorVendasCSV';
 import ModalAuditoriaCega from './ModalAuditoriaCega';
 import { calcularDescontoMaximo } from '../utils/descontoEngine';
 import { getCache, setCache, invalidateCache } from '../services/cacheService';
@@ -38,7 +37,6 @@ import ModalDetalheEstoqueProduto from './ModalDetalheEstoqueProduto';
 import ConsultaEstoque from './ConsultaEstoque';
 import AlertaEstoqueBaixo from './AlertaEstoqueBaixo';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
-import ImportarCaixaRetroativoModal from './ImportarCaixaRetroativoModal';
 import ModalDiagnosticoFilial from './ModalDiagnosticoFilial';
 import ModalAbrirCaixa from './ModalAbrirCaixa';
 import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obterUuidPuro, calcularParcelaComRepasse, calcularOpcoesParcelamento, calcularParcelamentoCredShop, TAXAS_PADRAO_CREDISHOP } from '../utils/currencyUtils';
@@ -14854,19 +14852,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ? ((pagamentosAdicionados.length > 0 ? pagamentosAdicionados[0].parcelas : pdvCartaoParcelas) || 1)
       : 1;
 
-    // Calcular juros/taxas do cartão se aplicável (fórmula Cred Shop: valor / fator_liquido)
-    let feeFactor = 1;
-    if (isCrediShopEfetivo) {
-      const feeObj = taxasCrediShop.find(t => (Number(t.parcela) === Number(parcelasEfetivo) || Number(t.parcelas) === Number(parcelasEfetivo)));
-      const rawFee = feeObj ? parseFloat(feeObj.fator ?? feeObj.taxa) : 100;
-      const fator = rawFee > 1 ? (rawFee / 100) : rawFee;
-      feeFactor = (fator > 0) ? (1 / fator) : 1;
-    } else if (isCartaoEfetivo) {
-      const feeObj = taxasCartao.find(t => (Number(t.parcela) === Number(parcelasEfetivo) || Number(t.parcelas) === Number(parcelasEfetivo)));
-      const rawFee = feeObj ? parseFloat(feeObj.taxa) : 0;
-      const taxaNominal = rawFee > 1 ? rawFee / 100 : rawFee;
-      feeFactor = (taxaNominal < 1 && taxaNominal >= 0) ? (1 / (1 - taxaNominal)) : 1;
-    }
+    // Sem repasse de taxas de parcelamento no checkout
+    const feeFactor = 1;
 
     // Checagem Poka-Yoke de Inadimplência do Cliente
     const clienteAlvo = clientes.find(c => (selectedPdvClienteId && c.id === selectedPdvClienteId) || (pdvClienteCpfCnpj && c.cpf_cnpj === pdvClienteCpfCnpj.trim()));
@@ -20464,15 +20451,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 }}
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
-                                {(() => {
-                                  const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
-                                  const opcoes = calcularOpcoesParcelamento(valBase, taxasCartao);
-                                  return opcoes.map((opt) => (
-                                    <option key={opt.parcelas} value={opt.parcelas}>
-                                      {opt.label}
+                                {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
+                                    <option key={n} value={n}>
+                                      {n}x
                                     </option>
-                                  ));
-                                })()}
+                                  ))}
                               </select>
                             </div>
                           )}
@@ -20492,15 +20475,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 }}
                                 className="w-full bg-black border border-primary/50 focus:border-primary rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
-                                {(() => {
-                                  const valBase = pdvNovoValor !== '' ? parseFloat(pdvNovoValor) : faltaPagar;
-                                  const opcoes = calcularParcelamentoCredShop(valBase, taxasCrediShop);
-                                  return opcoes.map((opt) => (
-                                    <option key={opt.parcelas} value={opt.parcelas}>
-                                      {opt.label}
+                                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                                    <option key={n} value={n}>
+                                      {n}x
                                     </option>
-                                  ));
-                                })()}
+                                  ))}
                               </select>
                             </div>
                           )}
@@ -26920,98 +26899,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </p>
                         </div>
 
-                        {/* CARD DE TAXAS DE CARTÃO */}
-                        {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id) && company?.id !== 'MASTER' && (
-                          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
-                            <div>
-                              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                <CreditCard size={18} className="text-[#6A0DAD]" />
-                                Taxas de Parcelamento (Cartão)
-                              </h3>
-                              <p className="text-xs text-gray-500 mt-1">Defina as taxas cobradas pela máquina de cartão para cada número de parcelas (1x a 18x).</p>
-                            </div>
-
-                            {isLoadingTaxas ? (
-                              <div className="flex items-center justify-center py-6 gap-2 text-gray-500">
-                                <Loader2 size={18} className="animate-spin text-[#6A0DAD]" />
-                                <span className="text-xs">Carregando taxas...</span>
-                              </div>
-                            ) : (
-                              <form onSubmit={handleSaveTaxasCartao} className="space-y-6">
-                                {/* CARD DESTACADO: TAXA DE DÉBITO (PARCELA 0) */}
-                                <div className="bg-gradient-to-r from-[#6A0DAD]/15 to-transparent border border-[#6A0DAD]/40 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
-                                  <div className="space-y-1">
-                                    <div className="flex items-center gap-2">
-                                      <span className="px-2.5 py-0.5 rounded bg-[#6A0DAD] text-white text-[11px] font-black tracking-wider uppercase">
-                                        DÉBITO
-                                      </span>
-                                      <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">
-                                        (À Vista - Parcela Única)
-                                      </span>
-                                    </div>
-                                    <p className="text-xs text-gray-300">
-                                      Taxa retida pela máquina de cartão nas vendas no débito (utilizada exclusivamente para conciliação líquida interna de relatórios).
-                                    </p>
-                                  </div>
-                                  <div className="bg-black border border-[#6A0DAD]/60 p-2.5 rounded-lg flex items-center gap-2 min-w-[150px] self-start sm:self-auto">
-                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">Taxa (%):</label>
-                                    <div className="relative flex-1">
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        value={tempTaxasMap[0] !== undefined ? tempTaxasMap[0] : ''}
-                                        onChange={(e) => setTempTaxasMap(prev => ({ ...prev, 0: e.target.value }))}
-                                        className="w-full bg-transparent border-0 text-white font-bold font-mono text-sm p-0 focus:ring-0 outline-none pr-5 text-right"
-                                        placeholder="0.00"
-                                        required
-                                      />
-                                      <span className="absolute right-0 top-0 text-xs text-purple-400 font-bold">%</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide">
-                                    Parcelamento no Cartão de Crédito (1x a 18x)
-                                  </label>
-                                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                                    {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
-                                      <div key={n} className="bg-black border border-[#222222] p-3 rounded-lg flex flex-col gap-1.5 focus-within:border-[#6A0DAD]">
-                                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{n}x Parcelas</label>
-                                        <div className="relative">
-                                          <input
-                                            type="number"
-                                            step="0.01"
-                                            min="0"
-                                            value={tempTaxasMap[n] !== undefined ? tempTaxasMap[n] : ''}
-                                            onChange={(e) => setTempTaxasMap(prev => ({ ...prev, [n]: e.target.value }))}
-                                            className="w-full bg-transparent border-0 text-white font-bold font-mono text-sm p-0 focus:ring-0 outline-none pr-5"
-                                            placeholder="0.00"
-                                            required
-                                          />
-                                          <span className="absolute right-0 top-0.5 text-xs text-gray-500 font-bold">%</span>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                <div className="flex justify-end">
-                                  <button
-                                    type="submit"
-                                    disabled={isSavingTaxas}
-                                    className="bg-[#6A0DAD] hover:bg-[#500885] disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold py-2.5 px-6 rounded-md transition-colors flex items-center gap-2 text-sm"
-                                  >
-                                    <Save size={16} />
-                                    {isSavingTaxas ? 'Salvando...' : 'Salvar Taxas de Parcelamento'}
-                                  </button>
-                                </div>
-                              </form>
-                            )}
-                          </div>
-                        )}
-
                         {/* CARD DE CONFIGURAÇÕES DE RECURSOS (NICHO) */}
                         {['SUPER_ADMIN', 'OWNER', 'DONO', 'ADMIN'].includes(profile?.role) && (company?.id || profile?.empresa_id) && company?.id !== 'MASTER' && (
                           <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6">
@@ -27181,58 +27068,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 </table>
                               </div>
                             )}
-                          </div>
-                        )}
-
-                        {/* CARD DE FERRAMENTAS ADMINISTRATIVAS - IMPORTAÇÃO CSV */}
-                        {(profile?.role === 'ADMIN' || profile?.role === 'SUPER_ADMIN' || profile?.role === 'OWNER' || profile?.role === 'DONO') && (
-                          <div className="bg-[#0A0A0A] border border-[#6A0DAD]/20 rounded-xl p-6 space-y-6 shadow-xl">
-                            <div className="border-b border-[#222] pb-4">
-                              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                <span className="text-xl">🛠️</span> Ferramentas Administrativas
-                              </h3>
-                              <p className="text-xs text-gray-500 mt-1">
-                                Importação de Histórico de Vendas (Apenas Financeiro/Comissões)
-                              </p>
-                            </div>
-                            <ImportadorVendasCSV
-                              empresaId={profile?.empresa_id || company?.id}
-                              profile={profile}
-                              onImportSuccess={() => {
-                                const targetEmpId = profile?.empresa_id || company?.id;
-                                if (targetEmpId && typeof fetchGerenteData === 'function') {
-                                  fetchGerenteData(targetEmpId);
-                                }
-                              }}
-                            />
-
-                            {/* NOVO RECURSO: IMPORTAÇÃO DE CAIXA RETROATIVO COM IA (PDF / FOTO) */}
-                            <div className="bg-gradient-to-r from-[#140026] to-[#0A0A0A] border border-[#6A0DAD]/40 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg shadow-purple-950/20">
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="p-1 rounded bg-[#6A0DAD] text-white">
-                                    <Sparkles size={14} className="text-yellow-300" />
-                                  </span>
-                                  <h4 className="text-sm font-extrabold text-white">
-                                    Importação Inteligente de Caixa Diário via IA (PDF / Foto)
-                                  </h4>
-                                  <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-[#6A0DAD]/30 text-purple-200 border border-[#6A0DAD]/50">
-                                    Gemini 3.6 Flash
-                                  </span>
-                                </div>
-                                <p className="text-xs text-gray-400 max-w-xl">
-                                  Faça upload de folhas físicas escaneadas ou fotos de celular do fechamento de caixa. A IA extrai produtos, vendedores, valores e abre a tela de bipagem de IMEIs para registrar tudo no Supabase com a data retroativa original.
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setIsImportarCaixaModalOpen(true)}
-                                className="bg-[#6A0DAD] hover:bg-[#500885] text-white text-xs font-extrabold py-2.5 px-5 rounded-lg transition-all shadow-md shadow-purple-950/40 flex items-center justify-center gap-2 shrink-0 cursor-pointer self-start sm:self-auto"
-                              >
-                                <Upload size={14} />
-                                <span>Abrir Importador IA</span>
-                              </button>
-                            </div>
                           </div>
                         )}
                       </div>
@@ -27503,15 +27338,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         />
                       </div>
                       <div className="flex items-center gap-2.5 ml-auto self-start">
-                        <button
-                          type="button"
-                          onClick={() => setIsImportarCaixaModalOpen(true)}
-                          className="flex items-center gap-2 border border-[#6A0DAD]/60 hover:border-[#6A0DAD] hover:bg-[#6A0DAD]/20 bg-[#6A0DAD]/10 text-purple-300 hover:text-white text-xs font-bold py-1.5 px-4 rounded-lg transition-all shadow-sm shadow-purple-950/30 cursor-pointer"
-                          title="Fazer upload de folha física de fechamento de caixa diário (PDF ou Foto) com extração por IA"
-                        >
-                          <Sparkles size={14} className="text-yellow-400" />
-                          <span>Importar Caixa via IA (PDF / Foto)</span>
-                        </button>
                         <button
                           type="button"
                           onClick={() => setModalRelatorioAberto(true)}
@@ -35156,24 +34982,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             }
             window.dispatchEvent(new Event('estoque_updated'));
             window.dispatchEvent(new Event('produtos_updated'));
-          }}
-        />
-
-        {/* Modal de Importação de Caixa e Vendas Retroativas via IA (Gemini 2.0 Flash) */}
-        <ImportarCaixaRetroativoModal
-          isOpen={isImportarCaixaModalOpen}
-          onClose={() => setIsImportarCaixaModalOpen(false)}
-          perfilUsuario={profile}
-          company={company}
-          filiais={filiais}
-          onSuccess={(qtdVendas, dataCaixa) => {
-            showToast(`Sucesso! ${qtdVendas} vendas retroativas importadas com a data ${dataCaixa}!`, 'success');
-            const targetEmpId = profile?.empresa_id || company?.id || activeEmpresaId;
-            if (targetEmpId && typeof fetchGerenteData === 'function') {
-              fetchGerenteData(targetEmpId, filtroMes);
-            }
-            window.dispatchEvent(new Event('vendas_updated'));
-            window.dispatchEvent(new Event('estoque_updated'));
           }}
         />
 
