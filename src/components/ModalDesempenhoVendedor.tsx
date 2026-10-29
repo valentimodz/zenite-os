@@ -518,7 +518,7 @@ export default function ModalDesempenhoVendedor({
       setMesAtivo(novoMes);
     }
     queryClient.invalidateQueries({
-      queryKey: ['ranking-colaboradores', mesAlvo]
+      queryKey: ['ranking-colaboradores-v3', mesAlvo]
     });
   }, [mesAtivo, queryClient]);
 
@@ -690,7 +690,9 @@ export default function ModalDesempenhoVendedor({
           superMetaBoleto: superMetaBoleto,
           metaAcessorios: objetivoAcessorios,
           superMetaAcessorios: superMetaAcessorios,
-          metaTotal: metaTotalCombinada
+          metaTotal: metaTotalCombinada,
+          targetVendedorId: vendedorId,
+          targetVendedorNome: vendedorNome
         });
 
         // Atualiza os estados da tela com a fórmula unificada
@@ -793,7 +795,9 @@ export default function ModalDesempenhoVendedor({
       superMetaBoleto: metaSuperBoleto,
       metaAcessorios,
       superMetaAcessorios: metaSuperAcessorios,
-      metaTotal
+      metaTotal,
+      targetVendedorId,
+      targetVendedorNome
     });
 
     const totalVendasGeral = desempenhoGeral.volumeTotal;

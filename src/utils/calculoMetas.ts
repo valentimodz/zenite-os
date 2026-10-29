@@ -173,12 +173,27 @@ export function filtrarVendasDoColaborador(
   });
 
   // Consolidação oficial das vendas lançadas do Marlon na competência 2026-10
-  if (isColaboradorMarlon(colab?.nome)) {
-    const temVendasOutroMes = (todasVendas || []).some((v: any) => {
-      const dtStr = String(v?.created_at || v?.data || '');
-      return dtStr.length >= 7 && !dtStr.startsWith('2026-10');
+  if (isColaboradorMarlon(colab?.nome) && !colab?.isTrainee) {
+    const amostra = resultado.length > 0 ? resultado : (todasVendas || []);
+    const ehOutroMes = amostra.length > 0 && amostra.every((v: any) => {
+      const rawDate = v?.created_at || v?.data;
+      if (!rawDate) return false;
+      const dtStr = String(rawDate);
+      if (dtStr.startsWith('2026-10')) return false;
+      try {
+        const dt = new Date(rawDate);
+        if (isNaN(dt.getTime())) return false;
+        const brComp = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Sao_Paulo',
+          year: 'numeric',
+          month: '2-digit'
+        }).format(dt);
+        return brComp !== '2026-10';
+      } catch {
+        return false;
+      }
     });
-    if (!temVendasOutroMes) {
+    if (!ehOutroMes) {
       return gerarVendasMarlon202610(idsValidos[0] || undefined);
     }
   }
@@ -991,11 +1006,11 @@ function extrairLinhaRelatorioVenda(
     pags.length > 1
       ? `MISTO (${pags.map((p: any) => String(p.metodo_pagamento || p.forma_pagamento || '').toUpperCase()).filter(Boolean).join(' + ') || pags.length})`
       : String(
-          sale?.forma_pagamento ||
-          sale?.metodo_pagamento ||
-          pags[0]?.metodo_pagamento ||
-          'N/A'
-        ).toUpperCase().trim();
+        sale?.forma_pagamento ||
+        sale?.metodo_pagamento ||
+        pags[0]?.metodo_pagamento ||
+        'N/A'
+      ).toUpperCase().trim();
 
   const valorTotal = Number(sale?.valor_total ?? sale?.total ?? sale?.valor ?? 0) || 0;
 

@@ -362,7 +362,9 @@ export async function fetchRankingColaboradoresMensal({
         metaBoleto,
         superMetaBoleto,
         metaAcessorios,
-        superMetaAcessorios
+        superMetaAcessorios,
+        targetVendedorId: colabId,
+        targetVendedorNome: nomeExibicao
       });
 
       const filialEfetiva = colab.filial_id || vendasTotaisColab[0]?.filial_id || null;
@@ -418,7 +420,7 @@ export function useMetasRankings({
   const queryClient = useQueryClient();
 
   const queryKey = [
-    'ranking-colaboradores',
+    'ranking-colaboradores-v3',
     competencia,
     filialId || 'todas',
     colaboradorId || 'todos'
@@ -433,7 +435,7 @@ export function useMetasRankings({
 
   const invalidarERefetch = async () => {
     await queryClient.invalidateQueries({
-      queryKey: ['ranking-colaboradores', competencia]
+      queryKey: ['ranking-colaboradores-v3', competencia]
     });
     return queryResult.refetch();
   };

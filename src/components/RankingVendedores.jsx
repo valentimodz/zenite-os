@@ -5,7 +5,7 @@ import ModalDesempenhoVendedor, { formatCurrency, calcularComissaoVendaIndividua
 import PeriodoSelector from './common/PeriodoSelector';
 import { useMetasRankings } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
-import { calcularDesempenhoGeral, isBoleto } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, filtrarVendasDoColaborador, isBoleto } from '../utils/calculoMetas';
 
 // Helper de cálculo dinâmico de comissão do vendedor titular por item / modalidade
 export function calcularComissaoVendedorItem(v, teveTrainee = false, opcoesMeta = {}) {
@@ -266,14 +266,23 @@ export default function RankingVendedores({
         : (isTrainee ? 7500 : (Number(regraFilial?.super_meta_acessorios) || 15000));
 
       // Centralização Única via calcularDesempenhoGeral
-      const vendasColab = Array.isArray(vr.vendas_colaborador) ? vr.vendas_colaborador : [];
+      const rawVendasColab = Array.isArray(vr.vendas_colaborador) ? vr.vendas_colaborador : [];
+      const vendasColab = rawVendasColab.length > 0
+        ? rawVendasColab
+        : filtrarVendasDoColaborador([], {
+          id: colabIdStr,
+          nome: vr.colaborador || colabDb?.nome,
+          isTrainee
+        });
       const calc = vendasColab.length > 0
         ? calcularDesempenhoGeral(vendasColab, 'COM_APOIO', {
           isTrainee,
           metaBoleto,
           superMetaBoleto,
           metaAcessorios,
-          superMetaAcessorios
+          superMetaAcessorios,
+          targetVendedorId: colabIdStr,
+          targetVendedorNome: vr.colaborador || colabDb?.nome
         })
         : null;
 

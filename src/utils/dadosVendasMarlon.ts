@@ -59,13 +59,14 @@ export const METAS_MARLON_2026_10 = {
   salario_base: 1499,
   vale_alimentacao: 150,
   vale_transporte: 240,
-  comissao_boletos_treinier: 659.43,
-  comissao_boletos_solo: 697.37,
-  comissao_android_avista: 220.00,
+  comissao_boletos_treinier: 1318.87,
+  comissao_boletos_solo: 2092.11,
+  comissao_android_avista: 440.00,
   comissao_acessorios: 15.48,
-  comissao_jbl_iphones: 45.00,
-  comissao_total_planilha: 1637.28,
-  remuneracao_total_planilha: 3526.28
+  comissao_jbl_iphones: 90.00,
+  comissao_total_planilha: 3956.46,
+  comissao_trainee_planilha: 659.43,
+  remuneracao_total_planilha: 5845.46
 };
 
 // 1. COLUNA ACESSÓRIOS (37 itens = R$ 1.550,95)
