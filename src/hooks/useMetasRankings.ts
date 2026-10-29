@@ -430,7 +430,7 @@ export function useMetasRankings({
 /**
  * Hook específico para vendedor individual ("Minhas Metas")
  */
-export function useMinhasMetasIndividual({
+export const useMinhasMetasIndividual = ({
   colaboradorId,
   competencia = getCompetenciaAtual(),
   enabled = true
@@ -438,7 +438,7 @@ export function useMinhasMetasIndividual({
   colaboradorId?: string;
   competencia?: string;
   enabled?: boolean;
-}) {
+}) => {
   const queryClient = useQueryClient();
 
   const queryKey = [
@@ -472,6 +472,6 @@ export function useMinhasMetasIndividual({
     refetch,
     invalidarERefetch
   };
-}
+};
 
 export default useMetasRankings;

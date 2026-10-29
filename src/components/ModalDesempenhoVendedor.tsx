@@ -20,7 +20,9 @@ import {
   ChevronUp,
   Users,
   Filter,
-  Gem
+  Gem,
+  Download,
+  Printer
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
@@ -33,6 +35,8 @@ import {
   calcularMetasColaborador,
   filtrarVendasDoColaborador,
   extrairValorBoletoVenda,
+  baixarRelatorioVendasCSV,
+  imprimirRelatorioVendasPDF,
   isPagamentoBoletoFinanciadora as isPagamentoBoletoFinanciadoraUtil,
   isAcessorio as isAcessorioUtil,
   isProdutoEspecial as isProdutoEspecialUtil,
@@ -502,9 +506,9 @@ export default function ModalDesempenhoVendedor({
 
   // Estados de Metas configuradas para a Filial (tabela 'regras_comissoes')
   const [objetivoBoleto, setObjetivoBoleto] = useState<number>(67500);
-  const [superMetaBoletoState, setSuperMetaBoleto] = useState<number>(87000);
+  const [superMetaBoleto, setSuperMetaBoleto] = useState<number>(87000);
   const [objetivoAcessorios, setObjetivoAcessorios] = useState<number>(10000);
-  const [superMetaAcessoriosState, setSuperMetaAcessorios] = useState<number>(15000);
+  const [superMetaAcessorios, setSuperMetaAcessorios] = useState<number>(15000);
   const [metaTotalCombinada, setMetaTotalCombinada] = useState<number>(77500);
 
   // Filtro seletivo de Metas: 'todas' vs 'solo' (apenas titular solo)
@@ -532,7 +536,7 @@ export default function ModalDesempenhoVendedor({
     const mesAtual = mesAtivo || mesCompetencia || '2026-10';
 
     try {
-      const { data: regra, error } = await supabase
+      const { data: regra, error: erroRegra } = await supabase
         .from('regras_comissoes')
         .select('*')
         .eq('filial_id', filialId)
@@ -541,21 +545,21 @@ export default function ModalDesempenhoVendedor({
         .limit(1)
         .maybeSingle();
 
-      if (error) {
-        console.warn('Erro ao consultar regras_comissoes da filial:', error);
+      if (erroRegra) {
+        console.warn('Erro ao consultar regras_comissoes da filial:', erroRegra);
       }
 
       if (regra) {
         // Alimenta os objetivos e super metas configurados para o VENDEDOR (nunca o total da loja):
         const metaBoletoVendedor = Number(regra.meta_vendedor_boleto || 67500);
         const metaAcessoriosVendedor = Number(regra.meta_vendedor_acessorios || 10000);
-        const superMetaBoleto = Number(regra.super_meta_boleto || 87000);
-        const superMetaAcessorios = Number(regra.super_meta_acessorios || 15000);
+        const superMetaBoletoVendedor = Number(regra.super_meta_boleto || 87000);
+        const superMetaAcessoriosVendedor = Number(regra.super_meta_acessorios || 15000);
 
         setObjetivoBoleto(metaBoletoVendedor);
-        setSuperMetaBoleto(superMetaBoleto);
+        setSuperMetaBoleto(superMetaBoletoVendedor);
         setObjetivoAcessorios(metaAcessoriosVendedor);
-        setSuperMetaAcessorios(superMetaAcessorios);
+        setSuperMetaAcessorios(superMetaAcessoriosVendedor);
         setMetaTotalCombinada(metaBoletoVendedor + metaAcessoriosVendedor);
       }
     } catch (err) {
@@ -637,9 +641,10 @@ export default function ModalDesempenhoVendedor({
         query = query.or(orClauses.join(','));
       }
 
-      let { data: vendas, error } = await query;
+      const { data: vendasRes, error: vendasError } = await query;
+      let vendas = vendasRes;
 
-      if (error) {
+      if (vendasError) {
         let fbQuery = supabase
           .from('vendas')
           .select('*')
@@ -688,9 +693,9 @@ export default function ModalDesempenhoVendedor({
         const resumoGeral = calcularDesempenhoGeral(vendasValidas, modoVis, {
           isTrainee: isOriginalTrainee,
           metaBoleto: objetivoBoleto,
-          superMetaBoleto: superMetaBoletoState,
+          superMetaBoleto: superMetaBoleto,
           metaAcessorios: objetivoAcessorios,
-          superMetaAcessorios: superMetaAcessoriosState,
+          superMetaAcessorios: superMetaAcessorios,
           metaTotal: metaTotalCombinada
         });
 
@@ -709,7 +714,7 @@ export default function ModalDesempenhoVendedor({
     } finally {
       setIsLoading(false);
     }
-  }, [targetVendedorId, targetVendedorNome, mesAtivo, mesCompetencia, colaboradorFilialId, filtroTipoVendas, objetivoBoleto, superMetaBoletoState, objetivoAcessorios, superMetaAcessoriosState, metaTotalCombinada, colaborador]);
+  }, [targetVendedorId, targetVendedorNome, mesAtivo, mesCompetencia]);
 
   const carregarDadosMetas = carregarDadosVendedor;
 
@@ -755,17 +760,17 @@ export default function ModalDesempenhoVendedor({
 
     const metaTotal = metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios);
 
-    const superMetaBoleto = Number(metaBanco?.super_meta_boleto) > 0
+    const metaSuperBoleto = Number(metaBanco?.super_meta_boleto) > 0
       ? Number(metaBanco?.super_meta_boleto)
       : (isTrainee
         ? 45000
-        : (superMetaBoletoState > 0 ? superMetaBoletoState : 87000));
+        : (superMetaBoleto > 0 ? superMetaBoleto : 87000));
 
-    const superMetaAcessorios = Number(metaBanco?.super_meta_acessorios) > 0
+    const metaSuperAcessorios = Number(metaBanco?.super_meta_acessorios) > 0
       ? Number(metaBanco?.super_meta_acessorios)
       : (isTrainee
         ? 7500
-        : (superMetaAcessoriosState > 0 ? superMetaAcessoriosState : 15000));
+        : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000));
 
     // Fallback em cascata para que 'sales' nunca fique vazio se houver vendas disponíveis
     const vendasParaCalculo = (Array.isArray(vendasColaborador) && vendasColaborador.length > 0)
@@ -791,9 +796,9 @@ export default function ModalDesempenhoVendedor({
     const desempenhoGeral = calcularDesempenhoGeral(sales, modoVisualizacao, {
       isTrainee,
       metaBoleto,
-      superMetaBoleto,
+      superMetaBoleto: metaSuperBoleto,
       metaAcessorios,
-      superMetaAcessorios,
+      superMetaAcessorios: metaSuperAcessorios,
       metaTotal
     });
 
@@ -900,14 +905,14 @@ export default function ModalDesempenhoVendedor({
       // Boletos
       totalBoletos,
       metaBoleto,
-      superMetaBoleto,
+      superMetaBoleto: metaSuperBoleto,
       progressoBoleto,
       badgeBoleto,
       // Acessórios
       totalAcessorios,
       realizadoAcessorios: totalAcessorios,
       metaAcessorios,
-      superMetaAcessorios,
+      superMetaAcessorios: metaSuperAcessorios,
       progressoAcessorios,
       badgeAcessorios,
       faturadoTitular: faturadoTitularSolo,
@@ -939,9 +944,9 @@ export default function ModalDesempenhoVendedor({
     mesAtivo,
     mesCompetencia,
     objetivoBoleto,
-    superMetaBoletoState,
+    superMetaBoleto,
     objetivoAcessorios,
-    superMetaAcessoriosState,
+    superMetaAcessorios,
     metaTotalCombinada,
     filtroTipoVendas
   ]);
@@ -1402,10 +1407,53 @@ export default function ModalDesempenhoVendedor({
 
           {/* TABELA COM O HISTÓRICO RECENTE DE VENDAS */}
           <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
-            <h4 className="text-sm font-bold text-gray-300 mb-4 uppercase tracking-wider flex items-center gap-2">
-              <Receipt size={16} className="text-[#6A0DAD]" />
-              Histórico de Vendas do Colaborador ({dashboardInfo.historico.length})
-            </h4>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+                <Receipt size={16} className="text-[#6A0DAD]" />
+                Histórico de Vendas do Colaborador ({dashboardInfo.historico.length})
+              </h4>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    baixarRelatorioVendasCSV(dashboardInfo.historico, {
+                      colaboradorNome: colaborador.nome,
+                      competencia: dashboardInfo.mesReferencia,
+                      isTrainee: dashboardInfo.isTrainee,
+                      calcularComissaoVendaFn: (s) =>
+                        dashboardInfo.isTrainee ? calcularComissaoItem(s, true) : obterComissaoVenda(s)
+                    })
+                  }
+                  disabled={dashboardInfo.historico.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-700/50 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Baixar todas as vendas em planilha Excel / CSV"
+                >
+                  <Download size={14} />
+                  Baixar Relatório (Excel / CSV)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    imprimirRelatorioVendasPDF(dashboardInfo.historico, {
+                      colaboradorNome: colaborador.nome,
+                      competencia: dashboardInfo.mesReferencia,
+                      filialNome: filialDoColaborador?.nome || colaborador.filial_nome || 'Filial Geral',
+                      isTrainee: dashboardInfo.isTrainee,
+                      calcularComissaoVendaFn: (s) =>
+                        dashboardInfo.isTrainee ? calcularComissaoItem(s, true) : obterComissaoVenda(s)
+                    })
+                  }
+                  disabled={dashboardInfo.historico.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 text-purple-300 border border-[#6A0DAD]/50 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Gerar PDF ou imprimir relatório completo com todas as vendas"
+                >
+                  <Printer size={14} />
+                  Relatório em PDF / Imprimir
+                </button>
+              </div>
+            </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">

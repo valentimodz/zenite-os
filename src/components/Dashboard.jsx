@@ -45,7 +45,7 @@ import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obte
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
-import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, filtrarVendasDoColaborador, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, filtrarVendasDoColaborador, baixarRelatorioVendasCSV, imprimirRelatorioVendasPDF, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
 
 const extrairNumero = (valor) => {
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
@@ -2579,7 +2579,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               .order('created_at', { ascending: false })
               .limit(1)
               .maybeSingle();
-            
+
             if (nfeExistente) {
               nfeJaEmitida = nfeExistente;
             }
@@ -6081,7 +6081,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const { error: sbErr } = await supabase
           .from('configuracoes_fiscais')
           .upsert(supabasePayload, { onConflict: 'tenant_id' });
-        
+
         if (sbErr) throw sbErr;
       }
 
@@ -18609,11 +18609,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           setTransfDestinoId('');
                         }
                       }}
-                      className={`w-full rounded px-3 py-2 text-sm outline-none font-semibold transition-all ${
-                        isDonoOuAdmin
+                      className={`w-full rounded px-3 py-2 text-sm outline-none font-semibold transition-all ${isDonoOuAdmin
                           ? 'bg-black border border-[#222222] focus:border-[#6A0DAD] text-white cursor-pointer'
                           : 'bg-[#111111] border border-[#222222] text-gray-300 cursor-not-allowed opacity-80'
-                      }`}
+                        }`}
                       disabled={!isDonoOuAdmin || transfItens.length > 0}
                     >
                       <option value="">Selecione a Origem...</option>
@@ -26615,11 +26614,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border ${
-                              fiscalAmbiente === '1'
+                            <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border ${fiscalAmbiente === '1'
                                 ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/40 shadow-sm shadow-emerald-950/50'
                                 : 'bg-purple-950/40 text-purple-300 border-purple-800/40'
-                            }`}>
+                              }`}>
                               {fiscalAmbiente === '1' ? '● SEFAZ: PRODUÇÃO OFICIAL' : '○ SEFAZ: HOMOLOGAÇÃO (TESTES)'}
                             </span>
                             <span className="text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider bg-neutral-900 text-gray-400 border border-neutral-800">
@@ -26751,11 +26749,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 <select
                                   value={fiscalAmbiente}
                                   onChange={(e) => setFiscalAmbiente(e.target.value)}
-                                  className={`w-full bg-black border rounded-lg px-4 py-2.5 text-sm outline-none transition-all cursor-pointer font-bold ${
-                                    fiscalAmbiente === '1'
+                                  className={`w-full bg-black border rounded-lg px-4 py-2.5 text-sm outline-none transition-all cursor-pointer font-bold ${fiscalAmbiente === '1'
                                       ? 'border-emerald-500 text-emerald-400 focus:border-emerald-400'
                                       : 'border-[#6A0DAD]/60 text-purple-300 focus:border-[#6A0DAD]'
-                                  }`}
+                                    }`}
                                 >
                                   <option value="2">Homologação (Ambiente de Testes / Sem Valor Fiscal)</option>
                                   <option value="1">PRODUÇÃO (Com Validade Fiscal Jurídica na SEFAZ)</option>
@@ -29180,7 +29177,62 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                         {/* Minhas Vendas Recentes */}
                         <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl p-6">
-                          <h4 className="text-sm font-bold text-gray-300 mb-4 uppercase tracking-wider">Histórico Recente de Vendas</h4>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                            <h4 className="text-sm font-bold text-gray-300 uppercase tracking-wider">
+                              Histórico Recente de Vendas ({metasInfo?.historico?.length || 0})
+                            </h4>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  baixarRelatorioVendasCSV(metasInfo?.historico || [], {
+                                    colaboradorNome: profile?.nome || session?.user?.email || 'Colaborador',
+                                    competencia: metasInfo?.mesReferencia || filtroMes,
+                                    isTrainee: Boolean(metasInfo?.isTrainee),
+                                    calcularComissaoVendaFn: (s) => {
+                                      const itens = Array.isArray(s?.itens_venda) ? s.itens_venda : [];
+                                      const salva = s?.comissao_vendedor ?? s?.comissao ?? s?.valor_comissao ?? itens?.[0]?.comissao;
+                                      return salva !== undefined && salva !== null && salva !== ''
+                                        ? Number(salva)
+                                        : Number(calcularComissaoItem(s));
+                                    }
+                                  })
+                                }
+                                disabled={!metasInfo?.historico || metasInfo.historico.length === 0}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-950/50 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-700/50 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Baixar todas as vendas em planilha Excel / CSV"
+                              >
+                                <Download size={14} />
+                                Baixar Relatório (Excel / CSV)
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  imprimirRelatorioVendasPDF(metasInfo?.historico || [], {
+                                    colaboradorNome: profile?.nome || session?.user?.email || 'Colaborador',
+                                    competencia: metasInfo?.mesReferencia || filtroMes,
+                                    filialNome: filiais.find(f => String(f.id) === String(profile?.filial_id))?.nome || 'Filial Geral',
+                                    isTrainee: Boolean(metasInfo?.isTrainee),
+                                    calcularComissaoVendaFn: (s) => {
+                                      const itens = Array.isArray(s?.itens_venda) ? s.itens_venda : [];
+                                      const salva = s?.comissao_vendedor ?? s?.comissao ?? s?.valor_comissao ?? itens?.[0]?.comissao;
+                                      return salva !== undefined && salva !== null && salva !== ''
+                                        ? Number(salva)
+                                        : Number(calcularComissaoItem(s));
+                                    }
+                                  })
+                                }
+                                disabled={!metasInfo?.historico || metasInfo.historico.length === 0}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#6A0DAD]/20 hover:bg-[#6A0DAD]/40 text-purple-300 border border-[#6A0DAD]/50 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Gerar PDF ou imprimir relatório completo com todas as vendas"
+                              >
+                                <Printer size={14} />
+                                Relatório em PDF / Imprimir
+                              </button>
+                            </div>
+                          </div>
 
                           <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
@@ -31972,7 +32024,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         {modalNfePdf && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fadeIn font-sans">
             <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-2xl w-full p-6 sm:p-7 space-y-6 shadow-2xl relative animate-scaleIn">
-              
+
               {/* Botão de Fechar */}
               <button
                 type="button"

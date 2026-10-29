@@ -323,12 +323,12 @@ export default function RankingVendedores({
       const vendasColab = Array.isArray(vr.vendas_colaborador) ? vr.vendas_colaborador : [];
       const calc = vendasColab.length > 0
         ? calcularDesempenhoGeral(vendasColab, 'COM_APOIO', {
-            isTrainee,
-            metaBoleto,
-            superMetaBoleto,
-            metaAcessorios,
-            superMetaAcessorios
-          })
+          isTrainee,
+          metaBoleto,
+          superMetaBoleto,
+          metaAcessorios,
+          superMetaAcessorios
+        })
         : null;
 
       const totalTransacoes = calc ? calc.transacoes : Number(vr.total_transacoes || 0);
@@ -461,97 +461,95 @@ export default function RankingVendedores({
               const tooltipDetalhes = temValoresMistos
                 ? `Apoio Trainee: ${formatCurrency(colab.faturadoTrainee)} | Titular: ${formatCurrency(colab.faturadoTitular)}`
                 : (colab.faturadoTrainee > 0
-                    ? `Apoio Trainee: ${formatCurrency(colab.faturadoTrainee)}`
-                    : `Titular: ${formatCurrency(colab.faturadoTitular)}`);
+                  ? `Apoio Trainee: ${formatCurrency(colab.faturadoTrainee)}`
+                  : `Titular: ${formatCurrency(colab.faturadoTitular)}`);
 
               const pctEfetivoTitular = (colab.taxaEfetivaTitular * 100).toFixed(1).replace('.', ',');
               const tooltipComissao = temValoresMistos
                 ? `Titular (${pctEfetivoTitular}%): ${formatCurrency(colab.comissaoTitular)} | Apoio Trainee (1,0%): ${formatCurrency(colab.comissaoTrainee)}`
                 : (colab.faturadoTrainee > 0
-                    ? `Apoio Trainee (1,0%): ${formatCurrency(colab.comissaoTrainee)}`
-                    : `Comissão Efetiva (${pctEfetivoTitular}%): ${formatCurrency(colab.comissaoTitular)}`);
+                  ? `Apoio Trainee (1,0%): ${formatCurrency(colab.comissaoTrainee)}`
+                  : `Comissão Efetiva (${pctEfetivoTitular}%): ${formatCurrency(colab.comissaoTitular)}`);
 
               return (
-              <tr 
-                key={colab.id} 
-                onClick={() => !colab.isSemVendedor && setVendedorSelecionadoModal(colab)}
-                className={`transition-all ${
-                  colab.isSemVendedor 
-                    ? 'hover:bg-white/5' 
-                    : 'cursor-pointer hover:bg-purple-950/20 hover:border-[#6A0DAD]/30 group'
-                }`}
-              >
-                <td className="py-3 px-4 font-mono font-bold text-gray-400 align-middle">
-                  {idx === 0 ? '🥇 1º' : idx === 1 ? '🥈 2º' : idx === 2 ? '🥉 3º' : `${idx + 1}º`}
-                </td>
-                <td className="py-3 px-4 font-bold text-white uppercase group-hover:text-purple-300 transition-colors align-middle">
-                  {colab.nome}
-                </td>
-                <td className="py-3 px-4 align-middle">
-                  <span className="text-zinc-200 font-semibold text-xs uppercase tracking-wide">
-                    {nomeFilialExibicao}
-                  </span>
-                </td>
-                <td className="py-3 px-4 align-middle">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
-                    colab.isSemVendedor
-                      ? 'bg-gray-900 text-gray-400 border border-gray-700'
-                      : colab.isTraineeView
-                      ? 'bg-purple-950/50 text-purple-300 border border-purple-800/50'
-                      : 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/30'
-                  }`}>
-                    {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView ? 'Trainee' : 'Profissional')}
-                  </span>
-                </td>
-                <td className="py-3 px-4 text-center font-mono font-bold text-gray-300 align-middle">{colab.transacoes}</td>
-                <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipDetalhes}>
-                  <div className="inline-flex items-center justify-end gap-1.5 font-bold text-white">
-                    <span>{formatCurrency(colab.volume)}</span>
-                    {temValoresMistos && (
-                      <span className="text-purple-400/80 hover:text-purple-300 cursor-help" title={tooltipDetalhes}>
-                        <Info size={12} />
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td 
-                  className="py-3 px-4 text-right font-mono text-cyan-400 font-medium align-middle"
-                  title={colab.totalBoletosBruto && colab.totalBoletosBruto > colab.totalBoletos
-                    ? `Realizado na Meta: ${formatCurrency(colab.totalBoletos)} | Total Bruto (incluindo Especiais/Apple): ${formatCurrency(colab.totalBoletosBruto)}`
-                    : `Realizado na Meta de Boletos: ${formatCurrency(colab.totalBoletos || 0)}`
-                  }
+                <tr
+                  key={colab.id}
+                  onClick={() => !colab.isSemVendedor && setVendedorSelecionadoModal(colab)}
+                  className={`transition-all ${colab.isSemVendedor
+                      ? 'hover:bg-white/5'
+                      : 'cursor-pointer hover:bg-purple-950/20 hover:border-[#6A0DAD]/30 group'
+                    }`}
                 >
-                  {formatCurrency(colab.totalBoletos || 0)}
-                </td>
-                <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipComissao}>
-                  <div className="inline-flex items-center justify-end gap-1.5 font-bold text-emerald-400">
-                    <span>{formatCurrency(colab.comissaoAcumulada)}</span>
-                    {temValoresMistos && (
-                      <span className="text-emerald-500/60 hover:text-emerald-400 cursor-help" title={tooltipComissao}>
-                        <Info size={12} />
-                      </span>
+                  <td className="py-3 px-4 font-mono font-bold text-gray-400 align-middle">
+                    {idx === 0 ? '🥇 1º' : idx === 1 ? '🥈 2º' : idx === 2 ? '🥉 3º' : `${idx + 1}º`}
+                  </td>
+                  <td className="py-3 px-4 font-bold text-white uppercase group-hover:text-purple-300 transition-colors align-middle">
+                    {colab.nome}
+                  </td>
+                  <td className="py-3 px-4 align-middle">
+                    <span className="text-zinc-200 font-semibold text-xs uppercase tracking-wide">
+                      {nomeFilialExibicao}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 align-middle">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${colab.isSemVendedor
+                        ? 'bg-gray-900 text-gray-400 border border-gray-700'
+                        : colab.isTraineeView
+                          ? 'bg-purple-950/50 text-purple-300 border border-purple-800/50'
+                          : 'bg-emerald-950/30 text-emerald-400 border border-emerald-800/30'
+                      }`}>
+                      {colab.isSemVendedor ? 'Balcão' : (colab.isTraineeView ? 'Trainee' : 'Profissional')}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-center font-mono font-bold text-gray-300 align-middle">{colab.transacoes}</td>
+                  <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipDetalhes}>
+                    <div className="inline-flex items-center justify-end gap-1.5 font-bold text-white">
+                      <span>{formatCurrency(colab.volume)}</span>
+                      {temValoresMistos && (
+                        <span className="text-purple-400/80 hover:text-purple-300 cursor-help" title={tooltipDetalhes}>
+                          <Info size={12} />
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td
+                    className="py-3 px-4 text-right font-mono text-cyan-400 font-medium align-middle"
+                    title={colab.totalBoletosBruto && colab.totalBoletosBruto > colab.totalBoletos
+                      ? `Realizado na Meta: ${formatCurrency(colab.totalBoletos)} | Total Bruto (incluindo Especiais/Apple): ${formatCurrency(colab.totalBoletosBruto)}`
+                      : `Realizado na Meta de Boletos: ${formatCurrency(colab.totalBoletos || 0)}`
+                    }
+                  >
+                    {formatCurrency(colab.totalBoletos || 0)}
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipComissao}>
+                    <div className="inline-flex items-center justify-end gap-1.5 font-bold text-emerald-400">
+                      <span>{formatCurrency(colab.comissaoAcumulada)}</span>
+                      {temValoresMistos && (
+                        <span className="text-emerald-500/60 hover:text-emerald-400 cursor-help" title={tooltipComissao}>
+                          <Info size={12} />
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 text-center align-middle">
+                    {!colab.isSemVendedor && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setVendedorSelecionadoModal(colab);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#6A0DAD]/15 hover:bg-[#6A0DAD]/30 text-purple-300 hover:text-white border border-[#6A0DAD]/30 text-[11px] font-bold transition-all shadow-sm cursor-pointer"
+                        title="Ver Dashboard e Metas do Colaborador"
+                      >
+                        <Eye size={12} />
+                        <span>Ver Metas</span>
+                      </button>
                     )}
-                  </div>
-                </td>
-                <td className="py-3 px-4 text-center align-middle">
-                  {!colab.isSemVendedor && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setVendedorSelecionadoModal(colab);
-                      }}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#6A0DAD]/15 hover:bg-[#6A0DAD]/30 text-purple-300 hover:text-white border border-[#6A0DAD]/30 text-[11px] font-bold transition-all shadow-sm cursor-pointer"
-                      title="Ver Dashboard e Metas do Colaborador"
-                    >
-                      <Eye size={12} />
-                      <span>Ver Metas</span>
-                    </button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+                  </td>
+                </tr>
+              );
+            })}
 
             {rankingData.length === 0 && (
               <tr>

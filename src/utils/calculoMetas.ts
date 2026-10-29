@@ -775,3 +775,352 @@ export function calcularMetasColaborador(
     faturadoComApoioTrainee: geral.faturadoComApoioTrainee
   };
 }
+
+/**
+ * Helper interno para extrair dados padronizados de cada linha de venda para relatórios
+ */
+function extrairLinhaRelatorioVenda(
+  sale: any,
+  isTrainee = false,
+  calcularComissaoVendaFn?: (s: any) => number
+) {
+  const itens = Array.isArray(sale?.itens_venda) ? sale.itens_venda : [];
+  const nomeBase =
+    sale?.produto_nome ||
+    sale?.descricao ||
+    (itens.length > 0 ? itens[0]?.produto_nome : null) ||
+    sale?.produtos_descricao ||
+    sale?.itens_resumo ||
+    'Produto Geral';
+  const produtoNome =
+    itens.length > 1
+      ? `${nomeBase} (+${itens.length - 1} ${itens.length - 1 === 1 ? 'item' : 'itens'})`
+      : String(nomeBase);
+
+  const quantidade =
+    itens.length > 0
+      ? itens.reduce((acc: number, cur: any) => acc + (Number(cur?.quantidade) || 1), 0)
+      : Number(sale?.quantidade) || 1;
+
+  const categoria =
+    itens.length > 0 && itens[0]?.categoria
+      ? String(itens[0].categoria)
+      : String(sale?.categoria || sale?.produtos?.categoria || 'Geral');
+
+  const pags = Array.isArray(sale?.vendas_pagamentos) ? sale.vendas_pagamentos : [];
+  const pagamento =
+    pags.length > 1
+      ? `MISTO (${pags.map((p: any) => String(p.metodo_pagamento || p.forma_pagamento || '').toUpperCase()).filter(Boolean).join(' + ') || pags.length})`
+      : String(
+          sale?.forma_pagamento ||
+          sale?.metodo_pagamento ||
+          pags[0]?.metodo_pagamento ||
+          'N/A'
+        ).toUpperCase().trim();
+
+  const valorTotal = Number(sale?.valor_total ?? sale?.total ?? sale?.valor ?? 0) || 0;
+
+  let comissao = 0;
+  if (calcularComissaoVendaFn) {
+    comissao = Number(calcularComissaoVendaFn(sale)) || 0;
+  } else {
+    const salva = isTrainee
+      ? sale?.comissao_trainee
+      : (sale?.comissao_vendedor ?? sale?.comissao ?? sale?.valor_comissao ?? itens?.[0]?.comissao);
+    if (salva !== undefined && salva !== null && salva !== '' && !isNaN(Number(salva)) && Number(salva) > 0) {
+      comissao = Number(salva);
+    } else if (isTrainee) {
+      comissao = Number((valorTotal * 0.01).toFixed(2));
+    } else if (isAcessorio(sale)) {
+      comissao = Number((valorTotal * 0.025).toFixed(2));
+    } else if (isProdutoEspecial(sale)) {
+      comissao = 15;
+    } else if (pagamento.includes('BOLETO') || isPagamentoBoletoFinanciadora(sale)) {
+      comissao = Number((valorTotal * 0.03).toFixed(2));
+    } else {
+      comissao = Number((valorTotal * 0.02).toFixed(2));
+    }
+  }
+
+  const rawDate = sale?.created_at || sale?.data;
+  const dt = rawDate ? new Date(rawDate) : new Date();
+  const dataFormatada = !isNaN(dt.getTime()) ? dt.toLocaleDateString('pt-BR') : '-';
+  const horaFormatada = !isNaN(dt.getTime())
+    ? dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : '-';
+
+  const imei = sale?.imei ? String(sale.imei).trim() : '';
+  const traineeNome = sale?.trainee_nome && String(sale.trainee_nome).trim() !== '-'
+    ? String(sale.trainee_nome).trim()
+    : (temApoioTrainee(sale) ? 'Sim' : 'Não');
+
+  return {
+    dataFormatada,
+    horaFormatada,
+    produtoNome,
+    imei,
+    categoria,
+    quantidade,
+    valorTotal,
+    pagamento,
+    traineeNome,
+    comissao
+  };
+}
+
+/**
+ * Baixa todas as vendas em formato CSV (compatível com Excel PT-BR com BOM UTF-8 e separador ';')
+ */
+export function baixarRelatorioVendasCSV(
+  vendas: any[],
+  opcoes: {
+    colaboradorNome?: string;
+    competencia?: string;
+    isTrainee?: boolean;
+    calcularComissaoVendaFn?: (sale: any) => number;
+  } = {}
+) {
+  const lista = Array.isArray(vendas) ? vendas : [];
+  const {
+    colaboradorNome = 'Colaborador',
+    competencia = new Date().toISOString().slice(0, 7),
+    isTrainee = false,
+    calcularComissaoVendaFn
+  } = opcoes;
+
+  const escapeCsv = (val: string | number) => {
+    const s = String(val ?? '').replace(/"/g, '""');
+    return `"${s}"`;
+  };
+
+  const formatNumBr = (n: number) =>
+    Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const cabecalho = [
+    'Data',
+    'Hora',
+    'Colaborador',
+    'Produto',
+    'IMEI',
+    'Categoria',
+    'Quantidade',
+    'Total Bruto (R$)',
+    'Forma de Pagamento',
+    'Apoio Trainee',
+    'Sua Comissao (R$)'
+  ].join(';');
+
+  let somaQtd = 0;
+  let somaValor = 0;
+  let somaComissao = 0;
+
+  const linhas = lista.map((sale) => {
+    const info = extrairLinhaRelatorioVenda(sale, isTrainee, calcularComissaoVendaFn);
+    somaQtd += info.quantidade;
+    somaValor += info.valorTotal;
+    somaComissao += info.comissao;
+
+    return [
+      escapeCsv(info.dataFormatada),
+      escapeCsv(info.horaFormatada),
+      escapeCsv(sale?.vendedor_nome || colaboradorNome),
+      escapeCsv(info.produtoNome),
+      escapeCsv(info.imei || '-'),
+      escapeCsv(info.categoria),
+      escapeCsv(info.quantidade),
+      escapeCsv(formatNumBr(info.valorTotal)),
+      escapeCsv(info.pagamento),
+      escapeCsv(info.traineeNome),
+      escapeCsv(formatNumBr(info.comissao))
+    ].join(';');
+  });
+
+  const linhaTotal = [
+    escapeCsv('TOTAL GERAL'),
+    escapeCsv(''),
+    escapeCsv(colaboradorNome),
+    escapeCsv(`${lista.length} venda(s)`),
+    escapeCsv(''),
+    escapeCsv(''),
+    escapeCsv(somaQtd),
+    escapeCsv(formatNumBr(somaValor)),
+    escapeCsv(''),
+    escapeCsv(''),
+    escapeCsv(formatNumBr(somaComissao))
+  ].join(';');
+
+  const conteudoCsv = '\uFEFF' + [cabecalho, ...linhas, '', linhaTotal].join('\r\n');
+  const blob = new Blob([conteudoCsv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+
+  const nomeLimpo = String(colaboradorNome)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .toLowerCase();
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `relatorio_vendas_${nomeLimpo}_${competencia}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Abre janela formatada para impressão ou salvamento em PDF com todas as vendas do período
+ */
+export function imprimirRelatorioVendasPDF(
+  vendas: any[],
+  opcoes: {
+    colaboradorNome?: string;
+    competencia?: string;
+    filialNome?: string;
+    isTrainee?: boolean;
+    calcularComissaoVendaFn?: (sale: any) => number;
+  } = {}
+) {
+  const lista = Array.isArray(vendas) ? vendas : [];
+  const {
+    colaboradorNome = 'Colaborador',
+    competencia = new Date().toISOString().slice(0, 7),
+    filialNome = 'Todas as Filiais',
+    isTrainee = false,
+    calcularComissaoVendaFn
+  } = opcoes;
+
+  const formatMoeda = (n: number) =>
+    Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  let somaQtd = 0;
+  let somaValor = 0;
+  let somaComissao = 0;
+
+  const linhasHtml = lista
+    .map((sale, idx) => {
+      const info = extrairLinhaRelatorioVenda(sale, isTrainee, calcularComissaoVendaFn);
+      somaQtd += info.quantidade;
+      somaValor += info.valorTotal;
+      somaComissao += info.comissao;
+
+      return `
+        <tr>
+          <td style="text-align:center;color:#666;">${idx + 1}</td>
+          <td>${info.dataFormatada} <span style="color:#777;font-size:10px;">${info.horaFormatada}</span></td>
+          <td>
+            <strong>${info.produtoNome}</strong>
+            ${info.imei ? `<br/><span style="color:#666;font-size:10px;">IMEI: ${info.imei}</span>` : ''}
+          </td>
+          <td>${info.categoria}</td>
+          <td style="text-align:center;font-weight:bold;">${info.quantidade}</td>
+          <td style="text-align:center;">${info.pagamento}</td>
+          <td style="text-align:right;font-weight:bold;">${formatMoeda(info.valorTotal)}</td>
+          <td style="text-align:right;font-weight:bold;color:#047857;">${formatMoeda(info.comissao)}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Relatório de Vendas - ${colaboradorNome} (${competencia})</title>
+      <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { margin: 24px; color: #111827; background: #ffffff; font-size: 12px; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #6A0DAD; padding-bottom: 14px; margin-bottom: 18px; }
+        .title { font-size: 18px; font-weight: 800; color: #111827; margin: 0 0 4px 0; text-transform: uppercase; }
+        .subtitle { font-size: 12px; color: #4B5563; margin: 2px 0; }
+        .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+        .card { border: 1px solid #E5E7EB; border-radius: 8px; padding: 10px 12px; background: #F9FAFB; }
+        .card-label { font-size: 10px; text-transform: uppercase; color: #6B7280; font-weight: 700; display: block; }
+        .card-value { font-size: 15px; font-weight: 800; color: #111827; margin-top: 4px; display: block; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th { background: #111827; color: #ffffff; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; padding: 8px; text-align: left; }
+        td { padding: 7px 8px; border-bottom: 1px solid #E5E7EB; vertical-align: middle; }
+        tr:nth-child(even) td { background: #F9FAFB; }
+        tfoot td { background: #F3F4F6 !important; font-weight: 800; border-top: 2px solid #111827; font-size: 12px; padding: 10px 8px; }
+        @media print {
+          body { margin: 10px; }
+          .no-print { display: none !important; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div>
+          <h1 class="title">Relatório Completo de Vendas</h1>
+          <p class="subtitle"><strong>Colaborador:</strong> ${colaboradorNome} &nbsp;|&nbsp; <strong>Filial:</strong> ${filialNome}</p>
+          <p class="subtitle"><strong>Competência:</strong> ${competencia}</p>
+        </div>
+        <div style="text-align:right;">
+          <p class="subtitle"><strong>Gerado em:</strong> ${new Date().toLocaleString('pt-BR')}</p>
+          <p class="subtitle"><strong>Total de Registros:</strong> ${lista.length} venda(s)</p>
+        </div>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <span class="card-label">Total Bruto Faturado</span>
+          <span class="card-value">${formatMoeda(somaValor)}</span>
+        </div>
+        <div class="card">
+          <span class="card-label">Vendas Realizadas</span>
+          <span class="card-value">${lista.length} (${somaQtd} itens)</span>
+        </div>
+        <div class="card">
+          <span class="card-label">Ticket Médio</span>
+          <span class="card-value">${formatMoeda(lista.length > 0 ? somaValor / lista.length : 0)}</span>
+        </div>
+        <div class="card">
+          <span class="card-label">Total de Comissões</span>
+          <span class="card-value" style="color:#047857;">${formatMoeda(somaComissao)}</span>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px;text-align:center;">#</th>
+            <th style="width:110px;">Data</th>
+            <th>Produto</th>
+            <th style="width:95px;">Categoria</th>
+            <th style="width:55px;text-align:center;">Qtd</th>
+            <th style="width:100px;text-align:center;">Pagamento</th>
+            <th style="width:110px;text-align:right;">Total Bruto</th>
+            <th style="width:110px;text-align:right;">Sua Comissão</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${linhasHtml || '<tr><td colspan="8" style="text-align:center;padding:20px;color:#6B7280;">Nenhuma venda registrada neste período.</td></tr>'}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="4">TOTAL GERAL (${lista.length} vendas)</td>
+            <td style="text-align:center;">${somaQtd}</td>
+            <td></td>
+            <td style="text-align:right;">${formatMoeda(somaValor)}</td>
+            <td style="text-align:right;color:#047857;">${formatMoeda(somaComissao)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <script>
+        window.onload = function() {
+          setTimeout(function() { window.print(); }, 250);
+        };
+      </script>
+    </body>
+    </html>
+  `;
+
+  const win = window.open('', '_blank', 'width=1024,height=768');
+  if (win) {
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  }
+}
