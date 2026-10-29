@@ -80,7 +80,27 @@ export const TERMOS_ESPECIAIS = [
 ];
 
 /**
+ * Extração segura e defensiva do valor da venda
+ */
+export const extrairValorVenda = (v: any): number => {
+  if (!v) return 0;
+  const val = Number(
+    v.valor_total ??
+    v.valorTotal ??
+    v.total ??
+    v.valor ??
+    v.valor_pago ??
+    v.valorPago ??
+    v.valor_boleto ??
+    v.valorBoleto ??
+    0
+  );
+  return isNaN(val) ? 0 : val;
+};
+
+/**
  * Identifica se a forma ou item de pagamento corresponde a Boleto ou Financiadora
+ * com suporte tanto a camelCase quanto a snake_case vindos do Supabase
  */
 export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
   if (!p) return false;
@@ -90,16 +110,20 @@ export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
   }
   const texto = [
     p.metodo_pagamento,
+    p.metodoPagamento,
     p.forma_pagamento,
+    p.formaPagamento,
     p.financeira,
     p.financeira_parceira,
+    p.financeiraParceira,
     p.bandeira,
     p.tipo,
     p.descricao,
     p.nome,
     p.metodo,
     p.forma,
-    p.metodo_detalhe
+    p.metodo_detalhe,
+    p.metodoDetalhe
   ].filter(Boolean).join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
   if (!texto) return false;
@@ -107,6 +131,92 @@ export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
     const termoNorm = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     return texto.includes(termoNorm);
   });
+};
+
+/**
+ * Verificação segura se a forma de pagamento é Boleto/Financiadora
+ */
+export const isBoleto = (v: any): boolean => {
+  if (!v) return false;
+  const forma = String(
+    v.forma_pagamento ||
+    v.formaPagamento ||
+    v.metodo_pagamento ||
+    v.metodoPagamento ||
+    v.financeira ||
+    v.financeira_parceira ||
+    v.financeiraParceira ||
+    ''
+  ).toUpperCase();
+
+  const isFormaDireta = forma.includes('BOLETO') || forma.includes('CREDIARIO') || forma.includes('PAYJOY') || forma.includes('WATU') || forma.includes('UME') || forma.includes('AIVA');
+  if (isFormaDireta) return true;
+
+  return isPagamentoBoletoFinanciadora(v);
+};
+
+/**
+ * Extrai o valor do pagamento em Boleto / Financiadora de uma venda específica,
+ * considerando vendas_pagamentos, pagamentos JSON ou colunas diretas com suporte
+ * tolerante a camelCase e snake_case.
+ */
+export const extrairValorBoletoVenda = (v: any): number => {
+  if (!v) return 0;
+  let valorBoletoVenda = 0;
+
+  // A) Verifica valor explícito em valor_boleto / valorBoleto
+  const valBoletoExplicit = Number(v.valor_boleto ?? v.valorBoleto ?? 0);
+  if (!isNaN(valBoletoExplicit) && valBoletoExplicit > 0) {
+    valorBoletoVenda += valBoletoExplicit;
+  }
+
+  // B) Extrai pagamentos de vendas_pagamentos / vendasPagamentos
+  const listaVendasPags = Array.isArray(v.vendas_pagamentos)
+    ? v.vendas_pagamentos
+    : (Array.isArray(v.vendasPagamentos) ? v.vendasPagamentos : []);
+
+  if (listaVendasPags.length > 0) {
+    listaVendasPags.forEach((p: any) => {
+      if (isPagamentoBoletoFinanciadora(p)) {
+        const pVal = Number(p.valor_pago ?? p.valorPago ?? p.valor ?? p.valor_total ?? p.valorTotal ?? 0);
+        if (!isNaN(pVal) && pVal > 0) {
+          valorBoletoVenda += pVal;
+        }
+      }
+    });
+  }
+
+  // C) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string ou array)
+  let listaPags: any[] = [];
+  const rawPags = v.pagamentos ?? v.pagamento;
+  if (rawPags) {
+    if (Array.isArray(rawPags)) {
+      listaPags = rawPags;
+    } else if (typeof rawPags === 'string') {
+      try {
+        const parsed = JSON.parse(rawPags);
+        if (Array.isArray(parsed)) listaPags = parsed;
+      } catch (e) { }
+    }
+  }
+  if (listaPags.length > 0) {
+    listaPags.forEach((p: any) => {
+      if (isPagamentoBoletoFinanciadora(p)) {
+        const pVal = Number(p.valor_pago ?? p.valorPago ?? p.valor ?? p.valor_total ?? p.valorTotal ?? 0);
+        if (!isNaN(pVal) && pVal > 0) {
+          valorBoletoVenda += pVal;
+        }
+      }
+    });
+  }
+
+  // D) Se não encontrou parcelas específicas, mas a venda inteira foi marcada como Boleto/Financiadora
+  // Utiliza a extração defensiva com fallback para valor_total, total ou valor
+  if (valorBoletoVenda === 0 && (isBoleto(v) || isPagamentoBoletoFinanciadora(v))) {
+    valorBoletoVenda = extrairValorVenda(v);
+  }
+
+  return valorBoletoVenda;
 };
 
 /**
@@ -175,55 +285,6 @@ export const temApoioTrainee = (s: VendaCalculo | any): boolean => {
   const mpUpper = String(s.metodo_pagamento || s.forma_pagamento || '').toUpperCase();
   if (obsUpper.includes('TRAINEE') || catUpper.includes('TRAINEE') || mpUpper.includes('TRAINEE')) return true;
   return false;
-};
-
-/**
- * Extrai o valor do pagamento em Boleto / Financiadora de uma venda específica,
- * considerando vendas_pagamentos, pagamentos JSON ou colunas diretas.
- */
-export const extrairValorBoletoVenda = (v: any): number => {
-  let valorBoletoVenda = 0;
-
-  // A) Verifica valor explícito em v.valor_boleto
-  if (v.valor_boleto && !isNaN(Number(v.valor_boleto)) && Number(v.valor_boleto) > 0) {
-    valorBoletoVenda += Number(v.valor_boleto);
-  }
-
-  // B) Extrai pagamentos de vendas_pagamentos
-  if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-    v.vendas_pagamentos.forEach((p: any) => {
-      if (isPagamentoBoletoFinanciadora(p)) {
-        valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
-      }
-    });
-  }
-
-  // C) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string ou array)
-  let listaPags: any[] = [];
-  if (v.pagamentos) {
-    if (Array.isArray(v.pagamentos)) {
-      listaPags = v.pagamentos;
-    } else if (typeof v.pagamentos === 'string') {
-      try {
-        const parsed = JSON.parse(v.pagamentos);
-        if (Array.isArray(parsed)) listaPags = parsed;
-      } catch (e) { }
-    }
-  }
-  if (listaPags.length > 0) {
-    listaPags.forEach((p: any) => {
-      if (isPagamentoBoletoFinanciadora(p)) {
-        valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
-      }
-    });
-  }
-
-  // D) Se não encontrou parcelas específicas, mas a venda inteira foi marcada como Boleto/Financiadora
-  if (valorBoletoVenda === 0 && isPagamentoBoletoFinanciadora(v)) {
-    valorBoletoVenda += Number(v.valor_total || v.valor || 0);
-  }
-
-  return valorBoletoVenda;
 };
 
 export interface OpcoesCalculoDesempenho {

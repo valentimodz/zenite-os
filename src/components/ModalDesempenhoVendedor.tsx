@@ -25,6 +25,7 @@ import {
 import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import { useMinhasMetasIndividual } from '../hooks/useMetasRankings';
+import { useQueryClient } from '@tanstack/react-query';
 import { formatarMoeda } from '../utils/currencyUtils';
 import {
   calcularDesempenhoColaborador,
