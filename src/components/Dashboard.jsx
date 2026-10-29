@@ -7331,16 +7331,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             .select('id, filial_id')
             .eq('empresa_id', targetEmpresaId)
             .eq('filial_id', resolvedFilialId)
-            .ilike('nome', nome);
+            .ilike('nome', nome.trim());
 
           if (prodsBanco && prodsBanco.length > 0) {
+            const idPrincipal = prodsBanco[0].id;
             const { data: updData, error: updErr } = await dbClient
               .from('produtos')
               .update({ quantidade: novaQtd })
-              .eq('id', prodsBanco[0].id)
+              .eq('id', idPrincipal)
               .select();
             console.log('[SUPABASE UPDATE PRODUTO - QTD] Resposta produtos exist:', { data: updData, error: updErr });
             if (updErr) throw updErr;
+
+            // Limpa duplicatas extras caso existam para a mesma filial e nome
+            if (prodsBanco.length > 1) {
+              const idsDuplicados = prodsBanco.slice(1).map(p => p.id);
+              try {
+                await dbClient.from('produtos').delete().in('id', idsDuplicados);
+              } catch (delErr) {
+                console.warn('[handleUpdateProdutoField] Aviso ao limpar duplicatas:', delErr);
+              }
+            }
           } else {
             const catMatch = (catalogoProdutos || []).find(c => c.nome?.toLowerCase() === nome.toLowerCase()) || {};
             const { data: insData, error: insErr } = await dbClient
@@ -12771,17 +12782,32 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const targetEmpresaId = company?.id || profile?.empresa_id;
       let targetProdutoId = null;
 
-      // Buscar produto na filial de destino/origem
-      const { data: existingProds, error: searchErr } = await supabase
+      // Buscar produto na filial de destino/origem considerando nome e cor (variação)
+      let queryBusca = supabase
         .from('produtos')
         .select('*')
         .eq('empresa_id', targetEmpresaId)
         .eq('filial_id', ajusteFilialId)
-        .ilike('nome', ajusteProduto.nome.trim())
-        .limit(1);
+        .ilike('nome', ajusteProduto.nome.trim());
+
+      if (ajusteProduto.cor) {
+        queryBusca = queryBusca.ilike('cor', String(ajusteProduto.cor).trim());
+      }
+
+      const { data: existingProds, error: searchErr } = await queryBusca;
 
       if (searchErr) throw searchErr;
       const existingProd = existingProds && existingProds.length > 0 ? existingProds[0] : null;
+
+      // Se existirem duplicatas anteriores no banco para essa mesma filial/variação, limpa os extras
+      if (existingProds && existingProds.length > 1) {
+        const idsExtras = existingProds.slice(1).map(p => p.id);
+        try {
+          await supabase.from('produtos').delete().in('id', idsExtras);
+        } catch (delE) {
+          console.warn('[handleSaveEstoqueAjuste] Aviso ao limpar duplicatas:', delE);
+        }
+      }
 
       if (ajusteTipo === 'ENTRADA') {
         if (existingProd) {

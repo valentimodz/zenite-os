@@ -127,9 +127,21 @@ export default function ConsultaEstoque({
       if (empresaId) {
         qProdutos = qProdutos.eq('empresa_id', empresaId);
       }
-      const { data: dataProdutos, error: errProdutos } = await qProdutos;
-      if (errProdutos) {
-        console.warn('Erro ao carregar produtos:', errProdutos);
+      // Tentar filtrar apenas produtos ativos no banco, com fallback defensivo
+      try {
+        const { data: dataProdutosAtivos, error: errAtivos } = await qProdutos.eq('ativo', true);
+        if (!errAtivos && dataProdutosAtivos) {
+          setProdutos(dataProdutosAtivos.filter(p => p.status !== 'INATIVO' && p.ativo !== false));
+        } else {
+          // Se a coluna ativo não existir no banco, busca normal
+          const { data: dataProdutos, error: errProdutos } = await supabase.from('produtos').select('*').eq(empresaId ? 'empresa_id' : 'id', empresaId || undefined);
+          if (errProdutos) console.warn('Erro ao carregar produtos:', errProdutos);
+          setProdutos((dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false));
+        }
+      } catch (e) {
+        const { data: dataProdutos, error: errProdutos } = await qProdutos;
+        if (errProdutos) console.warn('Erro ao carregar produtos:', errProdutos);
+        setProdutos((dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false));
       }
 
       // 4.2 Carregar catálogo mestre de produtos_catalogo com .select('*')
@@ -137,9 +149,19 @@ export default function ConsultaEstoque({
       if (empresaId) {
         qCatalogo = qCatalogo.eq('empresa_id', empresaId);
       }
-      const { data: dataCatalogo, error: errCatalogo } = await qCatalogo;
-      if (errCatalogo) {
-        console.warn('Erro ao carregar produtos_catalogo:', errCatalogo);
+      try {
+        const { data: dataCatAtivos, error: errCatAtivos } = await qCatalogo.eq('ativo', true);
+        if (!errCatAtivos && dataCatAtivos) {
+          setProdutosCatalogo(dataCatAtivos.filter(c => c.status !== 'INATIVO' && c.ativo !== false));
+        } else {
+          const { data: dataCatalogo, error: errCatalogo } = await qCatalogo;
+          if (errCatalogo) console.warn('Erro ao carregar produtos_catalogo:', errCatalogo);
+          setProdutosCatalogo((dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false));
+        }
+      } catch (e) {
+        const { data: dataCatalogo, error: errCatalogo } = await qCatalogo;
+        if (errCatalogo) console.warn('Erro ao carregar produtos_catalogo:', errCatalogo);
+        setProdutosCatalogo((dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false));
       }
 
       // 4.3 Carregar IMEIs disponíveis com .select('*')
@@ -344,14 +366,64 @@ export default function ConsultaEstoque({
             }
           });
         } else {
-          // Fallback para quantidade numérica direta em produtos
-          item.itensFisicos.forEach(p => {
+          // Fallback para quantidade numérica direta em produtos com deduplicação rigorosa por filial e variação (cor)
+          const vistosPorFilialVariacao = new Map();
+          // Ordena priorizando registros mais recentes (maior id ou updated_at)
+          const ordenados = [...item.itensFisicos].sort((a, b) => {
+            const timeA = new Date(a.updated_at || a.created_at || 0).getTime();
+            const timeB = new Date(b.updated_at || b.created_at || 0).getTime();
+            if (timeB !== timeA) return timeB - timeA;
+            return String(b.id || '').localeCompare(String(a.id || ''));
+          });
+
+          ordenados.forEach(p => {
+            const fId = String(p.filial_id || '');
+            if (!fId) return;
+            const corKey = String(p.cor || 'padrao').trim().toLowerCase();
+            const chave = `${fId}_${corKey}`;
+
+            // Deduplicação: se já consideramos esta mesma filial e cor, não soma linha duplicada antiga
+            if (!vistosPorFilialVariacao.has(chave)) {
+              vistosPorFilialVariacao.set(chave, p);
+              const q = Number(p.quantidade || 0);
+              qtdRede += q;
+              if (saldosFiliaisMap.has(fId)) {
+                saldosFiliaisMap.get(fId).quantidade += q;
+              } else {
+                const filObj = listaFiliais.find(f => String(f.id) === fId);
+                saldosFiliaisMap.set(fId, {
+                  filial_id: fId,
+                  filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
+                  quantidade: q
+                });
+              }
+            }
+          });
+        }
+      } else {
+        // Acessórios / Gerais: deduplica registros duplicados da mesma filial e variação (cor), somando apenas saldos válidos
+        const vistosPorFilialVariacao = new Map();
+        const ordenados = [...item.itensFisicos].sort((a, b) => {
+          const timeA = new Date(a.updated_at || a.created_at || 0).getTime();
+          const timeB = new Date(b.updated_at || b.created_at || 0).getTime();
+          if (timeB !== timeA) return timeB - timeA;
+          return String(b.id || '').localeCompare(String(a.id || ''));
+        });
+
+        ordenados.forEach(p => {
+          const fId = String(p.filial_id || '');
+          if (!fId) return;
+          const corKey = String(p.cor || 'padrao').trim().toLowerCase();
+          const chave = `${fId}_${corKey}`;
+
+          // Se já computamos essa filial e variação, ignoramos registros duplicados/antigos da mesma filial
+          if (!vistosPorFilialVariacao.has(chave)) {
+            vistosPorFilialVariacao.set(chave, p);
             const q = Number(p.quantidade || 0);
             qtdRede += q;
-            const fId = String(p.filial_id || '');
             if (saldosFiliaisMap.has(fId)) {
               saldosFiliaisMap.get(fId).quantidade += q;
-            } else if (fId) {
+            } else {
               const filObj = listaFiliais.find(f => String(f.id) === fId);
               saldosFiliaisMap.set(fId, {
                 filial_id: fId,
@@ -359,23 +431,6 @@ export default function ConsultaEstoque({
                 quantidade: q
               });
             }
-          });
-        }
-      } else {
-        // Acessórios / Gerais: soma as quantidades da tabela 'produtos'
-        item.itensFisicos.forEach(p => {
-          const q = Number(p.quantidade || 0);
-          qtdRede += q;
-          const fId = String(p.filial_id || '');
-          if (saldosFiliaisMap.has(fId)) {
-            saldosFiliaisMap.get(fId).quantidade += q;
-          } else if (fId) {
-            const filObj = listaFiliais.find(f => String(f.id) === fId);
-            saldosFiliaisMap.set(fId, {
-              filial_id: fId,
-              filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
-              quantidade: q
-            });
           }
         });
       }

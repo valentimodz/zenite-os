@@ -192,15 +192,38 @@ export default function ModalDetalheEstoqueProduto({
 
       const listaBruta = prodsDb && prodsDb.length > 0 ? prodsDb : [produto];
 
-      // Formatar cada item individualmente e filtrar itens com filial real
+      // Formatar cada item individualmente e filtrar itens ativos com filial real
       const itensFormatados: ItemProdutoDetalhado[] = [];
-      listaBruta.forEach((p: any) => {
+      const vistosChave = new Map<string, any>();
+
+      // Ordenar por mais recente para manter o registro prioritário de cada variação/filial
+      const ordenados = [...listaBruta].sort((a: any, b: any) => {
+        const timeA = new Date(a?.updated_at || a?.created_at || 0).getTime();
+        const timeB = new Date(b?.updated_at || b?.created_at || 0).getTime();
+        if (timeB !== timeA) return timeB - timeA;
+        return String(b?.id || '').localeCompare(String(a?.id || ''));
+      });
+
+      ordenados.forEach((p: any) => {
         if (!p) return;
+        // Filtrar registros inativos
+        if (p.status === 'INATIVO' || p.ativo === false) return;
+
         const rawFId = p.filial_id;
         // Não incluir registros sem filial válida no estoque físico
         if (!rawFId || rawFId === 'sem_filial' || String(rawFId).trim() === '') {
           return;
         }
+
+        const fId = String(rawFId);
+        const corLimpa = (p.cor || corAtual || 'Padrão').trim();
+        const chaveDeduplicacao = `${fId}_${corLimpa.toLowerCase()}`;
+
+        // Deduplicação lógica: se já temos o registro mais recente dessa filial e variação, ignoramos registros duplicados/fantasmas
+        if (vistosChave.has(chaveDeduplicacao)) {
+          return;
+        }
+        vistosChave.set(chaveDeduplicacao, p);
 
         const seriais = Array.isArray(p.imeis)
           ? p.imeis.filter((i: any) => !i.vendido && String(i.status || '').toUpperCase() !== 'VENDIDO')
@@ -213,7 +236,6 @@ export default function ModalDetalheEstoqueProduto({
           qtdValida = Number(p.quantidade || 0);
         }
 
-        const fId = String(rawFId);
         const fNome = p.filiais?.nome || mapaFiliaisNome[fId] || `Filial ${fId}`;
 
         itensFormatados.push({
@@ -222,7 +244,7 @@ export default function ModalDetalheEstoqueProduto({
           filial_id: fId,
           filial_nome: fNome,
           categoria: p.categoria || categoria,
-          cor: (p.cor || corAtual || 'Padrão').trim(),
+          cor: corLimpa,
           preco: Number(p.preco || p.preco_venda || precoBaseVenda),
           preco_venda: Number(p.preco_venda || p.preco || precoBaseVenda),
           quantidade: qtdValida,
@@ -403,116 +425,38 @@ export default function ModalDetalheEstoqueProduto({
     const nomeFinal = item.nome || produtoNome;
     const categoriaFinal = item.categoria || categoria;
 
-    // Se é um item sintético (ainda não existe registro real no banco para esta filial)
-    if (item.isSynthetic || String(item.id).startsWith('temp_')) {
-      // 1. Tentar verificar se já existe no banco (para evitar duplicidade acidental)
-      let queryCheck = supabase
-        .from('produtos')
-        .select('id, quantidade, preco, preco_venda, cor, filial_id')
-        .eq('filial_id', filialIdNumerico)
-        .ilike('nome', nomeFinal.trim());
+    // 1. Tentar localizar o registro no banco por ID direto ou por chave de unicidade lógica (filial_id + nome + cor)
+    let idAlvo = (!item.isSynthetic && !String(item.id).startsWith('temp_')) ? item.id : null;
 
-      if (corFinal) {
-        queryCheck = queryCheck.ilike('cor', corFinal);
-      }
+    let queryCheck = supabase
+      .from('produtos')
+      .select('id, quantidade, preco, preco_venda, cor, filial_id')
+      .eq('filial_id', filialIdNumerico)
+      .ilike('nome', nomeFinal.trim());
 
-      const { data: existente } = await queryCheck.maybeSingle();
+    if (corFinal) {
+      queryCheck = queryCheck.ilike('cor', corFinal);
+    }
 
-      if (existente && existente.id) {
-        // Se já existia, faz update
-        const { error: updErr } = await supabase
-          .from('produtos')
-          .update({
-            quantidade: qtdFinal,
-            preco: precoFinal,
-            preco_venda: precoFinal,
-            cor: corFinal
-          })
-          .eq('id', existente.id);
+    const { data: existentes } = await queryCheck;
+    const existente = existentes && existentes.length > 0 ? existentes[0] : null;
 
-        if (updErr) throw updErr;
-
-        return {
-          ...item,
-          id: String(existente.id),
-          filial_id: String(filialIdNumerico),
-          quantidade: qtdFinal,
-          preco: precoFinal,
-          preco_venda: precoFinal,
-          cor: corFinal,
-          isSynthetic: false
-        };
-      } else {
-        // Não existe: INSERT com dados completos
-        const payloadInsert: any = {
-          nome: nomeFinal,
-          filial_id: filialIdNumerico,
-          quantidade: qtdFinal,
-          preco: precoFinal,
-          preco_venda: precoFinal,
-          preco_custo: Number(produto?.preco_custo || 0),
-          cor: corFinal,
-          categoria: categoriaFinal,
-          status: 'ATIVO'
-        };
-
-        if (empresaIdReal) payloadInsert.empresa_id = empresaIdReal;
-        if (catIdReal) payloadInsert.produto_catalogo_id = catIdReal;
-        if (codBarrasReal) payloadInsert.codigo_barras = codBarrasReal;
-
-        const { data: inserted, error: insErr } = await supabase
-          .from('produtos')
-          .insert(payloadInsert)
-          .select()
-          .single();
-
-        if (insErr) {
-          // Fallback caso alguma coluna estrita (como status ou empresa_id) dê erro de esquema
-          console.warn('[ModalDetalheEstoqueProduto] Tentando insert de fallback simplificado:', insErr);
-          const fallbackPayload: any = {
-            nome: nomeFinal,
-            filial_id: filialIdNumerico,
-            quantidade: qtdFinal,
-            preco: precoFinal,
-            preco_venda: precoFinal,
-            cor: corFinal,
-            categoria: categoriaFinal
-          };
-          if (empresaIdReal) fallbackPayload.empresa_id = empresaIdReal;
-
-          const { data: insFallback, error: insFbErr } = await supabase
-            .from('produtos')
-            .insert(fallbackPayload)
-            .select()
-            .single();
-
-          if (insFbErr) throw insFbErr;
-
-          return {
-            ...item,
-            id: String(insFallback.id),
-            filial_id: String(filialIdNumerico),
-            quantidade: qtdFinal,
-            preco: precoFinal,
-            preco_venda: precoFinal,
-            cor: corFinal,
-            isSynthetic: false
-          };
+    if (existente && existente.id) {
+      idAlvo = existente.id;
+      // Se houver mais de um registro duplicado antigo no banco para a mesma filial e cor,
+      // atualiza o principal e limpa/desativa as duplicatas extras para evitar somas fantasmas futuras
+      if (existentes.length > 1) {
+        const idsDuplicadosExtras = existentes.slice(1).map(d => d.id);
+        try {
+          await supabase.from('produtos').delete().in('id', idsDuplicadosExtras);
+        } catch (delErr) {
+          console.warn('[persistirEstoqueFilial] Aviso ao limpar duplicatas extras:', delErr);
         }
-
-        return {
-          ...item,
-          id: String(inserted.id),
-          filial_id: String(filialIdNumerico),
-          quantidade: qtdFinal,
-          preco: precoFinal,
-          preco_venda: precoFinal,
-          cor: corFinal,
-          isSynthetic: false
-        };
       }
-    } else {
-      // Registro real existente: UPDATE direto no banco
+    }
+
+    if (idAlvo) {
+      // Registro real existente (UPSERT lógico -> UPDATE direto no ID único)
       const payloadUpdate: any = {};
       if (novosValores.quantidade !== undefined) payloadUpdate.quantidade = novosValores.quantidade;
       if (novosValores.preco !== undefined) {
@@ -521,23 +465,89 @@ export default function ModalDetalheEstoqueProduto({
       }
       if (novosValores.cor !== undefined) payloadUpdate.cor = novosValores.cor;
 
-      if (onUpdateProdutoField && novosValores.quantidade !== undefined) {
-        await onUpdateProdutoField(item.id, item.nome, 'quantidade', novosValores.quantidade, item.filial_id);
-      } else {
-        const { error: updErr } = await supabase
-          .from('produtos')
-          .update(payloadUpdate)
-          .eq('id', item.id);
+      const { error: updErr } = await supabase
+        .from('produtos')
+        .update(payloadUpdate)
+        .eq('id', idAlvo);
 
-        if (updErr) throw updErr;
+      if (updErr) throw updErr;
+
+      return {
+        ...item,
+        id: String(idAlvo),
+        filial_id: String(filialIdNumerico),
+        quantidade: qtdFinal,
+        preco: precoFinal,
+        preco_venda: precoFinal,
+        cor: corFinal,
+        isSynthetic: false
+      };
+    } else {
+      // Não existe no banco: INSERT do registro com filial e variação definidas
+      const payloadInsert: any = {
+        nome: nomeFinal,
+        filial_id: filialIdNumerico,
+        quantidade: qtdFinal,
+        preco: precoFinal,
+        preco_venda: precoFinal,
+        preco_custo: Number(produto?.preco_custo || 0),
+        cor: corFinal,
+        categoria: categoriaFinal,
+        status: 'ATIVO'
+      };
+
+      if (empresaIdReal) payloadInsert.empresa_id = empresaIdReal;
+      if (catIdReal) payloadInsert.produto_catalogo_id = catIdReal;
+      if (codBarrasReal) payloadInsert.codigo_barras = codBarrasReal;
+
+      const { data: inserted, error: insErr } = await supabase
+        .from('produtos')
+        .insert(payloadInsert)
+        .select()
+        .single();
+
+      if (insErr) {
+        console.warn('[ModalDetalheEstoqueProduto] Tentando insert de fallback simplificado:', insErr);
+        const fallbackPayload: any = {
+          nome: nomeFinal,
+          filial_id: filialIdNumerico,
+          quantidade: qtdFinal,
+          preco: precoFinal,
+          preco_venda: precoFinal,
+          cor: corFinal,
+          categoria: categoriaFinal
+        };
+        if (empresaIdReal) fallbackPayload.empresa_id = empresaIdReal;
+
+        const { data: insFallback, error: insFbErr } = await supabase
+          .from('produtos')
+          .insert(fallbackPayload)
+          .select()
+          .single();
+
+        if (insFbErr) throw insFbErr;
+
+        return {
+          ...item,
+          id: String(insFallback.id),
+          filial_id: String(filialIdNumerico),
+          quantidade: qtdFinal,
+          preco: precoFinal,
+          preco_venda: precoFinal,
+          cor: corFinal,
+          isSynthetic: false
+        };
       }
 
       return {
         ...item,
+        id: String(inserted.id),
+        filial_id: String(filialIdNumerico),
         quantidade: qtdFinal,
         preco: precoFinal,
         preco_venda: precoFinal,
-        cor: corFinal
+        cor: corFinal,
+        isSynthetic: false
       };
     }
   };
