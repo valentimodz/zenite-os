@@ -25,8 +25,18 @@ import {
 import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
 import { useMinhasMetasIndividual } from '../hooks/useMetasRankings';
-import { useQueryClient } from '@tanstack/react-query';
 import { formatarMoeda } from '../utils/currencyUtils';
+import {
+  calcularDesempenhoColaborador,
+  extrairValorBoletoVenda,
+  isPagamentoBoletoFinanciadora as isPagamentoBoletoFinanciadoraUtil,
+  isAcessorio as isAcessorioUtil,
+  isProdutoEspecial as isProdutoEspecialUtil,
+  temApoioTrainee as temApoioTraineeUtil,
+  BOLETO_FINANCIADORAS_TERMS as BOLETO_FINANCIADORAS_TERMS_UTIL,
+  TERMOS_ACESSORIOS,
+  TERMOS_ESPECIAIS
+} from '../utils/calculoMetas';
 
 export const formatCurrency = (value?: number | string | null): string => {
   if (value === undefined || value === null || value === '' || isNaN(Number(value))) {
@@ -694,83 +704,17 @@ export default function ModalDesempenhoVendedor({
         const totalQtd = vendasValidas.length;
         const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
 
-        // Soma direta de Boletos / Financiadoras (com suporte a pagamentos mistos / fracionados e apoio trainee):
-        let totalBoletos = 0;
-        vendasValidas.forEach((v: any) => {
-          const statusLimpo = String(v.status || '').toUpperCase().trim();
-          if (statusLimpo === 'CANCELADA' || statusLimpo === 'CANCELADO') return;
+        // Cálculo unificado de Boletos e Acessórios com exclusão de Produtos Especiais
+        const cargoNormalizado = String(colaborador?.cargo || (colaborador as any)?.funcao || '').toUpperCase().trim();
+        const roleNormalizado = String(colaborador?.role || '').toUpperCase().trim();
+        const isOriginalTrainee = cargoNormalizado.includes('TRAINEE') || roleNormalizado.includes('TRAINEE') || colaborador?.is_treinner === true;
 
-          let valorBoletoVenda = 0;
-
-          // A) Verifica valor explícito em v.valor_boleto
-          if (v.valor_boleto && !isNaN(Number(v.valor_boleto)) && Number(v.valor_boleto) > 0) {
-            valorBoletoVenda += Number(v.valor_boleto);
-          }
-
-          // B) Extrai pagamentos de vendas_pagamentos
-          if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-            v.vendas_pagamentos.forEach((p: any) => {
-              if (isPagamentoBoletoFinanciadora(p)) {
-                valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
-              }
-            });
-          }
-
-          // C) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string)
-          let listaPags: any[] = [];
-          if (v.pagamentos) {
-            if (Array.isArray(v.pagamentos)) {
-              listaPags = v.pagamentos;
-            } else if (typeof v.pagamentos === 'string') {
-              try {
-                const parsed = JSON.parse(v.pagamentos);
-                if (Array.isArray(parsed)) listaPags = parsed;
-              } catch (e) { }
-            }
-          }
-          if (listaPags.length > 0) {
-            listaPags.forEach((p: any) => {
-              if (isPagamentoBoletoFinanciadora(p)) {
-                valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
-              }
-            });
-          }
-
-          // D) Se não encontrou parcelas específicas, mas a venda inteira foi marcada como Boleto/Financiadora
-          if (valorBoletoVenda === 0 && isPagamentoBoletoFinanciadora(v)) {
-            valorBoletoVenda += Number(v.valor_total || v.valor || 0);
-          }
-
-          totalBoletos += valorBoletoVenda;
-        });
-
-        setRealizadoBoletos(Math.round(totalBoletos * 100) / 100);
-
-        // Realizado Acessórios: Unificado com Minhas Metas (incluindo vendas com trainee e itens da categoria acessorios)
-        const termosAcessorios = [
-          'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER',
-          'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE',
-          'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
-        ];
-
-        let acessorios = 0;
-        vendasValidas.forEach((v: any) => {
-          const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-          if (itens.length > 0) {
-            itens.forEach((item: any) => {
-              const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase().trim();
-              const catItem = String(item.categoria || '').toUpperCase().trim();
-              if (catItem.includes('ACESS') || termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
-                acessorios += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
-              }
-            });
-          } else {
-            const cat = String(v.categoria || '').toUpperCase().trim();
-            const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase().trim();
-            if (cat.includes('ACESS') || termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
-              acessorios += Number(v.valor_total || v.valor || 0);
-            }
-          }
+        const resumoMetas = calcularDesempenhoColaborador(vendasValidas, {
+          isTrainee: isOriginalTrainee,
+          targetVendedorId: vendedorId,
+          targetVendedorNome: vendedorNome,
+          filtroTipoVendas,
+          excluirEspeciaisDasMetas: true
         });
 
         // Atualiza os estados da tela
@@ -778,8 +722,8 @@ export default function ModalDesempenhoVendedor({
         setQtdVendas(totalQtd);
         setTicketMedio(mediaTicket);
         setComissoesAcumuladas(totalComissao);
-        setRealizadoBoletos(Math.round(totalBoletos * 100) / 100);
-        setRealizadoAcessorios(acessorios);
+        setRealizadoBoletos(resumoMetas.totalBoletos);
+        setRealizadoAcessorios(resumoMetas.totalAcessorios);
         setVendasColaborador(vendasValidas as Venda[]);
         setVendasLocais(vendasValidas as any[]);
       }
@@ -1077,138 +1021,30 @@ itens_venda (*)
       ? faturadoTitularSoloCalc
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
-    // Vendas filtradas para cálculo das metas operacionais:
-    // Se o colaborador for Trainee, suas metas consideram as vendas em que atuou como Trainee (v.trainee_id ou v.trainee_nome) ou vendas diretas
-    const vendasParaMetas = isTrainee
-      ? sales.filter(s => {
-        const tIdMatch = (targetVendedorId && (String(s.trainee_id) === String(targetVendedorId) || String(s.treener_id) === String(targetVendedorId)));
-        const tNomeMatch = (targetVendedorNome && String(s.trainee_nome || '').toUpperCase().includes(targetVendedorNome.toUpperCase()));
-        return tIdMatch || tNomeMatch || temApoioTrainee(s) || String(s.vendedor_id) === String(targetVendedorId);
-      })
-      : (filtroTipoVendas === 'solo'
-        ? sales.filter(s => !temApoioTrainee(s))
-        : sales);
-
-    // 3. CÁLCULO ESTRITO DE BOLETOS / FINANCIADORAS (com suporte a pagamentos mistos / fracionados e apoio trainee):
-    let totalBoletosCalculado = 0;
-    vendasParaMetas.forEach((v: any) => {
-      const status = String(v.status || '').toUpperCase().trim();
-      if (status === 'CANCELADA' || status === 'CANCELADO') return;
-
-      let valorBoletoVenda = 0;
-
-      // A) Verifica valor explícito em v.valor_boleto
-      if (v.valor_boleto && !isNaN(Number(v.valor_boleto)) && Number(v.valor_boleto) > 0) {
-        valorBoletoVenda += Number(v.valor_boleto);
-      }
-
-      // B) Extrai pagamentos de vendas_pagamentos
-      if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-        v.vendas_pagamentos.forEach((p: any) => {
-          if (isPagamentoBoletoFinanciadora(p)) {
-            valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
-          }
-        });
-      }
-
-      // C) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string)
-      let listaPags: any[] = [];
-      if (v.pagamentos) {
-        if (Array.isArray(v.pagamentos)) {
-          listaPags = v.pagamentos;
-        } else if (typeof v.pagamentos === 'string') {
-          try {
-            const parsed = JSON.parse(v.pagamentos);
-            if (Array.isArray(parsed)) listaPags = parsed;
-          } catch (e) { }
-        }
-      }
-      if (listaPags.length > 0) {
-        listaPags.forEach((p: any) => {
-          if (isPagamentoBoletoFinanciadora(p)) {
-            valorBoletoVenda += Number(p.valor_pago || p.valor || p.valor_total || 0);
-          }
-        });
-      }
-
-      // D) Se não encontrou parcelas específicas, mas a venda inteira foi marcada como Boleto/Financiadora
-      if (valorBoletoVenda === 0 && isPagamentoBoletoFinanciadora(v)) {
-        valorBoletoVenda += Number(v.valor_total || v.valor || 0);
-      }
-
-      totalBoletosCalculado += valorBoletoVenda;
+    // 3, 4 e 5. CÁLCULO UNIFICADO DE BOLETOS, ACESSÓRIOS E PRODUTOS ESPECIAIS (via calculoMetas.ts)
+    const desempenhoMetas = calcularDesempenhoColaborador(sales, {
+      isTrainee,
+      targetVendedorId: targetVendedorId || undefined,
+      targetVendedorNome: targetVendedorNome || undefined,
+      filtroTipoVendas,
+      excluirEspeciaisDasMetas: true
     });
 
     const totalBoletos = Math.round(
       (filtroTipoVendas === 'todas'
-        ? (totalBoletosCalculado > 0 ? totalBoletosCalculado : (realizadoBoletos > 0 ? realizadoBoletos : 0))
-        : (totalBoletosCalculado > 0 ? totalBoletosCalculado : 0)) * 100
+        ? (desempenhoMetas.totalBoletos > 0 ? desempenhoMetas.totalBoletos : (realizadoBoletos > 0 ? realizadoBoletos : 0))
+        : (desempenhoMetas.totalBoletos > 0 ? desempenhoMetas.totalBoletos : 0)) * 100
     ) / 100;
-
-    // 4. CÁLCULO DE ACESSÓRIOS IDÊNTICO A MINHAS METAS (com categoria acessorios e apoio de trainee):
-    const termosAcessorios = [
-      'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER',
-      'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE',
-      'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
-    ];
-
-    let totalAcessoriosCalculado = 0;
-
-    vendasParaMetas.forEach((v) => {
-      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-
-      if (itens.length > 0) {
-        itens.forEach((item: any) => {
-          const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase().trim();
-          const catItem = String(item.categoria || '').toUpperCase().trim();
-          if (catItem.includes('ACESS') || termosAcessorios.some(t => nomeItem.includes(t) || catItem.includes(t))) {
-            totalAcessoriosCalculado += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
-          }
-        });
-      } else {
-        const cat = String(v.categoria || '').toUpperCase().trim();
-        const prodNome = String(v.produto_nome || (v as any).produtos_descricao || v.descricao || (v as any).nome || '').toUpperCase().trim();
-        if (cat.includes('ACESS') || termosAcessorios.some(t => cat.includes(t) || prodNome.includes(t))) {
-          totalAcessoriosCalculado += Number(v.valor_total || v.valor || 0);
-        }
-      }
-    });
 
     const totalAcessorios = Math.round(
       (filtroTipoVendas === 'todas'
-        ? (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : (realizadoAcessorios > 0 ? realizadoAcessorios : 0))
-        : (totalAcessoriosCalculado > 0 ? totalAcessoriosCalculado : 0)) * 100
+        ? (desempenhoMetas.totalAcessorios > 0 ? desempenhoMetas.totalAcessorios : (realizadoAcessorios > 0 ? realizadoAcessorios : 0))
+        : (desempenhoMetas.totalAcessorios > 0 ? desempenhoMetas.totalAcessorios : 0)) * 100
     ) / 100;
 
-    // 5. CÁLCULO DE PRODUTOS ESPECIAIS & ALTO TICKET / FORA DE META (Linha Apple, Consoles, JBL, etc.)
-    let totalFaturadoEspeciais = 0;
-    let quantidadeItensEspeciais = 0;
-
-    sales.forEach((v: any) => {
-      const status = String(v.status || '').toUpperCase().trim();
-      if (status === 'CANCELADA' || status === 'CANCELADO') return;
-
-      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-      if (itens.length > 0) {
-        itens.forEach((item: any) => {
-          if (isProdutoEspecial(item)) {
-            const qtd = Number(item.quantidade || 1) || 1;
-            const val = Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * qtd) || 0);
-            totalFaturadoEspeciais += val;
-            quantidadeItensEspeciais += qtd;
-          }
-        });
-      } else if (isProdutoEspecial(v)) {
-        const qtd = Number(v.quantidade || 1) || 1;
-        const val = Number(v.valor_total || v.valor || 0);
-        totalFaturadoEspeciais += val;
-        quantidadeItensEspeciais += qtd;
-      }
-    });
-
-    const ticketMedioEspeciais = quantidadeItensEspeciais > 0
-      ? totalFaturadoEspeciais / quantidadeItensEspeciais
-      : 0;
+    const totalFaturadoEspeciais = desempenhoMetas.totalFaturadoEspeciais;
+    const quantidadeItensEspeciais = desempenhoMetas.quantidadeItensEspeciais;
+    const ticketMedioEspeciais = desempenhoMetas.ticketMedioEspeciais;
 
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 

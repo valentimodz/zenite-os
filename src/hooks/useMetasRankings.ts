@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../supabaseClient';
+import { calcularDesempenhoColaborador } from '../utils/calculoMetas';
 
 /**
  * Interface com os campos retornados pela View PostgreSQL `view_ranking_colaboradores_mensal`
@@ -31,7 +32,12 @@ export interface RankingColaborador {
   volume_total_participado: number;
   ticket_medio: number;
   total_boletos: number;
-  totalBoletos?: number;
+  totalBoletos: number;
+  totalBoletosBruto?: number;
+  total_acessorios?: number;
+  totalAcessorios?: number;
+  total_faturado_especiais?: number;
+  totalFaturadoEspeciais?: number;
   // Campos derivados para exibição e badges de perfil
   is_trainee: boolean;
   volume_exibicao: number;
@@ -100,17 +106,23 @@ export async function fetchRankingColaboradoresMensal({
     const { data: colaboradores, error: colabError } = await profilesQuery;
     if (colabError) throw colabError;
 
-    // 3. Busca de vendas da competência (REMOVIDA restrição de filial na consulta individual do colaborador)
+    // 3. Busca de vendas da competência incluindo itens_venda e vendas_pagamentos para cálculo idêntico ao Modal
     let vendasQuery = supabase
       .from('vendas')
-      .select('id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, status, treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee, forma_pagamento, metodo_pagamento, financeira, pagamentos, valor_boleto, valor_pix, valor_dinheiro, valor_cartao')
+      .select(`
+        id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, status,
+        treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee,
+        forma_pagamento, metodo_pagamento, financeira, pagamentos, valor_boleto, valor_pix, valor_dinheiro, valor_cartao,
+        produto_nome, descricao, produtos_descricao, itens_resumo, categoria,
+        itens_venda (*),
+        vendas_pagamentos (*)
+      `)
       .gte('created_at', inicioMes)
       .lte('created_at', fimMes)
       .neq('status', 'CANCELADA')
       .neq('status', 'cancelada');
 
     if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
-      // As metas pertencem ao vendedor e não a uma filial isolada: filtra unicamente pelo vendedor (ou como titular ou trainee)
       vendasQuery = vendasQuery.or(`vendedor_id.eq.${colaboradorId},trainee_id.eq.${colaboradorId},treener_id.eq.${colaboradorId}`);
     } else if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
       vendasQuery = vendasQuery.eq('filial_id', filialId);
@@ -122,7 +134,7 @@ export async function fetchRankingColaboradoresMensal({
     const vendasLista = (vendas || []) as any[];
     const colabsLista = colaboradores || [];
 
-    // Mapeamento com VÍNCULO DUPLO (ID ou NOME):
+    // Mapeamento com VÍNCULO DUPLO (ID ou NOME) e sincronização 1:1 com a lógica de metas do Modal:
     const resultado: RankingColaborador[] = colabsLista.map(colab => {
       const colabId = String(colab.id || '').trim();
       const colabNome = String(colab.nome || '').trim().toLowerCase();
@@ -142,51 +154,33 @@ export async function fetchRankingColaboradoresMensal({
       });
 
       const volumeTitular = vendasDoColaborador.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
-      const transacoesTitular = vendasDoColaborador.length;
       const faturadoTrainee = vendasComoTrainee.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
-      const transacoesTrainee = vendasComoTrainee.length;
 
       const isOriginalTrainee = colab.role === 'TRAINEE' || Boolean(colab.is_treinner);
       const isTrainee = faturadoTrainee > volumeTitular || isOriginalTrainee || (volumeTitular === 0 && faturadoTrainee > 0);
 
-      const volumeTotal = volumeTitular + faturadoTrainee;
-      const transacoes = transacoesTitular + (isTrainee ? transacoesTrainee : 0);
+      // Todas as vendas em que o colaborador participou (titular ou apoio)
+      const vendasTotaisColab = Array.from(
+        new Map([...vendasDoColaborador, ...vendasComoTrainee].map(v => [String(v.id), v])).values()
+      );
+
+      // Executa o cálculo unificado de desempenho (respeitando exclusão de Produtos Especiais na Meta de Boletos)
+      const calc = calcularDesempenhoColaborador(vendasTotaisColab, {
+        isTrainee,
+        targetVendedorId: colabId,
+        targetVendedorNome: colab.nome,
+        filtroTipoVendas: 'todas',
+        excluirEspeciaisDasMetas: true
+      });
+
+      const volumeTotal = calc.totalVendasGeral;
+      const transacoes = calc.totalTransacoes;
 
       const volumeExibicao = isTrainee
         ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
         : (volumeTitular > 0 ? volumeTitular : volumeTotal);
 
       const ticketMedio = transacoes > 0 ? volumeExibicao / transacoes : 0;
-
-      // 3. Soma estrita das formas de boleto / financiadora (com suporte a pagamentos mistos / fracionados)
-      const vendasTotais = isTrainee ? [...vendasDoColaborador, ...vendasComoTrainee] : vendasDoColaborador;
-      let totalBoletosCalculado = 0;
-
-      vendasTotais.forEach((v: any) => {
-        const status = String(v.status || '').toUpperCase().trim();
-        if (status === 'CANCELADA' || status === 'CANCELADO') return;
-
-        // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
-        if (Number(v.valor_boleto) > 0) {
-          totalBoletosCalculado += Number(v.valor_boleto);
-        } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
-          const parcelaBoleto = v.pagamentos
-            .filter((p: any) => {
-              const forma = String(p.forma || p.metodo || '').toUpperCase();
-              return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
-            })
-            .reduce((acc: number, p: any) => acc + Number(p.valor || 0), 0);
-          totalBoletosCalculado += parcelaBoleto > 0 ? parcelaBoleto : 0;
-        } else {
-          // 2º Fallback: Para vendas antigas de forma única gravada
-          const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
-          if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
-            totalBoletosCalculado += Number(v.valor_total || 0);
-          }
-        }
-      });
-
-      const totalBoletos = Math.round(totalBoletosCalculado * 100) / 100;
 
       return {
         colaborador_id: colab.id,
@@ -198,8 +192,13 @@ export async function fetchRankingColaboradoresMensal({
         faturado_trainee: faturadoTrainee,
         volume_total_participado: volumeTotal,
         ticket_medio: ticketMedio,
-        total_boletos: totalBoletos,
-        totalBoletos: totalBoletos,
+        total_boletos: calc.totalBoletos,
+        totalBoletos: calc.totalBoletos,
+        totalBoletosBruto: calc.totalBoletosBruto,
+        total_acessorios: calc.totalAcessorios,
+        totalAcessorios: calc.totalAcessorios,
+        total_faturado_especiais: calc.totalFaturadoEspeciais,
+        totalFaturadoEspeciais: calc.totalFaturadoEspeciais,
         is_trainee: isTrainee,
         volume_exibicao: volumeExibicao
       };

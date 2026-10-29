@@ -420,8 +420,12 @@ export default function RankingVendedores({
         faturadoTitular,
         faturadoTrainee,
         ticketMedio: ticketMedioConsistente,
-        totalBoletos: Number(vr.totalBoletos || vr.total_boletos || 0),
-        total_boletos: Number(vr.total_boletos || vr.totalBoletos || 0),
+        totalBoletos: Number(vr.totalBoletos ?? vr.total_boletos ?? 0),
+        total_boletos: Number(vr.total_boletos ?? vr.totalBoletos ?? 0),
+        totalBoletosBruto: Number(vr.totalBoletosBruto ?? 0),
+        totalAcessorios: Number(vr.totalAcessorios ?? vr.total_acessorios ?? 0),
+        total_acessorios: Number(vr.total_acessorios ?? vr.totalAcessorios ?? 0),
+        totalFaturadoEspeciais: Number(vr.totalFaturadoEspeciais ?? vr.total_faturado_especiais ?? 0),
         comissaoAcumulada: comissaoTotal,
         comissaoTitular,
         comissaoTrainee,
@@ -504,7 +508,9 @@ export default function RankingVendedores({
               <th className="py-3 px-4">Cargo</th>
               <th className="py-3 px-4 text-center">Transações</th>
               <th className="py-3 px-4 text-right">Volume</th>
-              <th className="py-3 px-4 text-right text-cyan-400">Total Boletos</th>
+              <th className="py-3 px-4 text-right text-cyan-400" title="Total realizado na Meta Operacional de Boletos (exclui produtos especiais fora de meta)">
+                Total Boletos (Meta)
+              </th>
               <th className="py-3 px-4 text-right text-emerald-400">Comissão Acumulada</th>
               <th className="py-3 px-4 text-center">Ações</th>
             </tr>
@@ -569,7 +575,13 @@ export default function RankingVendedores({
                     )}
                   </div>
                 </td>
-                <td className="py-3 px-4 text-right font-mono text-cyan-400 font-medium align-middle">
+                <td 
+                  className="py-3 px-4 text-right font-mono text-cyan-400 font-medium align-middle"
+                  title={colab.totalBoletosBruto && colab.totalBoletosBruto > colab.totalBoletos
+                    ? `Realizado na Meta: ${formatCurrency(colab.totalBoletos)} | Total Bruto (incluindo Especiais/Apple): ${formatCurrency(colab.totalBoletosBruto)}`
+                    : `Realizado na Meta de Boletos: ${formatCurrency(colab.totalBoletos || 0)}`
+                  }
+                >
                   {formatCurrency(colab.totalBoletos || 0)}
                 </td>
                 <td className="py-3 px-4 text-right font-mono align-middle" title={tooltipComissao}>
