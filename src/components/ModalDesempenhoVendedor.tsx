@@ -28,6 +28,7 @@ import { useMinhasMetasIndividual } from '../hooks/useMetasRankings';
 import { formatarMoeda } from '../utils/currencyUtils';
 import {
   calcularDesempenhoColaborador,
+  calcularMetasColaborador,
   extrairValorBoletoVenda,
   isPagamentoBoletoFinanciadora as isPagamentoBoletoFinanciadoraUtil,
   isAcessorio as isAcessorioUtil,
@@ -37,6 +38,8 @@ import {
   TERMOS_ACESSORIOS,
   TERMOS_ESPECIAIS
 } from '../utils/calculoMetas';
+
+export { calcularMetasColaborador, calcularDesempenhoColaborador };
 
 export const formatCurrency = (value?: number | string | null): string => {
   if (value === undefined || value === null || value === '' || isNaN(Number(value))) {

@@ -387,3 +387,74 @@ export function calcularDesempenhoColaborador(
     vendasFiltradasMetas
   };
 }
+
+/**
+ * Função utilitária com a assinatura solicitada para calcular as metas e realizados do colaborador
+ */
+export function calcularMetasColaborador(
+  vendas: VendaCalculo[] | any[],
+  colaboradorId?: string,
+  opcoesExtras: {
+    competencia?: string;
+    isTrainee?: boolean;
+    colaboradorNome?: string;
+    taxaComissao?: number;
+  } = {}
+) {
+  const { competencia, isTrainee = false, colaboradorNome, taxaComissao } = opcoesExtras;
+
+  // Filtrar mês de competência caso informado (YYYY-MM)
+  let vendasFiltradas = (vendas || []).filter((v: any) => {
+    const status = String(v.status || '').toUpperCase().trim();
+    if (status === 'CANCELADA' || status === 'CANCELADO') return false;
+
+    if (competencia && v.created_at) {
+      const dataVenda = String(v.created_at);
+      if (!dataVenda.startsWith(competencia)) return false;
+    }
+
+    if (colaboradorId) {
+      const cId = String(colaboradorId).trim();
+      const vId = v.vendedor_id ? String(v.vendedor_id).trim() : null;
+      const tId = v.trainee_id || v.treener_id ? String(v.trainee_id || v.treener_id).trim() : null;
+      const vNome = v.vendedor_nome ? String(v.vendedor_nome).trim().toLowerCase() : null;
+      const tNome = v.trainee_nome ? String(v.trainee_nome).trim().toLowerCase() : null;
+      const cNome = colaboradorNome ? String(colaboradorNome).trim().toLowerCase() : null;
+
+      const matchId = (vId && vId === cId) || (tId && tId === cId);
+      const matchNome = cNome && ((vNome && (vNome === cNome || vNome.includes(cNome))) || (tNome && (tNome === cNome || tNome.includes(cNome))));
+
+      return Boolean(matchId || matchNome);
+    }
+
+    return true;
+  });
+
+  const res = calcularDesempenhoColaborador(vendasFiltradas, {
+    isTrainee,
+    targetVendedorId: colaboradorId,
+    targetVendedorNome: colaboradorNome,
+    filtroTipoVendas: 'todas',
+    excluirEspeciaisDasMetas: true
+  });
+
+  const comissaoTotal = vendasFiltradas.reduce((acc, v) => {
+    const comissaoCadastrada = isTrainee ? Number(v.comissao_trainee || 0) : Number(v.comissao_vendedor || v.comissao || 0);
+    if (comissaoCadastrada > 0) return acc + comissaoCadastrada;
+    const taxa = taxaComissao || (isTrainee ? 0.01 : 0.021);
+    return acc + (Number(v.valor_total || v.valor || 0) * taxa);
+  }, 0);
+
+  return {
+    volumeTotal: res.totalVendasGeral,
+    totalBoletosMeta: res.totalBoletos,
+    totalBoletosBruto: res.totalBoletosBruto,
+    totalAcessoriosMeta: res.totalAcessorios,
+    totalFaturadoEspeciais: res.totalFaturadoEspeciais,
+    comissaoTotal: Math.round(comissaoTotal * 100) / 100,
+    transacoes: res.totalTransacoes,
+    ticketMedio: res.ticketMedio,
+    faturadoTitularSolo: res.faturadoTitularSolo,
+    faturadoComApoioTrainee: res.faturadoComApoioTrainee
+  };
+}
