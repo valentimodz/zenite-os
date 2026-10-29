@@ -574,8 +574,9 @@ export default function ModalDesempenhoVendedor({
       const [anoStr, mesStr] = (competencia || '2026-10').split('-');
       const ano = parseInt(anoStr, 10);
       const mes = parseInt(mesStr, 10);
-      const inicioMes = new Date(ano, mes - 1, 1, 0, 0, 0).toISOString();
-      const fimMes = new Date(ano, mes, 0, 23, 59, 59, 999).toISOString();
+      const ultimoDia = new Date(ano, mes, 0).getDate();
+      const inicioMes = `${competencia}-01T00:00:00.000-03:00`;
+      const fimMes = `${competencia}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
 
       // Busca meta individual rápida em paralelo
       (async () => {
@@ -607,7 +608,7 @@ export default function ModalDesempenhoVendedor({
         }
       })();
 
-      // 2. Busca única trazendo as vendas e os itens da venda via join (mesma query de Minhas Metas)
+      // 2. Busca de vendas sem filtro restritivo de filial_id (trazendo todas as vendas da colaboradora na rede)
       const orClauses: string[] = [];
       if (vendedorId) {
         orClauses.push(`vendedor_id.eq.${vendedorId}`);
@@ -760,15 +761,19 @@ export default function ModalDesempenhoVendedor({
       if (!idVendedor && !nomeVendedor) return;
 
       const [ano, mes] = (mesAtivo || mesCompetencia || '2026-10').split('-');
-      const dtInicio = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
-      const dtFim = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
+      const anoNum = parseInt(ano, 10);
+      const mesNum = parseInt(mes, 10);
+      const ultimoDia = new Date(anoNum, mesNum, 0).getDate();
+      const dtInicio = `${mesAtivo || mesCompetencia}-01T00:00:00.000-03:00`;
+      const dtFim = `${mesAtivo || mesCompetencia}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
 
       try {
         let query = supabase
           .from('vendas')
           .select(`
+            *,
             vendas_pagamentos (*),
-itens_venda (*)
+            itens_venda (*)
           `)
           .gte('created_at', dtInicio)
           .lte('created_at', dtFim)
@@ -980,18 +985,30 @@ itens_venda (*)
     const rawSalesCount = sales.length;
     const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
 
-    // Prioriza dados da view consolidada ou dos estados calculados da RPC/query direta otimizada
-    const totalVendasGeral = Number(dadosViewConsolidada?.volume_total_participado || 0) > 0
-      ? Number(dadosViewConsolidada?.volume_total_participado)
-      : (totalVendas > 0 ? totalVendas : (rawTotalVendasGeral > 0 ? rawTotalVendasGeral : 0));
+    // 3, 4 e 5. CÁLCULO UNIFICADO DE BOLETOS, ACESSÓRIOS E PRODUTOS ESPECIAIS (via calculoMetas.ts)
+    const desempenhoMetas = calcularDesempenhoColaborador(sales, {
+      isTrainee,
+      targetVendedorId: targetVendedorId || undefined,
+      targetVendedorNome: targetVendedorNome || undefined,
+      filtroTipoVendas,
+      excluirEspeciaisDasMetas: true
+    });
 
-    const salesCount = Number(dadosViewConsolidada?.total_transacoes || 0) > 0
-      ? Number(dadosViewConsolidada?.total_transacoes)
-      : (qtdVendas > 0 ? qtdVendas : rawSalesCount);
+    // O total faturado e quantidade de vendas devem refletir prioritariamente o conjunto real de vendas (sales)
+    // para sincronização perfeita com o login do vendedor:
+    const totalVendasGeral = desempenhoMetas.totalVendasGeral > 0
+      ? desempenhoMetas.totalVendasGeral
+      : (rawTotalVendasGeral > 0
+        ? rawTotalVendasGeral
+        : (totalVendas > 0 ? totalVendas : Number(dadosViewConsolidada?.volume_total_participado || 0)));
 
-    const ticketMedioCalc = Number(dadosViewConsolidada?.ticket_medio || 0) > 0
-      ? Number(dadosViewConsolidada?.ticket_medio)
-      : (ticketMedio > 0 ? ticketMedio : (salesCount > 0 ? totalVendasGeral / salesCount : 0));
+    const salesCount = desempenhoMetas.totalTransacoes > 0
+      ? desempenhoMetas.totalTransacoes
+      : (rawSalesCount > 0
+        ? rawSalesCount
+        : (qtdVendas > 0 ? qtdVendas : Number(dadosViewConsolidada?.total_transacoes || 0)));
+
+    const ticketMedioCalc = salesCount > 0 ? totalVendasGeral / salesCount : Number(dadosViewConsolidada?.ticket_medio || 0);
     const faturadoTitularView = dadosViewConsolidada?.faturado_titular ?? 0;
     const faturadoTraineeView = dadosViewConsolidada?.faturado_trainee ?? 0;
 
@@ -1026,14 +1043,6 @@ itens_venda (*)
       : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
 
     // 3, 4 e 5. CÁLCULO UNIFICADO DE BOLETOS, ACESSÓRIOS E PRODUTOS ESPECIAIS (via calculoMetas.ts)
-    const desempenhoMetas = calcularDesempenhoColaborador(sales, {
-      isTrainee,
-      targetVendedorId: targetVendedorId || undefined,
-      targetVendedorNome: targetVendedorNome || undefined,
-      filtroTipoVendas,
-      excluirEspeciaisDasMetas: true
-    });
-
     const totalBoletos = Math.round(
       (filtroTipoVendas === 'todas'
         ? (desempenhoMetas.totalBoletos > 0 ? desempenhoMetas.totalBoletos : (realizadoBoletos > 0 ? realizadoBoletos : 0))

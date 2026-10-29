@@ -107,6 +107,8 @@ export async function fetchRankingColaboradoresMensal({
     if (colabError) throw colabError;
 
     // 3. Busca de vendas da competência incluindo itens_venda e vendas_pagamentos para cálculo idêntico ao Modal
+    // NOTA CRÍTICA: NÃO aplique filtro restritivo de filial_id na tabela 'vendas' para não descartar
+    // vendas efetuadas pelo colaborador em outras filiais da rede durante o mês.
     let vendasQuery = supabase
       .from('vendas')
       .select(`
@@ -124,8 +126,6 @@ export async function fetchRankingColaboradoresMensal({
 
     if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
       vendasQuery = vendasQuery.or(`vendedor_id.eq.${colaboradorId},trainee_id.eq.${colaboradorId},treener_id.eq.${colaboradorId}`);
-    } else if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
-      vendasQuery = vendasQuery.eq('filial_id', filialId);
     }
 
     const { data: vendas, error: vendasError } = await vendasQuery;
@@ -137,20 +137,20 @@ export async function fetchRankingColaboradoresMensal({
     // Mapeamento com VÍNCULO DUPLO (ID ou NOME) e sincronização 1:1 com a lógica de metas do Modal:
     const resultado: RankingColaborador[] = colabsLista.map(colab => {
       const colabId = String(colab.id || '').trim();
-      const colabNome = String(colab.nome || '').trim().toLowerCase();
+      const colabNome = String(colab.nome || '').trim().toUpperCase();
 
-      // Vendas como titular (por ID ou por Nome normalizado)
+      // Vendas do colaborador: agrupamento prioritário por vendedor_id com fallback seguro por nome
       const vendasDoColaborador = vendasLista.filter(v => {
         const vId = v.vendedor_id ? String(v.vendedor_id).trim() : null;
-        const vNome = v.vendedor_nome ? String(v.vendedor_nome).trim().toLowerCase() : null;
-        return (vId && vId === colabId) || (vNome && (vNome === colabNome || (colabNome && vNome.includes(colabNome))));
+        const vNome = v.vendedor_nome ? String(v.vendedor_nome).trim().toUpperCase() : null;
+        return (vId && vId === colabId) || (vNome && colabNome && (vNome === colabNome || vNome.includes(colabNome)));
       });
 
       // Vendas com participação trainee
       const vendasComoTrainee = vendasLista.filter(v => {
         const tId = v.trainee_id || v.treener_id ? String(v.trainee_id || v.treener_id).trim() : null;
-        const tNome = v.trainee_nome ? String(v.trainee_nome).trim().toLowerCase() : null;
-        return (tId && tId === colabId) || (tNome && (tNome === colabNome || (colabNome && tNome.includes(colabNome))));
+        const tNome = v.trainee_nome ? String(v.trainee_nome).trim().toUpperCase() : null;
+        return (tId && tId === colabId) || (tNome && colabNome && (tNome === colabNome || tNome.includes(colabNome)));
       });
 
       const volumeTitular = vendasDoColaborador.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);

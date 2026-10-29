@@ -45,6 +45,7 @@ import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obte
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
+import { calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
 
 const extrairNumero = (valor) => {
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
@@ -5439,12 +5440,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
 
       const totalVendasCalculado = dataNormalizada.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
-      const total = consolidadoView
-        ? (Number(consolidadoView.faturado_titular || 0) + Number(consolidadoView.faturado_trainee || 0))
-        : totalVendasCalculado;
-      const qtd = consolidadoView
-        ? Number(consolidadoView.total_transacoes || dataNormalizada.length)
-        : dataNormalizada.length;
+      const qtdVendasCalculada = dataNormalizada.length;
+      const total = totalVendasCalculado > 0
+        ? totalVendasCalculado
+        : (consolidadoView ? (Number(consolidadoView.faturado_titular || 0) + Number(consolidadoView.faturado_trainee || 0)) : 0);
+      const qtd = qtdVendasCalculada > 0
+        ? qtdVendasCalculada
+        : (consolidadoView ? Number(consolidadoView.total_transacoes || 0) : 0);
       const media = qtd > 0 ? total / qtd : 0;
 
       // Atualizar os estados da UI do vendedor
@@ -17834,77 +17836,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
     });
 
-    // 2. CÁLCULO E DISTRIBUIÇÃO DAS VENDAS NOS CARDS:
+    // 2. CÁLCULO UNIFICADO DE METAS & DESEMPENHO (Compartilhado 1:1 com o Gerente):
     const listaVendas = (currentMonthSales && currentMonthSales.length > 0) ? currentMonthSales : (vendasVendedor || []);
 
-    // Helper robusto para identificar se a venda é de acessório (resiliente a acentos, case e singular/plural)
-    const isAcessorio = (venda) => {
-      const cat = (venda.categoria || venda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-      const prod = (venda.produto_nome || venda.produtos?.nome || venda.descricao || venda.produtos_descricao || venda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-
-      // Checa se a categoria é ACESSORIO(S)
-      if (cat.includes('ACESSORIO')) return true;
-
-      // Fallback se a categoria estiver genérica mas o nome do produto indicar acessório
-      const termosAcessorios = ['CAPA', 'CASE', 'PELICULA', 'FILME', 'FONE', 'FONTE', 'CABO', 'CARREGADOR', 'SUPORTE', 'POWERBANK', 'ADAPTADOR'];
-      if (termosAcessorios.some(termo => prod.includes(termo))) return true;
-
-      // Checagem complementar nos itens da venda se existirem
-      if (Array.isArray(venda.itens_venda) && venda.itens_venda.length > 0) {
-        return venda.itens_venda.some(item => {
-          const iCat = (item.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-          const iProd = (item.produto_nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-          return iCat.includes('ACESSORIO') || termosAcessorios.some(termo => iProd.includes(termo));
-        });
-      }
-
-      return false;
-    };
-
-    // Calcular o Total de Acessórios Realizado
-    const totalAcessorios = listaVendas
-      .filter(isAcessorio)
-      .reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
-
-    // Somar apenas vendas onde forma_pagamento/metodo_pagamento/financeira pertence a boleto ou financiadora (com suporte a pagamentos mistos)
-    let totalBoletosCalculado = 0;
-    listaVendas.forEach((v) => {
-      const status = String(v.status || '').toUpperCase().trim();
-      if (status === 'CANCELADA' || status === 'CANCELADO') return;
-
-      // 1º Prioridade: Se houver campo explícito 'valor_boleto' ou JSONB 'pagamentos'
-      if (Number(v.valor_boleto) > 0) {
-        totalBoletosCalculado += Number(v.valor_boleto);
-      } else if (Array.isArray(v.pagamentos) && v.pagamentos.length > 0) {
-        const parcelaBoleto = v.pagamentos
-          .filter((p) => {
-            const forma = String(p.forma || p.metodo || '').toUpperCase();
-            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
-          })
-          .reduce((acc, p) => acc + Number(p.valor || 0), 0);
-        totalBoletosCalculado += parcelaBoleto > 0 ? parcelaBoleto : 0;
-      } else if (Array.isArray(v.vendas_pagamentos) && v.vendas_pagamentos.length > 0) {
-        const parcelaBoletoVp = v.vendas_pagamentos
-          .filter((p) => {
-            const forma = String(p.forma || p.metodo || p.metodo_pagamento || p.forma_pagamento || p.financeira || '').toUpperCase();
-            return forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI');
-          })
-          .reduce((acc, p) => acc + Number(p.valor_pago || p.valor || 0), 0);
-        totalBoletosCalculado += parcelaBoletoVp > 0 ? parcelaBoletoVp : 0;
-      } else {
-        // 2º Fallback: Para vendas antigas de forma única gravada
-        const forma = String(v.forma_pagamento || v.metodo_pagamento || v.financeira || '').toUpperCase().trim();
-        if (forma.includes('BOLETO') || forma.includes('FINANC') || forma.includes('CREDI')) {
-          totalBoletosCalculado += Number(v.valor_total || v.valor || 0);
-        }
-      }
+    const desempenhoUnificado = calcularDesempenhoColaborador(listaVendas, {
+      isTrainee,
+      targetVendedorId: currentUserId || undefined,
+      targetVendedorNome: profileNome || undefined,
+      filtroTipoVendas: 'todas',
+      excluirEspeciaisDasMetas: true
     });
 
-    const totalBoletos = Math.round(totalBoletosCalculado * 100) / 100;
-
-    const totalVendasGeral = listaVendas.reduce((acc, s) => acc + parseFloat(s.valor_total || s.valor || 0), 0);
-    const salesCount = listaVendas.length;
-    const ticketMedio = salesCount > 0 ? totalVendasGeral / salesCount : 0;
+    const totalVendasGeral = desempenhoUnificado.totalVendasGeral;
+    const salesCount = desempenhoUnificado.totalTransacoes;
+    const ticketMedio = desempenhoUnificado.ticketMedio;
+    const totalBoletos = desempenhoUnificado.totalBoletos;
+    const totalAcessorios = desempenhoUnificado.totalAcessorios;
     const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
 
     // Porcentagem atingida
