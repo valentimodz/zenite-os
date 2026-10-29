@@ -28,6 +28,7 @@ import { useMinhasMetasIndividual } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatarMoeda } from '../utils/currencyUtils';
 import {
+  calcularDesempenhoGeral,
   calcularDesempenhoColaborador,
   calcularMetasColaborador,
   extrairValorBoletoVenda,
@@ -40,7 +41,7 @@ import {
   TERMOS_ESPECIAIS
 } from '../utils/calculoMetas';
 
-export { calcularMetasColaborador, calcularDesempenhoColaborador };
+export { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador };
 
 export const formatCurrency = (value?: number | string | null): string => {
   if (value === undefined || value === null || value === '' || isNaN(Number(value))) {
@@ -704,31 +705,27 @@ export default function ModalDesempenhoVendedor({
           }
         }
 
-        const totalFaturado = vendasValidas.reduce((acc, v) => acc + Number(v.valor_total || v.valor || 0), 0);
-        const totalComissao = vendasValidas.reduce((acc, v) => acc + Number(v.comissao_vendedor || v.comissao || 0), 0);
-        const totalQtd = vendasValidas.length;
-        const mediaTicket = totalQtd > 0 ? totalFaturado / totalQtd : 0;
-
-        // Cálculo unificado de Boletos e Acessórios com exclusão de Produtos Especiais
         const cargoNormalizado = String(colaborador?.cargo || (colaborador as any)?.funcao || '').toUpperCase().trim();
         const roleNormalizado = String(colaborador?.role || '').toUpperCase().trim();
         const isOriginalTrainee = cargoNormalizado.includes('TRAINEE') || roleNormalizado.includes('TRAINEE') || colaborador?.is_treinner === true;
 
-        const resumoMetas = calcularDesempenhoColaborador(vendasValidas, {
+        const modoVis: 'COM_APOIO' | 'SOLO' = filtroTipoVendas === 'solo' ? 'SOLO' : 'COM_APOIO';
+        const resumoGeral = calcularDesempenhoGeral(vendasValidas, modoVis, {
           isTrainee: isOriginalTrainee,
-          targetVendedorId: vendedorId,
-          targetVendedorNome: vendedorNome,
-          filtroTipoVendas,
-          excluirEspeciaisDasMetas: true
+          metaBoleto: objetivoBoleto,
+          superMetaBoleto: superMetaBoletoState,
+          metaAcessorios: objetivoAcessorios,
+          superMetaAcessorios: superMetaAcessoriosState,
+          metaTotal: metaTotalCombinada
         });
 
-        // Atualiza os estados da tela
-        setTotalVendas(totalFaturado);
-        setQtdVendas(totalQtd);
-        setTicketMedio(mediaTicket);
-        setComissoesAcumuladas(totalComissao);
-        setRealizadoBoletos(resumoMetas.totalBoletos);
-        setRealizadoAcessorios(resumoMetas.totalAcessorios);
+        // Atualiza os estados da tela com a fórmula unificada
+        setTotalVendas(resumoGeral.volumeTotal);
+        setQtdVendas(resumoGeral.transacoes);
+        setTicketMedio(resumoGeral.ticketMedio);
+        setComissoesAcumuladas(resumoGeral.comissaoLiquida);
+        setRealizadoBoletos(resumoGeral.totalBoletos);
+        setRealizadoAcessorios(resumoGeral.totalAcessorios);
         setVendasColaborador(vendasValidas as Venda[]);
         setVendasLocais(vendasValidas as any[]);
       }
@@ -737,7 +734,7 @@ export default function ModalDesempenhoVendedor({
     } finally {
       setIsLoading(false);
     }
-  }, [targetVendedorId, targetVendedorNome, mesAtivo, mesCompetencia, colaboradorFilialId]);
+  }, [targetVendedorId, targetVendedorNome, mesAtivo, mesCompetencia, colaboradorFilialId, filtroTipoVendas, objetivoBoleto, superMetaBoletoState, objetivoAcessorios, superMetaAcessoriosState, metaTotalCombinada, colaborador]);
 
   const carregarDadosMetas = carregarDadosVendedor;
 
@@ -867,44 +864,6 @@ export default function ModalDesempenhoVendedor({
     }
   }, [mounted, colaboradorId, colaborador, mesAtivo, mesCompetencia, vendasColaborador, vendasCache]);
 
-  // 2. CONECTAR RPC 'obter_resumo_metas_vendedor' PARA METAS EXATAS
-  useEffect(() => {
-    const carregarDadosRPC = async () => {
-      const targetId = targetVendedorId || colaboradorId || (colaborador as any)?.id || (colaborador as any)?.vendedorId;
-      if (!targetId || !mounted) return;
-
-      const [ano, mes] = (mesAtivo || mesCompetencia || '2026-10').split('-');
-      const dtInicio = new Date(Date.UTC(Number(ano), Number(mes) - 1, 1, 0, 0, 0)).toISOString();
-      const dtFim = new Date(Date.UTC(Number(ano), Number(mes), 0, 23, 59, 59, 999)).toISOString();
-
-      try {
-        const { data, error } = await supabase.rpc('obter_resumo_metas_vendedor', {
-          p_vendedor_id: targetId,
-          p_data_inicio: dtInicio,
-          p_data_fim: dtFim
-        });
-
-        if (!error && data) {
-          if (data.realizado_acessorios !== undefined && data.realizado_acessorios !== null) {
-            setRealizadoAcessorios(prev => Math.max(prev, Number(data.realizado_acessorios || 0)));
-          }
-          if (data.total_vendas !== undefined && data.total_vendas !== null && Number(data.total_vendas) > 0) {
-            setTotalVendas(prev => Math.max(prev, Number(data.total_vendas || 0)));
-          }
-          if (data.total_comissao !== undefined && data.total_comissao !== null && Number(data.total_comissao) > 0) {
-            setComissoesAcumuladas(prev => Math.max(prev, Number(data.total_comissao || 0)));
-          }
-        }
-      } catch (err) {
-        console.warn('[ModalDesempenhoVendedor] Aviso ao chamar RPC obter_resumo_metas_vendedor:', err);
-      }
-    };
-
-    if (mounted) {
-      carregarDadosRPC();
-    }
-  }, [mounted, targetVendedorId, colaboradorId, colaborador, mesAtivo, mesCompetencia]);
-
   // 3. ATUALIZAR NO USEEFFECT:
   // Executa carregarRegrasMetas() e carregarDadosVendedor() quando o modal for aberto ou filialId/mesAtivo mudarem
   useEffect(() => {
@@ -918,14 +877,9 @@ export default function ModalDesempenhoVendedor({
     }
   }, [mounted, colaboradorFilialId, targetVendedorId, targetVendedorNome, mesAtivo, carregarRegrasMetas, carregarDadosVendedor]);
 
-  // Cálculos do Dashboard do Colaborador com regras oficiais da tabela 'regras_comissoes' e 'metas'
+  // Cálculos do Dashboard do Colaborador 100% centralizados via calcularDesempenhoGeral
   const dashboardInfo = useMemo(() => {
-    const fTitularView = Number(dadosViewConsolidada?.faturado_titular || 0);
-    const fTraineeView = Number(dadosViewConsolidada?.faturado_trainee || 0);
-
-    // 1. CORREÇÃO DA CLASSIFICAÇÃO DE TRAINEE:
-    // O colaborador só deve ser considerado Trainee (isTrainee) se o seu cargo ou função for explicitamente de trainee.
-    // Jamais considerar um vendedor titular como trainee apenas porque vendeu mais com apoio de trainee do que solo.
+    // 1. Classificação estrita de Trainee (apenas se o cargo ou função for explicitamente de trainee)
     const cargoNormalizado = String(colaborador?.cargo || (colaborador as any)?.funcao || '').toUpperCase().trim();
     const roleNormalizado = String(colaborador?.role || '').toUpperCase().trim();
     const isOriginalTrainee = Boolean(
@@ -935,10 +889,9 @@ export default function ModalDesempenhoVendedor({
     );
     const isTrainee = isOriginalTrainee;
 
-    // Mapeamento oficial de metas com prioridade para regras_comissoes da filial
+    // 2. Mapeamento oficial de metas com prioridade para meta individual e regras_comissoes da filial
     const metaBanco = metaIndividual;
 
-    // Prioriza meta individual se existir e for maior que 0, senão utiliza a meta de regras_comissoes
     const metaBoleto = Number(metaBanco?.meta_boleto) > 0
       ? Number(metaBanco?.meta_boleto)
       : (isTrainee
@@ -951,7 +904,6 @@ export default function ModalDesempenhoVendedor({
         ? 5000
         : (objetivoAcessorios > 0 ? objetivoAcessorios : 10000));
 
-    // META TOTAL COMBINADA: soma de meta_boleto + meta_acessorios (ou metaTotalCombinada calculada)
     const metaTotal = metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios);
 
     const superMetaBoleto = Number(metaBanco?.super_meta_boleto) > 0
@@ -975,154 +927,49 @@ export default function ModalDesempenhoVendedor({
           ? propVendasColaborador
           : ((Array.isArray(vendasCache) && vendasCache.length > 0)
             ? vendasCache
-            : ((Array.isArray((colaborador as any)?.vendas) && (colaborador as any).vendas.length > 0)
-              ? (colaborador as any).vendas
-              : ((Array.isArray((colaborador as any)?.extrato) && (colaborador as any).extrato.length > 0)
-                ? (colaborador as any).extrato
-                : [])))));
+            : ((Array.isArray((colaborador as any)?.vendas_colaborador) && (colaborador as any).vendas_colaborador.length > 0)
+              ? (colaborador as any).vendas_colaborador
+              : ((Array.isArray((colaborador as any)?.vendas) && (colaborador as any).vendas.length > 0)
+                ? (colaborador as any).vendas
+                : ((Array.isArray((colaborador as any)?.extrato) && (colaborador as any).extrato.length > 0)
+                  ? (colaborador as any).extrato
+                  : []))))));
 
     const sales = (vendasParaCalculo || []) as any[];
-    const rawSalesCount = sales.length;
-    const rawTotalVendasGeral = sales.reduce((acc, s) => acc + parseFloat(String(s.valor_total || s.valor || 0)), 0);
+    const modoVisualizacao: 'COM_APOIO' | 'SOLO' = filtroTipoVendas === 'solo' ? 'SOLO' : 'COM_APOIO';
 
-    // 3, 4 e 5. CÁLCULO UNIFICADO DE BOLETOS, ACESSÓRIOS E PRODUTOS ESPECIAIS (via calculoMetas.ts)
-    const desempenhoMetas = calcularDesempenhoColaborador(sales, {
+    // 3. Centralização Única via calcularDesempenhoGeral
+    const desempenhoGeral = calcularDesempenhoGeral(sales, modoVisualizacao, {
       isTrainee,
-      targetVendedorId: targetVendedorId || undefined,
-      targetVendedorNome: targetVendedorNome || undefined,
-      filtroTipoVendas,
-      excluirEspeciaisDasMetas: true
+      metaBoleto,
+      superMetaBoleto,
+      metaAcessorios,
+      superMetaAcessorios,
+      metaTotal
     });
 
-    // O total faturado e quantidade de vendas devem refletir prioritariamente o conjunto real de vendas (sales)
-    // para sincronização perfeita com o login do vendedor:
-    const totalVendasGeral = desempenhoMetas.totalVendasGeral > 0
-      ? desempenhoMetas.totalVendasGeral
-      : (rawTotalVendasGeral > 0
-        ? rawTotalVendasGeral
-        : (totalVendas > 0 ? totalVendas : Number(dadosViewConsolidada?.volume_total_participado || 0)));
+    const totalVendasGeral = desempenhoGeral.volumeTotal;
+    const salesCount = desempenhoGeral.transacoes;
+    const ticketMedioCalc = desempenhoGeral.ticketMedio;
+    const totalBoletos = desempenhoGeral.totalBoletos;
+    const totalAcessorios = desempenhoGeral.totalAcessorios;
+    const totalAVista = desempenhoGeral.totalAVista;
+    const progressoTotal = desempenhoGeral.progressoTotal;
+    const progressoBoleto = desempenhoGeral.progressoBoleto;
+    const progressoAcessorios = desempenhoGeral.progressoAcessorios;
+    const badgeBoleto = desempenhoGeral.badgeBoleto;
+    const badgeAcessorios = desempenhoGeral.badgeAcessorios;
+    const faturadoTitularSolo = desempenhoGeral.faturadoTitularSolo;
+    const faturadoComApoioTrainee = desempenhoGeral.faturadoComApoioTrainee;
+    const totalFaturadoEspeciais = desempenhoGeral.totalFaturadoEspeciais;
+    const quantidadeItensEspeciais = desempenhoGeral.quantidadeItensEspeciais;
+    const ticketMedioEspeciais = desempenhoGeral.ticketMedioEspeciais;
 
-    const salesCount = desempenhoMetas.totalTransacoes > 0
-      ? desempenhoMetas.totalTransacoes
-      : (rawSalesCount > 0
-        ? rawSalesCount
-        : (qtdVendas > 0 ? qtdVendas : Number(dadosViewConsolidada?.total_transacoes || 0)));
-
-    const ticketMedioCalc = salesCount > 0 ? totalVendasGeral / salesCount : Number(dadosViewConsolidada?.ticket_medio || 0);
-    const faturadoTitularView = dadosViewConsolidada?.faturado_titular ?? 0;
-    const faturadoTraineeView = dadosViewConsolidada?.faturado_trainee ?? 0;
-
-    // Cálculo detalhado de Participação Trainee nas vendas:
-    // faturadoComApoioTrainee: vendas onde o titular vendeu com apoio de trainee (trainee_nome preenchido, teve_participacao_trainee, etc.)
-    // faturadoTitularSolo: vendas onde o titular vendeu sozinho sem apoio de trainee
-    let faturadoComApoioTraineeCalc = 0;
-    let faturadoTitularSoloCalc = 0;
-
-    sales.forEach(sale => {
-      const val = parseFloat(String(sale.valor_total || sale.valor || 0));
-      if (val > 0) {
-        if (temApoioTrainee(sale)) {
-          faturadoComApoioTraineeCalc += val;
-        } else {
-          faturadoTitularSoloCalc += val;
-        }
-      }
-    });
-
-    const nomeColabUpper = (colaborador?.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-    const isSetembro2026 = (mesAtivo || mesCompetencia).startsWith('2026-09');
-    const isIslayne = nomeColabUpper.includes('ISLAYNE');
-
-    // Validação específica da folha oficial de Setembro/2026 para apoio Trainee se view ainda não computou
-    const faturadoComApoioTrainee = faturadoComApoioTraineeCalc > 0
-      ? faturadoComApoioTraineeCalc
-      : (isIslayne && isSetembro2026 ? 11133.92 : (faturadoTraineeView > 0 ? faturadoTraineeView : 0));
-
-    const faturadoTitularSolo = faturadoTitularSoloCalc > 0
-      ? faturadoTitularSoloCalc
-      : (totalVendasGeral > faturadoComApoioTrainee ? totalVendasGeral - faturadoComApoioTrainee : totalVendasGeral);
-
-    // 3, 4 e 5. CÁLCULO UNIFICADO DE BOLETOS, ACESSÓRIOS E PRODUTOS ESPECIAIS (via calculoMetas.ts)
-    const totalBoletos = Math.round(
-      (filtroTipoVendas === 'todas'
-        ? (desempenhoMetas.totalBoletos > 0 ? desempenhoMetas.totalBoletos : (realizadoBoletos > 0 ? realizadoBoletos : 0))
-        : (desempenhoMetas.totalBoletos > 0 ? desempenhoMetas.totalBoletos : 0)) * 100
-    ) / 100;
-
-    const totalAcessorios = Math.round(
-      (filtroTipoVendas === 'todas'
-        ? (desempenhoMetas.totalAcessorios > 0 ? desempenhoMetas.totalAcessorios : (realizadoAcessorios > 0 ? realizadoAcessorios : 0))
-        : (desempenhoMetas.totalAcessorios > 0 ? desempenhoMetas.totalAcessorios : 0)) * 100
-    ) / 100;
-
-    const totalFaturadoEspeciais = desempenhoMetas.totalFaturadoEspeciais;
-    const quantidadeItensEspeciais = desempenhoMetas.quantidadeItensEspeciais;
-    const ticketMedioEspeciais = desempenhoMetas.ticketMedioEspeciais;
-
-    const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
-
-    // Recálculo do Progresso (%) Proporcional
-    const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((totalVendasGeral / metaTotal) * 100)) : 0;
-    const progressoBoleto = metaBoleto > 0 ? Math.round((totalBoletos / metaBoleto) * 100) : 0;
-    const progressoAcessorios = metaAcessorios > 0 ? Number(((totalAcessorios / metaAcessorios) * 100).toFixed(1)) : 0;
-
-    // Badges Boletos
-    let taxaBoletoNum = 0.01;
-    let badgeBoleto = {
-      taxa: '1,0%',
-      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
-      status: 'abaixo',
-      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
-    };
-    if (totalBoletos >= superMetaBoleto) {
-      taxaBoletoNum = 0.032;
-      badgeBoleto = {
-        taxa: '3,2%',
-        texto: 'Faixa Atual: Super Meta (3,2% 🔥)',
-        status: 'super',
-        classe: 'bg-purple-950/60 text-purple-300 border border-purple-700/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
-      };
-    } else if (totalBoletos >= metaBoleto) {
-      taxaBoletoNum = 0.03;
-      badgeBoleto = {
-        taxa: '3,0%',
-        texto: 'Faixa Atual: Meta Batida (3,0% 🚀)',
-        status: 'batida',
-        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
-      };
-    }
-
-    // Badges Acessórios
-    let taxaAcessoriosNum = 0.01;
-    let badgeAcessorios = {
-      taxa: '1,0%',
-      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
-      status: 'abaixo',
-      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
-    };
-    if (totalAcessorios >= superMetaAcessorios) {
-      taxaAcessoriosNum = 0.03;
-      badgeAcessorios = {
-        taxa: '3,0%',
-        texto: 'Faixa Atual: Super Meta (3,0% 🔥)',
-        status: 'super',
-        classe: 'bg-pink-950/60 text-pink-300 border border-pink-700/60 shadow-[0_0_12px_rgba(244,114,182,0.3)]'
-      };
-    } else if (totalAcessorios >= metaAcessorios) {
-      taxaAcessoriosNum = 0.025;
-      badgeAcessorios = {
-        taxa: '2,5%',
-        texto: 'Faixa Atual: Meta Batida (2,5% 🚀)',
-        status: 'batida',
-        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
-      };
-    }
-
-    // Comissões Acumuladas
-    let totalComissoesHistorico = 0;
-    let totalComissaoComoTitular = 0;
-    let totalComissaoComoTrainee = 0;
-    let totalComissaoGeradaParaTrainees = 0; // Soma da comissão repassada/gerada para trainees em vendas de apoio
+    const totalComissoes = desempenhoGeral.comissaoLiquida;
+    const comissaoTitularExclusiva = desempenhoGeral.comissaoLiquida;
+    const totalComissaoComoTitular = desempenhoGeral.comissaoLiquida;
+    const totalComissaoComoTrainee = desempenhoGeral.comissaoTrainee;
+    const totalComissaoGeradaParaTrainees = desempenhoGeral.comissaoTrainee;
 
     // Lista de extrato de vendas com trainee
     interface ExtratoVendaTrainee {
@@ -1137,36 +984,17 @@ export default function ModalDesempenhoVendedor({
     const extratoVendasComTrainee: ExtratoVendaTrainee[] = [];
 
     sales.forEach(s => {
-      const vSalva = s.comissao_vendedor ?? s.comissao ?? s.valor_comissao ?? s.itens_venda?.[0]?.comissao;
-      const vTitular = (vSalva !== undefined && vSalva !== null && vSalva !== '') ? Number(vSalva) : null;
-      const valTotal = Number(s.valor_total || s.valor || 0);
-
-      // Comissão do trainee calculada ou explícita
-      let cTraineeCalc = 0;
-      if (s.comissao_trainee !== undefined && s.comissao_trainee !== null && s.comissao_trainee !== '') {
-        const parsed = parseFloat(s.comissao_trainee);
-        cTraineeCalc = !isNaN(parsed) ? parsed : 0;
-      }
-      if (cTraineeCalc <= 0 && temApoioTrainee(s) && valTotal > 0) {
-        cTraineeCalc = Number((valTotal * 0.01).toFixed(2));
-      }
-
-      if (isTrainee) {
-        const cTitular = vTitular !== null ? vTitular : calcularComissaoItem(s, true);
-        totalComissaoComoTitular += cTitular;
-        totalComissaoComoTrainee += cTraineeCalc;
-        totalComissoesHistorico += (cTitular + cTraineeCalc);
-      } else {
-        const c = vTitular !== null ? vTitular : calcularComissaoItem(s, false);
-        totalComissaoComoTitular += c;
-        totalComissoesHistorico += c;
-        if (temApoioTrainee(s)) {
-          totalComissaoGeradaParaTrainees += cTraineeCalc;
-        }
-      }
-
-      // Adiciona ao extrato se teve apoio/participação de trainee
       if (temApoioTrainee(s)) {
+        const valTotal = Number(s.valor_total || s.valor || 0);
+        let cTraineeCalc = 0;
+        if (s.comissao_trainee !== undefined && s.comissao_trainee !== null && s.comissao_trainee !== '') {
+          const parsed = parseFloat(s.comissao_trainee);
+          cTraineeCalc = !isNaN(parsed) ? parsed : 0;
+        }
+        if (cTraineeCalc <= 0 && valTotal > 0) {
+          cTraineeCalc = Number((valTotal * 0.01).toFixed(2));
+        }
+
         const itens = Array.isArray(s.itens_venda) ? s.itens_venda : [];
         let nomeBase = s.produto_nome || s.descricao || (itens.length > 0 ? itens[0]?.produto_nome : null) || 'Produto / Pedido';
         if (itens.length > 1) {
@@ -1186,34 +1014,6 @@ export default function ModalDesempenhoVendedor({
         });
       }
     });
-
-    const comissaoBoletosCalc = totalBoletos * taxaBoletoNum;
-    const comissaoAcessoriosCalc = totalAcessorios * taxaAcessoriosNum;
-    const comissaoAVistaCalc = totalAVista * 0.01;
-    const comissaoCalculadaPorMetas = comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc;
-
-    // Regra da folha oficial homologada de Setembro/2026 para os vendedores da rede
-    let comissaoHomologadaOficial: number | null = null;
-    if (isSetembro2026) {
-      if (nomeColabUpper.includes('ISLAYNE')) {
-        comissaoHomologadaOficial = 2775.39;
-      } else if (nomeColabUpper.includes('REGIANE')) {
-        comissaoHomologadaOficial = 2076.62;
-      } else if (nomeColabUpper.includes('AMANDA')) {
-        comissaoHomologadaOficial = 1889.63;
-      } else if (nomeColabUpper.includes('SENNA')) {
-        comissaoHomologadaOficial = 1162.02;
-      }
-    }
-
-    const totalComissoes = comissaoHomologadaOficial !== null
-      ? comissaoHomologadaOficial
-      : (comissoesAcumuladas > 0 ? comissoesAcumuladas : (totalComissoesHistorico > 0 ? totalComissoesHistorico : comissaoCalculadaPorMetas));
-
-    // Comissão exclusiva do titular
-    const comissaoTitularExclusiva = comissaoHomologadaOficial !== null
-      ? comissaoHomologadaOficial
-      : (totalComissaoComoTitular > 0 ? totalComissaoComoTitular : totalComissoes);
 
     // Evolução diária (dias 1 a 31)
     const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
@@ -1279,6 +1079,8 @@ export default function ModalDesempenhoVendedor({
     metaIndividual,
     vendasColaborador,
     vendasLocais,
+    propVendasColaborador,
+    vendasCache,
     dadosViewConsolidada,
     colaboradorId,
     colaborador?.nome,
@@ -1287,12 +1089,6 @@ export default function ModalDesempenhoVendedor({
     colaborador?.is_treinner,
     mesAtivo,
     mesCompetencia,
-    totalVendas,
-    qtdVendas,
-    ticketMedio,
-    comissoesAcumuladas,
-    realizadoBoletos,
-    realizadoAcessorios,
     objetivoBoleto,
     superMetaBoletoState,
     objetivoAcessorios,

@@ -45,7 +45,7 @@ import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obte
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
-import { calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
 
 const extrairNumero = (valor) => {
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
@@ -4254,8 +4254,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao_trainee,
             teve_participacao_trainee,
             filiais ( nome ),
-            usuarios:vendedor_id ( id, nome ),
-            itens_venda (
+              itens_venda (
               id,
               produto_id,
               produto_nome,
@@ -17836,151 +17835,41 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
     });
 
-    // 2. CÁLCULO UNIFICADO DE METAS & DESEMPENHO (Compartilhado 1:1 com o Gerente):
+    // 2. CÁLCULO UNIFICADO DE METAS & DESEMPENHO (Centralizado 100% em calcularDesempenhoGeral):
     const listaVendas = (currentMonthSales && currentMonthSales.length > 0) ? currentMonthSales : (vendasVendedor || []);
 
-    const desempenhoUnificado = calcularDesempenhoColaborador(listaVendas, {
+    const desempenhoUnificado = calcularDesempenhoGeral(listaVendas, 'COM_APOIO', {
       isTrainee,
       targetVendedorId: currentUserId || undefined,
       targetVendedorNome: profileNome || undefined,
-      filtroTipoVendas: 'todas',
-      excluirEspeciaisDasMetas: true
+      excluirEspeciaisDasMetas: true,
+      metaBoleto,
+      superMetaBoleto,
+      metaAcessorios,
+      superMetaAcessorios,
+      metaTotal
     });
 
-    const totalVendasGeral = desempenhoUnificado.totalVendasGeral;
-    const salesCount = desempenhoUnificado.totalTransacoes;
+    const totalVendasGeral = desempenhoUnificado.volumeTotal;
+    const salesCount = desempenhoUnificado.transacoes;
     const ticketMedio = desempenhoUnificado.ticketMedio;
     const totalBoletos = desempenhoUnificado.totalBoletos;
     const totalAcessorios = desempenhoUnificado.totalAcessorios;
-    const totalAVista = Math.max(0, totalVendasGeral - totalBoletos - totalAcessorios);
+    const totalAVista = desempenhoUnificado.totalAVista;
 
-    // Porcentagem atingida
-    const progressoBoleto = metaBoleto > 0 ? Math.min(100, Math.round((totalBoletos / metaBoleto) * 100)) : 0;
-    const progressoAcessorios = metaAcessorios > 0 ? Math.min(100, Math.round((totalAcessorios / metaAcessorios) * 100)) : 0;
-    const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((totalVendasGeral / metaTotal) * 100)) : 0;
+    const progressoBoleto = desempenhoUnificado.progressoBoleto;
+    const progressoAcessorios = desempenhoUnificado.progressoAcessorios;
+    const progressoTotal = desempenhoUnificado.progressoTotal;
 
-    const faltaAcessorios = Math.max(0, metaAcessorios - totalAcessorios);
-    const faltaSuperAcessorios = Math.max(0, superMetaAcessorios - totalAcessorios);
+    const faltaAcessorios = desempenhoUnificado.faltaAcessorios;
+    const faltaSuperAcessorios = desempenhoUnificado.faltaSuperAcessorios;
 
-    // Badges e Faixas de Comissão Boletos
-    let taxaBoletoNum = 0.01;
-    let badgeBoleto = {
-      taxa: '1,0%',
-      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
-      status: 'abaixo',
-      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
-    };
-    if (totalBoletos >= superMetaBoleto) {
-      taxaBoletoNum = 0.032;
-      badgeBoleto = {
-        taxa: '3,2%',
-        texto: 'Faixa Atual: 3,2% (Super Meta! 🔥)',
-        status: 'super',
-        classe: 'bg-purple-950/60 text-purple-300 border border-purple-700/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
-      };
-    } else if (totalBoletos >= metaBoleto) {
-      taxaBoletoNum = 0.03;
-      badgeBoleto = {
-        taxa: '3,0%',
-        texto: 'Faixa Atual: 3,0% (Meta Batida! 🚀)',
-        status: 'batida',
-        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
-      };
-    }
+    const badgeBoleto = desempenhoUnificado.badgeBoleto;
+    const badgeAcessorios = desempenhoUnificado.badgeAcessorios;
 
-    // Badges e Faixas de Comissão Acessórios:
-    // * < R$ 10.000: "Faixa Atual: 1,0% (Abaixo da Meta)"
-    // * >= R$ 10.000 e < R$ 15.000: "Faixa Atual: 2,5% (Meta Batida! 🚀)"
-    // * >= R$ 15.000: "Faixa Atual: 3,0% (Super Meta! 🔥)"
-    let taxaAcessoriosNum = 0.01;
-    let badgeAcessorios = {
-      taxa: '1,0%',
-      texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
-      status: 'abaixo',
-      classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
-    };
-    if (totalAcessorios >= 15000 || totalAcessorios >= superMetaAcessorios) {
-      taxaAcessoriosNum = 0.03;
-      badgeAcessorios = {
-        taxa: '3,0%',
-        texto: 'Faixa Atual: 3,0% (Super Meta! 🔥)',
-        status: 'super',
-        classe: 'bg-pink-950/60 text-pink-300 border border-pink-700/60 shadow-[0_0_12px_rgba(244,114,182,0.3)]'
-      };
-    } else if (totalAcessorios >= 10000 || totalAcessorios >= metaAcessorios) {
-      taxaAcessoriosNum = 0.025;
-      badgeAcessorios = {
-        taxa: '2,5%',
-        texto: 'Faixa Atual: 2,5% (Meta Batida! 🚀)',
-        status: 'batida',
-        classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
-      };
-    }
-
-    // "COMISSÕES ACUMULADAS": Somatório das comissões como vendedor titular + comissão bonificada de trainee
-    let totalComissoesHistorico = 0;
-    let totalComissaoComoTitular = 0;
-    let totalComissaoComoTrainee = 0;
-
-    currentMonthSales.forEach(s => {
-      const saleUserId = s.vendedor_id || s.usuario_id || s.criado_por;
-      const saleTraineeId = s.trainee_id || s.treener_id;
-      const saleVendedorNome = (s.vendedor_nome || '').toLowerCase().trim();
-      const nomeVendedorLogado = userNome || '';
-
-      const isTitular = (
-        (userAuthId && String(saleUserId) === String(userAuthId)) ||
-        (profileId && String(saleUserId) === String(profileId)) ||
-        (currentUserId && String(saleUserId) === String(currentUserId)) ||
-        (Boolean(nomeVendedorLogado) && saleVendedorNome.includes(nomeVendedorLogado))
-      );
-
-      const isTraineePart = (
-        (userAuthId && String(saleTraineeId) === String(userAuthId)) ||
-        (profileId && String(saleTraineeId) === String(profileId)) ||
-        (currentUserId && String(saleTraineeId) === String(currentUserId))
-      );
-
-      let comissaoTitular = 0;
-      let comissaoTraineePart = 0;
-
-      if (isTitular) {
-        comissaoTitular = Number(s.comissao || 0);
-        if (comissaoTitular <= 0) {
-          comissaoTitular = calcularComissaoItem(s);
-        }
-      }
-
-      if (isTraineePart) {
-        comissaoTraineePart = Number(s.comissao_trainee || 0);
-        if (comissaoTraineePart <= 0 && s.teve_participacao_trainee) {
-          comissaoTraineePart = Number((Number(s.valor_total || 0) * 0.01).toFixed(2));
-        }
-      }
-
-      // Se não caiu estritamente em nenhum, fallback inteligente
-      if (!isTitular && !isTraineePart) {
-        if (isTrainee) {
-          comissaoTitular = Number(s.comissao || 0) || calcularComissaoItem(s);
-          comissaoTraineePart = Number(s.comissao_trainee || 0);
-        } else {
-          comissaoTitular = Number(s.comissao || 0) || calcularComissaoItem(s);
-        }
-      }
-
-      totalComissaoComoTitular += comissaoTitular;
-      totalComissaoComoTrainee += comissaoTraineePart;
-      totalComissoesHistorico += (comissaoTitular + comissaoTraineePart);
-    });
-
-    const comissaoBoletosCalc = totalBoletos * taxaBoletoNum;
-    const comissaoAcessoriosCalc = totalAcessorios * taxaAcessoriosNum;
-    const comissaoAVistaCalc = totalAVista * 0.01;
-    const comissaoCalculadaPorMetas = comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc;
-
-    const totalComissoes = isTrainee
-      ? totalComissoesHistorico
-      : Math.max(comissaoCalculadaPorMetas, totalComissoesHistorico);
+    const totalComissaoComoTitular = desempenhoUnificado.comissaoLiquida;
+    const totalComissaoComoTrainee = desempenhoUnificado.comissaoTrainee;
+    const totalComissoes = desempenhoUnificado.comissaoLiquida;
 
     // 3. Garantir a Distribuição no Gráfico Diário (Dias 1 a 30):
     const diasNoMes = new Date(anoAlvo, mesAlvoIdx + 1, 0).getDate();

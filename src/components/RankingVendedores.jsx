@@ -5,6 +5,7 @@ import ModalDesempenhoVendedor, { formatCurrency } from './ModalDesempenhoVended
 import PeriodoSelector from './common/PeriodoSelector';
 import { useMetasRankings } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
+import { calcularDesempenhoGeral } from '../utils/calculoMetas';
 
 // Helper de cálculo dinâmico de comissão do vendedor titular por item / modalidade
 export function calcularComissaoVendedorItem(v, teveTrainee = false) {
@@ -293,117 +294,57 @@ export default function RankingVendedores({
       const faturadoTitular = Number(vr.faturado_titular || 0);
       const faturadoTrainee = Number(vr.faturado_trainee || 0);
       const volumeTotal = Number(vr.volume_total_participado || 0);
-      const totalTransacoes = Number(vr.total_transacoes || 0);
 
-      // Regra 1: Definição Inteligente de Cargo (Badge)
-      // isTrainee = Number(item.faturado_trainee || 0) > Number(item.faturado_titular || 0) || item.cargo_original === 'Trainee'
+      // Definição estrita de Cargo (Trainee apenas se cargo/role for Trainee ou se só houver vendas como trainee)
       const cargoOriginal = colabDb?.cargo || colabDb?.role;
-      const isOriginalTrainee = cargoOriginal === 'TRAINEE' || cargoOriginal === 'Trainee' || Boolean(colabDb?.is_treinner);
-      const isTrainee = faturadoTrainee > faturadoTitular || isOriginalTrainee || (faturadoTitular === 0 && faturadoTrainee > 0);
+      const roleUpper = String(cargoOriginal || '').toUpperCase().trim();
+      const isOriginalTrainee = roleUpper.includes('TRAINEE') || Boolean(colabDb?.is_treinner);
+      const isTrainee = isOriginalTrainee || (faturadoTitular === 0 && faturadoTrainee > 0);
 
-      // Regra 2: Volume em Destaque
-      // Para quem é Trainee: o valor principal em destaque deve ser o 'volume_total_participado' (ou 'faturado_trainee')
-      // Para quem é Profissional/Titular: o valor principal é o 'faturado_titular'
-      const volumeDestaque = isTrainee
-        ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
-        : (faturadoTitular > 0 ? faturadoTitular : volumeTotal);
-
-      // Regra 3: Cálculo do Ticket Médio
-      // Deve ser sempre: Volume Exibido em Destaque ÷ total_transacoes
-      const ticketMedioConsistente = totalTransacoes > 0
-        ? (volumeDestaque / totalTransacoes)
-        : Number(vr.ticket_medio || 0);
-
-      // Regra 4: Cálculo da Comissão Acumulada Real (Conforme Folha Oficial da Rede)
-      // Consulta regras configuradas nas metas individuais ou da filial do vendedor / contrato
       const colabIdStr = String(vr.colaborador_id);
       const metaColab = metasVendedoresMap[colabIdStr];
       const targetFilialId = String(vr.filial_id || colabDb?.filial_id || '');
       const regraFilial = regrasFiliaisMap[targetFilialId];
 
-      // Determinação da Meta e Super Meta do vendedor
       const metaBoleto = Number(metaColab?.meta_boleto) > 0
         ? Number(metaColab.meta_boleto)
         : (isTrainee ? (Number(metaColab?.meta_trainee_boleto) || Number(regraFilial?.meta_trainee_boletos) || 35000) : (Number(regraFilial?.meta_vendedor_boleto) || 67500));
+
+      const superMetaBoleto = Number(metaColab?.super_meta_boleto) > 0
+        ? Number(metaColab.super_meta_boleto)
+        : (isTrainee ? 45000 : (Number(regraFilial?.super_meta_boleto) || 87000));
 
       const metaAcessorios = Number(metaColab?.meta_acessorios) > 0
         ? Number(metaColab.meta_acessorios)
         : (isTrainee ? 5000 : (Number(regraFilial?.meta_vendedor_acessorios) || 10000));
 
-      const metaTotal = Number(metaColab?.valor_meta) > 0 
-        ? Number(metaColab.valor_meta) 
-        : (metaBoleto + metaAcessorios);
+      const superMetaAcessorios = Number(metaColab?.super_meta_acessorios) > 0
+        ? Number(metaColab.super_meta_acessorios)
+        : (isTrainee ? 7500 : (Number(regraFilial?.super_meta_acessorios) || 15000));
 
-      const superMetaTotal = (Number(metaColab?.super_meta_boleto) || 87000) + (Number(metaColab?.super_meta_acessorios) || 15000);
+      // Centralização Única via calcularDesempenhoGeral
+      const vendasColab = Array.isArray(vr.vendas_colaborador) ? vr.vendas_colaborador : [];
+      const calc = vendasColab.length > 0
+        ? calcularDesempenhoGeral(vendasColab, 'COM_APOIO', {
+            isTrainee,
+            metaBoleto,
+            superMetaBoleto,
+            metaAcessorios,
+            superMetaAcessorios
+          })
+        : null;
 
-      // Percentual de contrato ou taxa batida customizada cadastrada no colaborador/meta
-      const taxaContratoCustom = Number(colabDb?.percentual_comissao || colabDb?.taxa_comissao || metaColab?.percentual_comissao || metaColab?.taxa_comissao_batida || 0);
-
-      // Verificação de Folha Oficial Homologada de Setembro de 2026 (Monkey Shop)
-      const nomeUpper = (vr.colaborador || colabDb?.nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-      const compAlvo = filtroMes || currentMonthStr;
-      const isSetembro2026 = compAlvo.startsWith('2026-09');
-
-      // Tabela oficial homologada de Setembro/2026 para os vendedores da Monkey Shop:
-      // - ISLAYNE COELHO: R$ 2.775,39 (~2,07% devido ao peso dos iPhones fixos R$ 30)
-      // - REGIANE BARROZO: R$ 2.076,62 (~2,45% devido ao volume em PayJoy)
-      // - AMANDA: R$ 1.889,63 (~2,32%)
-      // - SENNA: R$ 1.162,02 (~2,07%)
-      let comissaoHomologadaOficial = null;
-      let taxaHomologadaOficial = null;
-
-      if (isSetembro2026) {
-        if (nomeUpper.includes('ISLAYNE')) {
-          comissaoHomologadaOficial = 2775.39;
-          taxaHomologadaOficial = 0.0207;
-        } else if (nomeUpper.includes('REGIANE')) {
-          comissaoHomologadaOficial = 2076.62;
-          taxaHomologadaOficial = 0.0245;
-        } else if (nomeUpper.includes('AMANDA')) {
-          comissaoHomologadaOficial = 1889.63;
-          taxaHomologadaOficial = 0.0232;
-        } else if (nomeUpper.includes('SENNA')) {
-          comissaoHomologadaOficial = 1162.02;
-          taxaHomologadaOficial = 0.0207;
-        }
-      }
-
-      // Definição da taxa de comissão efetiva para Meta Batida (varia entre 2,1% e 2,5% conforme a folha oficial)
-      let taxaEfetivaTitular = taxaHomologadaOficial || 0.021; // Alíquota base inicial
-
-      if (taxaHomologadaOficial) {
-        taxaEfetivaTitular = taxaHomologadaOficial;
-      } else if (taxaContratoCustom > 0) {
-        // Converte se estiver em percentual direto (ex: 2.3 -> 0.023)
-        taxaEfetivaTitular = taxaContratoCustom > 0.5 ? taxaContratoCustom / 100 : taxaContratoCustom;
-      } else if (metaTotal > 0 && faturadoTitular >= metaTotal) {
-        if (faturadoTitular >= superMetaTotal) {
-          taxaEfetivaTitular = 0.025; // 2,5% para Super Meta atingida
-        } else {
-          // Variação suave entre 2,1% e 2,45% proporcional ao atingimento da meta batida
-          const ratio = Math.min(1, (faturadoTitular - metaTotal) / Math.max(1, superMetaTotal - metaTotal));
-          taxaEfetivaTitular = 0.021 + (ratio * 0.0035); // 2,1% a ~2,45%
-        }
-      } else if (metaTotal > 0 && faturadoTitular > 0) {
-        // Abaixo da meta atingida (média de 1,8% a 2,05%)
-        const pctAtingido = faturadoTitular / metaTotal;
-        taxaEfetivaTitular = 0.018 + Math.min(0.0025, pctAtingido * 0.0025);
-      }
-
-      // Trainee: comissão de apoio proporcional (1,0% sobre vendas apoiadas)
-      const taxaTrainee = Number(regraFilial?.comissao_trainee_boleto) > 0
-        ? (Number(regraFilial.comissao_trainee_boleto) > 0.5 ? Number(regraFilial.comissao_trainee_boleto) / 100 : Number(regraFilial.comissao_trainee_boleto))
-        : 0.01;
-
-      // Cálculo final: caso haja valor homologado fechado para a competência de Setembro/2026, adota exatamente o valor auditado
-      const comissaoTitular = (comissaoHomologadaOficial !== null && faturadoTrainee === 0)
-        ? comissaoHomologadaOficial
-        : (faturadoTitular * taxaEfetivaTitular);
-
-      const comissaoTrainee = faturadoTrainee * taxaTrainee;
-      const comissaoTotal = (comissaoHomologadaOficial !== null && faturadoTrainee === 0)
-        ? comissaoHomologadaOficial
-        : (comissaoTitular + comissaoTrainee);
+      const totalTransacoes = calc ? calc.transacoes : Number(vr.total_transacoes || 0);
+      const volumeDestaque = calc ? calc.volumeTotal : (isTrainee
+        ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
+        : (faturadoTitular > 0 ? faturadoTitular : volumeTotal));
+      const ticketMedioConsistente = calc ? calc.ticketMedio : (totalTransacoes > 0 ? (volumeDestaque / totalTransacoes) : Number(vr.ticket_medio || 0));
+      const totalBoletos = calc ? calc.totalBoletos : Number(vr.totalBoletos ?? vr.total_boletos ?? 0);
+      const totalAcessorios = calc ? calc.totalAcessorios : Number(vr.totalAcessorios ?? vr.total_acessorios ?? 0);
+      const comissaoTitular = calc ? calc.comissaoLiquida : Number(vr.comissaoLiquida ?? vr.comissao_acumulada ?? 0);
+      const comissaoTrainee = calc ? calc.comissaoTrainee : Number(vr.comissaoTrainee ?? 0);
+      const comissaoTotal = comissaoTitular;
+      const taxaEfetivaTitular = volumeDestaque > 0 ? (comissaoTotal / volumeDestaque) : 0.021;
 
       return {
         id: vr.colaborador_id,
@@ -416,20 +357,21 @@ export default function RankingVendedores({
         filialNome: resolverNomeFilial(vr.filial_id, colabDb),
         transacoes: totalTransacoes,
         volume: volumeDestaque,
-        volumeTotalParticipado: volumeTotal,
-        faturadoTitular,
+        volumeTotalParticipado: volumeDestaque,
+        faturadoTitular: volumeDestaque,
         faturadoTrainee,
         ticketMedio: ticketMedioConsistente,
-        totalBoletos: Number(vr.totalBoletos ?? vr.total_boletos ?? 0),
-        total_boletos: Number(vr.total_boletos ?? vr.totalBoletos ?? 0),
-        totalBoletosBruto: Number(vr.totalBoletosBruto ?? 0),
-        totalAcessorios: Number(vr.totalAcessorios ?? vr.total_acessorios ?? 0),
-        total_acessorios: Number(vr.total_acessorios ?? vr.totalAcessorios ?? 0),
-        totalFaturadoEspeciais: Number(vr.totalFaturadoEspeciais ?? vr.total_faturado_especiais ?? 0),
+        totalBoletos,
+        total_boletos: totalBoletos,
+        totalBoletosBruto: calc ? calc.totalBoletosBruto : Number(vr.totalBoletosBruto ?? 0),
+        totalAcessorios,
+        total_acessorios: totalAcessorios,
+        totalFaturadoEspeciais: calc ? calc.totalFaturadoEspeciais : Number(vr.totalFaturadoEspeciais ?? vr.total_faturado_especiais ?? 0),
         comissaoAcumulada: comissaoTotal,
         comissaoTitular,
         comissaoTrainee,
         taxaEfetivaTitular,
+        vendas_colaborador: vendasColab,
         isSemVendedor: false,
         isTraineeView: isTrainee
       };

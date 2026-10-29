@@ -1,9 +1,9 @@
 /**
  * Utilitário Unificado para Cálculo de Vendas, Metas e Comissões
  * Compartilhado entre:
- * - ModalDesempenhoVendedor.tsx (Modal individual do Vendedor)
- * - RankingVendedores.jsx / MetasRankings (Visão do Gerente)
- * - useMetasRankings.ts (Hook e Cache das Metas)
+ * - RankingVendedores.jsx / useMetasRankings.ts (Tabela do Gerente)
+ * - ModalDesempenhoVendedor.tsx (Modal do Gerente)
+ * - Dashboard.jsx / MinhasMetasComissoes (Login do Vendedor)
  */
 
 export interface ItemVenda {
@@ -23,6 +23,7 @@ export interface VendaCalculo {
   created_at?: string;
   valor_total?: number | string;
   valor?: number | string;
+  total?: number | string;
   metodo_pagamento?: string;
   forma_pagamento?: string;
   categoria?: string;
@@ -149,7 +150,13 @@ export const isBoleto = (v: any): boolean => {
     ''
   ).toUpperCase();
 
-  const isFormaDireta = forma.includes('BOLETO') || forma.includes('CREDIARIO') || forma.includes('PAYJOY') || forma.includes('WATU') || forma.includes('UME') || forma.includes('AIVA');
+  const isFormaDireta =
+    forma.includes('BOLETO') ||
+    forma.includes('CREDI') ||
+    forma.includes('PAYJOY') ||
+    forma.includes('WATU') ||
+    forma.includes('UME') ||
+    forma.includes('AIVA');
   if (isFormaDireta) return true;
 
   return isPagamentoBoletoFinanciadora(v);
@@ -157,36 +164,18 @@ export const isBoleto = (v: any): boolean => {
 
 /**
  * Extrai o valor do pagamento em Boleto / Financiadora de uma venda específica,
- * considerando vendas_pagamentos, pagamentos JSON ou colunas diretas com suporte
- * tolerante a camelCase e snake_case.
+ * usando estrutura mutuamente exclusiva (sem somar duplicado pagamentos + vendas_pagamentos).
  */
 export const extrairValorBoletoVenda = (v: any): number => {
   if (!v) return 0;
-  let valorBoletoVenda = 0;
 
   // A) Verifica valor explícito em valor_boleto / valorBoleto
   const valBoletoExplicit = Number(v.valor_boleto ?? v.valorBoleto ?? 0);
   if (!isNaN(valBoletoExplicit) && valBoletoExplicit > 0) {
-    valorBoletoVenda += valBoletoExplicit;
+    return valBoletoExplicit;
   }
 
-  // B) Extrai pagamentos de vendas_pagamentos / vendasPagamentos
-  const listaVendasPags = Array.isArray(v.vendas_pagamentos)
-    ? v.vendas_pagamentos
-    : (Array.isArray(v.vendasPagamentos) ? v.vendasPagamentos : []);
-
-  if (listaVendasPags.length > 0) {
-    listaVendasPags.forEach((p: any) => {
-      if (isPagamentoBoletoFinanciadora(p)) {
-        const pVal = Number(p.valor_pago ?? p.valorPago ?? p.valor ?? p.valor_total ?? p.valorTotal ?? 0);
-        if (!isNaN(pVal) && pVal > 0) {
-          valorBoletoVenda += pVal;
-        }
-      }
-    });
-  }
-
-  // C) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string ou array)
+  // B) Extrai pagamentos da coluna 'pagamentos' (com suporte a JSON string ou array)
   let listaPags: any[] = [];
   const rawPags = v.pagamentos ?? v.pagamento;
   if (rawPags) {
@@ -200,41 +189,35 @@ export const extrairValorBoletoVenda = (v: any): number => {
     }
   }
   if (listaPags.length > 0) {
+    let somaPags = 0;
     listaPags.forEach((p: any) => {
       if (isPagamentoBoletoFinanciadora(p)) {
         const pVal = Number(p.valor_pago ?? p.valorPago ?? p.valor ?? p.valor_total ?? p.valorTotal ?? 0);
         if (!isNaN(pVal) && pVal > 0) {
-          valorBoletoVenda += pVal;
+          somaPags += pVal;
         }
       }
     });
+    if (somaPags > 0) return somaPags;
   }
 
-  // D) Se não encontrou parcelas específicas, mas a venda inteira foi marcada como Boleto/Financiadora
-  // Utiliza a extração defensiva com fallback para valor_total, total ou valor
-  if (valorBoletoVenda === 0 && (isBoleto(v) || isPagamentoBoletoFinanciadora(v))) {
-    valorBoletoVenda = extrairValorVenda(v);
+  // C) Se a venda foi marcada como Boleto/Financiadora na própria linha da venda
+  if (isBoleto(v) || isPagamentoBoletoFinanciadora(v)) {
+    return extrairValorVenda(v);
   }
 
-  return valorBoletoVenda;
+  return 0;
 };
 
 /**
- * Identifica se a venda ou item é de Acessório
+ * Identifica se a venda é de Acessório (baseado diretamente nos campos da venda)
  */
 export const isAcessorio = (itemOuVenda: any): boolean => {
   if (!itemOuVenda) return false;
-  const cat = (itemOuVenda.categoria || itemOuVenda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-  const prod = (itemOuVenda.produto_nome || itemOuVenda.nome || itemOuVenda.produtos?.nome || itemOuVenda.descricao || itemOuVenda.produtos_descricao || itemOuVenda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-  const obs = (itemOuVenda.observacoes || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  const cat = String(itemOuVenda.categoria || itemOuVenda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  const prod = String(itemOuVenda.produto_nome || itemOuVenda.nome || itemOuVenda.produtos?.nome || itemOuVenda.descricao || itemOuVenda.produtos_descricao || itemOuVenda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
-  if (TERMOS_ACESSORIOS.some(t => cat.includes(t) || prod.includes(t) || obs.includes(t))) return true;
-
-  if (Array.isArray(itemOuVenda.itens_venda) && itemOuVenda.itens_venda.length > 0) {
-    return itemOuVenda.itens_venda.some((it: any) => isAcessorio(it));
-  }
-
-  return false;
+  return cat.includes('ACESS') || TERMOS_ACESSORIOS.some(t => cat.includes(t) || prod.includes(t));
 };
 
 /**
@@ -245,7 +228,7 @@ export const isProdutoEspecial = (itemOuVenda: any): boolean => {
   if (!itemOuVenda) return false;
   if (itemOuVenda.fora_meta === true || itemOuVenda.foraMeta === true) return true;
 
-  const nome = (
+  const nome = String(
     itemOuVenda.produto_nome ||
     itemOuVenda.nome ||
     itemOuVenda.descricao ||
@@ -255,21 +238,19 @@ export const isProdutoEspecial = (itemOuVenda: any): boolean => {
     ''
   ).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
-  const categoria = (
+  const categoria = String(
     itemOuVenda.categoria ||
     itemOuVenda.produtos?.categoria ||
     ''
   ).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
-  if (TERMOS_ESPECIAIS.some(t => categoria.includes(t) || nome.includes(t))) {
-    return true;
-  }
-
-  if (Array.isArray(itemOuVenda.itens_venda) && itemOuVenda.itens_venda.length > 0) {
-    return itemOuVenda.itens_venda.some((it: any) => isProdutoEspecial(it));
-  }
-
-  return false;
+  return (
+    categoria.includes('APPLE') ||
+    nome.includes('IPHONE') ||
+    nome.includes('PLAYSTATION') ||
+    nome.includes('JBL') ||
+    TERMOS_ESPECIAIS.some(t => categoria.includes(t) || nome.includes(t))
+  );
 };
 
 /**
@@ -287,22 +268,299 @@ export const temApoioTrainee = (s: VendaCalculo | any): boolean => {
   return false;
 };
 
+export interface OpcoesDesempenhoGeral {
+  isTrainee?: boolean;
+  metaBoleto?: number;
+  superMetaBoleto?: number;
+  metaAcessorios?: number;
+  superMetaAcessorios?: number;
+  metaTotal?: number;
+  targetVendedorId?: string;
+  targetVendedorNome?: string;
+}
+
+export interface ResultadoDesempenhoGeral {
+  transacoes: number;
+  volumeTotal: number;
+  ticketMedio: number;
+  totalBoletos: number;
+  totalBoletosBruto: number;
+  totalAcessorios: number;
+  totalAVista: number;
+  comissaoLiquida: number;
+  comissaoTrainee: number;
+  taxaBoletoNum: number;
+  taxaAcessoriosNum: number;
+  metaBoleto: number;
+  superMetaBoleto: number;
+  metaAcessorios: number;
+  superMetaAcessorios: number;
+  metaTotal: number;
+  progressoBoleto: number;
+  progressoAcessorios: number;
+  progressoTotal: number;
+  badgeBoleto: {
+    taxa: string;
+    texto: string;
+    status: string;
+    classe: string;
+  };
+  badgeAcessorios: {
+    taxa: string;
+    texto: string;
+    status: string;
+    classe: string;
+  };
+  faturadoTitularSolo: number;
+  faturadoComApoioTrainee: number;
+  totalFaturadoEspeciais: number;
+  quantidadeItensEspeciais: number;
+  ticketMedioEspeciais: number;
+  vendasFiltradas: any[];
+}
+
+/**
+ * FUNÇÃO ÚNICA E CENTRALIZADA DE CÁLCULO DE DESEMPENHO, METAS E COMISSÃO
+ * Utilizada obrigatoriamente por:
+ * - RankingVendedores / useMetasRankings (Tabela do Gerente)
+ * - ModalDesempenhoVendedor (Modal do Gerente)
+ * - Dashboard / MinhasMetasComissoes (Login Vendedor)
+ */
+export function calcularDesempenhoGeral(
+  vendasColaborador: any[],
+  modoVisualizacao: 'COM_APOIO' | 'SOLO' = 'COM_APOIO',
+  opcoes: OpcoesDesempenhoGeral = {}
+): ResultadoDesempenhoGeral {
+  const { isTrainee = false } = opcoes;
+
+  // Filtrar vendas canceladas
+  const vendasValidas = (vendasColaborador || []).filter((v: any) => {
+    const status = String(v?.status || '').toUpperCase().trim();
+    return status !== 'CANCELADA' && status !== 'CANCELADO';
+  });
+
+  // Separação informativa: faturado titular solo vs com apoio de trainee
+  let faturadoTitularSolo = 0;
+  let faturadoComApoioTrainee = 0;
+  vendasValidas.forEach((v: any) => {
+    const val = Number(v.valor_total ?? v.total ?? v.valor ?? 0);
+    if (val > 0) {
+      if (v.teve_participacao_trainee || (v.trainee_nome && String(v.trainee_nome).trim() !== '' && String(v.trainee_nome).trim() !== '-') || temApoioTrainee(v)) {
+        faturadoComApoioTrainee += val;
+      } else {
+        faturadoTitularSolo += val;
+      }
+    }
+  });
+
+  // 1. Filtrar se considera apenas solo ou com apoio de trainee
+  const vendasFiltradas = modoVisualizacao === 'SOLO'
+    ? vendasValidas.filter(v => !v.teve_participacao_trainee && (!v.trainee_nome || String(v.trainee_nome).trim() === '' || String(v.trainee_nome).trim() === '-') && !temApoioTrainee(v))
+    : vendasValidas;
+
+  const transacoes = vendasFiltradas.length;
+  const volumeTotal = Math.round(
+    vendasFiltradas.reduce((acc, v) => acc + Number(v.valor_total ?? v.total ?? v.valor ?? 0), 0) * 100
+  ) / 100;
+  const ticketMedio = transacoes > 0 ? Math.round((volumeTotal / transacoes) * 100) / 100 : 0;
+
+  // 2. Extrair boletos (excluindo produtos da linha Apple/Alto Ticket conforme regra do negócio)
+  let totalBoletosBrutoCalc = 0;
+  const totalBoletosCalc = vendasFiltradas.reduce((acc, v) => {
+    const valorBoleto = extrairValorBoletoVenda(v);
+    if (valorBoleto <= 0) return acc;
+
+    totalBoletosBrutoCalc += valorBoleto;
+
+    const isAltoTicket = isProdutoEspecial(v);
+    if (isAltoTicket) return acc;
+
+    return acc + valorBoleto;
+  }, 0);
+
+  const totalBoletos = Math.round(totalBoletosCalc * 100) / 100;
+  const totalBoletosBruto = Math.round(totalBoletosBrutoCalc * 100) / 100;
+
+  // 3. Extrair acessórios
+  const totalAcessoriosCalc = vendasFiltradas
+    .filter(v => isAcessorio(v))
+    .reduce((acc, v) => acc + Number(v.valor_total ?? v.total ?? v.valor ?? 0), 0);
+
+  const totalAcessorios = Math.round(totalAcessoriosCalc * 100) / 100;
+
+  // Produtos especiais informativo
+  let totalFaturadoEspeciais = 0;
+  let quantidadeItensEspeciais = 0;
+  vendasValidas.forEach((v: any) => {
+    if (isProdutoEspecial(v)) {
+      const qtd = Number(v.quantidade || 1) || 1;
+      const val = Number(v.valor_total ?? v.total ?? v.valor ?? 0);
+      totalFaturadoEspeciais += val;
+      quantidadeItensEspeciais += qtd;
+    }
+  });
+  const ticketMedioEspeciais = quantidadeItensEspeciais > 0
+    ? Math.round((totalFaturadoEspeciais / quantidadeItensEspeciais) * 100) / 100
+    : 0;
+
+  // 4. Calcular comissão líquida respeitando as faixas de meta e repasse a trainees
+  // Fórmula idêntica ao MinhasMetasComissoes para bater centavo por centavo
+  const metaBoleto = Number(opcoes.metaBoleto) > 0
+    ? Number(opcoes.metaBoleto)
+    : (isTrainee ? 35000 : 67500);
+
+  const superMetaBoleto = Number(opcoes.superMetaBoleto) > 0
+    ? Number(opcoes.superMetaBoleto)
+    : (isTrainee ? 45000 : 87000);
+
+  const metaAcessorios = Number(opcoes.metaAcessorios) > 0
+    ? Number(opcoes.metaAcessorios)
+    : (isTrainee ? 5000 : 10000);
+
+  const superMetaAcessorios = Number(opcoes.superMetaAcessorios) > 0
+    ? Number(opcoes.superMetaAcessorios)
+    : (isTrainee ? 7500 : 15000);
+
+  const metaTotal = Number(opcoes.metaTotal) > 0
+    ? Number(opcoes.metaTotal)
+    : (metaBoleto + metaAcessorios);
+
+  // Faixas de Comissão Boletos:
+  // < metaBoleto: 1,0% | >= metaBoleto: 3,0% | >= superMetaBoleto: 3,2%
+  let taxaBoletoNum = 0.01;
+  let badgeBoleto = {
+    taxa: '1,0%',
+    texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+    status: 'abaixo',
+    classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
+  };
+  if (totalBoletos >= superMetaBoleto) {
+    taxaBoletoNum = 0.032;
+    badgeBoleto = {
+      taxa: '3,2%',
+      texto: 'Faixa Atual: 3,2% (Super Meta! 🔥)',
+      status: 'super',
+      classe: 'bg-purple-950/60 text-purple-300 border border-purple-700/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+    };
+  } else if (totalBoletos >= metaBoleto) {
+    taxaBoletoNum = 0.03;
+    badgeBoleto = {
+      taxa: '3,0%',
+      texto: 'Faixa Atual: 3,0% (Meta Batida! 🚀)',
+      status: 'batida',
+      classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
+    };
+  }
+
+  // Faixas de Comissão Acessórios:
+  // < metaAcessorios: 1,0% | >= metaAcessorios: 2,5% | >= superMetaAcessorios: 3,0%
+  let taxaAcessoriosNum = 0.01;
+  let badgeAcessorios = {
+    taxa: '1,0%',
+    texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+    status: 'abaixo',
+    classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
+  };
+  if (totalAcessorios >= 15000 || totalAcessorios >= superMetaAcessorios) {
+    taxaAcessoriosNum = 0.03;
+    badgeAcessorios = {
+      taxa: '3,0%',
+      texto: 'Faixa Atual: 3,0% (Super Meta! 🔥)',
+      status: 'super',
+      classe: 'bg-pink-950/60 text-pink-300 border border-pink-700/60 shadow-[0_0_12px_rgba(244,114,182,0.3)]'
+    };
+  } else if (totalAcessorios >= 10000 || totalAcessorios >= metaAcessorios) {
+    taxaAcessoriosNum = 0.025;
+    badgeAcessorios = {
+      taxa: '2,5%',
+      texto: 'Faixa Atual: 2,5% (Meta Batida! 🚀)',
+      status: 'batida',
+      classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
+    };
+  }
+
+  const totalAVista = Math.max(0, Math.round((volumeTotal - totalBoletos - totalAcessorios) * 100) / 100);
+
+  const comissaoBoletosCalc = totalBoletos * taxaBoletoNum;
+  const comissaoAcessoriosCalc = totalAcessorios * taxaAcessoriosNum;
+  const comissaoAVistaCalc = totalAVista * 0.01;
+  const comissaoPorFaixasMetas = Math.round((comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc) * 100) / 100;
+
+  // Repasse / comissão gerada para trainees nas vendas com apoio (1%)
+  const comissaoTraineeCalc = vendasFiltradas.reduce((acc, s) => {
+    if (!s.teve_participacao_trainee && (!s.trainee_nome || String(s.trainee_nome).trim() === '' || String(s.trainee_nome).trim() === '-') && !temApoioTrainee(s)) {
+      return acc;
+    }
+    const cExplicita = Number(s.comissao_trainee || 0);
+    if (!isNaN(cExplicita) && cExplicita > 0) return acc + cExplicita;
+    const valTotal = Number(s.valor_total ?? s.total ?? s.valor ?? 0);
+    return acc + (valTotal > 0 ? Number((valTotal * 0.01).toFixed(2)) : 0);
+  }, 0);
+  const comissaoTrainee = Math.round(comissaoTraineeCalc * 100) / 100;
+
+  const comissaoLiquida = isTrainee
+    ? (comissaoTrainee > 0 && totalBoletos === 0 ? comissaoTrainee : Math.max(comissaoPorFaixasMetas, comissaoTrainee))
+    : comissaoPorFaixasMetas;
+
+  const progressoBoleto = metaBoleto > 0 ? Math.min(100, Math.round((totalBoletos / metaBoleto) * 100)) : 0;
+  const progressoAcessorios = metaAcessorios > 0 ? Number(((totalAcessorios / metaAcessorios) * 100).toFixed(1)) : 0;
+  const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((volumeTotal / metaTotal) * 100)) : 0;
+
+  return {
+    transacoes,
+    volumeTotal,
+    ticketMedio,
+    totalBoletos,
+    totalBoletosBruto,
+    totalAcessorios,
+    totalAVista,
+    comissaoLiquida,
+    comissaoTrainee,
+    taxaBoletoNum,
+    taxaAcessoriosNum,
+    metaBoleto,
+    superMetaBoleto,
+    metaAcessorios,
+    superMetaAcessorios,
+    metaTotal,
+    progressoBoleto,
+    progressoAcessorios,
+    progressoTotal,
+    badgeBoleto,
+    badgeAcessorios,
+    faturadoTitularSolo: Math.round(faturadoTitularSolo * 100) / 100,
+    faturadoComApoioTrainee: Math.round(faturadoComApoioTrainee * 100) / 100,
+    totalFaturadoEspeciais: Math.round(totalFaturadoEspeciais * 100) / 100,
+    quantidadeItensEspeciais,
+    ticketMedioEspeciais,
+    vendasFiltradas
+  };
+}
+
 export interface OpcoesCalculoDesempenho {
   isTrainee?: boolean;
   targetVendedorId?: string;
   targetVendedorNome?: string;
   filtroTipoVendas?: 'todas' | 'solo';
-  excluirEspeciaisDasMetas?: boolean; // Padrão: true (exclui Apple, Consoles e JBL da Meta Operacional de Boletos)
+  excluirEspeciaisDasMetas?: boolean;
+  metaBoleto?: number;
+  superMetaBoleto?: number;
+  metaAcessorios?: number;
+  superMetaAcessorios?: number;
+  metaTotal?: number;
 }
 
 export interface ResultadoCalculoDesempenho {
   totalVendasGeral: number;
   totalTransacoes: number;
   ticketMedio: number;
-  totalBoletos: number;         // Realizado oficial da Meta de Boletos (sem produtos especiais)
-  totalBoletosBruto: number;    // Somatório bruto financeiro de todos os boletos
-  totalAcessorios: number;      // Realizado oficial da Meta de Acessórios
-  totalFaturadoEspeciais: number; // Volume faturado de Produtos Especiais & Alto Ticket
+  totalBoletos: number;
+  totalBoletosBruto: number;
+  totalAcessorios: number;
+  totalAVista: number;
+  comissaoLiquida: number;
+  comissaoTrainee: number;
+  totalFaturadoEspeciais: number;
   quantidadeItensEspeciais: number;
   ticketMedioEspeciais: number;
   faturadoTitularSolo: number;
@@ -311,8 +569,7 @@ export interface ResultadoCalculoDesempenho {
 }
 
 /**
- * Função mestra que calcula o desempenho e as metas de um colaborador
- * de forma 100% idêntica entre o Modal de Desempenho e a Tabela do Gerente.
+ * Wrapper compatível que delega 100% para `calcularDesempenhoGeral`
  */
 export function calcularDesempenhoColaborador(
   vendas: VendaCalculo[] | any[],
@@ -320,137 +577,45 @@ export function calcularDesempenhoColaborador(
 ): ResultadoCalculoDesempenho {
   const {
     isTrainee = false,
-    targetVendedorId,
-    targetVendedorNome,
     filtroTipoVendas = 'todas',
-    excluirEspeciaisDasMetas = true
+    metaBoleto,
+    superMetaBoleto,
+    metaAcessorios,
+    superMetaAcessorios,
+    metaTotal
   } = opcoes;
 
-  const sales = (vendas || []).filter((v: any) => {
-    const status = String(v.status || '').toUpperCase().trim();
-    return status !== 'CANCELADA' && status !== 'CANCELADO';
+  const modo: 'COM_APOIO' | 'SOLO' = filtroTipoVendas === 'solo' ? 'SOLO' : 'COM_APOIO';
+  const geral = calcularDesempenhoGeral(vendas, modo, {
+    isTrainee,
+    metaBoleto,
+    superMetaBoleto,
+    metaAcessorios,
+    superMetaAcessorios,
+    metaTotal
   });
-
-  const totalTransacoes = sales.length;
-  const totalVendasGeral = sales.reduce((acc, s) => acc + Number(s.valor_total || s.valor || 0), 0);
-  const ticketMedio = totalTransacoes > 0 ? totalVendasGeral / totalTransacoes : 0;
-
-  // Separação de vendas com apoio de trainee e titular solo
-  let faturadoComApoioTrainee = 0;
-  let faturadoTitularSolo = 0;
-
-  sales.forEach((s: any) => {
-    const val = Number(s.valor_total || s.valor || 0);
-    if (val > 0) {
-      if (temApoioTrainee(s)) {
-        faturadoComApoioTrainee += val;
-      } else {
-        faturadoTitularSolo += val;
-      }
-    }
-  });
-
-  // Filtro de vendas para metas operacionais (conforme papel e seletor)
-  const vendasFiltradasMetas = isTrainee
-    ? sales.filter(s => {
-      const tIdMatch = targetVendedorId && (String(s.trainee_id) === String(targetVendedorId) || String(s.treener_id) === String(targetVendedorId));
-      const tNomeMatch = targetVendedorNome && String(s.trainee_nome || '').toUpperCase().includes(targetVendedorNome.toUpperCase());
-      return tIdMatch || tNomeMatch || temApoioTrainee(s) || String(s.vendedor_id) === String(targetVendedorId);
-    })
-    : (filtroTipoVendas === 'solo'
-      ? sales.filter(s => !temApoioTrainee(s))
-      : sales);
-
-  // 1. CÁLCULO DE BOLETOS / FINANCIADORAS
-  let totalBoletosCalculado = 0;
-  let totalBoletosBruto = 0;
-
-  vendasFiltradasMetas.forEach((v: any) => {
-    const valorBoleto = extrairValorBoletoVenda(v);
-    if (valorBoleto <= 0) return;
-
-    totalBoletosBruto += valorBoleto;
-
-    // Se a regra é excluir Produtos Especiais & Alto Ticket da Meta Operacional de Boletos:
-    if (excluirEspeciaisDasMetas && isProdutoEspecial(v)) {
-      return; // Linha Apple, Consoles e JBL não pontuam na meta operacional de boletos
-    }
-
-    totalBoletosCalculado += valorBoleto;
-  });
-
-  const totalBoletos = Math.round(totalBoletosCalculado * 100) / 100;
-
-  // 2. CÁLCULO DE ACESSÓRIOS
-  let totalAcessoriosCalculado = 0;
-
-  vendasFiltradasMetas.forEach((v: any) => {
-    const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-
-    if (itens.length > 0) {
-      itens.forEach((item: any) => {
-        const nomeItem = String(item.produto_nome || item.nome || '').toUpperCase().trim();
-        const catItem = String(item.categoria || '').toUpperCase().trim();
-        if (catItem.includes('ACESS') || TERMOS_ACESSORIOS.some(t => nomeItem.includes(t) || catItem.includes(t))) {
-          totalAcessoriosCalculado += Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * Number(item.quantidade || 1)) || 0);
-        }
-      });
-    } else {
-      const cat = String(v.categoria || '').toUpperCase().trim();
-      const prodNome = String(v.produto_nome || v.produtos_descricao || v.descricao || v.nome || '').toUpperCase().trim();
-      if (cat.includes('ACESS') || TERMOS_ACESSORIOS.some(t => cat.includes(t) || prodNome.includes(t))) {
-        totalAcessoriosCalculado += Number(v.valor_total || v.valor || 0);
-      }
-    }
-  });
-
-  const totalAcessorios = Math.round(totalAcessoriosCalculado * 100) / 100;
-
-  // 3. CÁLCULO DE PRODUTOS ESPECIAIS & ALTO TICKET (Linha Apple, Consoles, JBL, etc.)
-  let totalFaturadoEspeciais = 0;
-  let quantidadeItensEspeciais = 0;
-
-  sales.forEach((v: any) => {
-    const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-    if (itens.length > 0) {
-      itens.forEach((item: any) => {
-        if (isProdutoEspecial(item)) {
-          const qtd = Number(item.quantidade || 1) || 1;
-          const val = Number(item.valor_total || (Number(item.preco_unitario || item.valor_unitario || 0) * qtd) || 0);
-          totalFaturadoEspeciais += val;
-          quantidadeItensEspeciais += qtd;
-        }
-      });
-    } else if (isProdutoEspecial(v)) {
-      const qtd = Number(v.quantidade || 1) || 1;
-      const val = Number(v.valor_total || v.valor || 0);
-      totalFaturadoEspeciais += val;
-      quantidadeItensEspeciais += qtd;
-    }
-  });
-
-  const ticketMedioEspeciais = quantidadeItensEspeciais > 0
-    ? totalFaturadoEspeciais / quantidadeItensEspeciais
-    : 0;
 
   return {
-    totalVendasGeral: Math.round(totalVendasGeral * 100) / 100,
-    totalTransacoes,
-    ticketMedio: Math.round(ticketMedio * 100) / 100,
-    totalBoletos,
-    totalBoletosBruto: Math.round(totalBoletosBruto * 100) / 100,
-    totalAcessorios,
-    totalFaturadoEspeciais: Math.round(totalFaturadoEspeciais * 100) / 100,
-    quantidadeItensEspeciais,
-    ticketMedioEspeciais: Math.round(ticketMedioEspeciais * 100) / 100,
-    faturadoTitularSolo: Math.round(faturadoTitularSolo * 100) / 100,
-    faturadoComApoioTrainee: Math.round(faturadoComApoioTrainee * 100) / 100,
-    vendasFiltradasMetas
+    totalVendasGeral: geral.volumeTotal,
+    totalTransacoes: geral.transacoes,
+    ticketMedio: geral.ticketMedio,
+    totalBoletos: geral.totalBoletos,
+    totalBoletosBruto: geral.totalBoletosBruto,
+    totalAcessorios: geral.totalAcessorios,
+    totalAVista: geral.totalAVista,
+    comissaoLiquida: geral.comissaoLiquida,
+    comissaoTrainee: geral.comissaoTrainee,
+    totalFaturadoEspeciais: geral.totalFaturadoEspeciais,
+    quantidadeItensEspeciais: geral.quantidadeItensEspeciais,
+    ticketMedioEspeciais: geral.ticketMedioEspeciais,
+    faturadoTitularSolo: geral.faturadoTitularSolo,
+    faturadoComApoioTrainee: geral.faturadoComApoioTrainee,
+    vendasFiltradasMetas: geral.vendasFiltradas
   };
 }
 
 /**
- * Função utilitária com a assinatura solicitada para calcular as metas e realizados do colaborador
+ * Wrapper compatível que delega 100% para `calcularDesempenhoGeral`
  */
 export function calcularMetasColaborador(
   vendas: VendaCalculo[] | any[],
@@ -462,10 +627,9 @@ export function calcularMetasColaborador(
     taxaComissao?: number;
   } = {}
 ) {
-  const { competencia, isTrainee = false, colaboradorNome, taxaComissao } = opcoesExtras;
+  const { competencia, isTrainee = false, colaboradorNome } = opcoesExtras;
 
-  // Filtrar mês de competência caso informado (YYYY-MM)
-  let vendasFiltradas = (vendas || []).filter((v: any) => {
+  const vendasFiltradas = (vendas || []).filter((v: any) => {
     const status = String(v.status || '').toUpperCase().trim();
     if (status === 'CANCELADA' || status === 'CANCELADO') return false;
 
@@ -491,31 +655,20 @@ export function calcularMetasColaborador(
     return true;
   });
 
-  const res = calcularDesempenhoColaborador(vendasFiltradas, {
-    isTrainee,
-    targetVendedorId: colaboradorId,
-    targetVendedorNome: colaboradorNome,
-    filtroTipoVendas: 'todas',
-    excluirEspeciaisDasMetas: true
-  });
-
-  const comissaoTotal = vendasFiltradas.reduce((acc, v) => {
-    const comissaoCadastrada = isTrainee ? Number(v.comissao_trainee || 0) : Number(v.comissao_vendedor || v.comissao || 0);
-    if (comissaoCadastrada > 0) return acc + comissaoCadastrada;
-    const taxa = taxaComissao || (isTrainee ? 0.01 : 0.021);
-    return acc + (Number(v.valor_total || v.valor || 0) * taxa);
-  }, 0);
+  const geral = calcularDesempenhoGeral(vendasFiltradas, 'COM_APOIO', { isTrainee });
 
   return {
-    volumeTotal: res.totalVendasGeral,
-    totalBoletosMeta: res.totalBoletos,
-    totalBoletosBruto: res.totalBoletosBruto,
-    totalAcessoriosMeta: res.totalAcessorios,
-    totalFaturadoEspeciais: res.totalFaturadoEspeciais,
-    comissaoTotal: Math.round(comissaoTotal * 100) / 100,
-    transacoes: res.totalTransacoes,
-    ticketMedio: res.ticketMedio,
-    faturadoTitularSolo: res.faturadoTitularSolo,
-    faturadoComApoioTrainee: res.faturadoComApoioTrainee
+    volumeTotal: geral.volumeTotal,
+    totalBoletosMeta: geral.totalBoletos,
+    totalBoletosBruto: geral.totalBoletosBruto,
+    totalAcessoriosMeta: geral.totalAcessorios,
+    totalFaturadoEspeciais: geral.totalFaturadoEspeciais,
+    comissaoTotal: geral.comissaoLiquida,
+    comissaoLiquida: geral.comissaoLiquida,
+    comissaoTrainee: geral.comissaoTrainee,
+    transacoes: geral.transacoes,
+    ticketMedio: geral.ticketMedio,
+    faturadoTitularSolo: geral.faturadoTitularSolo,
+    faturadoComApoioTrainee: geral.faturadoComApoioTrainee
   };
 }

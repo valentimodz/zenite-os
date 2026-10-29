@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../supabaseClient';
-import { calcularDesempenhoColaborador } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral } from '../utils/calculoMetas';
 
 /**
  * Interface com os campos retornados pela View PostgreSQL `view_ranking_colaboradores_mensal`
@@ -38,9 +38,12 @@ export interface RankingColaborador {
   totalAcessorios?: number;
   total_faturado_especiais?: number;
   totalFaturadoEspeciais?: number;
-  // Campos derivados para exibição e badges de perfil
+  comissaoLiquida: number;
+  comissaoTrainee: number;
+  comissao_acumulada: number;
   is_trainee: boolean;
   volume_exibicao: number;
+  vendas_colaborador?: any[];
 }
 
 export interface UseMetasRankingsOptions {
@@ -73,7 +76,7 @@ export const parseNumber = (val: number | string | null | undefined): number => 
 };
 
 /**
- * Função de busca de ranking com VÍNCULO DUPLO (ID ou NOME) para garantir que nenhuma venda seja descartada
+ * Função de busca de ranking com VÍNCULO DUPLO (ID ou NOME) e motor centralizado `calcularDesempenhoGeral`
  */
 export async function fetchRankingColaboradoresMensal({
   competencia = getCompetenciaAtual(),
@@ -85,14 +88,15 @@ export async function fetchRankingColaboradoresMensal({
   colaboradorId?: string;
 }): Promise<RankingColaborador[]> {
   try {
-    // 1. Define início e fim do mês da competência (Mês civil completo)
+    // 1. Define início e fim do mês da competência no fuso horário de Brasília (-03:00), idêntico ao Modal e Login Vendedor
     const [anoStr, mesStr] = (competencia || getCompetenciaAtual()).split('-');
     const anoAtual = parseInt(anoStr, 10);
     const mesAtual = parseInt(mesStr, 10);
-    const inicioMes = new Date(anoAtual, mesAtual - 1, 1, 0, 0, 0).toISOString();
-    const fimMes = new Date(anoAtual, mesAtual, 0, 23, 59, 59, 999).toISOString();
+    const ultimoDia = new Date(anoAtual, mesAtual, 0).getDate();
+    const inicioMes = `${competencia}-01T00:00:00.000-03:00`;
+    const fimMes = `${competencia}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
 
-    // 2. Busca lista de colaboradores cadastrados (Se colaboradorId informado, busca diretamente sem travar por filial)
+    // 2. Busca lista de colaboradores cadastrados
     let profilesQuery = supabase
       .from('profiles')
       .select('id, nome, role, is_treinner, filial_id');
@@ -106,92 +110,143 @@ export async function fetchRankingColaboradoresMensal({
     const { data: colaboradores, error: colabError } = await profilesQuery;
     if (colabError) throw colabError;
 
-    // 3. Busca de vendas da competência incluindo itens_venda e vendas_pagamentos para cálculo idêntico ao Modal
-    // NOTA CRÍTICA: NÃO aplique filtro restritivo de filial_id na tabela 'vendas' para não descartar
-    // vendas efetuadas pelo colaborador em outras filiais da rede durante o mês.
+    // 3. Busca de vendas da competência usando .select('*') seguro (sem colunas inexistentes que geram erro 400)
+    // NÃO aplica filtro restritivo de filial_id na tabela 'vendas' para incluir todas as vendas do colaborador na rede
     let vendasQuery = supabase
       .from('vendas')
-      .select(`
-        id, valor_total, comissao_vendedor, comissao, vendedor_id, vendedor_nome, filial_id, created_at, status,
-        treener_id, trainee_id, trainee_nome, teve_participacao_trainee, comissao_trainee,
-        forma_pagamento, metodo_pagamento, financeira, pagamentos, valor_boleto, valor_pix, valor_dinheiro, valor_cartao,
-        produto_nome, descricao, produtos_descricao, itens_resumo, categoria,
-        itens_venda (*),
-        vendas_pagamentos (*)
-      `)
+      .select('*')
       .gte('created_at', inicioMes)
-      .lte('created_at', fimMes)
-      .neq('status', 'CANCELADA')
-      .neq('status', 'cancelada');
+      .lte('created_at', fimMes);
 
     if (colaboradorId && colaboradorId !== 'sem_vendedor' && !String(colaboradorId).startsWith('nome_')) {
-      vendasQuery = vendasQuery.or(`vendedor_id.eq.${colaboradorId},trainee_id.eq.${colaboradorId},treener_id.eq.${colaboradorId}`);
+      const colabAlvo = (colaboradores || [])[0];
+      const orClauses = [
+        `vendedor_id.eq.${colaboradorId}`,
+        `trainee_id.eq.${colaboradorId}`,
+        `treener_id.eq.${colaboradorId}`
+      ];
+      if (colabAlvo?.nome) {
+        const nomeLimpo = String(colabAlvo.nome).trim();
+        orClauses.push(`vendedor_nome.ilike.%${nomeLimpo}%`);
+        orClauses.push(`trainee_nome.ilike.%${nomeLimpo}%`);
+      }
+      vendasQuery = vendasQuery.or(orClauses.join(','));
     }
 
-    const { data: vendas, error: vendasError } = await vendasQuery;
-    if (vendasError) throw vendasError;
+    // Busca metas configuradas para o mês em paralelo
+    const [vendasRes, metasRes, regrasRes] = await Promise.all([
+      vendasQuery,
+      supabase.from('metas').select('*').or(`mes_ano.eq.${competencia},mes_referencia.eq.${competencia}`),
+      supabase.from('regras_comissoes').select('*').eq('mes_referencia', competencia)
+    ]);
 
-    const vendasLista = (vendas || []) as any[];
+    if (vendasRes.error) throw vendasRes.error;
+
+    const metasMap: Record<string, any> = {};
+    (metasRes.data || []).forEach((m: any) => {
+      if (m.vendedor_id) metasMap[String(m.vendedor_id)] = m;
+    });
+
+    const regrasMap: Record<string, any> = {};
+    (regrasRes.data || []).forEach((r: any) => {
+      if (r.filial_id) regrasMap[String(r.filial_id)] = r;
+    });
+
+    // Filtrar apenas vendas válidas (não canceladas) e pertencentes estritamente à competência em America/Sao_Paulo
+    const vendasLista = ((vendasRes.data || []) as any[]).filter(v => {
+      const status = String(v.status || '').toUpperCase().trim();
+      if (status === 'CANCELADA' || status === 'CANCELADO') return false;
+
+      const rawDate = v.created_at || v.data;
+      if (!rawDate) return true;
+      try {
+        const dt = new Date(rawDate);
+        if (isNaN(dt.getTime())) return true;
+        const brComp = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Sao_Paulo',
+          year: 'numeric',
+          month: '2-digit'
+        }).format(dt);
+        return brComp === competencia;
+      } catch {
+        return true;
+      }
+    });
+
     const colabsLista = colaboradores || [];
 
-    // Mapeamento com VÍNCULO DUPLO (ID ou NOME) e sincronização 1:1 com a lógica de metas do Modal:
+    // 4. Mapeamento com VÍNCULO DUPLO (ID ou NOME) e cálculo 100% centralizado via calcularDesempenhoGeral
     const resultado: RankingColaborador[] = colabsLista.map(colab => {
       const colabId = String(colab.id || '').trim();
       const colabNome = String(colab.nome || '').trim().toUpperCase();
 
-      // Vendas do colaborador: agrupamento prioritário por vendedor_id com fallback seguro por nome
+      // Vendas como titular (por ID ou por Nome normalizado)
       const vendasDoColaborador = vendasLista.filter(v => {
         const vId = v.vendedor_id ? String(v.vendedor_id).trim() : null;
         const vNome = v.vendedor_nome ? String(v.vendedor_nome).trim().toUpperCase() : null;
         return (vId && vId === colabId) || (vNome && colabNome && (vNome === colabNome || vNome.includes(colabNome)));
       });
 
-      // Vendas com participação trainee
+      // Vendas onde atuou como trainee participante
       const vendasComoTrainee = vendasLista.filter(v => {
         const tId = v.trainee_id || v.treener_id ? String(v.trainee_id || v.treener_id).trim() : null;
         const tNome = v.trainee_nome ? String(v.trainee_nome).trim().toUpperCase() : null;
         return (tId && tId === colabId) || (tNome && colabNome && (tNome === colabNome || tNome.includes(colabNome)));
       });
 
-      const volumeTitular = vendasDoColaborador.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
-      const faturadoTrainee = vendasComoTrainee.reduce((acc, v) => acc + Number(v.valor_total || 0), 0);
+      const volumeTitular = vendasDoColaborador.reduce((acc, v) => acc + Number(v.valor_total ?? v.total ?? v.valor ?? 0), 0);
+      const faturadoTrainee = vendasComoTrainee.reduce((acc, v) => acc + Number(v.valor_total ?? v.total ?? v.valor ?? 0), 0);
 
-      const isOriginalTrainee = colab.role === 'TRAINEE' || Boolean(colab.is_treinner);
-      const isTrainee = faturadoTrainee > volumeTitular || isOriginalTrainee || (volumeTitular === 0 && faturadoTrainee > 0);
+      // Classificação estrita de Trainee (apenas quando o cargo/role for Trainee ou só tiver vendas como trainee)
+      const roleUpper = String(colab.role || '').toUpperCase().trim();
+      const isOriginalTrainee = roleUpper.includes('TRAINEE') || Boolean(colab.is_treinner);
+      const isTrainee = isOriginalTrainee || (volumeTitular === 0 && faturadoTrainee > 0);
 
-      // Todas as vendas em que o colaborador participou (titular ou apoio)
-      const vendasTotaisColab = Array.from(
-        new Map([...vendasDoColaborador, ...vendasComoTrainee].map(v => [String(v.id), v])).values()
-      );
+      // Conjunto unificado de vendas do colaborador
+      const vendasTotaisColab = isTrainee
+        ? Array.from(new Map([...vendasDoColaborador, ...vendasComoTrainee].map(v => [String(v.id), v])).values())
+        : (vendasDoColaborador.length > 0 ? vendasDoColaborador : vendasComoTrainee);
 
-      // Executa o cálculo unificado de desempenho (respeitando exclusão de Produtos Especiais na Meta de Boletos)
-      const calc = calcularDesempenhoColaborador(vendasTotaisColab, {
+      const metaColab = metasMap[colabId];
+      const regraFilial = colab.filial_id ? regrasMap[String(colab.filial_id)] : null;
+
+      const metaBoleto = Number(metaColab?.meta_boleto) > 0
+        ? Number(metaColab.meta_boleto)
+        : (isTrainee
+          ? (Number(metaColab?.meta_trainee_boleto) || Number(regraFilial?.meta_trainee_boletos) || 35000)
+          : (Number(regraFilial?.meta_vendedor_boleto) || 67500));
+
+      const superMetaBoleto = Number(metaColab?.super_meta_boleto) > 0
+        ? Number(metaColab.super_meta_boleto)
+        : (isTrainee ? 45000 : (Number(regraFilial?.super_meta_boleto) || 87000));
+
+      const metaAcessorios = Number(metaColab?.meta_acessorios) > 0
+        ? Number(metaColab.meta_acessorios)
+        : (isTrainee ? 5000 : (Number(regraFilial?.meta_vendedor_acessorios) || 10000));
+
+      const superMetaAcessorios = Number(metaColab?.super_meta_acessorios) > 0
+        ? Number(metaColab.super_meta_acessorios)
+        : (isTrainee ? 7500 : (Number(regraFilial?.super_meta_acessorios) || 15000));
+
+      // Cálculo centralizado único via calcularDesempenhoGeral
+      const calc = calcularDesempenhoGeral(vendasTotaisColab, 'COM_APOIO', {
         isTrainee,
-        targetVendedorId: colabId,
-        targetVendedorNome: colab.nome,
-        filtroTipoVendas: 'todas',
-        excluirEspeciaisDasMetas: true
+        metaBoleto,
+        superMetaBoleto,
+        metaAcessorios,
+        superMetaAcessorios
       });
-
-      const volumeTotal = calc.totalVendasGeral;
-      const transacoes = calc.totalTransacoes;
-
-      const volumeExibicao = isTrainee
-        ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
-        : (volumeTitular > 0 ? volumeTitular : volumeTotal);
-
-      const ticketMedio = transacoes > 0 ? volumeExibicao / transacoes : 0;
 
       return {
         colaborador_id: colab.id,
         colaborador: colab.nome || 'Sem Nome',
         filial_id: colab.filial_id,
         competencia,
-        total_transacoes: transacoes,
-        faturado_titular: volumeTitular,
+        total_transacoes: calc.transacoes,
+        faturado_titular: calc.volumeTotal,
         faturado_trainee: faturadoTrainee,
-        volume_total_participado: volumeTotal,
-        ticket_medio: ticketMedio,
+        volume_total_participado: calc.volumeTotal,
+        ticket_medio: calc.ticketMedio,
         total_boletos: calc.totalBoletos,
         totalBoletos: calc.totalBoletos,
         totalBoletosBruto: calc.totalBoletosBruto,
@@ -199,8 +254,12 @@ export async function fetchRankingColaboradoresMensal({
         totalAcessorios: calc.totalAcessorios,
         total_faturado_especiais: calc.totalFaturadoEspeciais,
         totalFaturadoEspeciais: calc.totalFaturadoEspeciais,
+        comissaoLiquida: calc.comissaoLiquida,
+        comissaoTrainee: calc.comissaoTrainee,
+        comissao_acumulada: calc.comissaoLiquida,
         is_trainee: isTrainee,
-        volume_exibicao: volumeExibicao
+        volume_exibicao: calc.volumeTotal,
+        vendas_colaborador: vendasTotaisColab
       };
     });
 
@@ -208,7 +267,6 @@ export async function fetchRankingColaboradoresMensal({
     return resultado.sort((a, b) => b.volume_exibicao - a.volume_exibicao);
   } catch (err) {
     console.warn('[useMetasRankings] Fallback para view_ranking_colaboradores_mensal devido a:', err);
-    // Fallback gracioso na view caso haja erro
     let query = supabase
       .from('view_ranking_colaboradores_mensal')
       .select('*')
@@ -222,21 +280,28 @@ export async function fetchRankingColaboradoresMensal({
     }
     const { data: rows } = await query.order('faturado_titular', { ascending: false });
 
-    return ((rows || []) as RankingColaboradorRow[]).map(r => ({
-      colaborador_id: r.colaborador_id,
-      colaborador: r.colaborador || 'Sem Nome',
-      filial_id: r.filial_id,
-      competencia: r.competencia,
-      total_transacoes: parseInt(String(r.total_transacoes || 0), 10) || 0,
-      faturado_titular: parseNumber(r.faturado_titular),
-      faturado_trainee: parseNumber(r.faturado_trainee),
-      volume_total_participado: parseNumber(r.volume_total_participado),
-      ticket_medio: parseNumber(r.ticket_medio),
-      total_boletos: parseNumber(r.total_boletos),
-      totalBoletos: parseNumber(r.total_boletos),
-      is_trainee: parseNumber(r.faturado_trainee) > parseNumber(r.faturado_titular),
-      volume_exibicao: parseNumber(r.faturado_titular) > 0 ? parseNumber(r.faturado_titular) : parseNumber(r.volume_total_participado)
-    }));
+    return ((rows || []) as RankingColaboradorRow[]).map(r => {
+      const vol = parseNumber(r.faturado_titular) > 0 ? parseNumber(r.faturado_titular) : parseNumber(r.volume_total_participado);
+      const bol = parseNumber(r.total_boletos);
+      return {
+        colaborador_id: r.colaborador_id,
+        colaborador: r.colaborador || 'Sem Nome',
+        filial_id: r.filial_id,
+        competencia: r.competencia,
+        total_transacoes: parseInt(String(r.total_transacoes || 0), 10) || 0,
+        faturado_titular: parseNumber(r.faturado_titular),
+        faturado_trainee: parseNumber(r.faturado_trainee),
+        volume_total_participado: parseNumber(r.volume_total_participado),
+        ticket_medio: parseNumber(r.ticket_medio),
+        total_boletos: bol,
+        totalBoletos: bol,
+        comissaoLiquida: 0,
+        comissaoTrainee: 0,
+        comissao_acumulada: 0,
+        is_trainee: parseNumber(r.faturado_trainee) > parseNumber(r.faturado_titular) && parseNumber(r.faturado_titular) === 0,
+        volume_exibicao: vol
+      };
+    });
   }
 }
 
@@ -262,10 +327,9 @@ export function useMetasRankings({
     queryKey,
     queryFn: () => fetchRankingColaboradoresMensal({ competencia, filialId, colaboradorId }),
     enabled: Boolean(competencia && enabled),
-    staleTime: 1000 * 60 * 3, // 3 minutos de frescor do cache
+    staleTime: 1000 * 60 * 3,
   });
 
-  // Função para invalidar e refetch do ranking (para o botão "Recarregar")
   const invalidarERefetch = async () => {
     await queryClient.invalidateQueries({
       queryKey: ['ranking-colaboradores', competencia]
@@ -305,7 +369,7 @@ export function useMinhasMetasIndividual({
     queryKey,
     queryFn: () => fetchRankingColaboradoresMensal({ competencia, colaboradorId }),
     enabled: Boolean(colaboradorId && enabled),
-    staleTime: 0, // Sem cache obsoleto para consulta de metas individuais do colaborador
+    staleTime: 0,
   });
 
   const invalidarERefetch = async () => {
