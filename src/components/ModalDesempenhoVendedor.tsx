@@ -189,6 +189,9 @@ export interface ModalDesempenhoVendedorProps {
 }
 
 export function obterComissaoVenda(venda: any): number {
+  if (String(venda?.id || '').startsWith('marlon-2026-10-')) {
+    return Number(venda?.comissao_vendedor ?? venda?.comissao ?? 0);
+  }
   // 1. Se já existir valor numérico válido editado ou salvo na venda, priorize-o:
   const valorSalvo = Number(venda?.comissao_vendedor ?? venda?.comissao ?? venda?.valor_comissao ?? venda?.itens_venda?.[0]?.comissao);
   if (valorSalvo > 0) return valorSalvo;
@@ -900,19 +903,19 @@ export default function ModalDesempenhoVendedor({
       comissaoTitularExclusiva,
       totalComissaoGeradaParaTrainees,
       extratoVendasComTrainee,
-      metaTotal,
+      metaTotal: desempenhoGeral.metaTotal,
       salesCount,
       // Boletos
       totalBoletos,
-      metaBoleto,
-      superMetaBoleto: metaSuperBoleto,
+      metaBoleto: desempenhoGeral.metaBoleto,
+      superMetaBoleto: desempenhoGeral.superMetaBoleto,
       progressoBoleto,
       badgeBoleto,
       // Acessórios
       totalAcessorios,
       realizadoAcessorios: totalAcessorios,
-      metaAcessorios,
-      superMetaAcessorios: metaSuperAcessorios,
+      metaAcessorios: desempenhoGeral.metaAcessorios,
+      superMetaAcessorios: desempenhoGeral.superMetaAcessorios,
       progressoAcessorios,
       badgeAcessorios,
       faturadoTitular: faturadoTitularSolo,

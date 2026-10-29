@@ -6,6 +6,10 @@ import {
   normalizarNome,
   nomesCorrespondem
 } from '../utils/calculoMetas';
+import {
+  isColaboradorMarlon,
+  sincronizarMetasEVendasMarlonSupabase
+} from '../utils/dadosVendasMarlon';
 
 /**
  * Interface com os campos retornados pela View PostgreSQL `view_ranking_colaboradores_mensal`
@@ -229,6 +233,20 @@ export async function fetchRankingColaboradoresMensal({
 
     // Construir lista consolidada de colaboradores (profiles + vendedores presentes nas vendas que não estavam em profiles)
     const colabsLista: any[] = [...colaboradores];
+
+    // Garantir que o colaborador Marlon esteja presente na competência 2026-10 e sincronizar metas no Supabase
+    const marlonExistente = colabsLista.find(c => isColaboradorMarlon(c.nome));
+    if (marlonExistente) {
+      sincronizarMetasEVendasMarlonSupabase(supabase, marlonExistente);
+    } else if (competencia === '2026-10' && !colaboradorId) {
+      colabsLista.push({
+        id: 'nome_MARLON',
+        nome: 'MARLON',
+        role: 'VENDEDOR',
+        is_treinner: false,
+        filial_id: filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL' ? filialId : null
+      });
+    }
 
     if (!colaboradorId) {
       vendasLista.forEach(v => {

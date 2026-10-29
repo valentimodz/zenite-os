@@ -17705,19 +17705,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ? Number(m.valor_meta)
       : (isTrainee ? 40000 : 77500);
 
-    const metaBoleto = Number(m?.meta_boleto) > 0
+    let metaBoleto = Number(m?.meta_boleto) > 0
       ? Number(m.meta_boleto)
       : (isTrainee ? (Number(m?.meta_trainee_boleto) || 35000) : 67500);
 
-    const superMetaBoleto = Number(m?.super_meta_boleto) > 0
+    let superMetaBoleto = Number(m?.super_meta_boleto) > 0
       ? Number(m.super_meta_boleto)
       : (isTrainee ? 45000 : 87000);
 
-    const metaAcessorios = Number(m?.meta_acessorios) > 0
+    let metaAcessorios = Number(m?.meta_acessorios) > 0
       ? Number(m.meta_acessorios)
       : (isTrainee ? 5000 : 10000);
 
-    const superMetaAcessorios = Number(m?.super_meta_acessorios) > 0
+    let superMetaAcessorios = Number(m?.super_meta_acessorios) > 0
       ? Number(m.super_meta_acessorios)
       : (isTrainee ? 7500 : 15000);
 
@@ -17782,6 +17782,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const totalComissaoComoTitular = desempenhoUnificado.comissaoLiquida;
     const totalComissaoComoTrainee = desempenhoUnificado.comissaoTrainee;
     const totalComissoes = desempenhoUnificado.comissaoLiquida;
+    metaBoleto = desempenhoUnificado.metaBoleto;
+    superMetaBoleto = desempenhoUnificado.superMetaBoleto;
+    metaAcessorios = desempenhoUnificado.metaAcessorios;
+    superMetaAcessorios = desempenhoUnificado.superMetaAcessorios;
 
     // 3. Garantir a Distribuição no Gráfico Diário (Dias 1 a 30):
     const diasNoMes = new Date(anoAlvo, mesAlvoIdx + 1, 0).getDate();
@@ -17810,7 +17814,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       totalComissoes,
       totalComissaoComoTitular,
       totalComissaoComoTrainee,
-      metaTotal,
+      metaTotal: desempenhoUnificado.metaTotal,
       salesCount,
       // Boletos
       totalBoletos,
