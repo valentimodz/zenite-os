@@ -45,7 +45,7 @@ import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obte
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
-import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, filtrarVendasDoColaborador, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
 
 const extrairNumero = (valor) => {
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
@@ -5199,22 +5199,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         console.warn('[Dashboard] Aviso ao buscar meta do vendedor:', errM);
       }
 
-      // 2. Caso não exista registro individual, carregar os valores padrão da filial através da tabela configuracoes_metas_filial
+      // 2. Caso não exista registro individual, carregar os valores padrão da filial através da tabela regras_comissoes
       const targetFilial = filialId || activeFilialId || profile?.filial_id;
       if (!metaEncontrada && targetFilial) {
         try {
-          const { data: cfgData, error: cfgErr } = await supabase
-            .from('configuracoes_metas_filial')
+          const { data: regData } = await supabase
+            .from('regras_comissoes')
             .select('*')
             .eq('filial_id', targetFilial)
-            .eq('mes_ano', mesAlvo)
+            .eq('mes_referencia', mesAlvo)
             .maybeSingle();
 
-          if (!cfgErr && cfgData) {
+          if (regData) {
             const isTrainee = Boolean(profile?.is_treinner) || (profile?.role || '').toUpperCase().includes('TRAINEE');
             const valorCalculado = isTrainee
-              ? (Number(cfgData.meta_trainee_boletos) || 30000)
-              : (Number(cfgData.meta_vendedor_boleto) || 45000);
+              ? (Number(regData.meta_trainee_boleto || regData.meta_trainee_boletos) || 30000)
+              : (Number(regData.meta_vendedor_boleto || regData.meta_boleto) || 67500);
 
             metaEncontrada = {
               vendedor_id: userAuthId || profileId,
@@ -5222,47 +5222,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               mes_ano: mesAlvo,
               mes_referencia: mesAlvo,
               valor_meta: valorCalculado,
-              meta_boleto: cfgData.meta_vendedor_boleto,
-              meta_acessorios: cfgData.meta_vendedor_acessorios,
-              super_meta_boleto: cfgData.super_meta_boleto,
-              super_meta_acessorios: cfgData.super_meta_acessorios,
-              meta_trainee_boletos: cfgData.meta_trainee_boletos,
-              origem: 'configuracoes_metas_filial'
+              meta_boleto: regData.meta_vendedor_boleto || regData.meta_boleto || valorCalculado,
+              meta_acessorios: regData.meta_vendedor_acessorios || regData.meta_acessorios || (isTrainee ? 5000 : 10000),
+              super_meta_boleto: regData.super_meta_boleto || (isTrainee ? 45000 : 87000),
+              super_meta_acessorios: regData.super_meta_acessorios || (isTrainee ? 7500 : 15000),
+              meta_trainee_boletos: regData.meta_trainee_boleto || regData.meta_trainee_boletos || 30000,
+              tipo_meta: 'faturamento',
+              origem: 'regras_comissoes'
             };
           }
-        } catch (errCfg) {
-          console.warn('[Dashboard] Aviso fallback configuracoes_metas_filial:', errCfg);
-        }
-
-        // Se ainda não encontrou, verificar regras_comissoes da filial
-        if (!metaEncontrada) {
-          try {
-            const { data: regData } = await supabase
-              .from('regras_comissoes')
-              .select('*')
-              .eq('filial_id', targetFilial)
-              .eq('mes_referencia', mesAlvo)
-              .maybeSingle();
-
-            if (regData) {
-              const isTrainee = Boolean(profile?.is_treinner) || (profile?.role || '').toUpperCase().includes('TRAINEE');
-              const valorCalculado = isTrainee
-                ? (Number(regData.meta_trainee_boleto) || 30000)
-                : 45000;
-
-              metaEncontrada = {
-                vendedor_id: userAuthId || profileId,
-                filial_id: targetFilial,
-                mes_ano: mesAlvo,
-                mes_referencia: mesAlvo,
-                valor_meta: valorCalculado,
-                tipo_meta: 'faturamento',
-                origem: 'regras_comissoes'
-              };
-            }
-          } catch (errReg) {
-            console.warn('[Dashboard] Aviso fallback regras_comissoes:', errReg);
-          }
+        } catch (errReg) {
+          console.warn('[Dashboard] Aviso fallback regras_comissoes:', errReg);
         }
       }
 
@@ -5289,93 +5259,48 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const dataFim = `${mesAlvo}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
 
       // 2. Ajustar a Query de Busca no Supabase (incluindo vendas como titular ou participação como trainee):
+      // Importante: não usar .neq('status', 'CANCELADA') no SQL pois o PostgreSQL exclui linhas onde status IS NULL.
       let queryVendas = supabase
         .from('vendas')
-        .select(`
-          id,
-          created_at,
-          valor_total,
-          metodo_pagamento,
-          forma_pagamento,
-          pagamentos,
-          valor_boleto,
-          valor_pix,
-          valor_dinheiro,
-          valor_cartao,
-          status,
-          financeira,
-          financeira_parceira,
-          categoria,
-          comissao,
-          comissao_vendedor,
-          comissao_trainee,
-          teve_participacao_trainee,
-          trainee_id,
-          treener_id,
-          vendedor_id,
-          vendedor_nome,
-          usuario_id,
-          usuarios:vendedor_id ( id, nome ),
-          produto_nome,
-          quantidade,
-          imei,
-          filial_id,
-          vendas_pagamentos (*),
-          itens_venda (
-            id,
-            produto_id,
-            produto_nome,
-            quantidade,
-            preco_unitario,
-            valor_total,
-            preco_base,
-            desconto,
-            valor_desconto,
-            comissao,
-            produtos ( id, nome, preco_custo )
-          )
-        `)
+        .select('*, itens_venda (*)')
         .gte('created_at', dataInicio)
-        .lte('created_at', dataFim)
-        .neq('status', 'CANCELADA')
-        .neq('status', 'cancelada');
+        .lte('created_at', dataFim);
 
+      const orClauses = [];
       if (currentUserId) {
-        const orClauses = [
+        orClauses.push(
           `vendedor_id.eq.${currentUserId}`,
+          `usuario_id.eq.${currentUserId}`,
           `trainee_id.eq.${currentUserId}`,
           `treener_id.eq.${currentUserId}`
-        ];
-        if (profile?.nome) {
-          orClauses.push(`vendedor_nome.ilike.%${profile.nome.trim()}%`);
+        );
+      }
+      if (userNome) {
+        orClauses.push(`vendedor_nome.ilike.%${userNome}%`);
+        orClauses.push(`trainee_nome.ilike.%${userNome}%`);
+        const primeiroNome = userNome.split(/\s+/)[0];
+        if (primeiroNome && primeiroNome.length >= 3 && primeiroNome.toUpperCase() !== userNome.toUpperCase()) {
+          orClauses.push(`vendedor_nome.ilike.%${primeiroNome}%`);
+          orClauses.push(`trainee_nome.ilike.%${primeiroNome}%`);
         }
+      }
+
+      if (orClauses.length > 0) {
         queryVendas = queryVendas.or(orClauses.join(','));
-      } else if (profile?.nome) {
-        queryVendas = queryVendas.ilike('vendedor_nome', `%${profile.nome.trim()}%`);
       }
 
       let { data: listaVendas, error } = await queryVendas.order('created_at', { ascending: false });
 
       if (error) {
-        console.warn("[Dashboard] Tentando fallback de query de vendas sem joins:", error);
+        console.warn('[Dashboard] Tentando fallback de query de vendas sem joins:', error);
         let fallbackQuery = supabase
           .from('vendas')
           .select('*')
           .gte('created_at', dataInicio)
           .lte('created_at', dataFim);
 
-        if (currentUserId) {
-          const orClauses = [
-            `vendedor_id.eq.${currentUserId}`,
-            `trainee_id.eq.${currentUserId}`,
-            `treener_id.eq.${currentUserId}`
-          ];
-          if (profile?.nome) {
-            orClauses.push(`vendedor_nome.ilike.%${profile.nome.trim()}%`);
-          }
+        if (orClauses.length > 0) {
           fallbackQuery = fallbackQuery.or(orClauses.join(','));
-        } else if (profile?.nome) {
-          fallbackQuery = fallbackQuery.ilike('vendedor_nome', `%${profile.nome.trim()}%`);
         }
 
         const fbRes = await fallbackQuery.order('created_at', { ascending: false });
@@ -5384,11 +5309,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
       }
 
-      console.log("Vendas do vendedor conectado recebidas:", listaVendas);
+      console.log('Vendas do vendedor conectado recebidas:', listaVendas);
 
       // Filtrar estritamente dentro do mês selecionado usando o fuso horário de Brasília ('America/Sao_Paulo')
-      // para garantir que vendas de outros meses (como 2026-10) jamais entrem na soma
-      const dataNormalizada = (listaVendas || []).map(v => {
+      const vendasMes = (listaVendas || []).map(v => {
         const itensNorm = (v.itens_venda || []).map(it => ({
           ...it,
           valor_unitario: Number(it.valor_unitario || it.preco_unitario || 0),
@@ -5404,16 +5328,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         try {
           const dt = new Date(rawDate);
           if (isNaN(dt.getTime())) return false;
-          // Converte para data local de Brasília (YYYY-MM)
           const brComp = new Intl.DateTimeFormat('en-CA', {
             timeZone: 'America/Sao_Paulo',
             year: 'numeric',
             month: '2-digit'
-          }).format(dt); // Retorna "YYYY-MM"
+          }).format(dt);
           return brComp === mesAlvo;
         } catch (e) {
           return false;
         }
+      });
+
+      const isTraineeUser = Boolean(profile?.is_treinner) || (profile?.role || '').toUpperCase().includes('TRAINEE');
+      const dataNormalizada = filtrarVendasDoColaborador(vendasMes, {
+        id: currentUserId,
+        nome: userNome,
+        isTrainee: isTraineeUser
       });
 
       // Tentar obter números consolidados diretamente da view view_ranking_colaboradores_mensal
@@ -17792,37 +17722,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       : (isTrainee ? 7500 : 15000);
 
     // Todas as vendas do mês corrente/filtrado deste vendedor/trainee (resiliente a fuso horário e nulos)
-    const currentMonthSales = (vendasVendedor || []).filter(sale => {
-      const saleUserId = sale.vendedor_id || sale.usuario_id || sale.criado_por;
-      const saleTraineeId = sale.trainee_id || sale.treener_id;
-      const saleNome = (sale.vendedor_nome || '').toLowerCase().trim();
-      const userNome = profileNome.toLowerCase();
-
-      const matchesAuthId = userAuthId && saleUserId && String(saleUserId) === String(userAuthId);
-      const matchesProfileId = profileId && saleUserId && String(saleUserId) === String(profileId);
-      const matchesCurrentId = currentUserId && saleUserId && String(saleUserId) === String(currentUserId);
-      const matchesTrainee = currentUserId && saleTraineeId && (
-        String(saleTraineeId) === String(currentUserId) ||
-        (userAuthId && String(saleTraineeId) === String(userAuthId)) ||
-        (profileId && String(saleTraineeId) === String(profileId))
-      );
-      const matchesNome = userNome && saleNome && (saleNome.includes(userNome) || userNome.includes(saleNome));
-
-      if (currentUserId && (saleUserId || saleTraineeId) && !matchesAuthId && !matchesProfileId && !matchesCurrentId && !matchesTrainee && !matchesNome) {
-        return false;
-      }
-      if (!saleUserId && !saleTraineeId && userNome && !matchesNome) {
-        return false;
-      }
-
+    const vendasDoMes = (vendasVendedor || []).filter(sale => {
       const rawDateStr = sale.created_at || sale.data;
-      if (!rawDateStr) return true; // Se não houver data, mantém na exibição por segurança
+      if (!rawDateStr) return true;
 
       const saleDate = new Date(rawDateStr);
       if (isNaN(saleDate.getTime())) return true;
 
-      // Comparação estrita considerando o fuso horário oficial de Brasília ('America/Sao_Paulo')
-      // impedindo que vendas de competências diferentes (ex: 2026-10) entrem na soma de 2026-09
       try {
         const brCompetencia = new Intl.DateTimeFormat('en-CA', {
           timeZone: 'America/Sao_Paulo',
@@ -17835,8 +17741,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
     });
 
+    const currentMonthSales = filtrarVendasDoColaborador(vendasDoMes, {
+      id: currentUserId || userAuthId || profileId,
+      nome: profileNome,
+      isTrainee
+    });
+
     // 2. CÁLCULO UNIFICADO DE METAS & DESEMPENHO (Centralizado 100% em calcularDesempenhoGeral):
-    const listaVendas = (currentMonthSales && currentMonthSales.length > 0) ? currentMonthSales : (vendasVendedor || []);
+    const listaVendas = (currentMonthSales && currentMonthSales.length > 0) ? currentMonthSales : vendasDoMes;
 
     const desempenhoUnificado = calcularDesempenhoGeral(listaVendas, 'COM_APOIO', {
       isTrainee,

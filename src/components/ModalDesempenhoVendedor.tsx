@@ -31,6 +31,7 @@ import {
   calcularDesempenhoGeral,
   calcularDesempenhoColaborador,
   calcularMetasColaborador,
+  filtrarVendasDoColaborador,
   extrairValorBoletoVenda,
   isPagamentoBoletoFinanciadora as isPagamentoBoletoFinanciadoraUtil,
   isAcessorio as isAcessorioUtil,
@@ -548,7 +549,7 @@ export default function ModalDesempenhoVendedor({
         // Alimenta os objetivos e super metas configurados para o VENDEDOR (nunca o total da loja):
         const metaBoletoVendedor = Number(regra.meta_vendedor_boleto || 67500);
         const metaAcessoriosVendedor = Number(regra.meta_vendedor_acessorios || 10000);
-        const superMetaBoleto = Number(regra.super_meta_boleto || regra.super_meta || 87000);
+        const superMetaBoleto = Number(regra.super_meta_boleto || 87000);
         const superMetaAcessorios = Number(regra.super_meta_acessorios || 15000);
 
         setObjetivoBoleto(metaBoletoVendedor);
@@ -579,11 +580,17 @@ export default function ModalDesempenhoVendedor({
       const inicioMes = `${competencia}-01T00:00:00.000-03:00`;
       const fimMes = `${competencia}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
 
+      const isUuidValido = Boolean(
+        vendedorId &&
+        vendedorId !== 'sem_vendedor' &&
+        !String(vendedorId).startsWith('nome_')
+      );
+
       // Busca meta individual rápida em paralelo
       (async () => {
         try {
           let mQuery = supabase.from('metas').select('*');
-          if (vendedorId) {
+          if (isUuidValido) {
             mQuery = mQuery.eq('vendedor_id', vendedorId);
           } else if (vendedorNome) {
             mQuery = mQuery.ilike('vendedor_nome', `%${vendedorNome}%`);
@@ -594,40 +601,34 @@ export default function ModalDesempenhoVendedor({
 
           if (mData) {
             setMetaIndividual(mData);
-          } else if (colaboradorFilialId) {
-            const { data: cData } = await supabase
-              .from('configuracoes_metas_filial')
-              .select('*')
-              .eq('filial_id', colaboradorFilialId)
-              .eq('mes_ano', competencia)
-              .maybeSingle();
-
-            if (cData) setMetaIndividual(cData);
           }
         } catch {
           // Erro silencioso ao carregar meta individual
         }
       })();
 
-      // 2. Busca de vendas sem filtro restritivo de filial_id (trazendo todas as vendas da colaboradora na rede)
+      // 2. Busca de vendas sem filtro restritivo de filial_id e sem .neq('status','CANCELADA') em SQL (que descarta status IS NULL)
       const orClauses: string[] = [];
-      if (vendedorId) {
+      if (isUuidValido) {
         orClauses.push(`vendedor_id.eq.${vendedorId}`);
+        orClauses.push(`usuario_id.eq.${vendedorId}`);
         orClauses.push(`trainee_id.eq.${vendedorId}`);
         orClauses.push(`treener_id.eq.${vendedorId}`);
       }
       if (vendedorNome) {
-        orClauses.push(`vendedor_nome.ilike.%${vendedorNome}%`);
-        orClauses.push(`trainee_nome.ilike.%${vendedorNome}%`);
+        const nomeLimpo = vendedorNome.trim();
+        orClauses.push(`vendedor_nome.ilike.%${nomeLimpo}%`);
+        orClauses.push(`trainee_nome.ilike.%${nomeLimpo}%`);
+        const primeiroNome = nomeLimpo.split(/\s+/)[0];
+        if (primeiroNome && primeiroNome.length >= 3 && primeiroNome.toUpperCase() !== nomeLimpo.toUpperCase()) {
+          orClauses.push(`vendedor_nome.ilike.%${primeiroNome}%`);
+          orClauses.push(`trainee_nome.ilike.%${primeiroNome}%`);
+        }
       }
 
       let query = supabase
         .from('vendas')
-        .select(`
-    *,
-    vendas_pagamentos (*),
-    itens_venda (*)
-  `)
+        .select('*, itens_venda (*)')
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
         .order('created_at', { ascending: false });
@@ -636,78 +637,52 @@ export default function ModalDesempenhoVendedor({
         query = query.or(orClauses.join(','));
       }
 
-      const { data: vendas, error } = await query;
+      let { data: vendas, error } = await query;
 
-      if (error) throw error;
+      if (error) {
+        let fbQuery = supabase
+          .from('vendas')
+          .select('*')
+          .gte('created_at', inicioMes)
+          .lte('created_at', fimMes)
+          .order('created_at', { ascending: false });
+        if (orClauses.length > 0) {
+          fbQuery = fbQuery.or(orClauses.join(','));
+        }
+        const fbRes = await fbQuery;
+        vendas = fbRes.data || [];
+      }
 
       if (vendas) {
-        // Filtrar apenas se não estiver cancelada (insensível a maiúsculas/minúsculas)
-        const vendasValidas: any[] = vendas.filter((v: any) => {
-          const statusLimpo = String(v.status || '').toUpperCase().trim();
-          return statusLimpo !== 'CANCELADA' && statusLimpo !== 'CANCELADO';
-        });
-
-        const idsVendas = vendasValidas.map(v => v.id).filter(Boolean);
-
-        // Fetch complementar de itens_venda caso não venham aninhados pelo PostgREST
-        const faltamItens = vendasValidas.some(v => !Array.isArray(v.itens_venda) || v.itens_venda.length === 0);
-        if (faltamItens && idsVendas.length > 0) {
-          try {
-            const { data: itensComp } = await supabase
-              .from('itens_venda')
-              .select('*')
-              .in('venda_id', idsVendas);
-
-            if (itensComp && itensComp.length > 0) {
-              const mapaItens: Record<string, any[]> = {};
-              itensComp.forEach((it: any) => {
-                const vid = String(it.venda_id);
-                if (!mapaItens[vid]) mapaItens[vid] = [];
-                mapaItens[vid].push(it);
-              });
-
-              vendasValidas.forEach(v => {
-                if (!Array.isArray(v.itens_venda) || v.itens_venda.length === 0) {
-                  v.itens_venda = mapaItens[String(v.id)] || [];
-                }
-              });
-            }
-          } catch (errItens) {
-            console.warn('[ModalDesempenhoVendedor] Aviso ao buscar itens_venda complementares:', errItens);
-          }
-        }
-
-        // Fetch complementar de vendas_pagamentos caso não venham aninhados pelo PostgREST
-        const faltamPagtos = vendasValidas.some(v => !Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0);
-        if (faltamPagtos && idsVendas.length > 0) {
-          try {
-            const { data: pagtosComp } = await supabase
-              .from('vendas_pagamentos')
-              .select('*')
-              .in('venda_id', idsVendas);
-
-            if (pagtosComp && pagtosComp.length > 0) {
-              const mapaPagtos: Record<string, any[]> = {};
-              pagtosComp.forEach((pg: any) => {
-                const vid = String(pg.venda_id);
-                if (!mapaPagtos[vid]) mapaPagtos[vid] = [];
-                mapaPagtos[vid].push(pg);
-              });
-
-              vendasValidas.forEach(v => {
-                if (!Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0) {
-                  v.vendas_pagamentos = mapaPagtos[String(v.id)] || [];
-                }
-              });
-            }
-          } catch (errPagtos) {
-            console.warn('[ModalDesempenhoVendedor] Aviso ao buscar vendas_pagamentos complementares:', errPagtos);
-          }
-        }
-
         const cargoNormalizado = String(colaborador?.cargo || (colaborador as any)?.funcao || '').toUpperCase().trim();
         const roleNormalizado = String(colaborador?.role || '').toUpperCase().trim();
         const isOriginalTrainee = cargoNormalizado.includes('TRAINEE') || roleNormalizado.includes('TRAINEE') || colaborador?.is_treinner === true;
+
+        // Filtra estritamente na competência America/Sao_Paulo e valida vínculo do colaborador
+        const vendasMesBr = vendas.filter((v: any) => {
+          const statusLimpo = String(v?.status || '').toUpperCase().trim();
+          if (statusLimpo === 'CANCELADA' || statusLimpo === 'CANCELADO') return false;
+          const rawDate = v.created_at || v.data;
+          if (!rawDate) return true;
+          try {
+            const dt = new Date(rawDate);
+            if (isNaN(dt.getTime())) return true;
+            const brComp = new Intl.DateTimeFormat('en-CA', {
+              timeZone: 'America/Sao_Paulo',
+              year: 'numeric',
+              month: '2-digit'
+            }).format(dt);
+            return brComp === competencia;
+          } catch {
+            return true;
+          }
+        });
+
+        const vendasValidas = filtrarVendasDoColaborador(vendasMesBr, {
+          id: isUuidValido ? vendedorId : undefined,
+          nome: vendedorNome,
+          isTrainee: isOriginalTrainee
+        });
 
         const modoVis: 'COM_APOIO' | 'SOLO' = filtroTipoVendas === 'solo' ? 'SOLO' : 'COM_APOIO';
         const resumoGeral = calcularDesempenhoGeral(vendasValidas, modoVis, {
@@ -737,132 +712,6 @@ export default function ModalDesempenhoVendedor({
   }, [targetVendedorId, targetVendedorNome, mesAtivo, mesCompetencia, colaboradorFilialId, filtroTipoVendas, objetivoBoleto, superMetaBoletoState, objetivoAcessorios, superMetaAcessoriosState, metaTotalCombinada, colaborador]);
 
   const carregarDadosMetas = carregarDadosVendedor;
-
-  // 1. IDENTIFICAR SE 'vendasColaborador' ESTÁ VAZIO E CARREGAR AUTOMATICAMENTE
-  useEffect(() => {
-    const fetchVendasDireto = async () => {
-      // Se já vieram vendas por prop com itens, aproveita-as
-      if (vendasColaborador && vendasColaborador.length > 0) {
-        setVendasLocais(vendasColaborador);
-        return;
-      }
-      if (Array.isArray(vendasCache) && vendasCache.length > 0) {
-        setVendasLocais(vendasCache);
-        setVendasColaborador(vendasCache as Venda[]);
-        return;
-      }
-
-      const idVendedor = colaboradorId || (colaborador as any)?.id || (colaborador as any)?.vendedorId || (colaborador as any)?.vendedor_id;
-      const nomeVendedor = colaborador?.nome || (colaborador as any)?.vendedorNome || (colaborador as any)?.vendedor_nome;
-
-      if (!idVendedor && !nomeVendedor) return;
-
-      const [ano, mes] = (mesAtivo || mesCompetencia || '2026-10').split('-');
-      const anoNum = parseInt(ano, 10);
-      const mesNum = parseInt(mes, 10);
-      const ultimoDia = new Date(anoNum, mesNum, 0).getDate();
-      const dtInicio = `${mesAtivo || mesCompetencia}-01T00:00:00.000-03:00`;
-      const dtFim = `${mesAtivo || mesCompetencia}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
-
-      try {
-        let query = supabase
-          .from('vendas')
-          .select(`
-            *,
-            vendas_pagamentos (*),
-            itens_venda (*)
-          `)
-          .gte('created_at', dtInicio)
-          .lte('created_at', dtFim)
-          .neq('status', 'CANCELADA')
-          .neq('status', 'cancelada');
-
-        const orDirect: string[] = [];
-        if (idVendedor) {
-          orDirect.push(`vendedor_id.eq.${idVendedor}`);
-          orDirect.push(`trainee_id.eq.${idVendedor}`);
-          orDirect.push(`treener_id.eq.${idVendedor}`);
-        }
-        if (nomeVendedor) {
-          orDirect.push(`vendedor_nome.ilike.%${nomeVendedor}%`);
-          orDirect.push(`trainee_nome.ilike.%${nomeVendedor}%`);
-        }
-
-        if (orDirect.length > 0) {
-          query = query.or(orDirect.join(','));
-        }
-
-        const { data } = await query;
-        if (data && data.length > 0) {
-          const vendasDiretasValidas: any[] = [...data];
-          const idsDiretos = vendasDiretasValidas.map(v => v.id).filter(Boolean);
-
-          // Fetch complementar de itens_venda
-          const faltamItens = vendasDiretasValidas.some(v => !Array.isArray(v.itens_venda) || v.itens_venda.length === 0);
-          if (faltamItens && idsDiretos.length > 0) {
-            try {
-              const { data: itensComp } = await supabase
-                .from('itens_venda')
-                .select('*')
-                .in('venda_id', idsDiretos);
-
-              if (itensComp && itensComp.length > 0) {
-                const mapaItens: Record<string, any[]> = {};
-                itensComp.forEach((it: any) => {
-                  const vid = String(it.venda_id);
-                  if (!mapaItens[vid]) mapaItens[vid] = [];
-                  mapaItens[vid].push(it);
-                });
-                vendasDiretasValidas.forEach(v => {
-                  if (!Array.isArray(v.itens_venda) || v.itens_venda.length === 0) {
-                    v.itens_venda = mapaItens[String(v.id)] || [];
-                  }
-                });
-              }
-            } catch (errItens) {
-              console.warn('[ModalDesempenhoVendedor] Aviso ao buscar itens complementares em fetchVendasDireto:', errItens);
-            }
-          }
-
-          // Fetch complementar de vendas_pagamentos
-          const faltamPagtos = vendasDiretasValidas.some(v => !Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0);
-          if (faltamPagtos && idsDiretos.length > 0) {
-            try {
-              const { data: pagtosComp } = await supabase
-                .from('vendas_pagamentos')
-                .select('*')
-                .in('venda_id', idsDiretos);
-
-              if (pagtosComp && pagtosComp.length > 0) {
-                const mapaPagtos: Record<string, any[]> = {};
-                pagtosComp.forEach((pg: any) => {
-                  const vid = String(pg.venda_id);
-                  if (!mapaPagtos[vid]) mapaPagtos[vid] = [];
-                  mapaPagtos[vid].push(pg);
-                });
-                vendasDiretasValidas.forEach(v => {
-                  if (!Array.isArray(v.vendas_pagamentos) || v.vendas_pagamentos.length === 0) {
-                    v.vendas_pagamentos = mapaPagtos[String(v.id)] || [];
-                  }
-                });
-              }
-            } catch (errPagtos) {
-              console.warn('[ModalDesempenhoVendedor] Aviso ao buscar pagtos complementares em fetchVendasDireto:', errPagtos);
-            }
-          }
-
-          setVendasLocais(vendasDiretasValidas);
-          setVendasColaborador(vendasDiretasValidas as Venda[]);
-        }
-      } catch (err) {
-        console.error('Erro ao carregar vendas diretamente:', err);
-      }
-    };
-
-    if (mounted) {
-      fetchVendasDireto();
-    }
-  }, [mounted, colaboradorId, colaborador, mesAtivo, mesCompetencia, vendasColaborador, vendasCache]);
 
   // 3. ATUALIZAR NO USEEFFECT:
   // Executa carregarRegrasMetas() e carregarDadosVendedor() quando o modal for aberto ou filialId/mesAtivo mudarem

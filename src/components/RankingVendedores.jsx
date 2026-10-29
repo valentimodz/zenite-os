@@ -183,18 +183,15 @@ export default function RankingVendedores({
         setMetasVendedoresMap({});
       }
 
-      // Buscar regras/metas de filial (regras_comissoes e configuracoes_metas_filial)
-      const [{ data: regrasData }, { data: cfgData }] = await Promise.all([
-        supabase.from('regras_comissoes').select('*').eq('mes_referencia', compAlvo),
-        supabase.from('configuracoes_metas_filial').select('*').eq('mes_ano', compAlvo)
-      ]);
+      // Buscar regras de filial (regras_comissoes)
+      const { data: regrasData } = await supabase
+        .from('regras_comissoes')
+        .select('*')
+        .eq('mes_referencia', compAlvo);
 
       const mapaFiliais = {};
       (regrasData || []).forEach(r => {
         if (r.filial_id) mapaFiliais[String(r.filial_id)] = { ...mapaFiliais[String(r.filial_id)], ...r };
-      });
-      (cfgData || []).forEach(c => {
-        if (c.filial_id) mapaFiliais[String(c.filial_id)] = { ...mapaFiliais[String(c.filial_id)], ...c };
       });
       setRegrasFiliaisMap(mapaFiliais);
     } catch (err) {
@@ -578,6 +575,7 @@ export default function RankingVendedores({
           dataInicio={periodoData.inicio}
           dataFim={periodoData.fim}
           filiais={filiais}
+          vendasColaborador={vendedorSelecionadoModal.vendas_colaborador}
           onClose={() => setVendedorSelecionadoModal(null)}
         />
       )}

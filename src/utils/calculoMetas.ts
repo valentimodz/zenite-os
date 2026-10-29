@@ -36,6 +36,8 @@ export interface VendaCalculo {
   comissao_vendedor?: number | string;
   valor_comissao?: number | string;
   vendedor_id?: string;
+  usuario_id?: string;
+  criado_por?: string;
   vendedor_nome?: string;
   trainee_nome?: string;
   trainee_id?: string;
@@ -79,6 +81,92 @@ export const TERMOS_ESPECIAIS = [
   // Áudio JBL & Premium
   'JBL', 'BOOMBOX', 'PARTYBOX', 'XTREME', 'CHARGE 5', 'FLIP 6', 'GO 3', 'CLIP 4'
 ];
+
+/**
+ * Normaliza nome para comparação insensível a acentos e caixa
+ */
+export const normalizarNome = (s: any): string =>
+  String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+
+/**
+ * Verifica se dois nomes de colaborador correspondem (ex.: 'ISLAYNE' vs 'ISLAYNE COELHO')
+ */
+export const nomesCorrespondem = (nomeVendaRaw: any, nomeColabRaw: any): boolean => {
+  const nVenda = normalizarNome(nomeVendaRaw);
+  const nColab = normalizarNome(nomeColabRaw);
+  if (!nVenda || !nColab || nVenda === '-' || nColab === '-') return false;
+  if (nVenda === nColab) return true;
+  if (nColab.length >= 3 && nVenda.includes(nColab)) return true;
+  if (nVenda.length >= 3 && nColab.includes(nVenda)) return true;
+
+  const primeiroVenda = nVenda.split(/\s+/)[0] || '';
+  const primeiroColab = nColab.split(/\s+/)[0] || '';
+  if (primeiroVenda.length >= 3 && primeiroVenda === primeiroColab) {
+    // Se um dos dois tem apenas o primeiro nome, considera o mesmo colaborador
+    const partesVenda = nVenda.split(/\s+/);
+    const partesColab = nColab.split(/\s+/);
+    if (partesVenda.length === 1 || partesColab.length === 1) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Filtra de forma unificada todas as vendas pertencentes a um colaborador (por ID ou Nome, como titular ou trainee)
+ * garantindo que Gerente (Tabela), Gerente (Modal) e Login do Vendedor partam exatamente da mesma lista de vendas.
+ */
+export function filtrarVendasDoColaborador(
+  todasVendas: any[],
+  colab: {
+    id?: string | null;
+    authId?: string | null;
+    profileId?: string | null;
+    nome?: string | null;
+    isTrainee?: boolean;
+  }
+): any[] {
+  const idsValidos = [colab?.id, colab?.authId, colab?.profileId]
+    .map(x => String(x || '').trim())
+    .filter(x => x && x !== 'undefined' && x !== 'null' && x !== 'sem_vendedor' && !x.startsWith('nome_'));
+
+  const nomeColab = normalizarNome(colab?.nome);
+  const vistos = new Set<string>();
+  const resultado: any[] = [];
+
+  (todasVendas || []).forEach((v: any, idx: number) => {
+    if (!v) return;
+    const status = String(v.status || '').toUpperCase().trim();
+    if (status === 'CANCELADA' || status === 'CANCELADO') return;
+
+    const vId = String(v.vendedor_id || '').trim();
+    const uId = String(v.usuario_id || v.criado_por || '').trim();
+    const tId = String(v.trainee_id || v.treener_id || '').trim();
+
+    const matchTitularId = idsValidos.length > 0 && (idsValidos.includes(vId) || (!vId && idsValidos.includes(uId)));
+    const matchTraineeId = idsValidos.length > 0 && idsValidos.includes(tId);
+    const matchTitularNome = Boolean(nomeColab) && nomesCorrespondem(v.vendedor_nome, nomeColab);
+    const matchTraineeNome = Boolean(nomeColab) && nomesCorrespondem(v.trainee_nome, nomeColab);
+
+    const pertence = colab?.isTrainee
+      ? (matchTitularId || matchTraineeId || matchTitularNome || matchTraineeNome)
+      : (matchTitularId || matchTraineeId || matchTitularNome);
+
+    if (pertence) {
+      const chave = v.id ? String(v.id) : `idx_${idx}_${v.created_at}_${v.valor_total}`;
+      if (!vistos.has(chave)) {
+        vistos.add(chave);
+        resultado.push(v);
+      }
+    }
+  });
+
+  return resultado;
+}
 
 /**
  * Extração segura e defensiva do valor da venda
@@ -277,6 +365,7 @@ export interface OpcoesDesempenhoGeral {
   metaTotal?: number;
   targetVendedorId?: string;
   targetVendedorNome?: string;
+  excluirEspeciaisDasMetas?: boolean;
 }
 
 export interface ResultadoDesempenhoGeral {
@@ -299,6 +388,8 @@ export interface ResultadoDesempenhoGeral {
   progressoBoleto: number;
   progressoAcessorios: number;
   progressoTotal: number;
+  faltaAcessorios: number;
+  faltaSuperAcessorios: number;
   badgeBoleto: {
     taxa: string;
     texto: string;
@@ -333,10 +424,16 @@ export function calcularDesempenhoGeral(
 ): ResultadoDesempenhoGeral {
   const { isTrainee = false } = opcoes;
 
-  // Filtrar vendas canceladas
-  const vendasValidas = (vendasColaborador || []).filter((v: any) => {
+  // Filtrar vendas canceladas e desduplicar por ID
+  const vistos = new Set<string>();
+  const vendasValidas = (vendasColaborador || []).filter((v: any, idx: number) => {
+    if (!v) return false;
     const status = String(v?.status || '').toUpperCase().trim();
-    return status !== 'CANCELADA' && status !== 'CANCELADO';
+    if (status === 'CANCELADA' || status === 'CANCELADO') return false;
+    const chave = v.id ? String(v.id) : `idx_${idx}_${v.created_at}_${v.valor_total}`;
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
   });
 
   // Separação informativa: faturado titular solo vs com apoio de trainee
@@ -498,13 +595,29 @@ export function calcularDesempenhoGeral(
   }, 0);
   const comissaoTrainee = Math.round(comissaoTraineeCalc * 100) / 100;
 
+  // Somatório histórico salvo na venda (usado como piso se um trainee ou vendedor tiver comissão explícita maior)
+  const comissaoHistoricaSalva = Math.round(
+    vendasFiltradas.reduce((acc, s) => {
+      if (isTrainee) {
+        const cTr = Number(s.comissao_trainee || 0);
+        if (!isNaN(cTr) && cTr > 0) return acc + cTr;
+        const val = Number(s.valor_total ?? s.total ?? s.valor ?? 0);
+        return acc + (val > 0 ? Number((val * 0.01).toFixed(2)) : 0);
+      }
+      const cTit = Number(s.comissao_vendedor ?? s.comissao ?? s.valor_comissao ?? 0);
+      return acc + (!isNaN(cTit) && cTit > 0 ? cTit : 0);
+    }, 0) * 100
+  ) / 100;
+
   const comissaoLiquida = isTrainee
-    ? (comissaoTrainee > 0 && totalBoletos === 0 ? comissaoTrainee : Math.max(comissaoPorFaixasMetas, comissaoTrainee))
-    : comissaoPorFaixasMetas;
+    ? (comissaoHistoricaSalva > 0 ? comissaoHistoricaSalva : comissaoPorFaixasMetas)
+    : Math.max(comissaoPorFaixasMetas, comissaoHistoricaSalva);
 
   const progressoBoleto = metaBoleto > 0 ? Math.min(100, Math.round((totalBoletos / metaBoleto) * 100)) : 0;
   const progressoAcessorios = metaAcessorios > 0 ? Number(((totalAcessorios / metaAcessorios) * 100).toFixed(1)) : 0;
   const progressoTotal = metaTotal > 0 ? Math.min(100, Math.round((volumeTotal / metaTotal) * 100)) : 0;
+  const faltaAcessorios = Math.max(0, Math.round((metaAcessorios - totalAcessorios) * 100) / 100);
+  const faltaSuperAcessorios = Math.max(0, Math.round((superMetaAcessorios - totalAcessorios) * 100) / 100);
 
   return {
     transacoes,
@@ -526,6 +639,8 @@ export function calcularDesempenhoGeral(
     progressoBoleto,
     progressoAcessorios,
     progressoTotal,
+    faltaAcessorios,
+    faltaSuperAcessorios,
     badgeBoleto,
     badgeAcessorios,
     faturadoTitularSolo: Math.round(faturadoTitularSolo * 100) / 100,
@@ -629,31 +744,19 @@ export function calcularMetasColaborador(
 ) {
   const { competencia, isTrainee = false, colaboradorNome } = opcoesExtras;
 
-  const vendasFiltradas = (vendas || []).filter((v: any) => {
-    const status = String(v.status || '').toUpperCase().trim();
+  const vendasCompetencia = (vendas || []).filter((v: any) => {
+    const status = String(v?.status || '').toUpperCase().trim();
     if (status === 'CANCELADA' || status === 'CANCELADO') return false;
-
     if (competencia && v.created_at) {
       const dataVenda = String(v.created_at);
       if (!dataVenda.startsWith(competencia)) return false;
     }
-
-    if (colaboradorId) {
-      const cId = String(colaboradorId).trim();
-      const vId = v.vendedor_id ? String(v.vendedor_id).trim() : null;
-      const tId = v.trainee_id || v.treener_id ? String(v.trainee_id || v.treener_id).trim() : null;
-      const vNome = v.vendedor_nome ? String(v.vendedor_nome).trim().toLowerCase() : null;
-      const tNome = v.trainee_nome ? String(v.trainee_nome).trim().toLowerCase() : null;
-      const cNome = colaboradorNome ? String(colaboradorNome).trim().toLowerCase() : null;
-
-      const matchId = (vId && vId === cId) || (tId && tId === cId);
-      const matchNome = cNome && ((vNome && (vNome === cNome || vNome.includes(cNome))) || (tNome && (tNome === cNome || tNome.includes(cNome))));
-
-      return Boolean(matchId || matchNome);
-    }
-
     return true;
   });
+
+  const vendasFiltradas = (colaboradorId || colaboradorNome)
+    ? filtrarVendasDoColaborador(vendasCompetencia, { id: colaboradorId, nome: colaboradorNome, isTrainee })
+    : vendasCompetencia;
 
   const geral = calcularDesempenhoGeral(vendasFiltradas, 'COM_APOIO', { isTrainee });
 
