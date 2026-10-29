@@ -33,7 +33,6 @@ import {
   calcularDesempenhoGeral,
   calcularDesempenhoColaborador,
   calcularMetasColaborador,
-  calcularComissaoVendaIndividual,
   filtrarVendasDoColaborador,
   extrairValorBoletoVenda,
   baixarRelatorioVendasCSV,
@@ -187,6 +186,78 @@ export interface ModalDesempenhoVendedorProps {
   vendasCache?: Venda[] | any[];
   vendasColaborador?: Venda[] | any[];
   onClose: () => void;
+}
+
+export function calcularComissaoVendaIndividual(
+  sale: any,
+  opcoes: {
+    isTrainee?: boolean;
+    bateuMetaBoleto?: boolean;
+    bateuSuperMetaBoleto?: boolean;
+    bateuMetaAcessorios?: boolean;
+    bateuSuperMetaAcessorios?: boolean;
+  } = {}
+): number {
+  if (!sale) return 0;
+
+  const {
+    isTrainee = false,
+    bateuMetaBoleto = false,
+    bateuSuperMetaBoleto = false,
+    bateuMetaAcessorios = false,
+    bateuSuperMetaAcessorios = false
+  } = opcoes;
+
+  const itens = Array.isArray(sale?.itens_venda) ? sale.itens_venda : [];
+  const quantidade =
+    itens.length > 0
+      ? itens.reduce((acc: number, cur: any) => acc + (Number(cur?.quantidade) || 1), 0)
+      : Number(sale?.quantidade) || 1;
+
+  const valorTotal =
+    Number(
+      sale?.valor_total ??
+      sale?.total ??
+      sale?.valor ??
+      itens?.[0]?.valor_total ??
+      itens?.[0]?.preco_unitario ??
+      0
+    ) || 0;
+  const valorBoleto = extrairValorBoletoVenda(sale);
+
+  // REGRA TREINNER BONIFICADO: 1% DA VENDA DOS BOLETO
+  if (isTrainee) {
+    if (isAcessorioUtil(sale) || isProdutoEspecialUtil(sale)) return 0;
+    if (valorBoleto > 0) {
+      return Number((valorBoleto * 0.01).toFixed(2));
+    }
+    return 0;
+  }
+
+  // REGRA 1: ACESSÓRIOS (1% ❌ | 2,5% ✅ | 3% 🚀)
+  if (isAcessorioUtil(sale)) {
+    const taxaAcess = bateuSuperMetaAcessorios ? 0.03 : (bateuMetaAcessorios ? 0.025 : 0.01);
+    return Number((valorTotal * taxaAcess).toFixed(2));
+  }
+
+  // REGRA 2: JBL / IPHONES / CONSOLES / DRONES / AIR PODS / APPLE WATCH / PENCIL / OUTROS (Por Unidade: R$ 15 ❌ | R$ 30 ✅)
+  if (isProdutoEspecialUtil(sale)) {
+    const valorPorUnidade = bateuMetaBoleto ? 30.00 : 15.00;
+    return Number((quantidade * valorPorUnidade).toFixed(2));
+  }
+
+  // REGRA 3: VENDAS NO BOLETO (1% ❌ | 3% ✅ | 3,2% 🚀; menos 1% do Treinner se teve apoio e meta batida)
+  if (valorBoleto > 0) {
+    let taxaBol = bateuSuperMetaBoleto ? 0.032 : (bateuMetaBoleto ? 0.03 : 0.01);
+    if (temApoioTraineeUtil(sale) && bateuMetaBoleto) {
+      taxaBol = Math.max(0.01, Number((taxaBol - 0.01).toFixed(4)));
+    }
+    return Number((valorBoleto * taxaBol).toFixed(2));
+  }
+
+  // REGRA 4: VENDAS CELULARES À VISTA / CARTÃO / PIX (1% ❌ | 2% ✅)
+  const taxaAvista = bateuMetaBoleto ? 0.02 : 0.01;
+  return Number((valorTotal * taxaAvista).toFixed(2));
 }
 
 export function obterComissaoVenda(

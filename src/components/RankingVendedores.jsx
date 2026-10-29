@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Award, RefreshCw, Calendar, Store, Filter, Eye, UserCheck, Info } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import ModalDesempenhoVendedor, { formatCurrency } from './ModalDesempenhoVendedor';
+import ModalDesempenhoVendedor, { formatCurrency, calcularComissaoVendaIndividual } from './ModalDesempenhoVendedor';
 import PeriodoSelector from './common/PeriodoSelector';
 import { useMetasRankings } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
-import { calcularDesempenhoGeral, calcularComissaoVendaIndividual, isBoleto } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, isBoleto } from '../utils/calculoMetas';
 
 // Helper de cálculo dinâmico de comissão do vendedor titular por item / modalidade
 export function calcularComissaoVendedorItem(v, teveTrainee = false, opcoesMeta = {}) {

@@ -45,7 +45,8 @@ import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obte
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
-import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, calcularComissaoVendaIndividual, extrairValorBoletoVenda, filtrarVendasDoColaborador, baixarRelatorioVendasCSV, imprimirRelatorioVendasPDF, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, filtrarVendasDoColaborador, baixarRelatorioVendasCSV, imprimirRelatorioVendasPDF, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
+import { calcularComissaoVendaIndividual } from './ModalDesempenhoVendedor';
 
 const extrairNumero = (valor) => {
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
