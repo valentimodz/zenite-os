@@ -45,7 +45,7 @@ import { parseMonetaryValue, formatCurrency, formatarMoeda, getFundoSessao, obte
 import ContasAReceber from './ContasAReceber';
 import NotasFiscaisView from './fiscal/NotasFiscaisView';
 import PeriodoSelector from './common/PeriodoSelector';
-import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, extrairValorBoletoVenda, filtrarVendasDoColaborador, baixarRelatorioVendasCSV, imprimirRelatorioVendasPDF, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador, calcularComissaoVendaIndividual, extrairValorBoletoVenda, filtrarVendasDoColaborador, baixarRelatorioVendasCSV, imprimirRelatorioVendasPDF, isAcessorio as isAcessorioUtil, isProdutoEspecial as isProdutoEspecialUtil } from '../utils/calculoMetas';
 
 const extrairNumero = (valor) => {
   if (typeof valor === 'number') return isNaN(valor) ? 0 : valor;
@@ -13318,7 +13318,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     if (isProdutoAcessorio(produto)) return false;
     const cat = String(produto.categoria || produto.tipo || '').toUpperCase();
     const nome = String(produto.nome || produto.produto_nome || '').toUpperCase();
-    return cat === 'IOS' || cat === 'APPLE' || nome.includes('IPHONE') || nome.includes('APPLE') || nome.includes('IPAD');
+    return cat === 'IOS' || cat === 'APPLE' || cat.includes('CONSOLE') || cat.includes('DRONE') || cat.includes('JBL') || ['IPHONE', 'APPLE', 'IPAD', 'MACBOOK', 'AIRPOD', 'AIR POD', 'APPLE WATCH', 'PENCIL', 'JBL', 'BOOMBOX', 'AIWA', 'PS5', 'PS4', 'PLAYSTATION', 'XBOX', 'NINTENDO', 'DRONE', 'DJI'].some(t => nome.includes(t));
   };
 
   // Identificador de Celulares (Android ou Aparelhos em geral)
@@ -13350,7 +13350,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     // Obter referências de metas do vendedor
-    const metasRef = metasState !== null && metasState !== undefined ? metasState : null;
+    const metasRef = metasState !== null && metasState !== undefined ? metasState : (typeof metasInfo !== 'undefined' ? metasInfo : null);
     const totalBoletos = Number(metasRef?.totalBoletos || 0);
     const metaBoleto = Number(metasRef?.metaBoleto || 67500);
     const totalAcessorios = Number(metasRef?.totalAcessorios || 0);
@@ -13377,7 +13377,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // 1. PRIORIDADE MÁXIMA: ACESSÓRIOS (qualquer capa, película, cabo, fone, pen drive, chip, etc.)
     // Mesmo que tenha 'IPHONE' ou 'APPLE' no nome, se for acessório segue a regra de acessório!
     if (isProdutoAcessorio(produto)) {
-      const aliquotaAcessorio = 0.025; // Regra oficial: 2.5% para acessórios
+      const superMetaAcess = Number(metasRef?.superMetaAcessorios || 15000); const bateuSuperAcess = (superMetaAcess > 0 && totalAcessorios >= superMetaAcess) || metasRef?.badgeAcessorios?.status === 'super'; const bateuAcess = bateuSuperAcess || (metaAcessorios > 0 && totalAcessorios >= metaAcessorios) || metasRef?.badgeAcessorios?.status === 'batida'; const aliquotaAcessorio = bateuSuperAcess ? 0.03 : (bateuAcess ? 0.025 : 0.01);
       comissaoVendedor = Number((total * aliquotaAcessorio).toFixed(2));
       return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false, taxaVendedor: aliquotaAcessorio };
     }
@@ -13391,7 +13391,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         metasRef?.badgeBoleto?.status === 'batida' ||
         metasRef?.badgeBoleto?.status === 'super'
       );
-      const aliquotaBoleto = bateuMetaBoleto ? 0.03 : 0.01; // 3% ou 1%
+      const superMetaBol = Number(metasRef?.superMetaBoleto || 87000); const bateuSuperBol = (superMetaBol > 0 && totalBoletos >= superMetaBol) || metasRef?.badgeBoleto?.status === 'super'; const aliquotaBoleto = bateuSuperBol ? (hasTrainee ? 0.022 : 0.032) : (bateuMetaBoleto ? (hasTrainee ? 0.02 : 0.03) : 0.01);
       comissaoVendedor = Number((total * aliquotaBoleto).toFixed(2));
 
       if (hasTrainee) {
@@ -13410,7 +13410,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     // 4. DEMAIS APARELHOS CELULARES (Android à vista / PIX / Cartão)
     if (isProdutoCelular(produto)) {
-      const aliquotaCelular = isMetaBatidaGeral ? 0.015 : 0.01;
+      const aliquotaCelular = isMetaBatidaGeral ? 0.02 : 0.01;
       comissaoVendedor = Number((total * aliquotaCelular).toFixed(2));
       return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
     }
@@ -13423,7 +13423,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     // Demais casos (Fallback Geral)
-    const aliquotaPadrao = isMetaBatidaGeral ? 0.015 : 0.01;
+    const aliquotaPadrao = isMetaBatidaGeral ? 0.02 : 0.01;
     comissaoVendedor = Number((total * aliquotaPadrao).toFixed(2));
     return { comissaoVendedor, comissaoTrainee: 0, teveParticipacaoTrainee: false };
   };
@@ -17506,7 +17506,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   };
 
   // --- CALCULADOR DE COMISSÃO DINÂMICA POR ITEM ---
-  const calcularComissaoItem = (sale) => {
+  const calcularComissaoItem = (sale, metaCtx) => {
+    if (!sale) return 0;
+    const info = metaCtx || (typeof metasInfo !== 'undefined' ? metasInfo : null);
+    const isTr = Boolean(info?.isTrainee ?? profile?.is_treinner ?? (profile?.role || '').toUpperCase().includes('TRAINEE'));
+    const bateuBol = Number(info?.totalBoletos || 0) >= Number(info?.metaBoleto || 67500);
+    const bateuSuperBol = Number(info?.totalBoletos || 0) >= Number(info?.superMetaBoleto || 87000);
+    const bateuAcess = Number(info?.totalAcessorios || 0) >= Number(info?.metaAcessorios || 10000);
+    const bateuSuperAcess = Number(info?.totalAcessorios || 0) >= Number(info?.superMetaAcessorios || 15000);
+    return calcularComissaoVendaIndividual(sale, {
+      isTrainee: isTr,
+      bateuMetaBoleto: bateuBol,
+      bateuSuperMetaBoleto: bateuSuperBol,
+      bateuMetaAcessorios: bateuAcess,
+      bateuSuperMetaAcessorios: bateuSuperAcess
+    });
+  };
+  const _calcularComissaoItemLegacy = (sale) => {
     if (!sale) return 0;
 
     // 1. Se já estiver gravada no banco na coluna 'comissao' (ou variantes), prioriza o valor gravado
@@ -29197,6 +29213,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     calcularComissaoVendaFn: (s) => {
                                       const itens = Array.isArray(s?.itens_venda) ? s.itens_venda : [];
                                       const salva = s?.comissao_vendedor ?? s?.comissao ?? s?.valor_comissao ?? itens?.[0]?.comissao;
+                                      return Number(calcularComissaoItem(s, metasInfo));
                                       return salva !== undefined && salva !== null && salva !== ''
                                         ? Number(salva)
                                         : Number(calcularComissaoItem(s));
@@ -29222,6 +29239,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                     calcularComissaoVendaFn: (s) => {
                                       const itens = Array.isArray(s?.itens_venda) ? s.itens_venda : [];
                                       const salva = s?.comissao_vendedor ?? s?.comissao ?? s?.valor_comissao ?? itens?.[0]?.comissao;
+                                      return Number(calcularComissaoItem(s, metasInfo));
                                       return salva !== undefined && salva !== null && salva !== ''
                                         ? Number(salva)
                                         : Number(calcularComissaoItem(s));
@@ -29286,7 +29304,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       sale.valor_comissao ??
                                       itens?.[0]?.comissao;
 
-                                    const valorComissaoBruto = valorComissaoSalvaHistorico !== undefined && valorComissaoSalvaHistorico !== null && valorComissaoSalvaHistorico !== ''
+                                    const valorComissaoBruto = Number(calcularComissaoItem(sale, metasInfo));
+                                    const _valorComissaoBrutoLegacy = valorComissaoSalvaHistorico !== undefined && valorComissaoSalvaHistorico !== null && valorComissaoSalvaHistorico !== ''
                                       ? Number(valorComissaoSalvaHistorico)
                                       : Number(calcularComissaoItem(sale));
                                     const comissaoFormatada = valorComissaoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

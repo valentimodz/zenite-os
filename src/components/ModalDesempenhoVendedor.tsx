@@ -33,6 +33,7 @@ import {
   calcularDesempenhoGeral,
   calcularDesempenhoColaborador,
   calcularMetasColaborador,
+  calcularComissaoVendaIndividual,
   filtrarVendasDoColaborador,
   extrairValorBoletoVenda,
   baixarRelatorioVendasCSV,
@@ -188,96 +189,26 @@ export interface ModalDesempenhoVendedorProps {
   onClose: () => void;
 }
 
-export function obterComissaoVenda(venda: any): number {
-  if (String(venda?.id || '').startsWith('marlon-2026-10-')) {
-    return Number(venda?.comissao_vendedor ?? venda?.comissao ?? 0);
-  }
-  // 1. Se já existir valor numérico válido editado ou salvo na venda, priorize-o:
-  const valorSalvo = Number(venda?.comissao_vendedor ?? venda?.comissao ?? venda?.valor_comissao ?? venda?.itens_venda?.[0]?.comissao);
-  if (valorSalvo > 0) return valorSalvo;
-
-  // 2. Extração dos dados da venda e do item
-  const item = venda?.itens_venda?.[0] || {};
-  const produtoNome = String(venda?.produto_nome || item.produto_nome || venda?.nome || item.nome || '').toUpperCase();
-  const categoria = String(venda?.categoria || item.categoria || '').toUpperCase();
-
-  // A FORMA DE PAGAMENTO DEVE VIR DA VENDA PRINCIPAL (extração tolerante)
-  const formaPgto = String(
-    venda?.forma_pagamento ||
-    venda?.metodo_pagamento ||
-    venda?.pagamento ||
-    item?.forma_pagamento ||
-    item?.metodo_pagamento ||
-    ''
-  ).toUpperCase();
-
-  const valorTotal = Number(venda?.valor_total || item?.valor_total || item?.preco_unitario || venda?.valor || 0);
-  if (valorTotal <= 0) return 0;
-
-  // REGRA 1: ACESSÓRIOS (2,5%)
-  const isAcessorio =
-    categoria.includes('ACESS') ||
-    categoria.includes('CARREGADOR') ||
-    categoria.includes('CABO') ||
-    categoria.includes('PELIC') ||
-    categoria.includes('FONE') ||
-    categoria.includes('CHIP') ||
-    categoria.includes('PEN DRIVE') ||
-    categoria.includes('LIMPA TELA') ||
-    produtoNome.includes('CASE') ||
-    produtoNome.includes('CAPA') ||
-    produtoNome.includes('CHIP') ||
-    produtoNome.includes('PEN DRIVE') ||
-    produtoNome.includes('CHARGER') ||
-    produtoNome.includes('FONTE') ||
-    produtoNome.includes('PELICULA') ||
-    produtoNome.includes('CABO') ||
-    produtoNome.includes('LIMPA TELA') ||
-    produtoNome.includes('IWILL');
-
-  if (isAcessorio) {
-    return Number((valorTotal * 0.025).toFixed(2));
-  }
-
-  // REGRA 2: CONSOLES / DRONES (R$ 15,00)
-  if (
-    categoria.includes('CONSOLE') ||
-    categoria.includes('DRONE') ||
-    produtoNome.includes('PLAYSTATION') ||
-    produtoNome.includes('PS5') ||
-    produtoNome.includes('PS4') ||
-    produtoNome.includes('XBOX') ||
-    produtoNome.includes('NINTENDO') ||
-    produtoNome.includes('DRONE')
-  ) {
-    return 15.00;
-  }
-
-  // REGRA 3: CAIXAS DE SOM JBL (R$ 15,00)
-  if (produtoNome.includes('JBL')) {
-    return 15.00;
-  }
-
-  // REGRA 4: APARELHOS APPLE (IPHONE / IPAD) = R$ 15,00
-  if (produtoNome.includes('IPHONE') || produtoNome.includes('APPLE') || produtoNome.includes('IPAD')) {
-    return 15.00;
-  }
-
-  // REGRA 5: CELULARES NO BOLETO (3,0%)
-  if (formaPgto.includes('BOLETO')) {
-    return Number((valorTotal * 0.03).toFixed(2));
-  }
-
-  // REGRA 6: CELULARES FORA DO BOLETO (PIX, DINHEIRO, CARTÃO) = 2,0%
-  // Qualquer outro aparelho (Galaxy, Realme, Redmi, Infinix, etc.)
-  return Number((valorTotal * 0.02).toFixed(2));
+export function obterComissaoVenda(
+  venda: any,
+  opcoesMeta: {
+    isTrainee?: boolean;
+    bateuMetaBoleto?: boolean;
+    bateuSuperMetaBoleto?: boolean;
+    bateuMetaAcessorios?: boolean;
+    bateuSuperMetaAcessorios?: boolean;
+  } = {}
+): number {
+  return calcularComissaoVendaIndividual(venda, {
+    isTrainee: opcoesMeta.isTrainee ?? false,
+    bateuMetaBoleto: opcoesMeta.bateuMetaBoleto ?? true,
+    bateuSuperMetaBoleto: opcoesMeta.bateuSuperMetaBoleto ?? false,
+    bateuMetaAcessorios: opcoesMeta.bateuMetaAcessorios ?? false,
+    bateuSuperMetaAcessorios: opcoesMeta.bateuSuperMetaAcessorios ?? false
+  });
 }
 
 export function calcularComissaoTotal(venda: any, item?: any) {
-  const produtoNome = String(item?.produto_nome || venda?.produto_nome || venda?.nome || '').toUpperCase();
-  const categoria = String(item?.categoria || venda?.categoria || '').toUpperCase();
-
-  // Captura a forma de pagamento tanto da venda quanto do item
   const formaPgto = String(
     venda?.forma_pagamento ||
     venda?.metodo_pagamento ||
@@ -288,11 +219,11 @@ export function calcularComissaoTotal(venda: any, item?: any) {
   const valor = Number(item?.valor_total || venda?.valor_total || 0);
   if (valor <= 0) return { comissaoVendedor: 0, comissaoTrainee: 0 };
 
-  const comissaoVendedor = obterComissaoVenda(item ? { ...venda, ...item, forma_pagamento: formaPgto, valor_total: valor } : venda);
-
-  // 7. TRAINEE / APOIO: 1% SOBRE O VALOR DA VENDA
-  const temTrainee = Boolean(venda?.trainee_id || venda?.trainee_nome);
-  const comissaoTrainee = temTrainee ? Number((valor * 0.01).toFixed(2)) : 0;
+  const alvo = item ? { ...venda, ...item, forma_pagamento: formaPgto, valor_total: valor } : venda;
+  const comissaoVendedor = obterComissaoVenda(alvo);
+  const comissaoTrainee = temApoioTraineeUtil(alvo)
+    ? calcularComissaoVendaIndividual(alvo, { isTrainee: true })
+    : 0;
 
   return { comissaoVendedor, comissaoTrainee };
 }
@@ -302,35 +233,24 @@ export function calcularComissao(vendaOuItem: any): number {
 }
 
 // Helper robusto de comissão para cada item
-export const calcularComissaoItem = (sale: Venda | any, isTrainee = false): number => {
+export const calcularComissaoItem = (
+  sale: Venda | any,
+  isTrainee = false,
+  opcoesMeta: {
+    bateuMetaBoleto?: boolean;
+    bateuSuperMetaBoleto?: boolean;
+    bateuMetaAcessorios?: boolean;
+    bateuSuperMetaAcessorios?: boolean;
+  } = {}
+): number => {
   if (!sale) return 0;
-
-  if (isTrainee) {
-    if (sale.comissao_trainee !== undefined && sale.comissao_trainee !== null && sale.comissao_trainee !== '') {
-      const val = parseFloat(sale.comissao_trainee);
-      if (!isNaN(val)) return val;
-    }
-    return calcularComissaoTotal(sale).comissaoTrainee;
-  }
-
-  if (sale.comissao_vendedor !== undefined && sale.comissao_vendedor !== null && sale.comissao_vendedor !== '') {
-    const val = parseFloat(sale.comissao_vendedor);
-    if (!isNaN(val)) return val;
-  }
-  if (sale.comissao !== undefined && sale.comissao !== null && sale.comissao !== '') {
-    const val = parseFloat(sale.comissao);
-    if (!isNaN(val)) return val;
-  }
-  if (sale.valor_comissao !== undefined && sale.valor_comissao !== null && sale.valor_comissao !== '') {
-    const val = parseFloat(sale.valor_comissao);
-    if (!isNaN(val)) return val;
-  }
-  if (sale.itens_venda?.[0]?.comissao !== undefined && sale.itens_venda?.[0]?.comissao !== null && sale.itens_venda?.[0]?.comissao !== '') {
-    const val = parseFloat(sale.itens_venda[0].comissao);
-    if (!isNaN(val)) return val;
-  }
-
-  return calcularComissaoTotal(sale).comissaoVendedor;
+  return calcularComissaoVendaIndividual(sale, {
+    isTrainee,
+    bateuMetaBoleto: opcoesMeta.bateuMetaBoleto ?? true,
+    bateuSuperMetaBoleto: opcoesMeta.bateuSuperMetaBoleto ?? false,
+    bateuMetaAcessorios: opcoesMeta.bateuMetaAcessorios ?? false,
+    bateuSuperMetaAcessorios: opcoesMeta.bateuSuperMetaAcessorios ?? false
+  });
 };
 
 // Termos e financeiras para metas de boletos/financiadoras (PAYJOY, UME, WATU, AIVA, BOLETO, CREDIARIO, FINANCIADORA, etc.)
@@ -843,14 +763,8 @@ export default function ModalDesempenhoVendedor({
     sales.forEach(s => {
       if (temApoioTrainee(s)) {
         const valTotal = Number(s.valor_total || s.valor || 0);
-        let cTraineeCalc = 0;
-        if (s.comissao_trainee !== undefined && s.comissao_trainee !== null && s.comissao_trainee !== '') {
-          const parsed = parseFloat(s.comissao_trainee);
-          cTraineeCalc = !isNaN(parsed) ? parsed : 0;
-        }
-        if (cTraineeCalc <= 0 && valTotal > 0) {
-          cTraineeCalc = Number((valTotal * 0.01).toFixed(2));
-        }
+        // COMISSIONAMENTO TREINNER BONIFICADO: 1% DA VENDA DOS BOLETO
+        const cTraineeCalc = calcularComissaoVendaIndividual(s, { isTrainee: true });
 
         const itens = Array.isArray(s.itens_venda) ? s.itens_venda : [];
         let nomeBase = s.produto_nome || s.descricao || (itens.length > 0 ? itens[0]?.produto_nome : null) || 'Produto / Pedido';
@@ -1389,16 +1303,22 @@ export default function ModalDesempenhoVendedor({
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                     Regra de Remuneração
                   </span>
-                  <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-950/40 text-emerald-400 border border-emerald-800/40 font-bold uppercase">
-                    Ativa
+                  <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
+                    dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto
+                      ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
+                      : 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
+                  }`}>
+                    {dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto
+                      ? 'R$ 30,00 / un. (Meta Batida ✅)'
+                      : 'R$ 15,00 / un. (Meta Não Batida ❌)'}
                   </span>
                 </div>
                 <div className="mt-2 space-y-1">
                   <span className="text-xs font-bold text-gray-200 block">
-                    Comissão fixa por unidade / Faturamento direto
+                    Vendas por Unidade (JBL, iPhones, Consoles, Drones, AirPods, Watch, Pencil)
                   </span>
                   <p className="text-[10.5px] text-gray-400 leading-snug">
-                    R$ 15,00 fixos por aparelho Apple, Console ou Caixa JBL. Não interfere nem pontua nas metas operacionais de Boleto ou Acessórios.
+                    R$ 15,00 na Meta Não Batida ❌ e R$ 30,00 na Meta Batida ✅ por unidade vendida.
                   </p>
                 </div>
               </div>
@@ -1425,7 +1345,13 @@ export default function ModalDesempenhoVendedor({
                       competencia: dashboardInfo.mesReferencia,
                       isTrainee: dashboardInfo.isTrainee,
                       calcularComissaoVendaFn: (s) =>
-                        dashboardInfo.isTrainee ? calcularComissaoItem(s, true) : obterComissaoVenda(s)
+                        calcularComissaoVendaIndividual(s, {
+                          isTrainee: dashboardInfo.isTrainee,
+                          bateuMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto,
+                          bateuSuperMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.superMetaBoleto,
+                          bateuMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.metaAcessorios,
+                          bateuSuperMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.superMetaAcessorios
+                        })
                     })
                   }
                   disabled={dashboardInfo.historico.length === 0}
@@ -1445,7 +1371,13 @@ export default function ModalDesempenhoVendedor({
                       filialNome: filialDoColaborador?.nome || colaborador.filial_nome || 'Filial Geral',
                       isTrainee: dashboardInfo.isTrainee,
                       calcularComissaoVendaFn: (s) =>
-                        dashboardInfo.isTrainee ? calcularComissaoItem(s, true) : obterComissaoVenda(s)
+                        calcularComissaoVendaIndividual(s, {
+                          isTrainee: dashboardInfo.isTrainee,
+                          bateuMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto,
+                          bateuSuperMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.superMetaBoleto,
+                          bateuMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.metaAcessorios,
+                          bateuSuperMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.superMetaAcessorios
+                        })
                     })
                   }
                   disabled={dashboardInfo.historico.length === 0}
@@ -1497,16 +1429,13 @@ export default function ModalDesempenhoVendedor({
                         ? itens[0].categoria
                         : (sale.categoria || 'Geral');
 
-                      const valorComissaoSalva =
-                        sale.comissao_vendedor ??
-                        sale.comissao ??
-                        sale.valor_comissao ??
-                        itens?.[0]?.comissao;
-
-                      const valorComissaoBruto = valorComissaoSalva !== undefined && valorComissaoSalva !== null && valorComissaoSalva !== ''
-                        ? Number(valorComissaoSalva)
-                        : Number(calcularComissaoItem(sale, dashboardInfo.isTrainee));
-                      const comissaoFormatada = formatCurrency(valorComissaoBruto);
+                      const comissaoVendaCalculada = calcularComissaoVendaIndividual(sale, {
+                        isTrainee: dashboardInfo.isTrainee,
+                        bateuMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto,
+                        bateuSuperMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.superMetaBoleto,
+                        bateuMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.metaAcessorios,
+                        bateuSuperMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.superMetaAcessorios
+                      });
 
                       const metodoRaw = String(sale.forma_pagamento || sale.metodo_pagamento || 'N/A').toUpperCase();
 
@@ -1539,7 +1468,7 @@ export default function ModalDesempenhoVendedor({
                           </td>
                           <td className="py-3 text-right font-mono font-bold">
                             <span className="text-purple-400 font-bold">
-                              {formatarMoeda(dashboardInfo.isTrainee ? valorComissaoBruto : obterComissaoVenda(sale))}
+                              {formatarMoeda(comissaoVendaCalculada)}
                             </span>
                           </td>
                         </tr>

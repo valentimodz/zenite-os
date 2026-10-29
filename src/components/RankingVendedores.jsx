@@ -5,81 +5,27 @@ import ModalDesempenhoVendedor, { formatCurrency } from './ModalDesempenhoVended
 import PeriodoSelector from './common/PeriodoSelector';
 import { useMetasRankings } from '../hooks/useMetasRankings';
 import { useQueryClient } from '@tanstack/react-query';
-import { calcularDesempenhoGeral } from '../utils/calculoMetas';
+import { calcularDesempenhoGeral, calcularComissaoVendaIndividual, isBoleto } from '../utils/calculoMetas';
 
 // Helper de cálculo dinâmico de comissão do vendedor titular por item / modalidade
-export function calcularComissaoVendedorItem(v, teveTrainee = false) {
-  if (Number(v?.comissao) > 0) {
-    return Number(v.comissao);
-  }
-  const valor = Number(v?.valor_total || v?.valor_vendido || v?.total || (v?.preco * v?.quantidade) || v?.valor_pago || 0);
-  const qtd = parseInt(v?.quantidade || 1, 10);
-  const cat = (v?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-  const nomeProd = (v?.produto_nome || v?.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-  const metodo = (v?.metodo_pagamento || v?.forma_pagamento || '').toUpperCase();
-  const financeira = (v?.financeira || v?.financeira_parceira || '').toUpperCase();
-
-  // 1. iPhones Lacrados ou seminovos: comissão fixa de R$ 30,00 por aparelho
-  const isIphone = cat.includes('IOS') || cat.includes('APPLE') || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE');
-  if (isIphone) {
-    const comissaoFixa = 30.0 * (qtd > 0 ? qtd : 1);
-    return teveTrainee ? comissaoFixa * 0.7 : comissaoFixa;
-  }
-
-  // 2. Boletos / Financiamentos (PayJoy, Aiva, Watu, Crediário, UME, etc.): 3,0% a 3,2% (média de meta batida: 3,0%)
-  const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => metodo.includes(m) || financeira.includes(m));
-  if (isFinanciado) {
-    const taxa = teveTrainee ? 0.020 : 0.030;
-    return valor * taxa;
-  }
-
-  // 3. Acessórios: 2,5% (ou 1,5% se teve apoio trainee)
-  const isAcessorio = cat.includes('ACESS') || ['CAPA', 'PELICULA', 'PELÍCULA', 'FONE', 'CABO', 'CARREGADOR', 'FONTE', 'POWERBANK'].some(t => nomeProd.includes(t));
-  if (isAcessorio) {
-    return valor * (teveTrainee ? 0.015 : 0.025);
-  }
-
-  // 4. Aparelhos Android / Celulares em Cartão, Pix ou Dinheiro: 2,0%
-  const isAndroid = cat.includes('ANDROID') || cat.includes('CELULAR') || Boolean(v?.imei) || ['SAMSUNG', 'MOTOROLA', 'XIAOMI', 'REALME', 'POCO'].some(t => nomeProd.includes(t));
-  if (isAndroid) {
-    return valor * (teveTrainee ? 0.010 : 0.020);
-  }
-
-  // Demais vendas padrão
-  return valor * (teveTrainee ? 0.010 : 0.020);
+export function calcularComissaoVendedorItem(v, teveTrainee = false, opcoesMeta = {}) {
+  return calcularComissaoVendaIndividual(
+    { ...v, teve_participacao_trainee: Boolean(teveTrainee || v?.teve_participacao_trainee || v?.trainee_id || v?.treener_id) },
+    {
+      isTrainee: false,
+      bateuMetaBoleto: opcoesMeta?.bateuMetaBoleto ?? true,
+      bateuSuperMetaBoleto: opcoesMeta?.bateuSuperMetaBoleto ?? false,
+      bateuMetaAcessorios: opcoesMeta?.bateuMetaAcessorios ?? true,
+      bateuSuperMetaAcessorios: opcoesMeta?.bateuSuperMetaAcessorios ?? false
+    }
+  );
 }
 
-// Helper de cálculo dinâmico de comissão da trainee participante
+// Helper de cálculo dinâmico de comissão da trainee participante (1% da venda dos boletos)
 export function calcularComissaoTraineeItem(v) {
-  if (Number(v?.comissao_trainee) > 0) {
-    return Number(v.comissao_trainee);
-  }
-  const valor = Number(v?.valor_total || v?.valor_vendido || v?.total || (v?.preco * v?.quantidade) || v?.valor_pago || 0);
-  const qtd = parseInt(v?.quantidade || 1, 10);
-  const cat = (v?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-  const nomeProd = (v?.produto_nome || v?.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-  const metodo = (v?.metodo_pagamento || v?.forma_pagamento || '').toUpperCase();
-  const financeira = (v?.financeira || v?.financeira_parceira || '').toUpperCase();
-
-  // iPhones: apoio trainee R$ 10,00 por aparelho
-  if (cat.includes('IOS') || cat.includes('APPLE') || nomeProd.includes('IPHONE') || nomeProd.includes('APPLE')) {
-    return 10.0 * (qtd > 0 ? qtd : 1);
-  }
-
-  // Boletos / Financiamentos: 1,0%
-  const isFinanciado = ['PAYJOY', 'AIVA', 'BOLETO', 'CREDIARIO', 'UME', 'WATU'].some(m => metodo.includes(m) || financeira.includes(m));
-  if (isFinanciado) {
-    return valor * 0.010;
-  }
-
-  // Acessórios: 1,0%
-  const isAcessorio = cat.includes('ACESS') || ['CAPA', 'PELICULA', 'PELÍCULA', 'FONE', 'CABO', 'CARREGADOR', 'FONTE', 'POWERBANK'].some(t => nomeProd.includes(t));
-  if (isAcessorio) {
-    return valor * 0.010;
-  }
-
-  // Aparelhos Android / Outros
-  return valor * 0.005;
+  if (!isBoleto(v)) return 0;
+  const valor = Number(v?.valor_boleto || v?.valor_total || v?.valor_vendido || v?.total || (v?.preco * v?.quantidade) || v?.valor_pago || 0);
+  return Number((valor * 0.01).toFixed(2));
 }
 
 export default function RankingVendedores({

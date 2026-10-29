@@ -79,13 +79,14 @@ export const TERMOS_ACESSORIOS = [
 ];
 
 // Termos de Produtos Especiais / Alto Ticket (Fora de Meta Operacional de Boletos)
+// JBL / IPHONES / CONSOLES / DRONES / AIR PODS / APPLE WATCH / PENCIL / OUTROS
 export const TERMOS_ESPECIAIS = [
   // Linha Apple
-  'IPHONE', 'APPLE', 'IPAD', 'MACBOOK', 'APPLE WATCH', 'IMAC', 'AIRTAG',
+  'IPHONE', 'APPLE', 'IPAD', 'MACBOOK', 'APPLE WATCH', 'IMAC', 'AIRTAG', 'AIRPOD', 'AIR POD', 'AIRPODS', 'AIR PODS', 'PENCIL', 'APPLE PENCIL',
   // Consoles & Games
   'PLAYSTATION', 'PS5', 'PS4', 'XBOX', 'NINTENDO', 'CONSOLE', 'DRONE', 'SONY',
   // Áudio JBL & Premium
-  'JBL', 'BOOMBOX', 'PARTYBOX', 'XTREME', 'CHARGE 5', 'FLIP 6', 'GO 3', 'CLIP 4'
+  'JBL', 'BOOMBOX', 'PARTYBOX', 'XTREME', 'CHARGE 5', 'FLIP 6', 'GO 3', 'CLIP 4', 'AIWA'
 ];
 
 /**
@@ -322,6 +323,19 @@ export const isAcessorio = (itemOuVenda: any): boolean => {
   const cat = String(itemOuVenda.categoria || itemOuVenda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
   const prod = String(itemOuVenda.produto_nome || itemOuVenda.nome || itemOuVenda.produtos?.nome || itemOuVenda.descricao || itemOuVenda.produtos_descricao || itemOuVenda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
+  // AirPods, Apple Watch (aparelho) e Apple Pencil pertencem à regra de Produtos Especiais por unidade (R$ 15 / R$ 30),
+  // exceto quando for explicitamente acessório como pulseira, capa, case ou película.
+  const isAcessorioExplicito =
+    prod.includes('PULSEIRA') ||
+    prod.includes('CASE') ||
+    prod.includes('CAPA') ||
+    prod.includes('PELIC') ||
+    prod.includes('KIT X-ONE');
+
+  if (!isAcessorioExplicito && (prod.includes('AIRPOD') || prod.includes('AIR POD') || prod.includes('PENCIL') || prod.includes('APPLE WATCH'))) {
+    return false;
+  }
+
   return cat.includes('ACESS') || TERMOS_ACESSORIOS.some(t => cat.includes(t) || prod.includes(t));
 };
 
@@ -497,6 +511,9 @@ export function calcularDesempenhoGeral(
 
   // 2. Extrair boletos (excluindo produtos da linha Apple/Alto Ticket conforme regra do negócio)
   let totalBoletosBrutoCalc = 0;
+  let boletosSoloCalc = 0;
+  let boletosComTraineeCalc = 0;
+
   const totalBoletosCalc = vendasFiltradas.reduce((acc, v) => {
     const valorBoleto = extrairValorBoletoVenda(v);
     if (valorBoleto <= 0) return acc;
@@ -506,11 +523,19 @@ export function calcularDesempenhoGeral(
     const isAltoTicket = isProdutoEspecial(v);
     if (isAltoTicket) return acc;
 
+    if (temApoioTrainee(v)) {
+      boletosComTraineeCalc += valorBoleto;
+    } else {
+      boletosSoloCalc += valorBoleto;
+    }
+
     return acc + valorBoleto;
   }, 0);
 
   const totalBoletos = Math.round(totalBoletosCalc * 100) / 100;
   const totalBoletosBruto = Math.round(totalBoletosBrutoCalc * 100) / 100;
+  const boletosSolo = Math.round(boletosSoloCalc * 100) / 100;
+  const boletosComTrainee = Math.round(boletosComTraineeCalc * 100) / 100;
 
   // 3. Extrair acessórios
   const totalAcessoriosCalc = vendasFiltradas
@@ -519,17 +544,33 @@ export function calcularDesempenhoGeral(
 
   const totalAcessorios = Math.round(totalAcessoriosCalc * 100) / 100;
 
-  // Produtos especiais informativo
+  // Produtos especiais (JBL / iPhones / Consoles / Drones / AirPods / Apple Watch / Pencil / Outros)
   let totalFaturadoEspeciais = 0;
   let quantidadeItensEspeciais = 0;
+  let quantidadeItensEspeciaisFiltrados = 0;
+
   vendasValidas.forEach((v: any) => {
     if (isProdutoEspecial(v)) {
-      const qtd = Number(v.quantidade || 1) || 1;
+      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
+      const qtd = itens.length > 0
+        ? itens.reduce((acc: number, c: any) => acc + (Number(c?.quantidade) || 1), 0)
+        : (Number(v.quantidade || 1) || 1);
       const val = Number(v.valor_total ?? v.total ?? v.valor ?? 0);
       totalFaturadoEspeciais += val;
       quantidadeItensEspeciais += qtd;
     }
   });
+
+  vendasFiltradas.forEach((v: any) => {
+    if (isProdutoEspecial(v)) {
+      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
+      const qtd = itens.length > 0
+        ? itens.reduce((acc: number, c: any) => acc + (Number(c?.quantidade) || 1), 0)
+        : (Number(v.quantidade || 1) || 1);
+      quantidadeItensEspeciaisFiltrados += qtd;
+    }
+  });
+
   const ticketMedioEspeciais = quantidadeItensEspeciais > 0
     ? Math.round((totalFaturadoEspeciais / quantidadeItensEspeciais) * 100) / 100
     : 0;
@@ -542,8 +583,7 @@ export function calcularDesempenhoGeral(
 
   const ticketMedio = transacoes > 0 ? Math.round((volumeTotal / transacoes) * 100) / 100 : 0;
 
-  // 4. Calcular comissão líquida respeitando as faixas de meta e repasse a trainees
-  // Fórmula idêntica ao MinhasMetasComissoes para bater centavo por centavo
+  // 4. Metas configuradas
   const metaBoleto = isMarlonPlanilha
     ? METAS_MARLON_2026_10.meta_boleto
     : (Number(opcoes.metaBoleto) > 0
@@ -574,98 +614,103 @@ export function calcularDesempenhoGeral(
       ? Number(opcoes.metaTotal)
       : (metaBoleto + metaAcessorios));
 
-  // Faixas de Comissão Boletos:
-  // < metaBoleto: 1,0% | >= metaBoleto: 3,0% | >= superMetaBoleto: 3,2%
+  // Status de atingimento das metas
+  const bateuSuperMetaBoleto = superMetaBoleto > 0 && totalBoletos >= superMetaBoleto;
+  const bateuMetaBoleto = metaBoleto > 0 && totalBoletos >= metaBoleto;
+  const bateuSuperMetaAcessorios = superMetaAcessorios > 0 && totalAcessorios >= superMetaAcessorios;
+  const bateuMetaAcessorios = metaAcessorios > 0 && totalAcessorios >= metaAcessorios;
+
+  // REGRA 1: VENDAS NO BOLETO
+  // 1% META NÃO BATIDA ❌ | 3% META BATIDA ✅ | 3,2% SUPER META 🚀
   let taxaBoletoNum = 0.01;
   let badgeBoleto = {
     taxa: '1,0%',
-    texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+    texto: 'Faixa Atual: 1,0% (Meta Não Batida ❌)',
     status: 'abaixo',
     classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
   };
-  if (totalBoletos >= superMetaBoleto) {
+  if (bateuSuperMetaBoleto) {
     taxaBoletoNum = 0.032;
     badgeBoleto = {
       taxa: '3,2%',
-      texto: 'Faixa Atual: 3,2% (Super Meta! 🔥)',
+      texto: 'Faixa Atual: 3,2% (Super Meta 🚀)',
       status: 'super',
       classe: 'bg-purple-950/60 text-purple-300 border border-purple-700/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
     };
-  } else if (totalBoletos >= metaBoleto) {
+  } else if (bateuMetaBoleto) {
     taxaBoletoNum = 0.03;
     badgeBoleto = {
       taxa: '3,0%',
-      texto: 'Faixa Atual: 3,0% (Meta Batida! 🚀)',
+      texto: 'Faixa Atual: 3,0% (Meta Batida ✅)',
       status: 'batida',
       classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
     };
   }
 
-  // Faixas de Comissão Acessórios:
-  // < metaAcessorios: 1,0% | >= metaAcessorios: 2,5% | >= superMetaAcessorios: 3,0%
+  // REGRA 2: ACESSÓRIOS
+  // 1% META NÃO BATIDA ❌ | 2,5% META BATIDA ✅ | 3% SUPER META 🚀
   let taxaAcessoriosNum = 0.01;
   let badgeAcessorios = {
     taxa: '1,0%',
-    texto: 'Faixa Atual: 1,0% (Abaixo da Meta)',
+    texto: 'Faixa Atual: 1,0% (Meta Não Batida ❌)',
     status: 'abaixo',
     classe: 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
   };
-  if (totalAcessorios >= 15000 || totalAcessorios >= superMetaAcessorios) {
+  if (bateuSuperMetaAcessorios) {
     taxaAcessoriosNum = 0.03;
     badgeAcessorios = {
       taxa: '3,0%',
-      texto: 'Faixa Atual: 3,0% (Super Meta! 🔥)',
+      texto: 'Faixa Atual: 3,0% (Super Meta 🚀)',
       status: 'super',
       classe: 'bg-pink-950/60 text-pink-300 border border-pink-700/60 shadow-[0_0_12px_rgba(244,114,182,0.3)]'
     };
-  } else if (totalAcessorios >= 10000 || totalAcessorios >= metaAcessorios) {
+  } else if (bateuMetaAcessorios) {
     taxaAcessoriosNum = 0.025;
     badgeAcessorios = {
       taxa: '2,5%',
-      texto: 'Faixa Atual: 2,5% (Meta Batida! 🚀)',
+      texto: 'Faixa Atual: 2,5% (Meta Batida ✅)',
       status: 'batida',
       classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
     };
   }
 
-  const totalAVista = Math.max(0, Math.round((volumeTotal - totalBoletos - totalAcessorios) * 100) / 100);
-
-  const comissaoBoletosCalc = totalBoletos * taxaBoletoNum;
-  const comissaoAcessoriosCalc = totalAcessorios * taxaAcessoriosNum;
-  const comissaoAVistaCalc = totalAVista * 0.01;
-  const comissaoPorFaixasMetas = Math.round((comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc) * 100) / 100;
-
-  // Repasse / comissão gerada para trainees nas vendas com apoio (1%)
-  const comissaoTraineeCalc = vendasFiltradas.reduce((acc, s) => {
-    if (!s.teve_participacao_trainee && (!s.trainee_nome || String(s.trainee_nome).trim() === '' || String(s.trainee_nome).trim() === '-') && !temApoioTrainee(s)) {
-      return acc;
-    }
-    const cExplicita = Number(s.comissao_trainee || 0);
-    if (!isNaN(cExplicita) && cExplicita > 0) return acc + cExplicita;
-    const valTotal = Number(s.valor_total ?? s.total ?? s.valor ?? 0);
-    return acc + (valTotal > 0 ? Number((valTotal * 0.01).toFixed(2)) : 0);
+  // REGRA 3: VENDAS CELULARES À VISTA / CARTÃO / PIX
+  // 1% META NÃO BATIDA ❌ | 2% META BATIDA ✅
+  const totalAVistaCalc = vendasFiltradas.reduce((acc, v) => {
+    if (isAcessorio(v) || isProdutoEspecial(v) || extrairValorBoletoVenda(v) > 0) return acc;
+    return acc + Number(v.valor_total ?? v.total ?? v.valor ?? 0);
   }, 0);
-  const comissaoTrainee = Math.round(comissaoTraineeCalc * 100) / 100;
+  const totalAVista = Math.round(totalAVistaCalc * 100) / 100;
+  const taxaCelularAVistaNum = bateuMetaBoleto ? 0.02 : 0.01;
 
-  // Somatório histórico salvo na venda (usado como piso se um trainee ou vendedor tiver comissão explícita maior)
-  const comissaoHistoricaSalva = Math.round(
-    vendasFiltradas.reduce((acc, s) => {
-      if (isTrainee) {
-        const cTr = Number(s.comissao_trainee || 0);
-        if (!isNaN(cTr) && cTr > 0) return acc + cTr;
-        const val = Number(s.valor_total ?? s.total ?? s.valor ?? 0);
-        return acc + (val > 0 ? Number((val * 0.01).toFixed(2)) : 0);
-      }
-      const cTit = Number(s.comissao_vendedor ?? s.comissao ?? s.valor_comissao ?? 0);
-      return acc + (!isNaN(cTit) && cTit > 0 ? cTit : 0);
-    }, 0) * 100
+  // REGRA 4: VENDAS JBL / IPHONES / CONSOLES / DRONES / AIR PODS / APPLE WATCH / PENCIL / OUTROS (Por Unidade)
+  // R$ 15,00 META NÃO BATIDA ❌ | R$ 30,00 META BATIDA ✅
+  const valorUnitarioEspecial = bateuMetaBoleto ? 30 : 15;
+  const comissaoEspeciaisCalc = quantidadeItensEspeciaisFiltrados * valorUnitarioEspecial;
+
+  // REGRA 5: COMISSIONAMENTO TREINNER BONIFICADO = 1% DA VENDA DOS BOLETO
+  // Nas vendas de boleto com apoio de Treinner, quando o Vendedor Titular bate a meta (3% ou 3,2%),
+  // o 1% do Treinner é descontado daquela venda (ficando 2% ou 2,2% para o titular, e 1% quando a meta não foi batida).
+  const taxaBoletoComTraineeNum = bateuMetaBoleto ? Math.max(0.01, Number((taxaBoletoNum - 0.01).toFixed(4))) : 0.01;
+
+  const comissaoBoletosSolo = Math.round(boletosSolo * taxaBoletoNum * 100) / 100;
+  const comissaoBoletosComTrainee = Math.round(boletosComTrainee * taxaBoletoComTraineeNum * 100) / 100;
+  const comissaoBoletosCalc = Math.round((comissaoBoletosSolo + comissaoBoletosComTrainee) * 100) / 100;
+  const comissaoAcessoriosCalc = Math.round(totalAcessorios * taxaAcessoriosNum * 100) / 100;
+  const comissaoAVistaCalc = Math.round(totalAVista * taxaCelularAVistaNum * 100) / 100;
+
+  const comissaoPorFaixasMetas = Math.round(
+    (comissaoBoletosCalc + comissaoAcessoriosCalc + comissaoAVistaCalc + comissaoEspeciaisCalc) * 100
   ) / 100;
 
-  const comissaoLiquida = isMarlonPlanilha
-    ? (modoVisualizacao === 'COM_APOIO' ? METAS_MARLON_2026_10.comissao_total_planilha : comissaoHistoricaSalva)
-    : (isTrainee
-      ? (comissaoHistoricaSalva > 0 ? comissaoHistoricaSalva : comissaoPorFaixasMetas)
-      : Math.max(comissaoPorFaixasMetas, comissaoHistoricaSalva));
+  // Comissão do Treinner Bonificado: estritamente 1% da venda dos boletos
+  const comissaoTrainee = isTrainee
+    ? Math.round(totalBoletos * 0.01 * 100) / 100
+    : Math.round(boletosComTrainee * 0.01 * 100) / 100;
+
+  const comissaoLiquida = isTrainee
+    ? comissaoTrainee
+    : comissaoPorFaixasMetas;
 
   const progressoBoleto = metaBoleto > 0 ? Math.min(100, Math.round((totalBoletos / metaBoleto) * 100)) : 0;
   const progressoAcessorios = metaAcessorios > 0 ? Number(((totalAcessorios / metaAcessorios) * 100).toFixed(1)) : 0;
@@ -830,6 +875,86 @@ export function calcularMetasColaborador(
   };
 }
 
+export interface OpcoesComissaoIndividual {
+  isTrainee?: boolean;
+  bateuMetaBoleto?: boolean;
+  bateuSuperMetaBoleto?: boolean;
+  bateuMetaAcessorios?: boolean;
+  bateuSuperMetaAcessorios?: boolean;
+}
+
+/**
+ * Calcula a comissão individual de uma venda seguindo estritamente a tabela oficial:
+ *
+ * *COMISSIONAMENTO VENDEDOR*
+ * - VENDAS NO BOLETO: 1% (Meta não batida ❌) | 3% (Meta batida ✅) | 3,2% (Super Meta 🚀)
+ *   (Em vendas de boleto com apoio de Treinner Bonificado, desconta-se 1% do Treinner quando a meta é batida -> 2% ou 2,2%)
+ * - ACESSÓRIOS: 1% (Meta não batida ❌) | 2,5% (Meta batida ✅) | 3% (Super Meta 🚀)
+ * - VENDAS CELULARES À VISTA / CARTÃO / PIX: 1% (Meta não batida ❌) | 2% (Meta batida ✅)
+ * - VENDAS JBL / IPHONES / CONSOLES / DRONES / AIR PODS / APPLE WATCH / PENCIL / OUTROS:
+ *   Por unidade: R$ 15,00 (Meta não batida ❌) | R$ 30,00 (Meta batida ✅)
+ *
+ * *COMISSIONAMENTO TREINNER BONIFICADO*
+ * - 1% DA VENDA DOS BOLETO
+ */
+export function calcularComissaoVendaIndividual(
+  sale: any,
+  opcoes: OpcoesComissaoIndividual = {}
+): number {
+  if (!sale) return 0;
+
+  const {
+    isTrainee = false,
+    bateuMetaBoleto = false,
+    bateuSuperMetaBoleto = false,
+    bateuMetaAcessorios = false,
+    bateuSuperMetaAcessorios = false
+  } = opcoes;
+
+  const itens = Array.isArray(sale?.itens_venda) ? sale.itens_venda : [];
+  const quantidade =
+    itens.length > 0
+      ? itens.reduce((acc: number, cur: any) => acc + (Number(cur?.quantidade) || 1), 0)
+      : Number(sale?.quantidade) || 1;
+
+  const valorTotal = Number(sale?.valor_total ?? sale?.total ?? sale?.valor ?? itens?.[0]?.valor_total ?? itens?.[0]?.preco_unitario ?? 0) || 0;
+  const valorBoleto = extrairValorBoletoVenda(sale);
+
+  // REGRA TREINNER BONIFICADO: 1% DA VENDA DOS BOLETO
+  if (isTrainee) {
+    if (isAcessorio(sale) || isProdutoEspecial(sale)) return 0;
+    if (valorBoleto > 0) {
+      return Number((valorBoleto * 0.01).toFixed(2));
+    }
+    return 0;
+  }
+
+  // REGRA 1: ACESSÓRIOS (1% ❌ | 2,5% ✅ | 3% 🚀)
+  if (isAcessorio(sale)) {
+    const taxaAcess = bateuSuperMetaAcessorios ? 0.03 : (bateuMetaAcessorios ? 0.025 : 0.01);
+    return Number((valorTotal * taxaAcess).toFixed(2));
+  }
+
+  // REGRA 2: JBL / IPHONES / CONSOLES / DRONES / AIR PODS / APPLE WATCH / PENCIL / OUTROS (Por Unidade: R$ 15 ❌ | R$ 30 ✅)
+  if (isProdutoEspecial(sale)) {
+    const valorPorUnidade = bateuMetaBoleto ? 30.00 : 15.00;
+    return Number((quantidade * valorPorUnidade).toFixed(2));
+  }
+
+  // REGRA 3: VENDAS NO BOLETO (1% ❌ | 3% ✅ | 3,2% 🚀; menos 1% do Treinner se teve apoio e meta batida)
+  if (valorBoleto > 0) {
+    let taxaBol = bateuSuperMetaBoleto ? 0.032 : (bateuMetaBoleto ? 0.03 : 0.01);
+    if (temApoioTrainee(sale) && bateuMetaBoleto) {
+      taxaBol = Math.max(0.01, Number((taxaBol - 0.01).toFixed(4)));
+    }
+    return Number((valorBoleto * taxaBol).toFixed(2));
+  }
+
+  // REGRA 4: VENDAS CELULARES À VISTA / CARTÃO / PIX (1% ❌ | 2% ✅)
+  const taxaAvista = bateuMetaBoleto ? 0.02 : 0.01;
+  return Number((valorTotal * taxaAvista).toFixed(2));
+}
+
 /**
  * Helper interno para extrair dados padronizados de cada linha de venda para relatórios
  */
@@ -878,22 +1003,7 @@ function extrairLinhaRelatorioVenda(
   if (calcularComissaoVendaFn) {
     comissao = Number(calcularComissaoVendaFn(sale)) || 0;
   } else {
-    const salva = isTrainee
-      ? sale?.comissao_trainee
-      : (sale?.comissao_vendedor ?? sale?.comissao ?? sale?.valor_comissao ?? itens?.[0]?.comissao);
-    if (salva !== undefined && salva !== null && salva !== '' && !isNaN(Number(salva)) && Number(salva) > 0) {
-      comissao = Number(salva);
-    } else if (isTrainee) {
-      comissao = Number((valorTotal * 0.01).toFixed(2));
-    } else if (isAcessorio(sale)) {
-      comissao = Number((valorTotal * 0.025).toFixed(2));
-    } else if (isProdutoEspecial(sale)) {
-      comissao = 15;
-    } else if (pagamento.includes('BOLETO') || isPagamentoBoletoFinanciadora(sale)) {
-      comissao = Number((valorTotal * 0.03).toFixed(2));
-    } else {
-      comissao = Number((valorTotal * 0.02).toFixed(2));
-    }
+    comissao = calcularComissaoVendaIndividual(sale, { isTrainee });
   }
 
   const rawDate = sale?.created_at || sale?.data;

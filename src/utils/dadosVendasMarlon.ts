@@ -226,10 +226,9 @@ const RAW_JBL_IPHONES: [string, string, string, number][] = [
 export function gerarVendasMarlon202610(vendedorId?: string, filialId?: string | null): VendaPadraoMarlon[] {
   const lista: VendaPadraoMarlon[] = [];
 
-  // 1. Acessórios (37 itens)
+  // 1. Acessórios (37 itens — Meta de Acessórios R$ 8.000 não batida = 1%)
   RAW_ACESSORIOS.forEach(([data, prod, valor], idx) => {
-    const isPulseira3 = prod.includes('3 PULSEIRA');
-    const comissao = isPulseira3 ? 0 : Number((valor * 0.01).toFixed(4));
+    const comissao = Number((valor * 0.01).toFixed(2));
     const createdAt = `${data}T10:${String(idx % 60).padStart(2, '0')}:00.000-03:00`;
     lista.push({
       id: `marlon-2026-10-acess-${idx + 1}`,
@@ -268,9 +267,9 @@ export function gerarVendasMarlon202610(vendedorId?: string, filialId?: string |
     });
   });
 
-  // 2. Boletos Treinier (41 itens)
+  // 2. Boletos Treinier (41 itens — Meta Boleto batida = 3% bruto -> 2% Vendedor Titular + 1% Treinner Bonificado)
   RAW_BOLETOS_TREINIE.forEach(([data, prod, imei, valor], idx) => {
-    const comissao = Number((valor * 0.01).toFixed(4));
+    const comissao = Number((valor * 0.02).toFixed(2));
     const comissaoTrainee = Number((valor * 0.01).toFixed(2));
     const createdAt = `${data}T12:${String(idx % 60).padStart(2, '0')}:00.000-03:00`;
     lista.push({
@@ -310,9 +309,9 @@ export function gerarVendasMarlon202610(vendedorId?: string, filialId?: string |
     });
   });
 
-  // 3. Boletos Solo (42 itens)
+  // 3. Boletos Solo (42 itens — Meta Boleto batida = 3%)
   RAW_BOLETOS_SOLO.forEach(([data, prod, imei, valor], idx) => {
-    const comissao = Number((valor * 0.01).toFixed(4));
+    const comissao = Number((valor * 0.03).toFixed(2));
     const createdAt = `${data}T14:${String(idx % 60).padStart(2, '0')}:00.000-03:00`;
     lista.push({
       id: `marlon-2026-10-bol-solo-${idx + 1}`,
@@ -351,9 +350,9 @@ export function gerarVendasMarlon202610(vendedorId?: string, filialId?: string |
     });
   });
 
-  // 4. Cartão ou À Vista (12 itens)
+  // 4. Cartão ou À Vista (12 itens — Meta batida = 2%)
   RAW_CARTAO_AVISTA.forEach(([data, prod, imei, valor], idx) => {
-    const comissao = Number((valor * 0.01).toFixed(4));
+    const comissao = Number((valor * 0.02).toFixed(2));
     const createdAt = `${data}T16:${String(idx % 60).padStart(2, '0')}:00.000-03:00`;
     lista.push({
       id: `marlon-2026-10-avista-${idx + 1}`,
@@ -392,9 +391,9 @@ export function gerarVendasMarlon202610(vendedorId?: string, filialId?: string |
     });
   });
 
-  // 5. JBL e iPhones (3 itens)
+  // 5. JBL e iPhones (3 itens — Meta batida = R$ 30,00 por unidade)
   RAW_JBL_IPHONES.forEach(([data, prod, imei, valor], idx) => {
-    const comissao = 15.00;
+    const comissao = 30.00;
     const createdAt = `${data}T18:${String(idx % 60).padStart(2, '0')}:00.000-03:00`;
     lista.push({
       id: `marlon-2026-10-jbl-${idx + 1}`,
@@ -524,3 +523,4 @@ export async function sincronizarMetasEVendasMarlonSupabase(
     syncMarlonInProgress = false;
   }
 }
+
