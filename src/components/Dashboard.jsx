@@ -14476,6 +14476,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         obs: pdvUsadoObs
       };
 
+      const precoTroca = Number(novoUsado.valor || 0);
+      novoUsado.produto = {
+        ...novoUsado.produto,
+        preco: precoTroca,
+        preco_venda: precoTroca,
+        preco_custo: precoTroca
+      };
       setPdvUsadoList(prev => [...prev, novoUsado]);
 
       // Limpar campos locais do formulário do usado
@@ -14551,7 +14558,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             nome: [pendenteTrocaModelo, pendenteTrocaCapacidade].filter(Boolean).join(' ') || pendenteTrocaModelo,
             tipo: 'APARELHO',
             categoria: pendenteTrocaCategoria,
-            condicao: 'USADO'
+            condicao: 'USADO',
+            preco: pendenteTrocaValor,
+            preco_venda: pendenteTrocaValor,
+            preco_custo: pendenteTrocaValor
           },
           categoria: pendenteTrocaCategoria,
           tipo: 'APARELHO',
@@ -14606,7 +14616,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             nome: pendenteUsadoNome,
             tipo: 'APARELHO',
             categoria: produtoUsadoEfetivo?.categoria || 'Usados',
-            condicao: 'USADO'
+            condicao: 'USADO',
+            preco: pendenteUsadoValor,
+            preco_venda: pendenteUsadoValor,
+            preco_custo: pendenteUsadoValor
           },
           categoria: produtoUsadoEfetivo?.categoria || 'Usados',
           tipo: 'APARELHO',
@@ -14637,7 +14650,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 nome: tNome,
                 tipo: 'APARELHO',
                 categoria: tCat,
-                condicao: 'USADO'
+                condicao: 'USADO',
+                preco: tValor,
+                preco_venda: tValor,
+                preco_custo: tValor
               },
               categoria: tCat,
               tipo: 'APARELHO',
