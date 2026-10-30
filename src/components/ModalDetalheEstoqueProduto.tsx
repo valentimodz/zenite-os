@@ -98,6 +98,8 @@ export default function ModalDetalheEstoqueProduto({
   // Identificadores do Produto
   const produtoNome = produto?.nome || produto?.produto_nome || 'Produto sem nome';
   const produtoId = produto?.id || produto?.produto_id || '-';
+  const produtoEan = produto?.codigo_barras || produto?.ean || produto?.codigoBarras || null;
+  const produtoSku = produto?.sku || null;
   const categoria = produto?.categoria || produto?.tipo || 'GERAL';
   const corAtual = produto?.cor || produto?.cor_nome || 'Padrão';
   const precoBaseVenda = Number(produto?.preco_venda || produto?.preco || 0);
@@ -149,6 +151,8 @@ export default function ModalDetalheEstoqueProduto({
     try {
       const nomeTrim = String(produtoNome).trim();
       const catalogoId = produto?.produto_catalogo_id || null;
+      const eanTrim = produtoEan ? String(produtoEan).trim() : null;
+      const skuTrim = produtoSku ? String(produtoSku).trim() : null;
 
       let query = supabase
         .from('produtos')
@@ -177,10 +181,23 @@ export default function ModalDetalheEstoqueProduto({
           )
         `);
 
+      // Construção dinâmica de filtros OR abrangendo todas as filiais por catálogo, nome, EAN/código de barras ou SKU
+      const orConditions: string[] = [];
       if (catalogoId) {
-        query = query.or(`produto_catalogo_id.eq.${catalogoId},nome.ilike.${nomeTrim}`);
-      } else if (nomeTrim) {
-        query = query.ilike('nome', nomeTrim);
+        orConditions.push(`produto_catalogo_id.eq.${catalogoId}`);
+      }
+      if (nomeTrim && nomeTrim !== 'Produto sem nome') {
+        orConditions.push(`nome.ilike.${nomeTrim}`);
+      }
+      if (eanTrim) {
+        orConditions.push(`codigo_barras.eq.${eanTrim}`);
+      }
+      if (skuTrim) {
+        orConditions.push(`sku.eq.${skuTrim}`);
+      }
+
+      if (orConditions.length > 0) {
+        query = query.or(orConditions.join(','));
       } else if (produtoId && produtoId !== '-') {
         query = query.eq('id', produtoId);
       }
@@ -260,7 +277,7 @@ export default function ModalDetalheEstoqueProduto({
     } finally {
       setLoading(false);
     }
-  }, [produto, produtoNome, produtoId, categoria, corAtual, precoBaseVenda, mapaFiliaisNome]);
+  }, [produto, produtoNome, produtoId, produtoEan, produtoSku, categoria, corAtual, precoBaseVenda, mapaFiliaisNome]);
 
   useEffect(() => {
     if (isOpen && produto) {
