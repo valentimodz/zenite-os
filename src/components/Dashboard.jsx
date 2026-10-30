@@ -29135,10 +29135,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       ? itens.reduce((acc, cur) => acc + (Number(cur.quantidade) || 1), 0)
                                       : (Number(sale.quantidade) || 1);
 
-                                    // Categoria: Extrair a categoria real do item ou usar a categoria definida na venda
-                                    const categoriaExibida = (itens.length > 0 && itens[0]?.categoria)
-                                      ? itens[0].categoria
-                                      : (sale.categoria || sale.produtos?.categoria || 'Geral');
+                                    // Categoria: Classifica como 'Acessórios' ou 'Smartphones' (ou categoria real do item se definida e não for 'Geral')
+                                    const categoriaExibida = isAcessorioUtil(sale)
+                                      ? 'Acessórios'
+                                      : ((itens.length > 0 && itens[0]?.categoria && itens[0].categoria !== 'Geral')
+                                        ? itens[0].categoria
+                                        : (sale.categoria && sale.categoria !== 'Geral' ? sale.categoria : 'Smartphones'));
 
                                     // 3. Formatação da Comissão: 2 casas decimais com máscara monetária (ex.: R$ 104,42 em vez de R$ 104,415)
                                     const valorComissaoSalvaHistorico =

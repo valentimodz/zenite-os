@@ -72,10 +72,11 @@ export const BOLETO_FINANCIADORAS_TERMS = [
 ];
 
 // Termos de produtos considerados Acessórios
+// Conforme especificação oficial: ['ACESS', 'FONE', 'CABO', 'CARREGADOR', 'PELICULA', 'CAPA', 'CONTROLE', 'CASE', 'POWERBANK', 'HEADSET']
 export const TERMOS_ACESSORIOS = [
-  'ACESS', 'CASE', 'CAPA', 'CHIP', 'PEN DRIVE', 'CHARGER',
-  'FONTE', 'CABO', 'PELIC', 'ZIVIZ', 'FONE', 'PULSEIRA', 'X-ONE', 'HBROS', 'LELONG', 'HITSON',
-  'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'POWER BANK', 'POWERBANK', 'IWILL', 'CARREGADOR', 'SUPORTE'
+  'ACESS', 'FONE', 'CABO', 'CARREGADOR', 'PELICULA', 'PELÍCULA', 'PELIC', 'CAPA', 'CONTROLE', 'CASE',
+  'POWERBANK', 'POWER BANK', 'HEADSET', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'ZIVIZ', 'PULSEIRA',
+  'X-ONE', 'HBROS', 'LELONG', 'HITSON', 'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'IWILL', 'SUPORTE'
 ];
 
 // Termos de Produtos Especiais / Alto Ticket (Fora de Meta Operacional de Boletos)

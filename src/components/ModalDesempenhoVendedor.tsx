@@ -1500,9 +1500,11 @@ export default function ModalDesempenhoVendedor({
                         ? itens.reduce((acc: number, cur: any) => acc + (Number(cur.quantidade) || 1), 0)
                         : (Number(sale.quantidade) || 1);
 
-                      const categoriaExibida = (itens.length > 0 && itens[0]?.categoria)
-                        ? itens[0].categoria
-                        : (sale.categoria || 'Geral');
+                      const categoriaExibida = isAcessorioUtil(sale)
+                        ? 'Acessórios'
+                        : ((itens.length > 0 && itens[0]?.categoria && itens[0].categoria !== 'Geral')
+                          ? itens[0].categoria
+                          : (sale.categoria && sale.categoria !== 'Geral' ? sale.categoria : 'Smartphones'));
 
                       const comissaoVendaCalculada = calcularComissaoVendaIndividual(sale, {
                         isTrainee: dashboardInfo.isTrainee,
