@@ -417,6 +417,13 @@ export const isProdutoEspecial = (itemOuVenda: any): boolean => {
     'JBL', 'BOOMBOX', 'PARTYBOX', 'XTREME', 'CHARGE 5', 'FLIP 6', 'GO 3', 'CLIP 4'
   ];
 
+  // Se for acessório (fone JBL, soundgear, cabo, etc.), pertence a acessórios e não a produtos especiais
+  const isAcess = categoria.includes('ACESS') ||
+    ['FONE', 'CABO', 'CARREGADOR', 'SOUNDGEAR', 'PELICULA', 'PELIC', 'CAPA', 'CHIP', 'CONTROLE', 'CASE', 'HEADSET'].some(k =>
+      nome.includes(k)
+    );
+  if (isAcess) return false;
+
   if (termosEspeciais.some(t => categoria.includes(t) || nome.includes(t))) {
     return true;
   }
@@ -1500,19 +1507,28 @@ export default function ModalDesempenhoVendedor({
                         ? itens.reduce((acc: number, cur: any) => acc + (Number(cur.quantidade) || 1), 0)
                         : (Number(sale.quantidade) || 1);
 
-                      const categoriaExibida = isAcessorioUtil(sale)
-                        ? 'Acessórios'
-                        : ((itens.length > 0 && itens[0]?.categoria && itens[0].categoria !== 'Geral')
-                          ? itens[0].categoria
-                          : (sale.categoria && sale.categoria !== 'Geral' ? sale.categoria : 'Smartphones'));
+                      // Verificação explícita de acessório
+                      const isAcessorio = 
+                        (sale.categoria || '').toLowerCase().includes('acess') ||
+                        ['fone', 'cabo', 'carregador', 'soundgear', 'pelicula', 'capa', 'chip', 'controle'].some(k => 
+                          (sale.produto_nome || sale.descricao || produtoNome || '').toLowerCase().includes(k)
+                        ) ||
+                        isAcessorioUtil(sale);
 
-                      const comissaoVendaCalculada = calcularComissaoVendaIndividual(sale, {
-                        isTrainee: dashboardInfo.isTrainee,
-                        bateuMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto,
-                        bateuSuperMetaBoleto: dashboardInfo.totalBoletos >= dashboardInfo.superMetaBoleto,
-                        bateuMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.metaAcessorios,
-                        bateuSuperMetaAcessorios: dashboardInfo.totalAcessorios >= dashboardInfo.superMetaAcessorios
-                      });
+                      // Categoria visual correta
+                      const categoriaExibida = isAcessorio ? 'Acessórios' : (sale.categoria && sale.categoria !== 'Geral' ? sale.categoria : 'Smartphones');
+
+                      // Alíquota de comissão
+                      let percentual = 0.01; // padrão 1%
+                      if (isAcessorio) {
+                        percentual = 0.025; // 2,5% da meta batida de acessórios
+                      } else if (String(sale.forma_pagamento || sale.metodo_pagamento || '').toUpperCase().includes('BOLETO')) {
+                        percentual = 0.032; // 3,2% da super meta de boletos
+                      } else {
+                        percentual = 0.020; // 2,0% cartão/pix/dinheiro aparelhos
+                      }
+
+                      const comissaoVendaCalculada = Number((Number(sale.valor_total || sale.total || sale.valor || 0) * percentual).toFixed(2));
 
                       const metodoRaw = String(sale.forma_pagamento || sale.metodo_pagamento || 'N/A').toUpperCase();
 

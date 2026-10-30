@@ -75,7 +75,7 @@ export const BOLETO_FINANCIADORAS_TERMS = [
 // Conforme especificação oficial: ['ACESS', 'FONE', 'CABO', 'CARREGADOR', 'PELICULA', 'CAPA', 'CONTROLE', 'CASE', 'POWERBANK', 'HEADSET']
 export const TERMOS_ACESSORIOS = [
   'ACESS', 'FONE', 'CABO', 'CARREGADOR', 'PELICULA', 'PELÍCULA', 'PELIC', 'CAPA', 'CONTROLE', 'CASE',
-  'POWERBANK', 'POWER BANK', 'HEADSET', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'ZIVIZ', 'PULSEIRA',
+  'POWERBANK', 'POWER BANK', 'HEADSET', 'SOUNDGEAR', 'CHIP', 'PEN DRIVE', 'CHARGER', 'FONTE', 'ZIVIZ', 'PULSEIRA',
   'X-ONE', 'HBROS', 'LELONG', 'HITSON', 'ACESSORIO', 'ACESSÓRIO', 'ADAPTADOR', 'IWILL', 'SUPORTE'
 ];
 
@@ -380,14 +380,21 @@ export const isProdutoEspecial = (itemOuVenda: any): boolean => {
     ''
   ).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
-  // Acessórios como capas, películas ou pulseiras de Apple Watch/iPhone pertencem à meta de acessórios
+  // Acessórios (fones JBL, soundgear, cabos iWill, carregadores, etc.) pertencem à regra de acessórios
   if (
     categoria.includes('ACESS') ||
     nome.includes('PULSEIRA') ||
     nome.includes('CASE') ||
     nome.includes('CAPA') ||
     nome.includes('PELIC') ||
-    nome.includes('KIT X-ONE')
+    nome.includes('KIT X-ONE') ||
+    nome.includes('FONE') ||
+    nome.includes('CABO') ||
+    nome.includes('CARREGADOR') ||
+    nome.includes('SOUNDGEAR') ||
+    nome.includes('HEADSET') ||
+    nome.includes('CHIP') ||
+    nome.includes('CONTROLE')
   ) {
     return false;
   }

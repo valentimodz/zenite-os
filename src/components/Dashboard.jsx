@@ -29135,24 +29135,29 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       ? itens.reduce((acc, cur) => acc + (Number(cur.quantidade) || 1), 0)
                                       : (Number(sale.quantidade) || 1);
 
-                                    // Categoria: Classifica como 'Acessórios' ou 'Smartphones' (ou categoria real do item se definida e não for 'Geral')
-                                    const categoriaExibida = isAcessorioUtil(sale)
-                                      ? 'Acessórios'
-                                      : ((itens.length > 0 && itens[0]?.categoria && itens[0].categoria !== 'Geral')
-                                        ? itens[0].categoria
-                                        : (sale.categoria && sale.categoria !== 'Geral' ? sale.categoria : 'Smartphones'));
+                                    // Verificação explícita de acessório
+                                    const isAcessorio = 
+                                      (sale.categoria || '').toLowerCase().includes('acess') ||
+                                      ['fone', 'cabo', 'carregador', 'soundgear', 'pelicula', 'capa', 'chip', 'controle'].some(k => 
+                                        (sale.produto_nome || sale.descricao || produtoNome || '').toLowerCase().includes(k)
+                                      ) ||
+                                      isAcessorioUtil(sale);
 
-                                    // 3. Formatação da Comissão: 2 casas decimais com máscara monetária (ex.: R$ 104,42 em vez de R$ 104,415)
-                                    const valorComissaoSalvaHistorico =
-                                      sale.comissao_vendedor ??
-                                      sale.comissao ??
-                                      sale.valor_comissao ??
-                                      itens?.[0]?.comissao;
+                                    // Categoria visual correta
+                                    const categoriaExibida = isAcessorio ? 'Acessórios' : (sale.categoria && sale.categoria !== 'Geral' ? sale.categoria : 'Smartphones');
 
-                                    const valorComissaoBruto = Number(calcularComissaoItem(sale, metasInfo));
-                                    const _valorComissaoBrutoLegacy = valorComissaoSalvaHistorico !== undefined && valorComissaoSalvaHistorico !== null && valorComissaoSalvaHistorico !== ''
-                                      ? Number(valorComissaoSalvaHistorico)
-                                      : Number(calcularComissaoItem(sale));
+                                    // Alíquota de comissão
+                                    let percentual = 0.01; // padrão 1%
+                                    if (isAcessorio) {
+                                      percentual = 0.025; // 2,5% da meta batida de acessórios
+                                    } else if (String(sale.forma_pagamento || sale.metodo_pagamento || '').toUpperCase().includes('BOLETO')) {
+                                      percentual = 0.032; // 3,2% da super meta de boletos
+                                    } else {
+                                      percentual = 0.020; // 2,0% cartão/pix/dinheiro aparelhos
+                                    }
+
+                                    const comissaoFinal = Number(sale.valor_total || sale.total || sale.valor || 0) * percentual;
+                                    const valorComissaoBruto = Number(comissaoFinal.toFixed(2));
                                     const comissaoFormatada = valorComissaoBruto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
                                     // Renderizador de Badge de Pagamento
