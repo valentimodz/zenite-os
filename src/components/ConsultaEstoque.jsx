@@ -127,21 +127,20 @@ export default function ConsultaEstoque({
       if (empresaId) {
         qProdutos = qProdutos.eq('empresa_id', empresaId);
       }
-      // Tentar filtrar apenas produtos ativos no banco, com fallback defensivo
+      let prods = [];
       try {
         const { data: dataProdutosAtivos, error: errAtivos } = await qProdutos.eq('ativo', true);
-        if (!errAtivos && dataProdutosAtivos) {
-          setProdutos(dataProdutosAtivos.filter(p => p.status !== 'INATIVO' && p.ativo !== false));
+        if (!errAtivos && dataProdutosAtivos && dataProdutosAtivos.length > 0) {
+          prods = dataProdutosAtivos.filter(p => p.status !== 'INATIVO' && p.ativo !== false);
         } else {
-          // Se a coluna ativo não existir no banco, busca normal
           const { data: dataProdutos, error: errProdutos } = await supabase.from('produtos').select('*').eq(empresaId ? 'empresa_id' : 'id', empresaId || undefined);
           if (errProdutos) console.warn('Erro ao carregar produtos:', errProdutos);
-          setProdutos((dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false));
+          prods = (dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false);
         }
       } catch (e) {
         const { data: dataProdutos, error: errProdutos } = await qProdutos;
         if (errProdutos) console.warn('Erro ao carregar produtos:', errProdutos);
-        setProdutos((dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false));
+        prods = (dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false);
       }
 
       // 4.2 Carregar catálogo mestre de produtos_catalogo com .select('*')
@@ -149,19 +148,20 @@ export default function ConsultaEstoque({
       if (empresaId) {
         qCatalogo = qCatalogo.eq('empresa_id', empresaId);
       }
+      let catsMestre = [];
       try {
         const { data: dataCatAtivos, error: errCatAtivos } = await qCatalogo.eq('ativo', true);
-        if (!errCatAtivos && dataCatAtivos) {
-          setProdutosCatalogo(dataCatAtivos.filter(c => c.status !== 'INATIVO' && c.ativo !== false));
+        if (!errCatAtivos && dataCatAtivos && dataCatAtivos.length > 0) {
+          catsMestre = dataCatAtivos.filter(c => c.status !== 'INATIVO' && c.ativo !== false);
         } else {
           const { data: dataCatalogo, error: errCatalogo } = await qCatalogo;
           if (errCatalogo) console.warn('Erro ao carregar produtos_catalogo:', errCatalogo);
-          setProdutosCatalogo((dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false));
+          catsMestre = (dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false);
         }
       } catch (e) {
         const { data: dataCatalogo, error: errCatalogo } = await qCatalogo;
         if (errCatalogo) console.warn('Erro ao carregar produtos_catalogo:', errCatalogo);
-        setProdutosCatalogo((dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false));
+        catsMestre = (dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false);
       }
 
       // 4.3 Carregar IMEIs disponíveis com .select('*')
@@ -187,8 +187,7 @@ export default function ConsultaEstoque({
 
       if (!isMountedRef.current) return;
 
-      const prods = dataProdutos || [];
-      const catsMestre = dataCatalogo || [];
+
       const ims = (dataImeis || []).filter((im) => {
         const st = String(im.status || '').toUpperCase();
         return !im.vendido && !st.includes('VEND') && st !== 'DEFEITO' && st !== 'RESERVADO_OUTRO';
@@ -515,10 +514,10 @@ export default function ConsultaEstoque({
   // 8. Filtros de Interface (Busca Textual, Categoria e Status de Estoque)
   const itensFiltrados = useMemo(() => {
     return cardsDesdobrados.filter(item => {
-      // Filtro de Categoria
+      // Filtro de Categoria (normalizado sem espaços)
       if (categoriaSelecionada !== 'TODAS') {
-        const catItem = String(item.categoria || '').toUpperCase();
-        if (catItem !== categoriaSelecionada.toUpperCase()) return false;
+        const catItem = String(item.categoria || '').trim().toUpperCase();
+        if (catItem !== categoriaSelecionada.trim().toUpperCase()) return false;
       }
 
       // Filtro de Status de Estoque:
@@ -558,21 +557,39 @@ export default function ConsultaEstoque({
     return itensFiltrados.slice(indiceInicio, indiceFim);
   }, [itensFiltrados, indiceInicio, indiceFim]);
 
-  // Contadores para as Pílulas de Status
+  // Contadores para as Pílulas de Status (respeitando a categoria selecionada e busca)
   const contadores = useMemo(() => {
-    let todos = cardsDesdobrados.length;
+    const base = cardsDesdobrados.filter(item => {
+      if (categoriaSelecionada !== 'TODAS') {
+        const catItem = String(item.categoria || '').trim().toUpperCase();
+        if (catItem !== categoriaSelecionada.trim().toUpperCase()) return false;
+      }
+      if (buscaDebounced && buscaDebounced.trim()) {
+        const termo = buscaDebounced.toLowerCase().trim();
+        const nome = String(item.nome || '').toLowerCase();
+        const sku = String(item.sku || '').toLowerCase();
+        const barcode = String(item.codigo_barras || '').toLowerCase();
+        const filial = String(item.filialNomeCard || '').toLowerCase();
+        if (!nome.includes(termo) && !sku.includes(termo) && !barcode.includes(termo) && !filial.includes(termo)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    let todos = base.length;
     let critico = 0;
     let zerado = 0;
     let disponivel = 0;
 
-    cardsDesdobrados.forEach(i => {
+    base.forEach(i => {
       if (i.qtdFilial === 0) zerado++;
       else if (i.qtdFilial < 5) critico++;
       else disponivel++;
     });
 
     return { todos, critico, zerado, disponivel };
-  }, [cardsDesdobrados]);
+  }, [cardsDesdobrados, categoriaSelecionada, buscaDebounced]);
 
   // Abrir Modal de IMEIs para o Produto e Filial do Card
   const handleAbrirImeis = (item) => {

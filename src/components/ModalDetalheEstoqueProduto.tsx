@@ -109,8 +109,8 @@ export default function ModalDetalheEstoqueProduto({
 
   const ehAcessorioGarantido = (nome: string, cat: string) => {
     const termos = [
-      'SUPORTE', 'CAPA', 'CASE', 'PELIC', 'CABO', 'FONE', 
-      'CARREGADOR', 'FONTE', 'ADAPTADOR', 'CHIP', 'BRINDE', 
+      'SUPORTE', 'CAPA', 'CASE', 'PELIC', 'CABO', 'FONE',
+      'CARREGADOR', 'FONTE', 'ADAPTADOR', 'CHIP', 'BRINDE',
       'POWER BANK', 'FILME', 'BRACADEIRA'
     ];
     const str = `${nome || ''} ${cat || ''}`.toUpperCase();
@@ -753,11 +753,11 @@ export default function ModalDetalheEstoqueProduto({
   if (!isOpen || !produto) return null;
 
   return (
-    <div 
+    <div
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fadeIn"
       onClick={onClose}
     >
-      <div 
+      <div
         className="bg-[#121214] border border-[#27272a] rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-scaleUp text-left"
         onClick={e => e.stopPropagation()}
       >
@@ -903,11 +903,10 @@ export default function ModalDetalheEstoqueProduto({
           <button
             type="button"
             onClick={() => setAbaAtiva('filiais')}
-            className={`px-3 py-2 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
-              abaAtiva === 'filiais'
+            className={`px-3 py-2 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${abaAtiva === 'filiais'
                 ? 'border-[#6A0DAD] text-purple-300'
                 : 'border-transparent text-zinc-400 hover:text-white'
-            }`}
+              }`}
           >
             <Store size={14} />
             Estoque por Loja / Filial ({produtosIrmaos.length} registros)
@@ -915,11 +914,10 @@ export default function ModalDetalheEstoqueProduto({
           <button
             type="button"
             onClick={() => setAbaAtiva('variacoes')}
-            className={`px-3 py-2 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
-              abaAtiva === 'variacoes'
+            className={`px-3 py-2 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${abaAtiva === 'variacoes'
                 ? 'border-[#6A0DAD] text-purple-300'
                 : 'border-transparent text-zinc-400 hover:text-white'
-            }`}
+              }`}
           >
             <Layers size={14} />
             Variações de Cores ({variacoesCores.length})
@@ -944,11 +942,10 @@ export default function ModalDetalheEstoqueProduto({
                       <div className="flex items-center gap-2">
                         <Store size={15} className={filial.quantidadeTotal > 0 ? 'text-purple-400' : 'text-zinc-600'} />
                         <span className="font-bold text-white text-xs sm:text-sm">{filial.filial_nome}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          filial.quantidadeTotal > 0
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${filial.quantidadeTotal > 0
                             ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
                             : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
-                        }`}>
+                          }`}>
                           {filial.quantidadeTotal > 0 ? 'Em Estoque' : 'Esgotado'}
                         </span>
                       </div>
@@ -1103,7 +1100,7 @@ export default function ModalDetalheEstoqueProduto({
                                       >
                                         <Minus size={10} />
                                       </button>
-                                      <span 
+                                      <span
                                         onClick={() => {
                                           setItemEditandoId(item.id);
                                           setCampoEditando('quantidade');
