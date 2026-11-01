@@ -125,6 +125,18 @@ export const TERMOS_ESPECIAIS = [
 ];
 
 /**
+ * Helper para identificar a vendedora Islayne Coelho
+ */
+export function isColaboradorIslayne(nomeOuObjeto: any): boolean {
+  if (!nomeOuObjeto) return false;
+  const str = typeof nomeOuObjeto === 'string'
+    ? nomeOuObjeto
+    : (nomeOuObjeto?.nome || nomeOuObjeto?.colaborador || nomeOuObjeto?.vendedor_nome || '');
+  const norm = normalizarNome(str);
+  return norm.includes('ISLAYNE');
+}
+
+/**
  * Normaliza nome para comparação insensível a acentos e caixa
  */
 export const normalizarNome = (s: any): string =>
@@ -364,8 +376,35 @@ export const isBoleto = (v: any): boolean => {
 export const extrairValorBoletoVenda = (v: any): number => {
   if (!v) return 0;
 
-  // A) Verifica valor explícito em valor_boleto / valorBoleto
+  // 1. Exclusão explícita antecipada: Se for cartão de crédito/débito, pix ou dinheiro puro, NUNCA é boleto/financiadora
+  const formaDireta = String(
+    v.forma_pagamento ||
+    v.formaPagamento ||
+    v.metodo_pagamento ||
+    v.metodoPagamento ||
+    ''
+  ).toUpperCase();
+
+  const financeiraDireta = String(
+    v.financeira ||
+    v.financeira_parceira ||
+    v.financeiraParceira ||
+    ''
+  ).toUpperCase();
+
   const valBoletoExplicit = Number(v.valor_boleto ?? v.valorBoleto ?? 0);
+
+  // Se o método for claramente cartão, pix ou dinheiro e não houver financeira parceira homologada nem valor_boleto positivo
+  const ehMetodoAVista = isMetodoAVistaPuro(formaDireta);
+  const temFinanceiraHomologada = ['PAYJOY', 'WATU', 'UME', 'AIVA', 'CREDIARIO', 'BOLETO'].some(f => 
+    financeiraDireta.includes(f) || formaDireta.includes(f)
+  );
+
+  if (ehMetodoAVista && !temFinanceiraHomologada && valBoletoExplicit <= 0) {
+    return 0;
+  }
+
+  // A) Verifica valor explícito em valor_boleto / valorBoleto
   if (!isNaN(valBoletoExplicit) && valBoletoExplicit > 0) {
     return valBoletoExplicit;
   }
@@ -396,22 +435,7 @@ export const extrairValorBoletoVenda = (v: any): number => {
     if (somaPags > 0) return somaPags;
   }
 
-  // C) Exclusão explícita: Se a venda é Cartão, PIX ou Dinheiro puro (e não tem valor_boleto explícito), NÃO pontua em boletos
-  const formaDireta = String(
-    v.forma_pagamento ||
-    v.formaPagamento ||
-    v.metodo_pagamento ||
-    v.metodoPagamento ||
-    ''
-  ).toUpperCase();
-  const financeiraDireta = String(
-    v.financeira ||
-    v.financeira_parceira ||
-    v.financeiraParceira ||
-    ''
-  ).toUpperCase();
-
-  if (!financeiraDireta && isMetodoAVistaPuro(formaDireta)) {
+  if (!temFinanceiraHomologada && ehMetodoAVista) {
     return 0;
   }
 
@@ -698,6 +722,9 @@ export function calcularDesempenhoGeral(
 
   const ticketMedio = transacoes > 0 ? Math.round((volumeTotal / transacoes) * 100) / 100 : 0;
 
+  const isIslaynePlanilha =
+    isColaboradorIslayne(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+
   // 4. Metas configuradas
   const metaBoleto = isMarlonPlanilha
     ? METAS_MARLON_2026_10.meta_boleto
@@ -725,9 +752,11 @@ export function calcularDesempenhoGeral(
 
   const metaTotal = isMarlonPlanilha
     ? METAS_MARLON_2026_10.valor_meta
-    : (Number(opcoes.metaTotal) > 0
-      ? Number(opcoes.metaTotal)
-      : (metaBoleto + metaAcessorios));
+    : (isIslaynePlanilha && (!opcoes.metaTotal || opcoes.metaTotal <= 77500)
+      ? 142298.60
+      : (Number(opcoes.metaTotal) > 0
+        ? Number(opcoes.metaTotal)
+        : (metaBoleto + metaAcessorios)));
 
   // Status de atingimento das metas
   const bateuSuperMetaBoleto = superMetaBoleto > 0 && totalBoletos >= superMetaBoleto;
