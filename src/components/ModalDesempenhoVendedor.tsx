@@ -862,7 +862,8 @@ export default function ModalDesempenhoVendedor({
         : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000));
 
     // Fallback em cascata para que 'sales' nunca fique vazio se houver vendas disponíveis
-    const vendasParaCalculo = (Array.isArray(vendasColaborador) && vendasColaborador.length > 0)
+    // Garantindo que, se vendasColaborador/vendasLocais foram carregadas diretamente da query da filial ativa, elas tenham prioridade absoluta
+    const candidatasVendas = (Array.isArray(vendasColaborador) && vendasColaborador.length > 0)
       ? vendasColaborador
       : ((Array.isArray(vendasLocais) && vendasLocais.length > 0)
         ? vendasLocais
@@ -877,6 +878,17 @@ export default function ModalDesempenhoVendedor({
                 : ((Array.isArray((colaborador as any)?.extrato) && (colaborador as any).extrato.length > 0)
                   ? (colaborador as any).extrato
                   : []))))));
+
+    // Filtra estritamente pela filial do colaborador e competência para evitar vazamento de vendas passadas por prop
+    const vendasParaCalculo = (candidatasVendas || []).filter((v: any) => {
+      if (!v) return false;
+      const statusLimpo = String(v?.status || '').toUpperCase().trim();
+      if (statusLimpo === 'CANCELADA' || statusLimpo === 'CANCELADO') return false;
+      if (colaboradorFilialId && v.filial_id && String(v.filial_id).trim() !== String(colaboradorFilialId).trim()) {
+        return false;
+      }
+      return true;
+    });
 
     const sales = (vendasParaCalculo || []) as any[];
     const modoVisualizacao: 'COM_APOIO' | 'SOLO' = filtroTipoVendas === 'solo' ? 'SOLO' : 'COM_APOIO';

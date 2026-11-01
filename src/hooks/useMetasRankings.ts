@@ -302,10 +302,15 @@ export async function fetchRankingColaboradoresMensal({
       const vendasComoTitular = filtrarVendasDoColaborador(vendasLista, {
         id: colabId,
         nome: colab.nome,
-        isTrainee: false
+        isTrainee: false,
+        competencia,
+        filialId: colab.filial_id
       });
 
       const vendasComoTrainee = vendasLista.filter(v => {
+        if (colab.filial_id && v.filial_id && String(v.filial_id).trim() !== String(colab.filial_id).trim()) {
+          return false;
+        }
         const tId = v.trainee_id || v.treener_id ? String(v.trainee_id || v.treener_id).trim() : '';
         const matchId = colabId && !colabId.startsWith('nome_') && tId === colabId;
         const matchNome = Boolean(colab.nome) && nomesCorrespondem(v.trainee_nome, colab.nome);
@@ -321,7 +326,9 @@ export async function fetchRankingColaboradoresMensal({
       const vendasTotaisColab = filtrarVendasDoColaborador(vendasLista, {
         id: colabId,
         nome: colab.nome,
-        isTrainee
+        isTrainee,
+        competencia,
+        filialId: colab.filial_id
       });
 
       // Nome completo mais descritivo (ex: se em profiles está 'ISLAYNE' e nas vendas está 'ISLAYNE COELHO')
