@@ -329,19 +329,61 @@ export const calcularComissaoItem = (
 };
 
 // Termos e financeiras para metas de boletos/financiadoras (PAYJOY, UME, WATU, AIVA, BOLETO, CREDIARIO, FINANCIADORA, etc.)
+// Exclusão explícita de termos genéricos como "PARCELADO" que capturavam cartões de crédito parcelados
 export const BOLETO_FINANCIADORAS_TERMS = [
   'BOLETO', 'PAYJOY', 'UME', 'UMA', 'WATU', 'AIVA',
   'CREDIARIO', 'CREDIÁRIO', 'FINANCIADORA', 'FINANCIAMENTO', 'FINANC',
-  'PARCELADO', 'PROMIS', 'CARNE', 'CARNÊ'
+  'PROMIS', 'CARNE', 'CARNÊ'
 ];
+
+/**
+ * Identifica se um método ou texto representa pagamento puro à vista/cartão
+ * (Cartão de Crédito, Débito, PIX ou Dinheiro)
+ */
+export const isMetodoAVistaPuro = (textoRaw: any): boolean => {
+  if (!textoRaw) return false;
+  const s = String(textoRaw).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  if (!s) return false;
+
+  if (
+    s.includes('BOLETO') ||
+    s.includes('PAYJOY') ||
+    s.includes('WATU') ||
+    s.includes('UME') ||
+    s.includes('AIVA') ||
+    s.includes('CREDI') ||
+    s.includes('CARNE') ||
+    s.includes('PROMIS')
+  ) {
+    return false;
+  }
+
+  return (
+    s.includes('CARTAO') ||
+    s.includes('CREDITO') ||
+    s.includes('DEBITO') ||
+    s.includes('PIX') ||
+    s.includes('DINHEIRO') ||
+    s.includes('ESPECIE')
+  );
+};
 
 export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
   if (!p) return false;
   // Se for string direta
   if (typeof p === 'string') {
     const s = p.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    if (isMetodoAVistaPuro(s)) return false;
     return BOLETO_FINANCIADORAS_TERMS.some(t => s.includes(t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()));
   }
+
+  const textoMetodo = [p.metodo_pagamento, p.forma_pagamento].filter(Boolean).join(' ');
+  const textoFinanceira = [p.financeira, p.financeira_parceira].filter(Boolean).join(' ');
+
+  if (!textoFinanceira && isMetodoAVistaPuro(textoMetodo)) {
+    return false;
+  }
+
   const texto = [
     p.metodo_pagamento,
     p.forma_pagamento,
@@ -357,6 +399,8 @@ export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
   ].filter(Boolean).join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
   if (!texto) return false;
+  if (isMetodoAVistaPuro(texto)) return false;
+
   return BOLETO_FINANCIADORAS_TERMS.some(t => {
     const termoNorm = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     return texto.includes(termoNorm);
@@ -636,7 +680,7 @@ export default function ModalDesempenhoVendedor({
         }
       })();
 
-      // 2. Busca de vendas sem filtro restritivo de filial_id e sem .neq('status','CANCELADA') em SQL (que descarta status IS NULL)
+      // 2. Busca de vendas delimitadas pelo período e filial (evita misturar registros entre lojas)
       const orClauses: string[] = [];
       if (isUuidValido) {
         orClauses.push(`vendedor_id.eq.${vendedorId}`);
@@ -662,6 +706,10 @@ export default function ModalDesempenhoVendedor({
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
         .order('created_at', { ascending: false });
+
+      if (colaboradorFilialId) {
+        query = query.eq('filial_id', colaboradorFilialId);
+      }
 
       if (orClauses.length > 0) {
         query = query.or(orClauses.join(','));
@@ -724,7 +772,8 @@ export default function ModalDesempenhoVendedor({
           id: isUuidValido ? vendedorId : undefined,
           nome: vendedorNome,
           isTrainee: isOriginalTrainee,
-          competencia
+          competencia,
+          filialId: colaboradorFilialId
         });
 
         const modoVis: 'COM_APOIO' | 'SOLO' = filtroTipoVendas === 'solo' ? 'SOLO' : 'COM_APOIO';

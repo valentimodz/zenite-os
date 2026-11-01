@@ -64,12 +64,46 @@ import {
   METAS_MARLON_2026_10
 } from './dadosVendasMarlon';
 
-// Termos e financeiras para identificação estrita de boletos e financiadoras
+// Termos e financeiras homologadas para identificação estrita de boletos e financiadoras
+// Exclusão explícita de termos genéricos como "PARCELADO", que capturava cartões de crédito parcelados
 export const BOLETO_FINANCIADORAS_TERMS = [
   'BOLETO', 'PAYJOY', 'UME', 'UMA', 'WATU', 'AIVA',
   'CREDIARIO', 'CREDIÁRIO', 'FINANCIADORA', 'FINANCIAMENTO', 'FINANC',
-  'PARCELADO', 'PROMIS', 'CARNE', 'CARNÊ'
+  'PROMIS', 'CARNE', 'CARNÊ'
 ];
+
+/**
+ * Identifica se um método ou texto representa pagamento puro à vista/cartão
+ * (Cartão de Crédito, Débito, PIX ou Dinheiro)
+ */
+export const isMetodoAVistaPuro = (textoRaw: any): boolean => {
+  if (!textoRaw) return false;
+  const s = String(textoRaw).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  if (!s) return false;
+
+  // Se contiver boleto ou financiadora homologada, não é à vista puro
+  if (
+    s.includes('BOLETO') ||
+    s.includes('PAYJOY') ||
+    s.includes('WATU') ||
+    s.includes('UME') ||
+    s.includes('AIVA') ||
+    s.includes('CREDI') ||
+    s.includes('CARNE') ||
+    s.includes('PROMIS')
+  ) {
+    return false;
+  }
+
+  return (
+    s.includes('CARTAO') ||
+    s.includes('CREDITO') ||
+    s.includes('DEBITO') ||
+    s.includes('PIX') ||
+    s.includes('DINHEIRO') ||
+    s.includes('ESPECIE')
+  );
+};
 
 // Termos de produtos considerados Acessórios
 // Conforme especificação oficial: ['ACESS', 'FONE', 'CABO', 'CARREGADOR', 'PELICULA', 'CAPA', 'CONTROLE', 'CASE', 'POWERBANK', 'HEADSET']
@@ -137,12 +171,14 @@ export function filtrarVendasDoColaborador(
     nome?: string | null;
     isTrainee?: boolean;
     competencia?: string;
+    filialId?: string | number | null;
   }
 ): any[] {
   const idsValidos = [colab?.id, colab?.authId, colab?.profileId]
     .map(x => String(x || '').trim())
     .filter(x => x && x !== 'undefined' && x !== 'null' && x !== 'sem_vendedor' && !x.startsWith('nome_'));
 
+  const filialAlvo = colab?.filialId ? String(colab.filialId).trim() : null;
   const nomeColab = normalizarNome(colab?.nome);
   const vistos = new Set<string>();
   const resultado: any[] = [];
@@ -151,6 +187,13 @@ export function filtrarVendasDoColaborador(
     if (!v) return;
     const status = String(v.status || '').toUpperCase().trim();
     if (status === 'CANCELADA' || status === 'CANCELADO') return;
+
+    // Se a filial do colaborador foi especificada, a venda deve pertencer à mesma filial
+    if (filialAlvo && v.filial_id) {
+      if (String(v.filial_id).trim() !== filialAlvo) {
+        return;
+      }
+    }
 
     const vId = String(v.vendedor_id || '').trim();
     const uId = String(v.usuario_id || v.criado_por || '').trim();
@@ -242,8 +285,18 @@ export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
   if (!p) return false;
   if (typeof p === 'string') {
     const s = p.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    if (isMetodoAVistaPuro(s)) return false;
     return BOLETO_FINANCIADORAS_TERMS.some(t => s.includes(t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()));
   }
+
+  // Se houver indicador explícito de cartão, pix ou dinheiro sem financiadora
+  const textoMetodo = [p.metodo_pagamento, p.metodoPagamento, p.forma_pagamento, p.formaPagamento].filter(Boolean).join(' ');
+  const textoFinanceira = [p.financeira, p.financeira_parceira, p.financeiraParceira].filter(Boolean).join(' ');
+
+  if (!textoFinanceira && isMetodoAVistaPuro(textoMetodo)) {
+    return false;
+  }
+
   const texto = [
     p.metodo_pagamento,
     p.metodoPagamento,
@@ -263,6 +316,8 @@ export const isPagamentoBoletoFinanciadora = (p: any): boolean => {
   ].filter(Boolean).join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
   if (!texto) return false;
+  if (isMetodoAVistaPuro(texto)) return false;
+
   return BOLETO_FINANCIADORAS_TERMS.some(t => {
     const termoNorm = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     return texto.includes(termoNorm);
@@ -292,7 +347,12 @@ export const isBoleto = (v: any): boolean => {
     forma.includes('WATU') ||
     forma.includes('UME') ||
     forma.includes('AIVA');
-  if (isFormaDireta) return true;
+  if (isFormaDireta) {
+    if (!forma.includes('BOLETO') && !forma.includes('PAYJOY') && !forma.includes('WATU') && !forma.includes('UME') && !forma.includes('AIVA') && isMetodoAVistaPuro(forma)) {
+      return false;
+    }
+    return true;
+  }
 
   return isPagamentoBoletoFinanciadora(v);
 };
@@ -336,7 +396,26 @@ export const extrairValorBoletoVenda = (v: any): number => {
     if (somaPags > 0) return somaPags;
   }
 
-  // C) Se a venda foi marcada como Boleto/Financiadora na própria linha da venda
+  // C) Exclusão explícita: Se a venda é Cartão, PIX ou Dinheiro puro (e não tem valor_boleto explícito), NÃO pontua em boletos
+  const formaDireta = String(
+    v.forma_pagamento ||
+    v.formaPagamento ||
+    v.metodo_pagamento ||
+    v.metodoPagamento ||
+    ''
+  ).toUpperCase();
+  const financeiraDireta = String(
+    v.financeira ||
+    v.financeira_parceira ||
+    v.financeiraParceira ||
+    ''
+  ).toUpperCase();
+
+  if (!financeiraDireta && isMetodoAVistaPuro(formaDireta)) {
+    return 0;
+  }
+
+  // D) Se a venda foi marcada como Boleto/Financiadora na própria linha da venda
   if (isBoleto(v) || isPagamentoBoletoFinanciadora(v)) {
     return extrairValorVenda(v);
   }
