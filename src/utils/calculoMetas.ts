@@ -195,7 +195,24 @@ export function filtrarVendasDoColaborador(
       }
     });
     if (!ehOutroMes) {
-      return gerarVendasMarlon202610(idsValidos[0] || undefined);
+      const vendasBaseMarlon = gerarVendasMarlon202610(idsValidos[0] || undefined);
+      // Mescla com eventuais vendas reais inseridas no banco para o Marlon que não pertençam ao mock base
+      const vendasExtrasDoBanco = resultado.filter((v: any) => {
+        const vId = String(v?.id || '');
+        return !vId.startsWith('marlon-2026-10-');
+      });
+      if (vendasExtrasDoBanco.length === 0) {
+        return vendasBaseMarlon;
+      }
+      // Evita duplicidade se a venda do banco já tiver representação no mock
+      const listaCombinada = [...vendasBaseMarlon];
+      vendasExtrasDoBanco.forEach((vb: any) => {
+        const jaConsta = listaCombinada.some(m => m.id === vb.id || (m.created_at === vb.created_at && (m.valor_total === vb.valor_total || m.valor === vb.valor)));
+        if (!jaConsta) {
+          listaCombinada.push(vb);
+        }
+      });
+      return listaCombinada;
     }
   }
 

@@ -631,9 +631,10 @@ export default function ModalDesempenhoVendedor({
         }
       }
 
+      // Query segura e direta de 'vendas' com fallback defensivo para left join de itens_venda
       let query = supabase
         .from('vendas')
-        .select('*, itens_venda (*)')
+        .select('*')
         .gte('created_at', inicioMes)
         .lte('created_at', fimMes)
         .order('created_at', { ascending: false });
@@ -643,20 +644,31 @@ export default function ModalDesempenhoVendedor({
       }
 
       const { data: vendasRes, error: vendasError } = await query;
-      let vendas = vendasRes;
+      let vendas = vendasRes || [];
 
-      if (vendasError) {
-        let fbQuery = supabase
-          .from('vendas')
-          .select('*')
-          .gte('created_at', inicioMes)
-          .lte('created_at', fimMes)
-          .order('created_at', { ascending: false });
-        if (orClauses.length > 0) {
-          fbQuery = fbQuery.or(orClauses.join(','));
+      // Opcional: tenta enriquecer com itens_venda sem descartar vendas manuais que não possuem linhas filhas
+      try {
+        const idsVendas = vendas.map((v: any) => v.id).filter(Boolean);
+        if (idsVendas.length > 0) {
+          const { data: itensRes } = await supabase
+            .from('itens_venda')
+            .select('*')
+            .in('venda_id', idsVendas);
+          if (itensRes && itensRes.length > 0) {
+            const itensPorVenda = new Map<string, any[]>();
+            itensRes.forEach((it: any) => {
+              const vId = String(it.venda_id);
+              if (!itensPorVenda.has(vId)) itensPorVenda.set(vId, []);
+              itensPorVenda.get(vId)!.push(it);
+            });
+            vendas = vendas.map((v: any) => ({
+              ...v,
+              itens_venda: itensPorVenda.get(String(v.id)) || (Array.isArray(v.itens_venda) ? v.itens_venda : [])
+            }));
+          }
         }
-        const fbRes = await fbQuery;
-        vendas = fbRes.data || [];
+      } catch {
+        // Enriquecimento opcional silencioso
       }
 
       if (vendas) {

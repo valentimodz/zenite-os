@@ -4,8 +4,8 @@
  *
  * Resumo da Planilha:
  * - Boletos Treinier (41 vendas): R$ 65.943,37 (Comissão: R$ 659,43)
- * - Boletos Titular Solo (42 vendas): R$ 69.736,90 (Comissão: R$ 697,37)
- * - Total Boletos (83 vendas): R$ 135.680,27 | Meta Loja Boleto: R$ 123.000,00 (Superou em R$ 12.680,27)
+ * - Boletos Titular Solo (45 vendas): R$ 75.216,90 (Comissão: R$ 697,37)
+ * - Total Boletos (86 vendas): R$ 141.160,27 | Meta Loja Boleto: R$ 123.000,00 (Superou em R$ 18.160,27)
  * - Cartão ou À Vista (12 vendas): R$ 22.000,00 (Comissão: R$ 220,00)
  * - Acessórios (37 vendas): R$ 1.550,95 (R$ 1.547,95 + R$ 3,00) | Meta Loja Acessórios: R$ 8.000,00 (Falta: R$ 6.449,05)
  * - JBL e iPhones / Fora de Meta (3 vendas): R$ 6.500,00 (Comissão: R$ 45,00)
@@ -53,9 +53,9 @@ export const METAS_MARLON_2026_10 = {
   super_meta_acessorios: 15000,
   valor_meta: 131000,
   boletos_meta_qtd: 70,
-  boletos_realizado_qtd: 78,
+  boletos_realizado_qtd: 81,
   celulares_meta_qtd: 100,
-  celulares_realizado_qtd: 90,
+  celulares_realizado_qtd: 93,
   salario_base: 1499,
   vale_alimentacao: 150,
   vale_transporte: 240,
@@ -198,7 +198,10 @@ const RAW_BOLETOS_SOLO: [string, string, string, number][] = [
   ['2026-10-28', 'SAMSUNG A07 - 128 GB VERDE IMEI: 357066765481726', '357066765481726', 1428.90],
   ['2026-10-29', 'SAMSUNG A07 - 128 GB PRETO IMEI: 357066765810304', '357066765810304', 1330.00],
   ['2026-10-29', 'REALME C75X - 128 GB PRETO IMEI: 865796073453612', '865796073453612', 1700.00],
-  ['2026-10-29', 'REALME C85 - 256 GB PRETO IMEI: 868864082773631', '868864082773631', 1899.00]
+  ['2026-10-29', 'REALME C85 - 256 GB PRETO IMEI: 868864082773631', '868864082773631', 1899.00],
+  ['2026-10-30', 'TELEMÓVEL SMARTPHONE 30/10 ITEM 1', '', 1800.00],
+  ['2026-10-30', 'TELEMÓVEL SMARTPHONE 30/10 ITEM 2', '', 1840.00],
+  ['2026-10-30', 'TELEMÓVEL SMARTPHONE 30/10 ITEM 3', '', 1840.00]
 ];
 
 // 4. COLUNA CARTÃO OU À VISTA (12 itens = R$ 22.000,00)
