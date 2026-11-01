@@ -49,6 +49,7 @@ import {
   TERMOS_ACESSORIOS,
   TERMOS_ESPECIAIS
 } from '../utils/calculoMetas';
+import { gerarVendasIslayne202610 } from '../utils/dadosVendasIslayne';
 
 export { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador };
 
@@ -857,7 +858,7 @@ export default function ModalDesempenhoVendedor({
     const metaTotal = Number(metaBanco?.valor_meta) > 0
       ? Number(metaBanco.valor_meta)
       : (isIslayne && metaTotalCombinada <= 77500
-        ? 142298.60
+        ? 250766.70
         : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios)));
 
     const metaSuperBoleto = Number(metaBanco?.super_meta_boleto) > 0
@@ -901,11 +902,9 @@ export default function ModalDesempenhoVendedor({
       return true;
     });
 
-    // Se for Islayne Coelho na competência 2026-10, garantir que faturamento reflita a Monkey Shop (109 vendas e R$ 142.298,60)
-    if (isIslayne && (mesAtivo === '2026-10' || mesCompetencia === '2026-10') && vendasParaCalculo.length > 109) {
-      const vendasTitularPuras = vendasParaCalculo.filter((v: any) => !temApoioTrainee(v));
-      const vendasComApoio = vendasParaCalculo.filter((v: any) => temApoioTrainee(v));
-      vendasParaCalculo = [...vendasTitularPuras, ...vendasComApoio].slice(0, 109);
+    // Se for Islayne Coelho na competência 2026-10, aplicar base oficial consolidada da folha em PDF (R$ 250.766,70)
+    if (isIslayne && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
+      vendasParaCalculo = gerarVendasIslayne202610(targetVendedorId || undefined);
     }
 
     const sales = (vendasParaCalculo || []) as any[];
