@@ -456,14 +456,15 @@ export default function ModalDetalheEstoqueProduto({
     }
 
     const { data: existentes } = await queryCheck;
-    const existente = existentes && existentes.length > 0 ? existentes[0] : null;
+    const listaExistentes = existentes || [];
+    const existente = listaExistentes.length > 0 ? listaExistentes[0] : null;
 
     if (existente && existente.id) {
       idAlvo = existente.id;
       // Se houver mais de um registro duplicado antigo no banco para a mesma filial e cor,
       // atualiza o principal e limpa/desativa as duplicatas extras para evitar somas fantasmas futuras
-      if (existentes && existentes.length > 1) {
-        const idsDuplicadosExtras = existentes.slice(1).map(d => d.id);
+      if (listaExistentes.length > 1) {
+        const idsDuplicadosExtras = listaExistentes.slice(1).map(d => d.id);
         try {
           await supabase.from('produtos').delete().in('id', idsDuplicadosExtras);
         } catch (delErr) {
