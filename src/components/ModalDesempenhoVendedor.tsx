@@ -22,7 +22,11 @@ import {
   Filter,
   Gem,
   Download,
-  Printer
+  Printer,
+  Speaker,
+  Gamepad2,
+  Camera,
+  Smartphone
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import GraficosMinhasMetas from './GraficosMinhasMetas';
@@ -1410,120 +1414,235 @@ export default function ModalDesempenhoVendedor({
           </div>
 
           {/* CARD ANALÍTICO: PRODUTOS ESPECIAIS & ALTO TICKET (FORA DE META) */}
-          <div className="bg-[#0A0A0A] border border-[#222222] hover:border-amber-500/40 rounded-xl p-5 shadow-xl transition-all relative overflow-hidden group">
-            {/* Efeito Glow Sutil de Fundo */}
-            <div className="absolute -top-16 -right-16 w-48 h-48 bg-amber-500/5 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/10 transition-all duration-700"></div>
+          {(() => {
+            const bateuMeta = dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto;
+            const taxaUnitaria = bateuMeta ? 30 : 15;
+            const comissaoTotalEspeciais = (dashboardInfo.quantidadeItensEspeciais || 0) * taxaUnitaria;
+            const totalFaturado = Number(dashboardInfo.totalFaturadoEspeciais || 0);
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1A1A1A] pb-3.5 relative z-10">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/30">
-                    <Gem size={15} />
+            const categoriasEspeciais = [
+              {
+                id: 'jbl',
+                nome: 'Caixas JBL',
+                detalhe: 'Boombox, Partybox, Xtreme & Flip',
+                icone: Speaker,
+                qtd: Number(dashboardInfo.itensJBL?.qtd || 0),
+                total: Number(dashboardInfo.itensJBL?.total || 0),
+                cor: 'text-amber-400',
+                corBgIcon: 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+              },
+              {
+                id: 'consoles',
+                nome: 'Consoles & Games',
+                detalhe: 'PS5, PS4, Xbox & Nintendo',
+                icone: Gamepad2,
+                qtd: Number(dashboardInfo.itensConsoles?.qtd || 0),
+                total: Number(dashboardInfo.itensConsoles?.total || 0),
+                cor: 'text-purple-400',
+                corBgIcon: 'bg-purple-500/10 border-purple-500/30 text-purple-400'
+              },
+              {
+                id: 'drones',
+                nome: 'Drones & Câmeras',
+                detalhe: 'DJI, Câmeras & Filmadoras',
+                icone: Camera,
+                qtd: Number(dashboardInfo.itensDrones?.qtd || 0),
+                total: Number(dashboardInfo.itensDrones?.total || 0),
+                cor: 'text-sky-400',
+                corBgIcon: 'bg-sky-500/10 border-sky-500/30 text-sky-400'
+              },
+              {
+                id: 'apple',
+                nome: 'Linha Apple / Premium',
+                detalhe: 'iPhone, iPad, Watch & Mac',
+                icone: Smartphone,
+                qtd: Number(dashboardInfo.itensApple?.qtd || 0),
+                total: Number(dashboardInfo.itensApple?.total || 0),
+                cor: 'text-rose-400',
+                corBgIcon: 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+              }
+            ];
+
+            return (
+              <div className="bg-[#0f0f11] border border-zinc-800 hover:border-amber-500/30 rounded-2xl p-5 sm:p-6 shadow-2xl transition-all relative overflow-hidden group">
+                {/* Glow decorativo de fundo */}
+                <div className="absolute -top-20 -right-20 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/10 transition-all duration-700"></div>
+
+                {/* CABEÇALHO UNIFICADO */}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4 relative z-10">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/30 shadow-sm">
+                        <Gem size={16} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm sm:text-base font-extrabold text-amber-300 uppercase tracking-wider">
+                          Produtos Especiais & Alto Ticket
+                        </h4>
+                        <p className="text-[11px] text-zinc-400">
+                          Linha Apple, Consoles, Caixas JBL, Drones e Eletrônicos Premium
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <h4 className="text-sm font-extrabold text-amber-300 uppercase tracking-wider">
-                    PRODUTOS ESPECIAIS & ALTO TICKET
-                  </h4>
-                </div>
-                <p className="text-[11px] text-gray-400 pl-9">
-                  Linha Apple, Consoles, Caixas JBL e Eletrônicos Premium
-                </p>
-              </div>
 
-              <div className="self-start sm:self-auto px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 uppercase tracking-wide">
-                Sem Meta Operacional / Faturamento Direto
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 relative z-10">
-              {/* Valor Principal em Destaque */}
-              <div className="bg-[#111111] border border-[#1E1E1E] rounded-xl p-4 flex flex-col justify-between">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                  Total Faturado no Período
-                </span>
-                <div className="mt-2">
-                  <span className="text-2xl sm:text-3xl font-black text-amber-400 font-mono block tracking-tight">
-                    {formatCurrency(dashboardInfo.totalFaturadoEspeciais)}
-                  </span>
-                  <span className="text-[10px] text-gray-400 mt-1 block">
-                    Volume bruto comercializado na competência
-                  </span>
-                </div>
-              </div>
-
-              {/* Unidades Vendidas & Ticket Médio */}
-              <div className="bg-[#111111] border border-[#1E1E1E] rounded-xl p-4 grid grid-cols-2 gap-2 text-center font-mono">
-                <div className="flex flex-col justify-center border-r border-[#222222] pr-2">
-                  <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider block">
-                    Unidades Vendidas
-                  </span>
-                  <span className="text-xl sm:text-2xl font-black text-white mt-1 block">
-                    {dashboardInfo.quantidadeItensEspeciais} <span className="text-xs font-normal text-gray-400">un.</span>
-                  </span>
-                  <span className="text-[9px] text-gray-400 mt-0.5 block">Itens especiais</span>
+                  {/* Badges de Operação e Regra */}
+                  <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-zinc-900 text-zinc-300 border border-zinc-700/70 uppercase tracking-wide">
+                      Faturamento Direto / Sem Meta Operacional
+                    </span>
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border flex items-center gap-1.5 ${
+                      bateuMeta
+                        ? 'bg-emerald-950/50 text-emerald-300 border-emerald-800/60 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
+                        : 'bg-amber-950/50 text-amber-300 border-amber-800/60'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${bateuMeta ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+                      {bateuMeta
+                        ? 'R$ 30,00 / un. (Meta Batida ✅)'
+                        : 'R$ 15,00 / un. (Meta Não Batida ❌)'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex flex-col justify-center pl-2">
-                  <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider block">
-                    Ticket Médio
-                  </span>
-                  <span className="text-base sm:text-lg font-black text-amber-300 mt-1 block">
-                    {formatCurrency(dashboardInfo.ticketMedioEspeciais)}
-                  </span>
-                  <span className="text-[9px] text-gray-400 mt-0.5 block">Por item vendido</span>
-                </div>
-              </div>
+                {/* SPLIT VIEW: VISÃO MACRO (ESQUERDA) vs SUB-CATEGORIAS (DIREITA) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-5 relative z-10">
+                  {/* COLUNA ESQUERDA: KPIs & VISÃO MACRO */}
+                  <div className="lg:col-span-5 flex flex-col justify-between space-y-4">
+                    {/* Total Faturado */}
+                    <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl pointer-events-none"></div>
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                        Total Faturado no Período
+                      </span>
+                      <div className="mt-2">
+                        <span className="text-3xl sm:text-4xl font-black text-amber-400 font-mono block tracking-tight">
+                          {formatCurrency(totalFaturado)}
+                        </span>
+                        <span className="text-[11px] text-zinc-400 mt-1 block">
+                          Volume bruto de alto ticket comercializado no mês
+                        </span>
+                      </div>
+                    </div>
 
-              {/* Status de Comissão e Regra Aplicada */}
-              <div className="bg-[#111111] border border-[#1E1E1E] rounded-xl p-4 flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                    Regra de Remuneração
-                  </span>
-                  <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase ${
-                    dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto
-                      ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
-                      : 'bg-amber-950/40 text-amber-400 border border-amber-800/40'
-                  }`}>
-                    {dashboardInfo.totalBoletos >= dashboardInfo.metaBoleto
-                      ? 'R$ 30,00 / un. (Meta Batida ✅)'
-                      : 'R$ 15,00 / un. (Meta Não Batida ❌)'}
-                  </span>
-                </div>
-                <div className="mt-2 space-y-1">
-                  <span className="text-xs font-bold text-gray-200 block">
-                    Vendas por Unidade (JBL, iPhones, Consoles, Drones, AirPods, Watch, Pencil)
-                  </span>
-                  <p className="text-[10.5px] text-gray-400 leading-snug">
-                    R$ 15,00 na Meta Não Batida ❌ e R$ 30,00 na Meta Batida ✅ por unidade vendida.
-                  </p>
-                </div>
-              </div>
-            </div>
+                    {/* Sub-KPIs: Unidades & Ticket Médio */}
+                    <div className="grid grid-cols-2 gap-3 font-mono">
+                      <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3 flex flex-col justify-center">
+                        <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider block">
+                          Unidades Vendidas
+                        </span>
+                        <span className="text-xl sm:text-2xl font-black text-zinc-100 mt-1 block">
+                          {dashboardInfo.quantidadeItensEspeciais} <span className="text-xs font-normal text-zinc-400">un.</span>
+                        </span>
+                        <span className="text-[9px] text-zinc-400 mt-0.5 block">Total de peças</span>
+                      </div>
 
-            {/* Grid de Subcategorias Especiais */}
-            <div className="mt-4 pt-4 border-t border-zinc-800 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
-                <span className="text-zinc-400 block">Caixas JBL</span>
-                <span className="font-semibold text-zinc-100">{dashboardInfo.itensJBL?.qtd || 0} un.</span>
-                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensJBL?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <div className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3 flex flex-col justify-center">
+                        <span className="text-[9px] text-zinc-400 uppercase font-bold tracking-wider block">
+                          Ticket Médio
+                        </span>
+                        <span className="text-base sm:text-lg font-black text-amber-300 mt-1 block">
+                          {formatCurrency(dashboardInfo.ticketMedioEspeciais)}
+                        </span>
+                        <span className="text-[9px] text-zinc-400 mt-0.5 block">Por item vendido</span>
+                      </div>
+                    </div>
+
+                    {/* Comissão Estimada por Unidade */}
+                    <div className="bg-gradient-to-r from-amber-500/10 via-zinc-900 to-zinc-950 border border-amber-500/25 rounded-xl p-3.5 flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider block">
+                          Comissão Gerada (Especiais)
+                        </span>
+                        <span className="text-[10.5px] text-zinc-400 block">
+                          {dashboardInfo.quantidadeItensEspeciais} un. × R$ {taxaUnitaria.toFixed(2).replace('.', ',')}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-lg sm:text-xl font-black text-amber-300 font-mono block">
+                          {formatCurrency(comissaoTotalEspeciais)}
+                        </span>
+                        <span className="text-[9px] text-zinc-400 uppercase font-semibold">
+                          Premiação Direta
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* COLUNA DIREITA: DETALHAMENTO DAS 4 SUBCATEGORIAS */}
+                  <div className="lg:col-span-7 flex flex-col justify-between gap-2.5">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 uppercase tracking-wider px-1">
+                      <span>Desdobramento por Categoria</span>
+                      <span>Volume / Comissão</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {categoriasEspeciais.map((cat) => {
+                        const Icone = cat.icone;
+                        const temVenda = cat.qtd > 0;
+                        const comissaoCat = cat.qtd * taxaUnitaria;
+                        const percFaturamento = totalFaturado > 0 ? (cat.total / totalFaturado) * 100 : 0;
+
+                        return (
+                          <div
+                            key={cat.id}
+                            className={`relative overflow-hidden rounded-xl border p-3 transition-all ${
+                              temVenda
+                                ? 'bg-zinc-900/80 border-amber-500/40 shadow-sm'
+                                : 'bg-zinc-950/40 border-zinc-800/60 opacity-45 hover:opacity-75'
+                            }`}
+                          >
+                            {/* Barra sutil de proporção em background */}
+                            {temVenda && percFaturamento > 0 && (
+                              <div
+                                className="absolute inset-y-0 left-0 bg-amber-500/5 transition-all duration-700 pointer-events-none"
+                                style={{ width: `${Math.min(100, Math.max(5, percFaturamento))}%` }}
+                              />
+                            )}
+
+                            <div className="flex items-center justify-between relative z-10 gap-3">
+                              {/* Ícone e Nome da Categoria */}
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${cat.corBgIcon}`}>
+                                  <Icone size={18} />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs sm:text-sm font-bold text-zinc-200 truncate block">
+                                      {cat.nome}
+                                    </span>
+                                    {temVenda && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                                        {cat.qtd} un.
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-zinc-400 block truncate">
+                                    {cat.detalhe}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Valores Financeiros */}
+                              <div className="text-right shrink-0 font-mono">
+                                <span className={`text-xs sm:text-sm font-bold block ${temVenda ? 'text-zinc-100' : 'text-zinc-400'}`}>
+                                  R$ {cat.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                                <span className={`text-[10px] font-medium block ${temVenda ? 'text-amber-400' : 'text-zinc-500'}`}>
+                                  {temVenda
+                                    ? `+ R$ ${comissaoCat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} comissão`
+                                    : '0 un.'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
-                <span className="text-zinc-400 block">Consoles & Games</span>
-                <span className="font-semibold text-zinc-100">{dashboardInfo.itensConsoles?.qtd || 0} un.</span>
-                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensConsoles?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
-                <span className="text-zinc-400 block">Drones & Câmeras</span>
-                <span className="font-semibold text-zinc-100">{dashboardInfo.itensDrones?.qtd || 0} un.</span>
-                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensDrones?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
-                <span className="text-zinc-400 block">Linha Apple / Premium</span>
-                <span className="font-semibold text-zinc-100">{dashboardInfo.itensApple?.qtd || 0} un.</span>
-                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensApple?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* GRÁFICOS DINÂMICOS DO COLABORADOR */}
           <GraficosMinhasMetas metasInfo={dashboardInfo} />
