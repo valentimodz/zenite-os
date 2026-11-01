@@ -677,7 +677,7 @@ export function calcularDesempenhoGeral(
     taxaBoletoNum = 0.03;
     badgeBoleto = {
       taxa: '3,0%',
-      texto: 'Faixa Atual: 3,0% (Meta Batida ✅)',
+      texto: 'Faixa Atual: 3,0% (Meta Batida)',
       status: 'batida',
       classe: 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/50'
     };

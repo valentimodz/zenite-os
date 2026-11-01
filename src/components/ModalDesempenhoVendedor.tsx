@@ -901,7 +901,64 @@ export default function ModalDesempenhoVendedor({
       }
     });
 
-    // Evolução diária (dias 1 a 31)
+    // Desdobramento de Itens Especiais por Categoria (Caixas JBL, Consoles, Drones & Linha Apple)
+    const itensJBL = { qtd: 0, total: 0 };
+    const itensConsoles = { qtd: 0, total: 0 };
+    const itensDrones = { qtd: 0, total: 0 };
+    const itensApple = { qtd: 0, total: 0 };
+
+    sales.forEach(s => {
+      const extrairSubcategoria = (nomeStr: string, catStr: string, valor: number, qtd: number) => {
+        const nUpper = (nomeStr || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+        const cUpper = (catStr || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+        // Evita contar fones / cabos como especiais
+        const isAcess = cUpper.includes('ACESS') || ['FONE', 'CABO', 'CARREGADOR', 'SOUNDGEAR', 'PELICULA', 'PELIC', 'CAPA', 'CHIP', 'CONTROLE', 'CASE', 'HEADSET'].some(k => nUpper.includes(k));
+        if (isAcess) return;
+
+        if (nUpper.includes('DRONE') || cUpper.includes('DRONE') || nUpper.includes('CAMERA') || nUpper.includes('GOPRO')) {
+          itensDrones.qtd += qtd;
+          itensDrones.total += valor;
+        } else if (
+          nUpper.includes('JBL') || nUpper.includes('BOOMBOX') || nUpper.includes('PARTYBOX') ||
+          nUpper.includes('XTREME') || nUpper.includes('CHARGE') || nUpper.includes('FLIP') ||
+          cUpper.includes('JBL')
+        ) {
+          itensJBL.qtd += qtd;
+          itensJBL.total += valor;
+        } else if (
+          nUpper.includes('PLAYSTATION') || nUpper.includes('PS5') || nUpper.includes('PS4') ||
+          nUpper.includes('XBOX') || nUpper.includes('NINTENDO') || nUpper.includes('CONSOLE') ||
+          cUpper.includes('CONSOLE') || cUpper.includes('GAME')
+        ) {
+          itensConsoles.qtd += qtd;
+          itensConsoles.total += valor;
+        } else if (
+          nUpper.includes('IPHONE') || nUpper.includes('APPLE') || nUpper.includes('IPAD') ||
+          nUpper.includes('MACBOOK') || nUpper.includes('WATCH') || nUpper.includes('AIRTAG') ||
+          cUpper.includes('APPLE')
+        ) {
+          itensApple.qtd += qtd;
+          itensApple.total += valor;
+        }
+      };
+
+      if (Array.isArray(s.itens_venda) && s.itens_venda.length > 0) {
+        s.itens_venda.forEach((it: any) => {
+          const nomeIt = it.produto_nome || it.nome || '';
+          const catIt = it.categoria || '';
+          const q = Number(it.quantidade || 1) || 1;
+          const val = Number(it.valor_total || (Number(it.valor_unitario || 0) * q) || 0);
+          extrairSubcategoria(nomeIt, catIt, val, q);
+        });
+      } else if (isProdutoEspecial(s)) {
+        const nomeS = s.produto_nome || s.nome || s.descricao || '';
+        const catS = s.categoria || '';
+        const q = Number(s.quantidade || 1) || 1;
+        const val = Number(s.valor_total || s.valor || s.total || 0);
+        extrairSubcategoria(nomeS, catS, val, q);
+      }
+    });
     const [anoStr, mesStr] = (mesAtivo || mesCompetencia).split('-');
     const ano = parseInt(anoStr, 10);
     const mes = parseInt(mesStr, 10);
@@ -955,6 +1012,10 @@ export default function ModalDesempenhoVendedor({
       totalFaturadoEspeciais,
       quantidadeItensEspeciais,
       ticketMedioEspeciais,
+      itensJBL,
+      itensConsoles,
+      itensDrones,
+      itensApple,
       // Geral
       totalAVista,
       progressoTotal,
@@ -1436,6 +1497,30 @@ export default function ModalDesempenhoVendedor({
                     R$ 15,00 na Meta Não Batida ❌ e R$ 30,00 na Meta Batida ✅ por unidade vendida.
                   </p>
                 </div>
+              </div>
+            </div>
+
+            {/* Grid de Subcategorias Especiais */}
+            <div className="mt-4 pt-4 border-t border-zinc-800 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
+                <span className="text-zinc-400 block">Caixas JBL</span>
+                <span className="font-semibold text-zinc-100">{dashboardInfo.itensJBL?.qtd || 0} un.</span>
+                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensJBL?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
+                <span className="text-zinc-400 block">Consoles & Games</span>
+                <span className="font-semibold text-zinc-100">{dashboardInfo.itensConsoles?.qtd || 0} un.</span>
+                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensConsoles?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
+                <span className="text-zinc-400 block">Drones & Câmeras</span>
+                <span className="font-semibold text-zinc-100">{dashboardInfo.itensDrones?.qtd || 0} un.</span>
+                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensDrones?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className="bg-zinc-900/60 p-2.5 rounded border border-zinc-800">
+                <span className="text-zinc-400 block">Linha Apple / Premium</span>
+                <span className="font-semibold text-zinc-100">{dashboardInfo.itensApple?.qtd || 0} un.</span>
+                <span className="text-emerald-400 block">R$ {(dashboardInfo.itensApple?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
           </div>
