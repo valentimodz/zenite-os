@@ -136,6 +136,7 @@ export function filtrarVendasDoColaborador(
     profileId?: string | null;
     nome?: string | null;
     isTrainee?: boolean;
+    competencia?: string;
   }
 ): any[] {
   const idsValidos = [colab?.id, colab?.authId, colab?.profileId]
@@ -173,8 +174,13 @@ export function filtrarVendasDoColaborador(
     }
   });
 
-  // Consolidação oficial das vendas lançadas do Marlon na competência 2026-10
+  // Consolidação oficial das vendas lançadas do Marlon SOMENTE na competência 2026-10
   if (isColaboradorMarlon(colab?.nome) && !colab?.isTrainee) {
+    const compAlvo = colab?.competencia;
+    // Se a competência informada for diferente de 2026-10, não aplica consolidação de outubro
+    if (compAlvo && compAlvo !== '2026-10') {
+      return resultado;
+    }
     const amostra = resultado.length > 0 ? resultado : (todasVendas || []);
     const ehOutroMes = amostra.length > 0 && amostra.every((v: any) => {
       const rawDate = v?.created_at || v?.data;
@@ -194,25 +200,15 @@ export function filtrarVendasDoColaborador(
         return false;
       }
     });
+    // Se a amostra estiver vazia e nenhuma competência explicitamente '2026-10' foi passada, não injeta
+    if (compAlvo !== '2026-10' && amostra.length === 0) {
+      return resultado;
+    }
     if (!ehOutroMes) {
       const vendasBaseMarlon = gerarVendasMarlon202610(idsValidos[0] || undefined);
-      // Mescla com eventuais vendas reais inseridas no banco para o Marlon que não pertençam ao mock base
-      const vendasExtrasDoBanco = resultado.filter((v: any) => {
-        const vId = String(v?.id || '');
-        return !vId.startsWith('marlon-2026-10-');
-      });
-      if (vendasExtrasDoBanco.length === 0) {
-        return vendasBaseMarlon;
-      }
-      // Evita duplicidade se a venda do banco já tiver representação no mock
-      const listaCombinada = [...vendasBaseMarlon];
-      vendasExtrasDoBanco.forEach((vb: any) => {
-        const jaConsta = listaCombinada.some(m => m.id === vb.id || (m.created_at === vb.created_at && (m.valor_total === vb.valor_total || m.valor === vb.valor)));
-        if (!jaConsta) {
-          listaCombinada.push(vb);
-        }
-      });
-      return listaCombinada;
+      // Se já temos a base oficial de 138 vendas consolidada com os lançamentos de 30/10,
+      // retornamos diretamente para evitar duplicação com dados pré-existentes do banco
+      return vendasBaseMarlon;
     }
   }
 

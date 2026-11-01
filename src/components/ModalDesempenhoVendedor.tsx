@@ -436,6 +436,22 @@ export const isProdutoEspecial = (itemOuVenda: any): boolean => {
   return false;
 };
 
+// Helper estrito para delimitar o intervalo da competência em UTC (sem vazamento de meses anteriores ou posteriores)
+export function getIntervaloCompetencia(competenciaStr: string) {
+  // Garantir formato YYYY-MM
+  const [ano, mes] = (competenciaStr || new Date().toISOString().slice(0, 7)).split('-').map(Number);
+  
+  // Primeiro dia do mês às 00:00:00 UTC
+  const inicio = new Date(Date.UTC(ano, mes - 1, 1, 0, 0, 0, 0)).toISOString();
+  
+  // Último dia do mês às 23:59:59.999 UTC
+  // Usar dia 0 do mês seguinte obtém o último dia do mês corrente (ex: 31 para outubro)
+  const ultimoDia = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const fim = new Date(Date.UTC(ano, mes - 1, ultimoDia, 23, 59, 59, 999)).toISOString();
+
+  return { inicio, fim };
+}
+
 // Helper robusto para identificar se a venda teve participação de trainee
 export const temApoioTrainee = (s: Venda | any): boolean => {
   if (!s) return false;
@@ -462,6 +478,15 @@ export default function ModalDesempenhoVendedor({
 }: ModalDesempenhoVendedorProps) {
   const mesCompetencia = propCompetencia || propMesAno || filtroMes || new Date().toISOString().slice(0, 7);
   const [mesAtivo, setMesAtivo] = useState<string>(() => mesCompetencia);
+
+  useEffect(() => {
+    if (propCompetencia || propMesAno || filtroMes) {
+      const proximoMes = propCompetencia || propMesAno || filtroMes;
+      if (proximoMes && proximoMes !== mesAtivo) {
+        setMesAtivo(proximoMes);
+      }
+    }
+  }, [propCompetencia, propMesAno, filtroMes]);
   const initialVendas = Array.isArray(propVendasColaborador) && propVendasColaborador.length > 0
     ? propVendasColaborador
     : (Array.isArray(vendasCache) && vendasCache.length > 0 ? vendasCache : []);
@@ -577,13 +602,8 @@ export default function ModalDesempenhoVendedor({
     setIsLoading(true);
 
     try {
-      // 1. Período do mês atual selecionado (ex: '2026-10')
-      const [anoStr, mesStr] = (competencia || '2026-10').split('-');
-      const ano = parseInt(anoStr, 10);
-      const mes = parseInt(mesStr, 10);
-      const ultimoDia = new Date(ano, mes, 0).getDate();
-      const inicioMes = `${competencia}-01T00:00:00.000-03:00`;
-      const fimMes = `${competencia}-${String(ultimoDia).padStart(2, '0')}T23:59:59.999-03:00`;
+      // 1. Obter intervalo estrito de competência em UTC (impede vazamentos entre meses)
+      const { inicio: inicioMes, fim: fimMes } = getIntervaloCompetencia(competencia);
 
       const isUuidValido = Boolean(
         vendedorId &&
@@ -699,7 +719,8 @@ export default function ModalDesempenhoVendedor({
         const vendasValidas = filtrarVendasDoColaborador(vendasMesBr, {
           id: isUuidValido ? vendedorId : undefined,
           nome: vendedorNome,
-          isTrainee: isOriginalTrainee
+          isTrainee: isOriginalTrainee,
+          competencia
         });
 
         const modoVis: 'COM_APOIO' | 'SOLO' = filtroTipoVendas === 'solo' ? 'SOLO' : 'COM_APOIO';
