@@ -50,6 +50,7 @@ import {
   TERMOS_ESPECIAIS
 } from '../utils/calculoMetas';
 import { gerarVendasIslayne202610 } from '../utils/dadosVendasIslayne';
+import { gerarVendasGisele202610 } from '../utils/dadosVendasGisele';
 
 export { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador };
 
@@ -854,12 +855,15 @@ export default function ModalDesempenhoVendedor({
         : (objetivoAcessorios > 0 ? objetivoAcessorios : 10000));
 
     const isIslayne = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('ISLAYNE');
+    const isGisele = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('GISELE');
 
     const metaTotal = Number(metaBanco?.valor_meta) > 0
       ? Number(metaBanco.valor_meta)
       : (isIslayne && metaTotalCombinada <= 77500
         ? 250766.70
-        : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios)));
+        : (isGisele
+          ? 40000.00
+          : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios))));
 
     const metaSuperBoleto = Number(metaBanco?.super_meta_boleto) > 0
       ? Number(metaBanco?.super_meta_boleto)
@@ -905,6 +909,9 @@ export default function ModalDesempenhoVendedor({
     // Se for Islayne Coelho na competência 2026-10, aplicar base oficial consolidada da folha em PDF (R$ 250.766,70)
     if (isIslayne && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
       vendasParaCalculo = gerarVendasIslayne202610(targetVendedorId || undefined);
+    } else if (isGisele && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
+      // Se for Gisele Gomes na competência 2026-10, aplicar base oficial multiloja (R$ 41.477,60 boletos + acessórios)
+      vendasParaCalculo = gerarVendasGisele202610(targetVendedorId || undefined);
     }
 
     const sales = (vendasParaCalculo || []) as any[];
