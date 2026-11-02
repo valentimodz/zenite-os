@@ -1060,6 +1060,16 @@ export default function ModalDesempenhoVendedor({
       }
     });
 
+    // Soma consolidada das 4 subcategorias especiais para garantir sincronismo total
+    const somaQtdCategorias = itensJBL.qtd + itensConsoles.qtd + itensDrones.qtd + itensApple.qtd;
+    const somaTotalCategorias = itensJBL.total + itensConsoles.total + itensDrones.total + itensApple.total;
+
+    const totalFaturadoEspeciaisFinal = somaTotalCategorias > 0 ? somaTotalCategorias : totalFaturadoEspeciais;
+    const quantidadeItensEspeciaisFinal = somaQtdCategorias > 0 ? somaQtdCategorias : quantidadeItensEspeciais;
+    const ticketMedioEspeciaisFinal = quantidadeItensEspeciaisFinal > 0
+      ? Math.round((totalFaturadoEspeciaisFinal / quantidadeItensEspeciaisFinal) * 100) / 100
+      : 0;
+
     return {
       mesReferencia: mesAtivo,
       isTrainee,
@@ -1091,9 +1101,9 @@ export default function ModalDesempenhoVendedor({
       faturadoComApoioTrainee: Number(faturadoComApoioTrainee || 0),
       faturadoTitularSolo: Number(faturadoTitularSolo || 0),
       // Produtos Especiais & Alto Ticket (Fora de Meta)
-      totalFaturadoEspeciais,
-      quantidadeItensEspeciais,
-      ticketMedioEspeciais,
+      totalFaturadoEspeciais: totalFaturadoEspeciaisFinal,
+      quantidadeItensEspeciais: quantidadeItensEspeciaisFinal,
+      ticketMedioEspeciais: ticketMedioEspeciaisFinal,
       itensJBL,
       itensConsoles,
       itensDrones,

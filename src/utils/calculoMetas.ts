@@ -526,7 +526,6 @@ export const isAcessorio = (itemOuVenda: any): boolean => {
  */
 export const isProdutoEspecial = (itemOuVenda: any): boolean => {
   if (!itemOuVenda) return false;
-  if (itemOuVenda.fora_meta === false) return false;
   if (itemOuVenda.fora_meta === true || itemOuVenda.foraMeta === true) return true;
 
   const nome = String(
@@ -564,13 +563,22 @@ export const isProdutoEspecial = (itemOuVenda: any): boolean => {
     return false;
   }
 
-  return (
+  if (
     categoria.includes('APPLE') ||
     nome.includes('IPHONE') ||
     nome.includes('PLAYSTATION') ||
     nome.includes('JBL') ||
     TERMOS_ESPECIAIS.some(t => categoria.includes(t) || nome.includes(t))
-  );
+  ) {
+    return true;
+  }
+
+  // Se tiver array de itens aninhados
+  if (Array.isArray(itemOuVenda.itens_venda) && itemOuVenda.itens_venda.length > 0) {
+    return itemOuVenda.itens_venda.some((it: any) => isProdutoEspecial(it));
+  }
+
+  return false;
 };
 
 /**
@@ -763,26 +771,41 @@ export function calcularDesempenhoGeral(
   let quantidadeItensEspeciais = 0;
   let quantidadeItensEspeciaisFiltrados = 0;
 
-  vendasValidas.forEach((v: any) => {
-    if (isProdutoEspecial(v)) {
-      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-      const qtd = itens.length > 0
-        ? itens.reduce((acc: number, c: any) => acc + (Number(c?.quantidade) || 1), 0)
-        : (Number(v.quantidade || 1) || 1);
+  const contabilizarEspeciaisVenda = (v: any, callback: (qtd: number, val: number) => void) => {
+    if (Array.isArray(v.itens_venda) && v.itens_venda.length > 0) {
+      let achouItemEspecial = false;
+      v.itens_venda.forEach((it: any) => {
+        if (isProdutoEspecial(it)) {
+          achouItemEspecial = true;
+          const q = Number(it.quantidade || 1) || 1;
+          const val = Number(it.valor_total || (Number(it.valor_unitario || 0) * q) || 0);
+          callback(q, val);
+        }
+      });
+      // Se nenhum item foi pego individualmente mas a venda inteira foi marcada como especial
+      if (!achouItemEspecial && isProdutoEspecial(v)) {
+        const q = v.itens_venda.reduce((acc: number, c: any) => acc + (Number(c?.quantidade) || 1), 0);
+        const val = Number(v.valor_total ?? v.total ?? v.valor ?? 0);
+        callback(q, val);
+      }
+    } else if (isProdutoEspecial(v)) {
+      const q = Number(v.quantidade || 1) || 1;
       const val = Number(v.valor_total ?? v.total ?? v.valor ?? 0);
+      callback(q, val);
+    }
+  };
+
+  vendasValidas.forEach((v: any) => {
+    contabilizarEspeciaisVenda(v, (qtd, val) => {
       totalFaturadoEspeciais += val;
       quantidadeItensEspeciais += qtd;
-    }
+    });
   });
 
   vendasFiltradas.forEach((v: any) => {
-    if (isProdutoEspecial(v)) {
-      const itens = Array.isArray(v.itens_venda) ? v.itens_venda : [];
-      const qtd = itens.length > 0
-        ? itens.reduce((acc: number, c: any) => acc + (Number(c?.quantidade) || 1), 0)
-        : (Number(v.quantidade || 1) || 1);
+    contabilizarEspeciaisVenda(v, (qtd) => {
       quantidadeItensEspeciaisFiltrados += qtd;
-    }
+    });
   });
 
   const ticketMedioEspeciais = quantidadeItensEspeciais > 0
