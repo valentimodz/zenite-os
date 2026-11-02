@@ -884,7 +884,7 @@ export default function ModalDesempenhoVendedor({
           : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000)));
 
     const metaTotal = Number(metaBanco?.valor_meta) > 0
-      ? Number(metaBanco.valor_meta)
+      ? Number(metaBanco?.valor_meta)
       : (isIslayne && metaTotalCombinada <= 77500
         ? 250766.70
         : (isPamela
