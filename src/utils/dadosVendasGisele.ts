@@ -412,3 +412,4 @@ export function gerarVendasGisele202610(traineeId?: string): any[] {
 
   return lista;
 }
+

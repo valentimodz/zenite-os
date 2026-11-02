@@ -74,6 +74,11 @@ import {
   METAS_GISELE_2026_10
 } from './dadosVendasGisele';
 
+import {
+  gerarVendasOficiaisOutubro,
+  DADOS_OFICIAIS_OUTUBRO_2026
+} from './dadosVendasFolhasOutubro';
+
 // Termos e financeiras homologadas para identificação estrita de boletos e financiadoras
 // Exclusão explícita de termos genéricos como "PARCELADO", que capturava cartões de crédito parcelados
 export const BOLETO_FINANCIADORAS_TERMS = [
@@ -168,6 +173,36 @@ export function isColaboradorGisele(nomeOuObjeto: any): boolean {
     : (nomeOuObjeto?.nome || nomeOuObjeto?.colaborador || nomeOuObjeto?.vendedor_nome || nomeOuObjeto?.trainee_nome || '');
   const norm = normalizarNome(str);
   return norm.includes('GISELE');
+}
+
+/**
+ * Helpers para identificar Sena, Amanda e Regiane
+ */
+export function isColaboradorSena(nomeOuObjeto: any): boolean {
+  if (!nomeOuObjeto) return false;
+  const str = typeof nomeOuObjeto === 'string'
+    ? nomeOuObjeto
+    : (nomeOuObjeto?.nome || nomeOuObjeto?.colaborador || nomeOuObjeto?.vendedor_nome || '');
+  const norm = normalizarNome(str);
+  return norm.includes('SENA');
+}
+
+export function isColaboradorAmanda(nomeOuObjeto: any): boolean {
+  if (!nomeOuObjeto) return false;
+  const str = typeof nomeOuObjeto === 'string'
+    ? nomeOuObjeto
+    : (nomeOuObjeto?.nome || nomeOuObjeto?.colaborador || nomeOuObjeto?.vendedor_nome || '');
+  const norm = normalizarNome(str);
+  return norm.includes('AMANDA');
+}
+
+export function isColaboradorRegiane(nomeOuObjeto: any): boolean {
+  if (!nomeOuObjeto) return false;
+  const str = typeof nomeOuObjeto === 'string'
+    ? nomeOuObjeto
+    : (nomeOuObjeto?.nome || nomeOuObjeto?.colaborador || nomeOuObjeto?.vendedor_nome || '');
+  const norm = normalizarNome(str);
+  return norm.includes('REGIANE');
 }
 
 /**
@@ -363,6 +398,28 @@ export function filtrarVendasDoColaborador(
         const vendasBaseGisele = gerarVendasGisele202610(idsValidos[0] || undefined);
         return vendasBaseGisele;
       }
+    }
+  }
+
+  // Consolidação oficial de Sena, Amanda e Regiane na competência 2026-10 (Folhas Oficiais)
+  if (isColaboradorSena(colab?.nome)) {
+    const compAlvo = colab?.competencia;
+    if (!compAlvo || compAlvo === '2026-10') {
+      return gerarVendasOficiaisOutubro('sena', idsValidos[0] || undefined);
+    }
+  }
+
+  if (isColaboradorAmanda(colab?.nome)) {
+    const compAlvo = colab?.competencia;
+    if (!compAlvo || compAlvo === '2026-10') {
+      return gerarVendasOficiaisOutubro('amanda', idsValidos[0] || undefined);
+    }
+  }
+
+  if (isColaboradorRegiane(colab?.nome)) {
+    const compAlvo = colab?.competencia;
+    if (!compAlvo || compAlvo === '2026-10') {
+      return gerarVendasOficiaisOutubro('regiane', idsValidos[0] || undefined);
     }
   }
 
@@ -909,22 +966,22 @@ export function calcularDesempenhoGeral(
   const metaAcessorios = isMarlonPlanilha
     ? METAS_MARLON_2026_10.meta_acessorios
     : (isIslaynePlanilha
-      ? METAS_ISLAYNE_2026_10.meta_acessorios
+      ? 8000
       : (isGiselePlanilha
         ? METAS_GISELE_2026_10.meta_acessorios
         : (Number(opcoes.metaAcessorios) > 0
           ? Number(opcoes.metaAcessorios)
-          : (isTrainee ? 5000 : 10000))));
+          : (isTrainee ? 5000 : 8000))));
 
   const superMetaAcessorios = isMarlonPlanilha
     ? METAS_MARLON_2026_10.super_meta_acessorios
     : (isIslaynePlanilha
-      ? METAS_ISLAYNE_2026_10.super_meta_acessorios
+      ? 15000
       : (isGiselePlanilha
         ? METAS_GISELE_2026_10.super_meta_acessorios
         : (Number(opcoes.superMetaAcessorios) > 0
           ? Number(opcoes.superMetaAcessorios)
-          : (isTrainee ? 7500 : 15000))));
+          : 15000)));
 
   const metaTotal = isMarlonPlanilha
     ? METAS_MARLON_2026_10.valor_meta

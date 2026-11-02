@@ -51,6 +51,7 @@ import {
 } from '../utils/calculoMetas';
 import { gerarVendasIslayne202610 } from '../utils/dadosVendasIslayne';
 import { gerarVendasGisele202610 } from '../utils/dadosVendasGisele';
+import { gerarVendasOficiaisOutubro } from '../utils/dadosVendasFolhasOutubro';
 
 export { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador };
 
@@ -852,10 +853,13 @@ export default function ModalDesempenhoVendedor({
       ? Number(metaBanco?.meta_acessorios)
       : (isTrainee
         ? 5000
-        : (objetivoAcessorios > 0 ? objetivoAcessorios : 10000));
+        : (objetivoAcessorios > 0 ? objetivoAcessorios : 8000));
 
     const isIslayne = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('ISLAYNE');
     const isGisele = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('GISELE');
+    const isSena = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('SENA');
+    const isAmanda = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('AMANDA');
+    const isRegiane = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('REGIANE');
 
     const metaTotal = Number(metaBanco?.valor_meta) > 0
       ? Number(metaBanco.valor_meta)
@@ -863,7 +867,11 @@ export default function ModalDesempenhoVendedor({
         ? 250766.70
         : (isGisele
           ? 40000.00
-          : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios))));
+          : (isSena
+            ? 75500.00
+            : (isAmanda || isRegiane
+              ? 75500.00
+              : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios))))));
 
     const metaSuperBoleto = Number(metaBanco?.super_meta_boleto) > 0
       ? Number(metaBanco?.super_meta_boleto)
@@ -912,6 +920,12 @@ export default function ModalDesempenhoVendedor({
     } else if (isGisele && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
       // Se for Gisele Gomes na competência 2026-10, aplicar base oficial multiloja (R$ 41.477,60 boletos + acessórios)
       vendasParaCalculo = gerarVendasGisele202610(targetVendedorId || undefined);
+    } else if (isSena && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
+      vendasParaCalculo = gerarVendasOficiaisOutubro('sena', targetVendedorId || undefined);
+    } else if (isAmanda && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
+      vendasParaCalculo = gerarVendasOficiaisOutubro('amanda', targetVendedorId || undefined);
+    } else if (isRegiane && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
+      vendasParaCalculo = gerarVendasOficiaisOutubro('regiane', targetVendedorId || undefined);
     }
 
     const sales = (vendasParaCalculo || []) as any[];
