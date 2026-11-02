@@ -445,14 +445,13 @@ export default function ConsultaEstoque({
   }, [produtosConsolidados, imeisDisponiveis, listaFiliais]);
 
   // 7. Desdobramento dos Cards:
-  // - Quando filialSelecionada === 'TODAS' (Rede Completa) OU quando há termo de busca digitado:
+  // - Quando filialSelecionada === 'TODAS' (Rede Completa):
   //   Gera UM CARD INDIVIDUAL PARA CADA FILIAL da rede (ou que possui saldo/registro).
-  // - Quando uma filial específica for selecionada (e sem busca de rede):
-  //   Gera o card apenas daquela filial selecionada.
+  // - Quando uma filial específica for selecionada (ex: MONKEY SHOP TUCURUÍ):
+  //   Gera o card ESTRITAMENTE daquela filial selecionada (inclusive durante buscas por texto).
   const cardsDesdobrados = useMemo(() => {
     const lista = [];
-    const temBuscaAtiva = Boolean(buscaDebounced && buscaDebounced.trim());
-    const deveDesdobrarTodasFiliais = filialSelecionada === 'TODAS' || temBuscaAtiva;
+    const deveDesdobrarTodasFiliais = filialSelecionada === 'TODAS';
 
     produtosComSaldosPorFilial.forEach(prod => {
       if (deveDesdobrarTodasFiliais) {
@@ -509,7 +508,7 @@ export default function ConsultaEstoque({
     });
 
     return lista;
-  }, [produtosComSaldosPorFilial, filialSelecionada, listaFiliais, buscaDebounced]);
+  }, [produtosComSaldosPorFilial, filialSelecionada, listaFiliais]);
 
   // 8. Filtros de Interface (Busca Textual, Categoria e Status de Estoque)
   const itensFiltrados = useMemo(() => {
