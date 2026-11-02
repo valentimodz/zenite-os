@@ -382,7 +382,12 @@ export function filtrarVendasDoColaborador(
   // - Total Boletos: R$ 41.477,60 | Acessórios: R$ 349,99
   if (isColaboradorGisele(colab?.nome)) {
     const compAlvo = colab?.competencia;
-    if (!compAlvo || compAlvo === '2026-10') {
+    if (compAlvo === '2026-10') {
+      const vendasBaseGisele = gerarVendasGisele202610(idsValidos[0] || undefined);
+      return vendasBaseGisele;
+    } else if (compAlvo && compAlvo !== '2026-10') {
+      return resultado;
+    } else {
       const amostra = resultado.length > 0 ? resultado : (todasVendas || []);
       const ehOutroMes = amostra.length > 0 && amostra.every((v: any) => {
         const rawDate = v?.created_at || v?.data;
@@ -403,7 +408,7 @@ export function filtrarVendasDoColaborador(
         }
       });
 
-      if (!ehOutroMes) {
+      if (!ehOutroMes && amostra.some((v: any) => String(v?.created_at || v?.data || '').startsWith('2026-10'))) {
         const vendasBaseGisele = gerarVendasGisele202610(idsValidos[0] || undefined);
         return vendasBaseGisele;
       }
@@ -413,22 +418,46 @@ export function filtrarVendasDoColaborador(
   // Consolidação oficial de Sena, Amanda e Regiane na competência 2026-10 (Folhas Oficiais)
   if (isColaboradorSena(colab?.nome)) {
     const compAlvo = colab?.competencia;
-    if (!compAlvo || compAlvo === '2026-10') {
+    if (compAlvo === '2026-10') {
       return gerarVendasOficiaisOutubro('sena', idsValidos[0] || undefined);
+    } else if (compAlvo && compAlvo !== '2026-10') {
+      return resultado;
+    } else {
+      const amostra = resultado.length > 0 ? resultado : (todasVendas || []);
+      const temOutubro = amostra.some((v: any) => String(v?.created_at || v?.data || '').startsWith('2026-10'));
+      if (temOutubro && amostra.every((v: any) => String(v?.created_at || v?.data || '').startsWith('2026-10'))) {
+        return gerarVendasOficiaisOutubro('sena', idsValidos[0] || undefined);
+      }
     }
   }
 
   if (isColaboradorAmanda(colab?.nome)) {
     const compAlvo = colab?.competencia;
-    if (!compAlvo || compAlvo === '2026-10') {
+    if (compAlvo === '2026-10') {
       return gerarVendasOficiaisOutubro('amanda', idsValidos[0] || undefined);
+    } else if (compAlvo && compAlvo !== '2026-10') {
+      return resultado;
+    } else {
+      const amostra = resultado.length > 0 ? resultado : (todasVendas || []);
+      const temOutubro = amostra.some((v: any) => String(v?.created_at || v?.data || '').startsWith('2026-10'));
+      if (temOutubro && amostra.every((v: any) => String(v?.created_at || v?.data || '').startsWith('2026-10'))) {
+        return gerarVendasOficiaisOutubro('amanda', idsValidos[0] || undefined);
+      }
     }
   }
 
   if (isColaboradorRegiane(colab?.nome)) {
     const compAlvo = colab?.competencia;
-    if (!compAlvo || compAlvo === '2026-10') {
+    if (compAlvo === '2026-10') {
       return gerarVendasOficiaisOutubro('regiane', idsValidos[0] || undefined);
+    } else if (compAlvo && compAlvo !== '2026-10') {
+      return resultado;
+    } else {
+      const amostra = resultado.length > 0 ? resultado : (todasVendas || []);
+      const temOutubro = amostra.some((v: any) => String(v?.created_at || v?.data || '').startsWith('2026-10'));
+      if (temOutubro && amostra.every((v: any) => String(v?.created_at || v?.data || '').startsWith('2026-10'))) {
+        return gerarVendasOficiaisOutubro('regiane', idsValidos[0] || undefined);
+      }
     }
   }
 
@@ -722,6 +751,7 @@ export interface OpcoesDesempenhoGeral {
   targetVendedorId?: string;
   targetVendedorNome?: string;
   excluirEspeciaisDasMetas?: boolean;
+  competencia?: string;
 }
 
 export interface ResultadoDesempenhoGeral {
@@ -792,9 +822,17 @@ export function calcularDesempenhoGeral(
     return true;
   });
 
-  const isMarlonPlanilha =
+  // Determina se os cálculos pertencem à competência histórica de Outubro/2026
+  const isCompetenciaOutubro = opcoes.competencia === '2026-10' ||
+    (!opcoes.competencia && vendasValidas.length > 0 && vendasValidas.every((v: any) => {
+      const dt = String(v?.created_at || v?.data || '');
+      return dt.startsWith('2026-10');
+    }));
+
+  const isMarlonPlanilha = isCompetenciaOutubro && (
     vendasValidas.some((v: any) => String(v?.id || '').startsWith('marlon-2026-10-')) ||
-    isColaboradorMarlon(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+    isColaboradorMarlon(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome)
+  );
 
   // Separação informativa: faturado titular solo vs com apoio de trainee
   let faturadoTitularSolo = 0;
@@ -844,14 +882,16 @@ export function calcularDesempenhoGeral(
     return acc + valorBoleto;
   }, 0);
 
-  const isIslaynePlanilha =
+  const isIslaynePlanilha = isCompetenciaOutubro && (
     vendasValidas.some((v: any) => String(v?.id || '').startsWith('islayne-2026-10-')) ||
-    isColaboradorIslayne(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+    isColaboradorIslayne(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome)
+  );
 
-  const isSamillyPlanilha =
-    isColaboradorSamilly(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+  const isSamillyPlanilha = isCompetenciaOutubro && (
+    isColaboradorSamilly(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome)
+  );
 
-  const isGiselePlanilha =
+  const isGiselePlanilha = isCompetenciaOutubro && (
     !isColaboradorPamela(opcoes.targetVendedorNome) &&
     !isColaboradorAmanda(opcoes.targetVendedorNome) &&
     !isColaboradorSena(opcoes.targetVendedorNome) &&
@@ -860,18 +900,19 @@ export function calcularDesempenhoGeral(
     !isColaboradorMarlon(opcoes.targetVendedorNome) &&
     !isColaboradorSamilly(opcoes.targetVendedorNome) &&
     (vendasValidas.some((v: any) => String(v?.id || '').startsWith('gisele-') || String(v?.trainee_nome || '').toUpperCase().includes('GISELE')) ||
-     isColaboradorGisele(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome || vendasValidas[0]?.trainee_nome));
+     isColaboradorGisele(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome || vendasValidas[0]?.trainee_nome))
+  );
 
-  // Consolidação oficial de Boletos/Financiadoras:
+  // Consolidação oficial de Boletos/Financiadoras (estritamente para Outubro/2026):
   // - Islayne: R$ 142.298,60 no total (R$ 89.831,60 Titular Solo + R$ 52.467,00 Com Apoio Treinier)
   // - Samilly (Cred Smart): R$ 38.450,00 na meta de boletos e crediário da loja
   // - Amanda: R$ 41.837,22 (R$ 26.666,00 Solo + R$ 15.171,22 Treinier)
   // - Regiane: R$ 24.384,41 (R$ 18.584,41 Solo + R$ 5.800,00 Treinier)
   // - Sena: R$ 10.363,00 (R$ 3.340,00 Solo + R$ 7.023,00 Treinier)
   // - Gisele (Trainee Bonificado Multiloja): R$ 41.477,60 no total
-  const isAmandaPlanilha = isColaboradorAmanda(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
-  const isRegianePlanilha = isColaboradorRegiane(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
-  const isSenaPlanilha = isColaboradorSena(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+  const isAmandaPlanilha = isCompetenciaOutubro && isColaboradorAmanda(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+  const isRegianePlanilha = isCompetenciaOutubro && isColaboradorRegiane(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+  const isSenaPlanilha = isCompetenciaOutubro && isColaboradorSena(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
 
   const totalBoletos = isIslaynePlanilha
     ? METAS_ISLAYNE_2026_10.total_boletos

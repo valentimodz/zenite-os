@@ -282,14 +282,19 @@ export default function RankingVendedores({
           metaAcessorios,
           superMetaAcessorios,
           targetVendedorId: colabIdStr,
-          targetVendedorNome: vr.colaborador || colabDb?.nome
+          targetVendedorNome: vr.colaborador || colabDb?.nome,
+          competencia: vr.competencia || filtroMes || currentMonthStr
         })
         : null;
 
-      const totalTransacoes = calc ? calc.transacoes : Number(vr.total_transacoes || 0);
-      const volumeDestaque = calc ? calc.volumeTotal : (isTrainee
-        ? (volumeTotal > 0 ? volumeTotal : faturadoTrainee)
-        : (faturadoTitular > 0 ? faturadoTitular : volumeTotal));
+      const totalTransacoes = calc && calc.transacoes > 0
+        ? calc.transacoes
+        : Number(vr.total_transacoes || 0);
+      const volumeDestaque = calc && calc.volumeTotal > 0
+        ? calc.volumeTotal
+        : (isTrainee
+          ? (faturadoTrainee > 0 ? faturadoTrainee : volumeTotal)
+          : (faturadoTitular > 0 ? faturadoTitular : volumeTotal));
       const ticketMedioConsistente = calc ? calc.ticketMedio : (totalTransacoes > 0 ? (volumeDestaque / totalTransacoes) : Number(vr.ticket_medio || 0));
       const totalBoletos = calc ? calc.totalBoletos : Number(vr.totalBoletos ?? vr.total_boletos ?? 0);
       const totalAcessorios = calc ? calc.totalAcessorios : Number(vr.totalAcessorios ?? vr.total_acessorios ?? 0);

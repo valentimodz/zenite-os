@@ -17764,7 +17764,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     const currentMonthSales = filtrarVendasDoColaborador(vendasDoMes, {
       id: currentUserId || userAuthId || profileId,
       nome: profileNome,
-      isTrainee
+      isTrainee,
+      competencia: mesAlvo
     });
 
     // 2. CÁLCULO UNIFICADO DE METAS & DESEMPENHO (Centralizado 100% em calcularDesempenhoGeral):
@@ -17779,7 +17780,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       superMetaBoleto,
       metaAcessorios,
       superMetaAcessorios,
-      metaTotal
+      metaTotal,
+      competencia: mesAlvo
     });
 
     const totalVendasGeral = desempenhoUnificado.volumeTotal;

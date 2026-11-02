@@ -793,7 +793,8 @@ export default function ModalDesempenhoVendedor({
           superMetaAcessorios: superMetaAcessorios,
           metaTotal: metaTotalCombinada,
           targetVendedorId: vendedorId,
-          targetVendedorNome: vendedorNome
+          targetVendedorNome: vendedorNome,
+          competencia
         });
 
         // Atualiza os estados da tela com a fórmula unificada
@@ -951,7 +952,8 @@ export default function ModalDesempenhoVendedor({
       superMetaAcessorios: metaSuperAcessorios,
       metaTotal,
       targetVendedorId,
-      targetVendedorNome
+      targetVendedorNome,
+      competencia: mesAtivo || mesCompetencia
     });
 
     const totalVendasGeral = desempenhoGeral.volumeTotal;

@@ -371,21 +371,28 @@ export async function fetchRankingColaboradoresMensal({
         metaAcessorios,
         superMetaAcessorios,
         targetVendedorId: colabId,
-        targetVendedorNome: nomeExibicao
+        targetVendedorNome: nomeExibicao,
+        competencia
       });
 
       const filialEfetiva = colab.filial_id || vendasTotaisColab[0]?.filial_id || null;
+      const volumeExibicao = calc.volumeTotal > 0
+        ? calc.volumeTotal
+        : (isTrainee ? faturadoTrainee : calc.volumeTotal);
+      const transacoesEfetivas = calc.transacoes > 0
+        ? calc.transacoes
+        : (isTrainee && vendasComoTrainee.length > 0 ? vendasComoTrainee.length : 0);
 
       return {
         colaborador_id: colab.id,
         colaborador: nomeExibicao,
         filial_id: filialEfetiva,
         competencia,
-        total_transacoes: calc.transacoes,
+        total_transacoes: transacoesEfetivas,
         faturado_titular: calc.volumeTotal,
         faturado_trainee: faturadoTrainee,
-        volume_total_participado: calc.volumeTotal,
-        ticket_medio: calc.ticketMedio,
+        volume_total_participado: volumeExibicao,
+        ticket_medio: calc.ticketMedio > 0 ? calc.ticketMedio : (transacoesEfetivas > 0 ? volumeExibicao / transacoesEfetivas : 0),
         total_boletos: calc.totalBoletos,
         totalBoletos: calc.totalBoletos,
         totalBoletosBruto: calc.totalBoletosBruto,
@@ -397,7 +404,7 @@ export async function fetchRankingColaboradoresMensal({
         comissaoTrainee: calc.comissaoTrainee,
         comissao_acumulada: calc.comissaoLiquida,
         is_trainee: isTrainee,
-        volume_exibicao: calc.volumeTotal,
+        volume_exibicao: volumeExibicao,
         vendas_colaborador: vendasTotaisColab
       };
     });
@@ -405,7 +412,7 @@ export async function fetchRankingColaboradoresMensal({
     // Se for listagem geral do ranking, exibe colaboradores com vendas no período
     const filtrados = colaboradorId
       ? resultado
-      : resultado.filter(r => r.total_transacoes > 0 || r.volume_exibicao > 0 || r.faturado_trainee > 0);
+      : resultado.filter(r => r.total_transacoes > 0 || r.volume_exibicao > 0 || r.faturado_trainee > 0 || (r.comissaoTrainee && r.comissaoTrainee > 0));
 
     // Ordena do maior para o menor faturamento
     return filtrados.sort((a, b) => b.volume_exibicao - a.volume_exibicao);
