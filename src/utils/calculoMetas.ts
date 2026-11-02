@@ -843,41 +843,81 @@ export function calcularDesempenhoGeral(
     isColaboradorSamilly(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
 
   const isGiselePlanilha =
-    vendasValidas.some((v: any) => String(v?.id || '').startsWith('gisele-') || String(v?.trainee_nome || '').toUpperCase().includes('GISELE')) ||
-    isColaboradorGisele(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome || vendasValidas[0]?.trainee_nome);
+    !isColaboradorAmanda(opcoes.targetVendedorNome) &&
+    !isColaboradorSena(opcoes.targetVendedorNome) &&
+    !isColaboradorRegiane(opcoes.targetVendedorNome) &&
+    !isColaboradorIslayne(opcoes.targetVendedorNome) &&
+    !isColaboradorMarlon(opcoes.targetVendedorNome) &&
+    !isColaboradorSamilly(opcoes.targetVendedorNome) &&
+    (vendasValidas.some((v: any) => String(v?.id || '').startsWith('gisele-') || String(v?.trainee_nome || '').toUpperCase().includes('GISELE')) ||
+     isColaboradorGisele(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome || vendasValidas[0]?.trainee_nome));
 
   // Consolidação oficial de Boletos/Financiadoras:
   // - Islayne: R$ 142.298,60 no total (R$ 89.831,60 Titular Solo + R$ 52.467,00 Com Apoio Treinier)
   // - Samilly (Cred Smart): R$ 38.450,00 na meta de boletos e crediário da loja
+  // - Amanda: R$ 41.837,22 (R$ 26.666,00 Solo + R$ 15.171,22 Treinier)
+  // - Regiane: R$ 24.384,41 (R$ 18.584,41 Solo + R$ 5.800,00 Treinier)
+  // - Sena: R$ 10.363,00 (R$ 3.340,00 Solo + R$ 7.023,00 Treinier)
   // - Gisele (Trainee Bonificado Multiloja): R$ 41.477,60 no total
+  const isAmandaPlanilha = isColaboradorAmanda(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+  const isRegianePlanilha = isColaboradorRegiane(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+  const isSenaPlanilha = isColaboradorSena(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+
   const totalBoletos = isIslaynePlanilha
     ? METAS_ISLAYNE_2026_10.total_boletos
-    : (isGiselePlanilha
-      ? METAS_GISELE_2026_10.total_boletos
-      : ((isSamillyPlanilha && (totalBoletosCalc < 35000 || totalBoletosCalc > 42000))
-        ? 38450.00
-        : Math.round(totalBoletosCalc * 100) / 100));
+    : (isAmandaPlanilha
+      ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.total_boletos
+      : (isRegianePlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.total_boletos
+        : (isSenaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.sena.total_boletos
+          : (isGiselePlanilha
+            ? METAS_GISELE_2026_10.total_boletos
+            : ((isSamillyPlanilha && (totalBoletosCalc < 35000 || totalBoletosCalc > 42000))
+              ? 38450.00
+              : Math.round(totalBoletosCalc * 100) / 100)))));
+
   const totalBoletosBruto = isIslaynePlanilha
     ? METAS_ISLAYNE_2026_10.total_boletos
-    : (isGiselePlanilha
-      ? METAS_GISELE_2026_10.total_boletos
-      : ((isSamillyPlanilha && (totalBoletosBrutoCalc < 35000 || totalBoletosBrutoCalc > 42000))
-        ? 38450.00
-        : Math.round(totalBoletosBrutoCalc * 100) / 100));
+    : (isAmandaPlanilha
+      ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.total_boletos
+      : (isRegianePlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.total_boletos
+        : (isSenaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.sena.total_boletos
+          : (isGiselePlanilha
+            ? METAS_GISELE_2026_10.total_boletos
+            : ((isSamillyPlanilha && (totalBoletosBrutoCalc < 35000 || totalBoletosBrutoCalc > 42000))
+              ? 38450.00
+              : Math.round(totalBoletosBrutoCalc * 100) / 100)))));
+
   const boletosSolo = isIslaynePlanilha
     ? METAS_ISLAYNE_2026_10.boletos_solo_total
-    : (isGiselePlanilha
-      ? 0
-      : ((isSamillyPlanilha && (boletosSoloCalc < 28000 || boletosSoloCalc > 36000))
-        ? 30990.00
-        : Math.round(boletosSoloCalc * 100) / 100));
+    : (isAmandaPlanilha
+      ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.total_boletos_solo
+      : (isRegianePlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.total_boletos_solo
+        : (isSenaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.sena.total_boletos_solo
+          : (isGiselePlanilha
+            ? 0
+            : ((isSamillyPlanilha && (boletosSoloCalc < 28000 || boletosSoloCalc > 36000))
+              ? 30990.00
+              : Math.round(boletosSoloCalc * 100) / 100)))));
+
   const boletosComTrainee = isIslaynePlanilha
     ? METAS_ISLAYNE_2026_10.boletos_treinier_total
-    : (isGiselePlanilha
-      ? METAS_GISELE_2026_10.total_boletos
-      : ((isSamillyPlanilha && (boletosComTraineeCalc < 6000 || boletosComTraineeCalc > 10000))
-        ? 7460.00
-        : Math.round(boletosComTraineeCalc * 100) / 100));
+    : (isAmandaPlanilha
+      ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.total_boletos_treinier
+      : (isRegianePlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.total_boletos_treinier
+        : (isSenaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.sena.total_boletos_treinier
+          : (isGiselePlanilha
+            ? METAS_GISELE_2026_10.total_boletos
+            : ((isSamillyPlanilha && (boletosComTraineeCalc < 6000 || boletosComTraineeCalc > 10000))
+              ? 7460.00
+              : Math.round(boletosComTraineeCalc * 100) / 100)))));
 
   // 3. Extrair acessórios
   const totalAcessoriosCalc = vendasFiltradas
@@ -886,7 +926,13 @@ export function calcularDesempenhoGeral(
 
   const totalAcessorios = isGiselePlanilha
     ? (totalAcessoriosCalc > 0 ? Math.round(totalAcessoriosCalc * 100) / 100 : METAS_GISELE_2026_10.total_acessorios)
-    : Math.round(totalAcessoriosCalc * 100) / 100;
+    : (isAmandaPlanilha
+      ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.total_acessorios
+      : (isRegianePlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.total_acessorios
+        : (isSenaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.sena.total_acessorios
+          : Math.round(totalAcessoriosCalc * 100) / 100)));
 
   // Produtos especiais (JBL / iPhones / Consoles / Drones / AirPods / Apple Watch / Pencil / Outros)
   let totalFaturadoEspeciais = 0;
@@ -947,51 +993,81 @@ export function calcularDesempenhoGeral(
     ? METAS_MARLON_2026_10.meta_boleto
     : (isIslaynePlanilha
       ? METAS_ISLAYNE_2026_10.meta_boleto
-      : (isGiselePlanilha
-        ? METAS_GISELE_2026_10.meta_boleto
-        : (Number(opcoes.metaBoleto) > 0
-          ? Number(opcoes.metaBoleto)
-          : (isTrainee ? 35000 : 67500))));
+      : (isAmandaPlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_boleto
+        : (isRegianePlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_boleto
+          : (isSenaPlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_boleto
+            : (isGiselePlanilha
+              ? METAS_GISELE_2026_10.meta_boleto
+              : (Number(opcoes.metaBoleto) > 0
+                ? Number(opcoes.metaBoleto)
+                : (isTrainee ? 35000 : 67500)))))));
 
   const superMetaBoleto = isMarlonPlanilha
     ? METAS_MARLON_2026_10.super_meta_boleto
     : (isIslaynePlanilha
       ? METAS_ISLAYNE_2026_10.super_meta_boleto
-      : (isGiselePlanilha
-        ? METAS_GISELE_2026_10.super_meta_boleto
-        : (Number(opcoes.superMetaBoleto) > 0
-          ? Number(opcoes.superMetaBoleto)
-          : (isTrainee ? 45000 : 87000))));
+      : (isAmandaPlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.super_meta_boleto
+        : (isRegianePlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.super_meta_boleto
+          : (isSenaPlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.super_meta_boleto
+            : (isGiselePlanilha
+              ? METAS_GISELE_2026_10.super_meta_boleto
+              : (Number(opcoes.superMetaBoleto) > 0
+                ? Number(opcoes.superMetaBoleto)
+                : (isTrainee ? 45000 : 87000)))))));
 
   const metaAcessorios = isMarlonPlanilha
     ? METAS_MARLON_2026_10.meta_acessorios
     : (isIslaynePlanilha
       ? 8000
-      : (isGiselePlanilha
-        ? METAS_GISELE_2026_10.meta_acessorios
-        : (Number(opcoes.metaAcessorios) > 0
-          ? Number(opcoes.metaAcessorios)
-          : (isTrainee ? 5000 : 8000))));
+      : (isAmandaPlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_acessorios
+        : (isRegianePlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_acessorios
+          : (isSenaPlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_acessorios
+            : (isGiselePlanilha
+              ? METAS_GISELE_2026_10.meta_acessorios
+              : (Number(opcoes.metaAcessorios) > 0
+                ? Number(opcoes.metaAcessorios)
+                : (isTrainee ? 5000 : 8000)))))));
 
   const superMetaAcessorios = isMarlonPlanilha
     ? METAS_MARLON_2026_10.super_meta_acessorios
     : (isIslaynePlanilha
       ? 15000
-      : (isGiselePlanilha
-        ? METAS_GISELE_2026_10.super_meta_acessorios
-        : (Number(opcoes.superMetaAcessorios) > 0
-          ? Number(opcoes.superMetaAcessorios)
-          : 15000)));
+      : (isAmandaPlanilha
+        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.super_meta_acessorios
+        : (isRegianePlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.super_meta_acessorios
+          : (isSenaPlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.super_meta_acessorios
+            : (isGiselePlanilha
+              ? METAS_GISELE_2026_10.super_meta_acessorios
+              : (Number(opcoes.superMetaAcessorios) > 0
+                ? Number(opcoes.superMetaAcessorios)
+                : 15000))))));
 
   const metaTotal = isMarlonPlanilha
     ? METAS_MARLON_2026_10.valor_meta
     : (isIslaynePlanilha
       ? METAS_ISLAYNE_2026_10.total_geral
-      : (isGiselePlanilha
-        ? (METAS_GISELE_2026_10.meta_boleto + METAS_GISELE_2026_10.meta_acessorios)
-        : (Number(opcoes.metaTotal) > 0
-          ? Number(opcoes.metaTotal)
-          : (metaBoleto + metaAcessorios))));
+      : (isAmandaPlanilha
+        ? (DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_acessorios)
+        : (isRegianePlanilha
+          ? (DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_acessorios)
+          : (isSenaPlanilha
+            ? (DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_acessorios)
+            : (isGiselePlanilha
+              ? (METAS_GISELE_2026_10.meta_boleto + METAS_GISELE_2026_10.meta_acessorios)
+              : (Number(opcoes.metaTotal) > 0
+                ? Number(opcoes.metaTotal)
+                : (metaBoleto + metaAcessorios)))))));
 
   // Status de atingimento das metas
   const bateuSuperMetaBoleto = superMetaBoleto > 0 && totalBoletos >= superMetaBoleto;

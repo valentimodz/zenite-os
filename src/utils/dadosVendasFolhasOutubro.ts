@@ -341,3 +341,4 @@ export function gerarVendasOficiaisOutubro(tipo: 'sena' | 'amanda' | 'regiane', 
 
   return lista;
 }
+
