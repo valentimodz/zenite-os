@@ -843,47 +843,58 @@ export default function ModalDesempenhoVendedor({
     // 2. Mapeamento oficial de metas com prioridade para meta individual e regras_comissoes da filial
     const metaBanco = metaIndividual;
 
-    const metaBoleto = Number(metaBanco?.meta_boleto) > 0
-      ? Number(metaBanco?.meta_boleto)
-      : (isTrainee
-        ? (Number(metaBanco?.meta_trainee_boleto) || 35000)
-        : (objetivoBoleto > 0 ? objetivoBoleto : 67500));
-
-    const metaAcessorios = Number(metaBanco?.meta_acessorios) > 0
-      ? Number(metaBanco?.meta_acessorios)
-      : (isTrainee
-        ? 5000
-        : (objetivoAcessorios > 0 ? objetivoAcessorios : 8000));
-
     const isIslayne = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('ISLAYNE');
     const isGisele = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('GISELE');
     const isSena = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('SENA');
     const isAmanda = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('AMANDA');
     const isRegiane = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('REGIANE');
+    const isPamela = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('PAMELA');
+
+    const metaBoleto = Number(metaBanco?.meta_boleto) > 0
+      ? Number(metaBanco?.meta_boleto)
+      : (isPamela
+        ? 125000
+        : (isTrainee
+          ? (Number(metaBanco?.meta_trainee_boleto) || 35000)
+          : (objetivoBoleto > 0 ? objetivoBoleto : 67500)));
+
+    const metaAcessorios = Number(metaBanco?.meta_acessorios) > 0
+      ? Number(metaBanco?.meta_acessorios)
+      : (isPamela
+        ? 8000
+        : (isTrainee
+          ? 5000
+          : (objetivoAcessorios > 0 ? objetivoAcessorios : 8000)));
+
+    const metaSuperBoleto = Number(metaBanco?.super_meta_boleto) > 0
+      ? Number(metaBanco?.super_meta_boleto)
+      : (isPamela
+        ? 145000
+        : (isTrainee
+          ? 45000
+          : (superMetaBoleto > 0 ? superMetaBoleto : 87000)));
+
+    const metaSuperAcessorios = Number(metaBanco?.super_meta_acessorios) > 0
+      ? Number(metaBanco?.super_meta_acessorios)
+      : (isPamela
+        ? 15000
+        : (isTrainee
+          ? 7500
+          : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000)));
 
     const metaTotal = Number(metaBanco?.valor_meta) > 0
       ? Number(metaBanco.valor_meta)
       : (isIslayne && metaTotalCombinada <= 77500
         ? 250766.70
-        : (isGisele
-          ? 40000.00
-          : (isSena
-            ? 75500.00
-            : (isAmanda || isRegiane
+        : (isPamela
+          ? 133000.00
+          : (isGisele
+            ? 40000.00
+            : (isSena
               ? 75500.00
-              : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios))))));
-
-    const metaSuperBoleto = Number(metaBanco?.super_meta_boleto) > 0
-      ? Number(metaBanco?.super_meta_boleto)
-      : (isTrainee
-        ? 45000
-        : (superMetaBoleto > 0 ? superMetaBoleto : 87000));
-
-    const metaSuperAcessorios = Number(metaBanco?.super_meta_acessorios) > 0
-      ? Number(metaBanco?.super_meta_acessorios)
-      : (isTrainee
-        ? 7500
-        : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000));
+              : (isAmanda || isRegiane
+                ? 75500.00
+                : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios)))))));
 
     // Fallback em cascata para que 'sales' nunca fique vazio se houver vendas disponíveis
     // Garantindo que, se vendasColaborador/vendasLocais foram carregadas diretamente da query da filial ativa, elas tenham prioridade absoluta

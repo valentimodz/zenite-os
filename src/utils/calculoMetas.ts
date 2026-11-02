@@ -205,6 +205,15 @@ export function isColaboradorRegiane(nomeOuObjeto: any): boolean {
   return norm.includes('REGIANE');
 }
 
+export function isColaboradorPamela(nomeOuObjeto: any): boolean {
+  if (!nomeOuObjeto) return false;
+  const str = typeof nomeOuObjeto === 'string'
+    ? nomeOuObjeto
+    : (nomeOuObjeto?.nome || nomeOuObjeto?.colaborador || nomeOuObjeto?.vendedor_nome || '');
+  const norm = normalizarNome(str);
+  return norm.includes('PAMELA');
+}
+
 /**
  * Normaliza nome para comparação insensível a acentos e caixa
  */
@@ -843,6 +852,7 @@ export function calcularDesempenhoGeral(
     isColaboradorSamilly(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
 
   const isGiselePlanilha =
+    !isColaboradorPamela(opcoes.targetVendedorNome) &&
     !isColaboradorAmanda(opcoes.targetVendedorNome) &&
     !isColaboradorSena(opcoes.targetVendedorNome) &&
     !isColaboradorRegiane(opcoes.targetVendedorNome) &&
@@ -989,85 +999,97 @@ export function calcularDesempenhoGeral(
   const ticketMedio = transacoes > 0 ? Math.round((volumeTotal / transacoes) * 100) / 100 : 0;
 
   // 4. Metas configuradas
+  const isPamelaPlanilha = isColaboradorPamela(opcoes.targetVendedorNome || vendasValidas[0]?.vendedor_nome);
+
   const metaBoleto = isMarlonPlanilha
     ? METAS_MARLON_2026_10.meta_boleto
-    : (isIslaynePlanilha
-      ? METAS_ISLAYNE_2026_10.meta_boleto
-      : (isAmandaPlanilha
-        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_boleto
-        : (isRegianePlanilha
-          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_boleto
-          : (isSenaPlanilha
-            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_boleto
-            : (isGiselePlanilha
-              ? METAS_GISELE_2026_10.meta_boleto
-              : (Number(opcoes.metaBoleto) > 0
-                ? Number(opcoes.metaBoleto)
-                : (isTrainee ? 35000 : 67500)))))));
+    : (isPamelaPlanilha
+      ? 125000
+      : (isIslaynePlanilha
+        ? METAS_ISLAYNE_2026_10.meta_boleto
+        : (isAmandaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_boleto
+          : (isRegianePlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_boleto
+            : (isSenaPlanilha
+              ? DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_boleto
+              : (isGiselePlanilha
+                ? METAS_GISELE_2026_10.meta_boleto
+                : (Number(opcoes.metaBoleto) > 0
+                  ? Number(opcoes.metaBoleto)
+                  : (isTrainee ? 35000 : 67500))))))));
 
   const superMetaBoleto = isMarlonPlanilha
     ? METAS_MARLON_2026_10.super_meta_boleto
-    : (isIslaynePlanilha
-      ? METAS_ISLAYNE_2026_10.super_meta_boleto
-      : (isAmandaPlanilha
-        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.super_meta_boleto
-        : (isRegianePlanilha
-          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.super_meta_boleto
-          : (isSenaPlanilha
-            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.super_meta_boleto
-            : (isGiselePlanilha
-              ? METAS_GISELE_2026_10.super_meta_boleto
-              : (Number(opcoes.superMetaBoleto) > 0
-                ? Number(opcoes.superMetaBoleto)
-                : (isTrainee ? 45000 : 87000)))))));
+    : (isPamelaPlanilha
+      ? 145000
+      : (isIslaynePlanilha
+        ? METAS_ISLAYNE_2026_10.super_meta_boleto
+        : (isAmandaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.super_meta_boleto
+          : (isRegianePlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.super_meta_boleto
+            : (isSenaPlanilha
+              ? DADOS_OFICIAIS_OUTUBRO_2026.sena.super_meta_boleto
+              : (isGiselePlanilha
+                ? METAS_GISELE_2026_10.super_meta_boleto
+                : (Number(opcoes.superMetaBoleto) > 0
+                  ? Number(opcoes.superMetaBoleto)
+                  : (isTrainee ? 45000 : 87000))))))));
 
   const metaAcessorios = isMarlonPlanilha
     ? METAS_MARLON_2026_10.meta_acessorios
-    : (isIslaynePlanilha
+    : (isPamelaPlanilha
       ? 8000
-      : (isAmandaPlanilha
-        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_acessorios
-        : (isRegianePlanilha
-          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_acessorios
-          : (isSenaPlanilha
-            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_acessorios
-            : (isGiselePlanilha
-              ? METAS_GISELE_2026_10.meta_acessorios
-              : (Number(opcoes.metaAcessorios) > 0
-                ? Number(opcoes.metaAcessorios)
-                : (isTrainee ? 5000 : 8000)))))));
+      : (isIslaynePlanilha
+        ? 8000
+        : (isAmandaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_acessorios
+          : (isRegianePlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_acessorios
+            : (isSenaPlanilha
+              ? DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_acessorios
+              : (isGiselePlanilha
+                ? METAS_GISELE_2026_10.meta_acessorios
+                : (Number(opcoes.metaAcessorios) > 0
+                  ? Number(opcoes.metaAcessorios)
+                  : (isTrainee ? 5000 : 8000))))))));
 
   const superMetaAcessorios = isMarlonPlanilha
     ? METAS_MARLON_2026_10.super_meta_acessorios
-    : (isIslaynePlanilha
+    : (isPamelaPlanilha
       ? 15000
-      : (isAmandaPlanilha
-        ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.super_meta_acessorios
-        : (isRegianePlanilha
-          ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.super_meta_acessorios
-          : (isSenaPlanilha
-            ? DADOS_OFICIAIS_OUTUBRO_2026.sena.super_meta_acessorios
-            : (isGiselePlanilha
-              ? METAS_GISELE_2026_10.super_meta_acessorios
-              : (Number(opcoes.superMetaAcessorios) > 0
-                ? Number(opcoes.superMetaAcessorios)
-                : 15000))))));
+      : (isIslaynePlanilha
+        ? 15000
+        : (isAmandaPlanilha
+          ? DADOS_OFICIAIS_OUTUBRO_2026.amanda.super_meta_acessorios
+          : (isRegianePlanilha
+            ? DADOS_OFICIAIS_OUTUBRO_2026.regiane.super_meta_acessorios
+            : (isSenaPlanilha
+              ? DADOS_OFICIAIS_OUTUBRO_2026.sena.super_meta_acessorios
+              : (isGiselePlanilha
+                ? METAS_GISELE_2026_10.super_meta_acessorios
+                : (Number(opcoes.superMetaAcessorios) > 0
+                  ? Number(opcoes.superMetaAcessorios)
+                  : 15000)))))));
 
   const metaTotal = isMarlonPlanilha
     ? METAS_MARLON_2026_10.valor_meta
-    : (isIslaynePlanilha
-      ? METAS_ISLAYNE_2026_10.total_geral
-      : (isAmandaPlanilha
-        ? (DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_acessorios)
-        : (isRegianePlanilha
-          ? (DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_acessorios)
-          : (isSenaPlanilha
-            ? (DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_acessorios)
-            : (isGiselePlanilha
-              ? (METAS_GISELE_2026_10.meta_boleto + METAS_GISELE_2026_10.meta_acessorios)
-              : (Number(opcoes.metaTotal) > 0
-                ? Number(opcoes.metaTotal)
-                : (metaBoleto + metaAcessorios)))))));
+    : (isPamelaPlanilha
+      ? 133000
+      : (isIslaynePlanilha
+        ? METAS_ISLAYNE_2026_10.total_geral
+        : (isAmandaPlanilha
+          ? (DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.amanda.meta_acessorios)
+          : (isRegianePlanilha
+            ? (DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.regiane.meta_acessorios)
+            : (isSenaPlanilha
+              ? (DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_boleto + DADOS_OFICIAIS_OUTUBRO_2026.sena.meta_acessorios)
+              : (isGiselePlanilha
+                ? (METAS_GISELE_2026_10.meta_boleto + METAS_GISELE_2026_10.meta_acessorios)
+                : (Number(opcoes.metaTotal) > 0
+                  ? Number(opcoes.metaTotal)
+                  : (metaBoleto + metaAcessorios))))))));
 
   // Status de atingimento das metas
   const bateuSuperMetaBoleto = superMetaBoleto > 0 && totalBoletos >= superMetaBoleto;
