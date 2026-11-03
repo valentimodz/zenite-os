@@ -264,7 +264,9 @@ export default function ConsultaEstoque({
     (produtosCatalogo || []).forEach(cat => {
       const nomeNorm = String(cat.nome || '').trim();
       if (!nomeNorm) return;
-      const key = `${nomeNorm.toLowerCase()}_${String(cat.categoria || 'GERAL').toLowerCase()}`;
+      // Normalização da chave base por Nome (case-insensitive e sem acentos redundantes)
+      const nomeLower = nomeNorm.toLowerCase();
+      const key = cat.codigo_barras ? `ean_${String(cat.codigo_barras).trim().toLowerCase()}` : `nome_${nomeLower}`;
 
       const tipoStr = String(cat.tipo || '').toUpperCase();
       const catStr = String(cat.categoria || '').toUpperCase();
@@ -284,17 +286,35 @@ export default function ConsultaEstoque({
       });
     });
 
-    // 2º Passo: Produtos Físicos
+    // 2º Passo: Produtos Físicos (Casamento prioritário por Código de Barras / EAN, depois por Nome)
     (produtos || []).forEach(prod => {
       const nomeNorm = String(prod.nome || '').trim();
       if (!nomeNorm) return;
-      const key = `${nomeNorm.toLowerCase()}_${String(prod.categoria || 'GERAL').toLowerCase()}`;
+      const nomeLower = nomeNorm.toLowerCase();
+      const prodEan = prod.codigo_barras ? String(prod.codigo_barras).trim().toLowerCase() : '';
 
       const tipoStr = String(prod.tipo || '').toUpperCase();
       const catStr = String(prod.categoria || '').toUpperCase();
       const isCelular = tipoStr.includes('CELULAR') || tipoStr.includes('SMARTPHONE') || catStr === 'IOS' || catStr === 'ANDROID';
 
-      if (!mapa.has(key)) {
+      // Procura primeiro pelo EAN no mapa
+      let itemExistente = prodEan ? mapa.get(`ean_${prodEan}`) : null;
+      // Se não achou por EAN, procura pelo nome
+      if (!itemExistente) {
+        itemExistente = mapa.get(`nome_${nomeLower}`);
+      }
+      // Se ainda não achou, procura por similaridade de nome entre chaves existentes
+      if (!itemExistente) {
+        for (const [k, v] of mapa.entries()) {
+          if (String(v.nome || '').trim().toLowerCase() === nomeLower) {
+            itemExistente = v;
+            break;
+          }
+        }
+      }
+
+      if (!itemExistente) {
+        const key = prodEan ? `ean_${prodEan}` : `nome_${nomeLower}`;
         mapa.set(key, {
           id: prod.id,
           nome: prod.nome,
@@ -307,7 +327,6 @@ export default function ConsultaEstoque({
           itensFisicos: [prod]
         });
       } else {
-        const itemExistente = mapa.get(key);
         itemExistente.itensFisicos.push(prod);
         if (!itemExistente.sku && prod.sku) itemExistente.sku = prod.sku;
         if (!itemExistente.codigo_barras && prod.codigo_barras) itemExistente.codigo_barras = prod.codigo_barras;
