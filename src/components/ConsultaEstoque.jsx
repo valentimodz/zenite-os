@@ -844,7 +844,14 @@ export default function ConsultaEstoque({
               >
                 {/* 1. Cabeçalho do Card (Clicável para abrir Detalhes / Ajuste) */}
                 <div
-                  onClick={() => setProdutoSelecionadoModal(item.itensFisicos?.[0] || item)}
+                  onClick={() => {
+                    const targetProd = {
+                      ...(item.itensFisicos?.[0] || item),
+                      filial_id: item.filialIdCard || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
+                      filialNome: item.filialNomeCard
+                    };
+                    setProdutoSelecionadoModal(targetProd);
+                  }}
                   className="cursor-pointer group/header"
                   title="Clique para ver detalhes e ajustes do produto"
                 >
@@ -948,7 +955,11 @@ export default function ConsultaEstoque({
                     <button
                       type="button"
                       onClick={() => {
-                        const targetProd = item.itensFisicos?.[0] || item;
+                        const targetProd = {
+                          ...(item.itensFisicos?.[0] || item),
+                          filial_id: item.filialIdCard || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
+                          filialNome: item.filialNomeCard
+                        };
                         setProdutoSelecionadoModal(targetProd);
                         if (onOpenDetalhesProduto) {
                           onOpenDetalhesProduto(targetProd);
@@ -1151,7 +1162,11 @@ export default function ConsultaEstoque({
         <ModalDetalheEstoqueProduto
           produtoId={produtoSelecionadoModal.id || produtoSelecionadoModal.produto_id}
           produto={produtoSelecionadoModal}
-          filialId={filialSelecionada !== 'TODAS' ? filialSelecionada : activeFilialId}
+          filialId={
+            produtoSelecionadoModal.filial_id && String(produtoSelecionadoModal.filial_id) !== 'TODAS'
+              ? produtoSelecionadoModal.filial_id
+              : (filialSelecionada !== 'TODAS' ? filialSelecionada : activeFilialId)
+          }
           filiais={listaFiliais}
           isOpen={!!produtoSelecionadoModal}
           onClose={() => setProdutoSelecionadoModal(null)}

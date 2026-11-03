@@ -27,11 +27,14 @@ interface ModalDetalheEstoqueProdutoProps {
   isOpen: boolean;
   onClose: () => void;
   produto: any;
+  filialId?: string | number | null;
   filiais?: Array<{ id: string | number; nome: string }>;
   onTransferir?: (produto: any) => void;
   onUpdateProdutoField?: (produtoId: any, nome: string, field: string, value: any, itemFilialId?: any) => Promise<any>;
   onDeleteProduto?: (produto: any) => Promise<any>;
   onRefresh?: () => void;
+  onSuccess?: () => void;
+  produtoId?: string | number;
 }
 
 interface ItemProdutoDetalhado {
@@ -70,11 +73,13 @@ export default function ModalDetalheEstoqueProduto({
   isOpen,
   onClose,
   produto,
+  filialId: propFilialId,
   filiais = [],
   onTransferir,
   onUpdateProdutoField,
   onDeleteProduto,
-  onRefresh
+  onRefresh,
+  onSuccess
 }: ModalDetalheEstoqueProdutoProps) {
   const [loading, setLoading] = useState(false);
   const [produtosIrmaos, setProdutosIrmaos] = useState<ItemProdutoDetalhado[]>([]);
@@ -285,6 +290,37 @@ export default function ModalDetalheEstoqueProduto({
     }
   }, [isOpen, produto, carregarDetalhesEstoque]);
 
+  // Handler para fechar com tecla ESC
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        // Se houver algum sub-modal/edição aberta, fecha ela primeiro
+        if (editandoPrecoGeral) {
+          setEditandoPrecoGeral(false);
+          return;
+        }
+        if (itemEditandoId) {
+          setItemEditandoId(null);
+          return;
+        }
+        if (itemParaAdicionarImei) {
+          setItemParaAdicionarImei(null);
+          return;
+        }
+        if (itemParaExcluir) {
+          setItemParaExcluir(null);
+          return;
+        }
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, editandoPrecoGeral, itemEditandoId, itemParaAdicionarImei, itemParaExcluir]);
+
   // Total Geral consolidando todas as variações e filiais
   const totalGeral = useMemo(() => {
     return produtosIrmaos.reduce((acc, curr) => acc + curr.quantidade, 0);
@@ -300,10 +336,18 @@ export default function ModalDetalheEstoqueProduto({
   const estoqueFiliais = useMemo(() => {
     const mapa: { [filialKey: string]: EstoquePorFilialItem } = {};
 
-    // Inicia com todas as filiais conhecidas
-    (filiais || []).forEach(f => {
+    // Inicia com as filiais: se propFilialId foi informada e não é 'TODAS', filtra apenas ela!
+    const filiaisBase = (filiais || []).filter(f => {
       const fId = String(f.id);
-      if (!fId || fId === 'sem_filial') return;
+      if (!fId || fId === 'sem_filial') return false;
+      if (propFilialId && String(propFilialId) !== 'TODAS') {
+        return String(fId) === String(propFilialId);
+      }
+      return true;
+    });
+
+    filiaisBase.forEach(f => {
+      const fId = String(f.id);
       mapa[fId] = {
         filial_id: fId,
         filial_nome: f.nome,
@@ -317,6 +361,11 @@ export default function ModalDetalheEstoqueProduto({
     produtosIrmaos.forEach(item => {
       const fId = String(item.filial_id);
       if (!fId || fId === 'sem_filial') return;
+
+      // Se houver filial específica selecionada, ignora itens de outras filiais
+      if (propFilialId && String(propFilialId) !== 'TODAS' && String(fId) !== String(propFilialId)) {
+        return;
+      }
 
       if (!mapa[fId]) {
         mapa[fId] = {
@@ -367,7 +416,7 @@ export default function ModalDetalheEstoqueProduto({
         status: statusCalc
       };
     }).sort((a, b) => b.quantidadeTotal - a.quantidadeTotal);
-  }, [filiais, produtosIrmaos, mapaFiliaisNome, produtoNome, categoria, corAtual, precoBaseVenda]);
+  }, [filiais, produtosIrmaos, mapaFiliaisNome, produtoNome, categoria, corAtual, precoBaseVenda, propFilialId]);
 
   // Agrupamento por Variações de Cor
   const variacoesCores = useMemo(() => {
@@ -910,7 +959,7 @@ export default function ModalDetalheEstoqueProduto({
               }`}
           >
             <Store size={14} />
-            Estoque por Loja / Filial ({produtosIrmaos.length} registros)
+            Estoque por Loja / Filial ({estoqueFiliais.length} {estoqueFiliais.length === 1 ? 'filial' : 'filiais'})
           </button>
           <button
             type="button"
