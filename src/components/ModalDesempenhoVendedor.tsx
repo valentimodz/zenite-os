@@ -597,6 +597,8 @@ export default function ModalDesempenhoVendedor({
   const [filtroTipoVendas, setFiltroTipoVendas] = useState<'todas' | 'solo'>('todas');
   // Seção colapsável de Extrato de Vendas com Trainee
   const [extratoTraineeAberto, setExtratoTraineeAberto] = useState<boolean>(true);
+  // Filtro por Trainee selecionado no extrato detalhado
+  const [filtroTraineeSelecionado, setFiltroTraineeSelecionado] = useState<string>('TODOS');
 
   // Invalidação de cache local e força de recarga
   const invalidarCacheERecarregar = useCallback((novoMes?: string) => {
@@ -1017,6 +1019,39 @@ export default function ModalDesempenhoVendedor({
       }
     });
 
+    // Desdobramento e Consolidação por Trainee (Quantas vendas, qual trainee, e quanto de participação)
+    interface ResumoPorTrainee {
+      nome: string;
+      qtdVendas: number;
+      volumeTotal: number;
+      comissaoTotal: number;
+      percentualVolume: number;
+    }
+
+    const mapaTrainees = new Map<string, { qtdVendas: number; volumeTotal: number; comissaoTotal: number }>();
+    extratoVendasComTrainee.forEach(item => {
+      const chave = item.traineeNome || 'Trainee Geral';
+      const atual = mapaTrainees.get(chave) || { qtdVendas: 0, volumeTotal: 0, comissaoTotal: 0 };
+      atual.qtdVendas += 1;
+      atual.volumeTotal += item.valorVenda;
+      atual.comissaoTotal += item.comissaoTrainee;
+      mapaTrainees.set(chave, atual);
+    });
+
+    const totalVolumeComTrainee = extratoVendasComTrainee.reduce((acc, cur) => acc + cur.valorVenda, 0);
+    const resumoPorTrainee: ResumoPorTrainee[] = Array.from(mapaTrainees.entries())
+      .map(([nome, dados]) => ({
+        nome,
+        qtdVendas: dados.qtdVendas,
+        volumeTotal: dados.volumeTotal,
+        comissaoTotal: dados.comissaoTotal,
+        percentualVolume: totalVolumeComTrainee > 0 ? (dados.volumeTotal / totalVolumeComTrainee) * 100 : 0
+      }))
+      .sort((a, b) => b.volumeTotal - a.volumeTotal);
+
+    const qtdVendasComTrainee = extratoVendasComTrainee.length;
+    const qtdVendasSolo = Math.max(0, salesCount - qtdVendasComTrainee);
+
     // Desdobramento de Itens Especiais por Categoria (Caixas JBL, Consoles, Drones & Linha Apple)
     const itensJBL = { qtd: 0, total: 0 };
     const itensConsoles = { qtd: 0, total: 0 };
@@ -1115,6 +1150,9 @@ export default function ModalDesempenhoVendedor({
       comissaoTitularExclusiva,
       totalComissaoGeradaParaTrainees,
       extratoVendasComTrainee,
+      resumoPorTrainee,
+      qtdVendasComTrainee,
+      qtdVendasSolo,
       metaTotal: desempenhoGeral.metaTotal,
       salesCount,
       // Boletos
@@ -1296,9 +1334,20 @@ export default function ModalDesempenhoVendedor({
                   {dashboardInfo.salesCount} {dashboardInfo.salesCount === 1 ? 'venda realizada' : 'vendas realizadas'}
                 </span>
                 {((dashboardInfo?.faturadoTitularSolo ?? 0) > 0 || (dashboardInfo?.faturadoComApoioTrainee ?? 0) > 0) && (
-                  <span className="text-[10px] text-purple-300 mt-1 block font-medium">
-                    Titular Solo: R$ {(dashboardInfo?.faturadoTitularSolo ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Com Apoio Trainee: R$ {(dashboardInfo?.faturadoComApoioTrainee ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
+                  <div className="text-[10px] mt-1.5 space-y-0.5 text-zinc-400">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-400">Titular Solo:</span>
+                      <span className="text-white font-mono font-medium">
+                        {dashboardInfo.qtdVendasSolo} un ({formatCurrency(dashboardInfo?.faturadoTitularSolo ?? 0)})
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-purple-300 font-medium">Com Trainee:</span>
+                      <span className="text-purple-300 font-mono font-bold">
+                        {dashboardInfo.qtdVendasComTrainee} un ({formatCurrency(dashboardInfo?.faturadoComApoioTrainee ?? 0)})
+                      </span>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -1965,70 +2014,184 @@ export default function ModalDesempenhoVendedor({
             </button>
 
             {extratoTraineeAberto && (
-              <div className="p-4 sm:p-6 overflow-x-auto animate-fade-in">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider text-[10px]">
-                      <th className="pb-3">Data</th>
-                      <th className="pb-3">Produto / Pedido</th>
-                      <th className="pb-3">Nome do Trainee</th>
-                      <th className="pb-3 text-right">Valor da Venda</th>
-                      <th className="pb-3 text-right text-purple-400">Comissão Trainee</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#222222]/50">
-                    {dashboardInfo.extratoVendasComTrainee.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center italic text-gray-600">
-                          Nenhuma venda com apoio de trainee registrada para {colaborador.nome} nesta competência ({dashboardInfo.mesReferencia}).
-                        </td>
-                      </tr>
-                    ) : (
-                      dashboardInfo.extratoVendasComTrainee.map((item, idx) => (
-                        <tr key={`${item.id}-${idx}`} className="hover:bg-purple-950/10 transition-colors">
-                          <td className="py-3 text-gray-400 font-mono">
-                            {new Date(item.data).toLocaleDateString('pt-BR')}
-                          </td>
-                          <td className="py-3">
-                            <div className="flex flex-col">
-                              <span className="font-semibold text-white">{item.produto}</span>
-                              {Boolean(item.imei) && (
-                                <span className="text-[10px] text-zinc-500 font-mono">IMEI: ...{String(item.imei).slice(-4)}</span>
-                              )}
+              <div className="p-4 sm:p-6 space-y-5 animate-fade-in">
+                {/* CARDS / RESUMO POR TRAINEE */}
+                {dashboardInfo.resumoPorTrainee && dashboardInfo.resumoPorTrainee.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                        Participação por Trainee ({dashboardInfo.resumoPorTrainee.length} participantes)
+                      </span>
+                      <span className="text-[10px] text-gray-500">
+                        Clique em um trainee para filtrar a listagem abaixo
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {dashboardInfo.resumoPorTrainee.map((trainee, tIdx) => {
+                        const isSelecionado = filtroTraineeSelecionado === trainee.nome;
+                        return (
+                          <div
+                            key={`trainee-card-${tIdx}`}
+                            onClick={() => setFiltroTraineeSelecionado(prev => prev === trainee.nome ? 'TODOS' : trainee.nome)}
+                            className={`p-3 rounded-xl border transition-all cursor-pointer select-none flex flex-col justify-between ${
+                              isSelecionado
+                                ? 'bg-purple-950/40 border-purple-500 shadow-md ring-1 ring-purple-500/50'
+                                : 'bg-[#111111] border-[#222222] hover:border-purple-800/60 hover:bg-[#16121D]'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-purple-900/50 text-purple-200 border border-purple-700/50 flex items-center justify-center font-bold text-[10px]">
+                                  {trainee.nome.slice(0, 2).toUpperCase()}
+                                </div>
+                                <div>
+                                  <span className="text-xs font-bold text-white block">
+                                    {trainee.nome}
+                                  </span>
+                                  <span className="text-[10px] text-purple-300 font-mono">
+                                    {trainee.qtdVendas} {trainee.qtdVendas === 1 ? 'venda com apoio' : 'vendas com apoio'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                                {trainee.percentualVolume.toFixed(1)}% do apoio
+                              </span>
                             </div>
-                          </td>
-                          <td className="py-3">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-bold bg-purple-950/40 text-purple-300 border border-purple-800/40">
-                              <Users size={11} className="text-purple-400" />
-                              {item.traineeNome}
-                            </span>
-                          </td>
-                          <td className="py-3 text-right font-mono font-bold text-white">
-                            {formatarMoeda(item.valorVenda)}
-                          </td>
-                          <td className="py-3 text-right font-mono font-bold text-purple-400">
-                            {formatarMoeda(item.comissaoTrainee)}
+
+                            <div className="mt-3 pt-2.5 border-t border-[#222222] flex items-center justify-between text-xs">
+                              <div>
+                                <span className="text-[9px] uppercase tracking-wider text-gray-500 block">Volume Faturado</span>
+                                <span className="font-mono font-bold text-white text-[11px]">
+                                  {formatarMoeda(trainee.volumeTotal)}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[9px] uppercase tracking-wider text-purple-400 block">Comissão Trainee</span>
+                                <span className="font-mono font-bold text-purple-300 text-[11px]">
+                                  {formatarMoeda(trainee.comissaoTotal)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* FILTROS RÁPIDOS EM PÍLULAS */}
+                {dashboardInfo.resumoPorTrainee && dashboardInfo.resumoPorTrainee.length > 1 && (
+                  <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-[#1C1C1C]">
+                    <span className="text-[11px] font-semibold text-gray-400 mr-1">Filtrar tabela:</span>
+                    <button
+                      type="button"
+                      onClick={() => setFiltroTraineeSelecionado('TODOS')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                        filtroTraineeSelecionado === 'TODOS'
+                          ? 'bg-[#6A0DAD] text-white shadow-sm'
+                          : 'bg-[#1A1A1A] text-gray-400 hover:text-white hover:bg-[#252525]'
+                      }`}
+                    >
+                      Todos ({dashboardInfo.extratoVendasComTrainee.length})
+                    </button>
+                    {dashboardInfo.resumoPorTrainee.map((tr, idx) => (
+                      <button
+                        key={`pill-${idx}`}
+                        type="button"
+                        onClick={() => setFiltroTraineeSelecionado(tr.nome)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                          filtroTraineeSelecionado === tr.nome
+                            ? 'bg-purple-900 text-purple-100 border border-purple-500 shadow-sm'
+                            : 'bg-[#1A1A1A] text-gray-400 hover:text-white hover:bg-[#252525]'
+                        }`}
+                      >
+                        <span>{tr.nome}</span>
+                        <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/40 text-purple-300">
+                          {tr.qtdVendas}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* TABELA DE VENDAS */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#222222] text-gray-500 font-bold uppercase tracking-wider text-[10px]">
+                        <th className="pb-3">Data</th>
+                        <th className="pb-3">Produto / Pedido</th>
+                        <th className="pb-3">Nome do Trainee</th>
+                        <th className="pb-3 text-right">Valor da Venda</th>
+                        <th className="pb-3 text-right text-purple-400">Comissão Trainee</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#222222]/50">
+                      {dashboardInfo.extratoVendasComTrainee.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center italic text-gray-600">
+                            Nenhuma venda com apoio de trainee registrada para {colaborador.nome} nesta competência ({dashboardInfo.mesReferencia}).
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                  {dashboardInfo.extratoVendasComTrainee.length > 0 && (
-                    <tfoot>
-                      <tr className="border-t border-[#333] font-bold text-xs bg-[#111]">
-                        <td colSpan={3} className="py-3 px-2 text-gray-300 uppercase tracking-wider text-[11px]">
-                          Totais de Vendas com Trainee
-                        </td>
-                        <td className="py-3 text-right font-mono text-white">
-                          {formatarMoeda(dashboardInfo.extratoVendasComTrainee.reduce((acc, cur) => acc + cur.valorVenda, 0))}
-                        </td>
-                        <td className="py-3 text-right font-mono text-purple-300">
-                          {formatarMoeda(dashboardInfo.totalComissaoGeradaParaTrainees)}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
+                      ) : (
+                        dashboardInfo.extratoVendasComTrainee
+                          .filter(item => filtroTraineeSelecionado === 'TODOS' || item.traineeNome === filtroTraineeSelecionado)
+                          .map((item, idx) => (
+                            <tr key={`${item.id}-${idx}`} className="hover:bg-purple-950/10 transition-colors">
+                              <td className="py-3 text-gray-400 font-mono">
+                                {new Date(item.data).toLocaleDateString('pt-BR')}
+                              </td>
+                              <td className="py-3">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-white">{item.produto}</span>
+                                  {Boolean(item.imei) && (
+                                    <span className="text-[10px] text-zinc-500 font-mono">IMEI: ...{String(item.imei).slice(-4)}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-bold bg-purple-950/40 text-purple-300 border border-purple-800/40">
+                                  <Users size={11} className="text-purple-400" />
+                                  {item.traineeNome}
+                                </span>
+                              </td>
+                              <td className="py-3 text-right font-mono font-bold text-white">
+                                {formatarMoeda(item.valorVenda)}
+                              </td>
+                              <td className="py-3 text-right font-mono font-bold text-purple-400">
+                                {formatarMoeda(item.comissaoTrainee)}
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                    {dashboardInfo.extratoVendasComTrainee.length > 0 && (() => {
+                      const vendasFiltradas = dashboardInfo.extratoVendasComTrainee.filter(
+                        item => filtroTraineeSelecionado === 'TODOS' || item.traineeNome === filtroTraineeSelecionado
+                      );
+                      const somaValor = vendasFiltradas.reduce((acc, cur) => acc + cur.valorVenda, 0);
+                      const somaComissao = vendasFiltradas.reduce((acc, cur) => acc + cur.comissaoTrainee, 0);
+
+                      return (
+                        <tfoot>
+                          <tr className="border-t border-[#333] font-bold text-xs bg-[#111]">
+                            <td colSpan={3} className="py-3 px-2 text-gray-300 uppercase tracking-wider text-[11px]">
+                              Total {filtroTraineeSelecionado !== 'TODOS' ? `(${filtroTraineeSelecionado})` : 'Geral de Vendas com Apoio'} ({vendasFiltradas.length} un)
+                            </td>
+                            <td className="py-3 text-right font-mono text-white">
+                              {formatarMoeda(somaValor)}
+                            </td>
+                            <td className="py-3 text-right font-mono text-purple-300">
+                              {formatarMoeda(somaComissao)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      );
+                    })()}
+                  </table>
+                </div>
               </div>
             )}
           </div>
