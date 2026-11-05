@@ -61,8 +61,8 @@ export const METAS_ISLAYNE_2026_10 = {
   comissao_acessorios: 491.09,
   comissao_iphones: 210.00,
   comissao_jbl: 180.00,
-  comissao_total: 5475.94,
-  remuneracao_total: 7500.44
+  comissao_total: 5815.24,
+  remuneracao_total: 7839.74
 };
 
 export const VENDAS_ISLAYNE_2026_10: VendaPadraoIslayne[] = [

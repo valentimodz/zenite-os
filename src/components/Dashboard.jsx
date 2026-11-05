@@ -18695,8 +18695,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         }
                       }}
                       className={`w-full rounded px-3 py-2 text-sm outline-none font-semibold transition-all ${isDonoOuAdmin
-                          ? 'bg-black border border-[#222222] focus:border-[#6A0DAD] text-white cursor-pointer'
-                          : 'bg-[#111111] border border-[#222222] text-gray-300 cursor-not-allowed opacity-80'
+                        ? 'bg-black border border-[#222222] focus:border-[#6A0DAD] text-white cursor-pointer'
+                        : 'bg-[#111111] border border-[#222222] text-gray-300 cursor-not-allowed opacity-80'
                         }`}
                       disabled={!isDonoOuAdmin || transfItens.length > 0}
                     >
@@ -20529,10 +20529,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 className="w-full bg-black border border-[#222222] focus:border-[#6A0DAD] rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
                                 {Array.from({ length: 18 }, (_, i) => i + 1).map((n) => (
-                                    <option key={n} value={n}>
-                                      {n}x
-                                    </option>
-                                  ))}
+                                  <option key={n} value={n}>
+                                    {n}x
+                                  </option>
+                                ))}
                               </select>
                             </div>
                           )}
@@ -20553,10 +20553,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                 className="w-full bg-black border border-primary/50 focus:border-primary rounded px-3 py-1.5 text-xs text-white outline-none font-mono font-bold"
                               >
                                 {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                                    <option key={n} value={n}>
-                                      {n}x
-                                    </option>
-                                  ))}
+                                  <option key={n} value={n}>
+                                    {n}x
+                                  </option>
+                                ))}
                               </select>
                             </div>
                           )}
@@ -26692,8 +26692,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider border ${fiscalAmbiente === '1'
-                                ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/40 shadow-sm shadow-emerald-950/50'
-                                : 'bg-purple-950/40 text-purple-300 border-purple-800/40'
+                              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/40 shadow-sm shadow-emerald-950/50'
+                              : 'bg-purple-950/40 text-purple-300 border-purple-800/40'
                               }`}>
                               {fiscalAmbiente === '1' ? '● SEFAZ: PRODUÇÃO OFICIAL' : '○ SEFAZ: HOMOLOGAÇÃO (TESTES)'}
                             </span>
@@ -26827,8 +26827,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                   value={fiscalAmbiente}
                                   onChange={(e) => setFiscalAmbiente(e.target.value)}
                                   className={`w-full bg-black border rounded-lg px-4 py-2.5 text-sm outline-none transition-all cursor-pointer font-bold ${fiscalAmbiente === '1'
-                                      ? 'border-emerald-500 text-emerald-400 focus:border-emerald-400'
-                                      : 'border-[#6A0DAD]/60 text-purple-300 focus:border-[#6A0DAD]'
+                                    ? 'border-emerald-500 text-emerald-400 focus:border-emerald-400'
+                                    : 'border-[#6A0DAD]/60 text-purple-300 focus:border-[#6A0DAD]'
                                     }`}
                                 >
                                   <option value="2">Homologação (Ambiente de Testes / Sem Valor Fiscal)</option>
@@ -29197,9 +29197,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                                       : (Number(sale.quantidade) || 1);
 
                                     // Verificação explícita de acessório
-                                    const isAcessorio = 
+                                    const isAcessorio =
                                       (sale.categoria || '').toLowerCase().includes('acess') ||
-                                      ['fone', 'cabo', 'carregador', 'soundgear', 'pelicula', 'capa', 'chip', 'controle'].some(k => 
+                                      ['fone', 'cabo', 'carregador', 'soundgear', 'pelicula', 'capa', 'chip', 'controle'].some(k =>
                                         (sale.produto_nome || sale.descricao || produtoNome || '').toLowerCase().includes(k)
                                       ) ||
                                       isAcessorioUtil(sale);

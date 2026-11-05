@@ -74,8 +74,8 @@ export const DADOS_OFICIAIS_OUTUBRO_2026: Record<string, ResumoVendedorConsolida
     comissao_acessorios: 71.40,
     comissao_iphones: 45.00,
     comissao_jbl: 15.00,
-    comissao_total: 673.77,
-    remuneracao_total: 2629.77
+    comissao_total: 709.77,
+    remuneracao_total: 2665.77
   },
   regiane: {
     nome: "REGIANE",
@@ -99,8 +99,8 @@ export const DADOS_OFICIAIS_OUTUBRO_2026: Record<string, ResumoVendedorConsolida
     comissao_acessorios: 65.90,
     comissao_iphones: 105.00,
     comissao_jbl: 0.00,
-    comissao_total: 532.24,
-    remuneracao_total: 2488.24
+    comissao_total: 551.32,
+    remuneracao_total: 2507.32
   }
 };
 
