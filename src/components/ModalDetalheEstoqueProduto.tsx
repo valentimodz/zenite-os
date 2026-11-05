@@ -109,6 +109,15 @@ export default function ModalDetalheEstoqueProduto({
   const corAtual = produto?.cor || produto?.cor_nome || 'Padrão';
   const precoBaseVenda = Number(produto?.preco_venda || produto?.preco || 0);
 
+  // Mapeamento de Filiais por ID para lookup rápido
+  const mapaFiliaisNome = useMemo(() => {
+    const mapa: { [key: string]: string } = {};
+    (filiais || []).forEach(f => {
+      mapa[String(f.id)] = f.nome;
+    });
+    return mapa;
+  }, [filiais]);
+
   // Resolução da filial real vinculada a este registro de produto
   const filialIdProdutoOrigem = propFilialId || produto?.filial_id || null;
   const filialNomeProdutoOrigem = (filialIdProdutoOrigem && mapaFiliaisNome[String(filialIdProdutoOrigem)]) ||
@@ -147,15 +156,6 @@ export default function ModalDetalheEstoqueProduto({
   const [novoImeiInput, setNovoImeiInput] = useState('');
   const [salvandoNovoImei, setSalvandoNovoImei] = useState(false);
   const [erroNovoImei, setErroNovoImei] = useState<string | null>(null);
-
-  // Mapeamento de Filiais por ID para lookup rápido
-  const mapaFiliaisNome = useMemo(() => {
-    const mapa: { [key: string]: string } = {};
-    (filiais || []).forEach(f => {
-      mapa[String(f.id)] = f.nome;
-    });
-    return mapa;
-  }, [filiais]);
 
   // Função para buscar e consolidar todos os itens/filiais/cores deste produto
   const carregarDetalhesEstoque = useCallback(async () => {
