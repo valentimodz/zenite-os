@@ -160,7 +160,16 @@ export async function fetchRankingColaboradoresMensal({
       profilesQuery = profilesQuery.eq('filial_id', filialId);
     }
 
-    const [colabRes, metasRes, regrasRes] = await Promise.all([
+    let viewQuery = supabase
+      .from('view_ranking_colaboradores_mensal')
+      .select('*')
+      .eq('competencia', competencia);
+
+    if (filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL') {
+      viewQuery = viewQuery.eq('filial_id', filialId);
+    }
+
+    const [colabRes, metasRes, regrasRes, viewRes] = await Promise.all([
       profilesQuery.then(r => r, () => ({ data: [] as any[], error: null })),
       supabase
         .from('metas')
@@ -171,10 +180,12 @@ export async function fetchRankingColaboradoresMensal({
         .from('regras_comissoes')
         .select('*')
         .eq('mes_referencia', competencia)
-        .then(r => r, () => ({ data: [] as any[], error: null }))
+        .then(r => r, () => ({ data: [] as any[], error: null })),
+      viewQuery.then(r => r, () => ({ data: [] as any[], error: null }))
     ]);
 
     const colaboradores = (colabRes.data || []) as any[];
+    const rowsView = (viewRes.data || []) as any[];
 
     // 3. Monta filtro opcional quando colaboradorId individual é solicitado
     let orClauses: string[] | undefined = undefined;
@@ -247,6 +258,27 @@ export async function fetchRankingColaboradoresMensal({
         filial_id: filialId && filialId.toUpperCase() !== 'TODAS' && filialId.toUpperCase() !== 'ALL' ? filialId : null
       });
     }
+
+    // Inclui também colaboradores que possam estar presentes na view PostgreSQL mas não na lista local
+    rowsView.forEach(rv => {
+      const rvNome = rv.colaborador ? String(rv.colaborador).trim() : '';
+      const rvId = rv.colaborador_id ? String(rv.colaborador_id).trim() : '';
+      if (rvNome) {
+        const jaExiste = colabsLista.some(c =>
+          (rvId && String(c.id).trim() === rvId) ||
+          nomesCorrespondem(rvNome, c.nome)
+        );
+        if (!jaExiste) {
+          colabsLista.push({
+            id: rvId || `nome_${normalizarNome(rvNome).replace(/\s+/g, '_')}`,
+            nome: rvNome,
+            role: 'VENDEDOR',
+            is_treinner: false,
+            filial_id: rv.filial_id || null
+          });
+        }
+      }
+    });
 
     if (!colaboradorId) {
       vendasLista.forEach(v => {
@@ -375,13 +407,50 @@ export async function fetchRankingColaboradoresMensal({
         competencia
       });
 
-      const filialEfetiva = colab.filial_id || vendasTotaisColab[0]?.filial_id || null;
-      const volumeExibicao = calc.volumeTotal > 0
-        ? calc.volumeTotal
-        : (isTrainee ? faturadoTrainee : calc.volumeTotal);
-      const transacoesEfetivas = calc.transacoes > 0
-        ? calc.transacoes
-        : (isTrainee && vendasComoTrainee.length > 0 ? vendasComoTrainee.length : 0);
+      // Busca registro oficial consolidado correspondente na view PostgreSQL (se existir)
+      const rowView = rowsView.find(v =>
+        (v.colaborador_id && String(v.colaborador_id) === colabId) ||
+        nomesCorrespondem(v.colaborador, nomeExibicao) ||
+        nomesCorrespondem(v.colaborador, colab.nome)
+      );
+
+      const filialEfetiva = colab.filial_id || rowView?.filial_id || vendasTotaisColab[0]?.filial_id || null;
+
+      // Prioridade absoluta para a View PostgreSQL consolidada conforme regra de negócio:
+      // Volume: rowView.volume_total_participado
+      // Boletos: rowView.total_boletos
+      // Comissão: rowView.comissao_acumulada
+      const volumeExibicao = rowView && Number(rowView.volume_total_participado || 0) > 0
+        ? Number(rowView.volume_total_participado)
+        : (calc.volumeTotal > 0
+          ? calc.volumeTotal
+          : (isTrainee ? faturadoTrainee : calc.volumeTotal));
+
+      const totalBoletosEfetivo = rowView && rowView.total_boletos !== undefined && rowView.total_boletos !== null
+        ? Number(rowView.total_boletos || 0)
+        : calc.totalBoletos;
+
+      const comissaoAcumuladaEfetiva = rowView && rowView.comissao_acumulada !== undefined && rowView.comissao_acumulada !== null
+        ? Number(rowView.comissao_acumulada || 0)
+        : calc.comissaoLiquida;
+
+      const totalAcessoriosEfetivo = rowView && rowView.total_acessorios !== undefined && rowView.total_acessorios !== null
+        ? Number(rowView.total_acessorios || 0)
+        : calc.totalAcessorios;
+
+      const transacoesEfetivas = rowView && Number(rowView.total_transacoes || 0) > 0
+        ? Number(rowView.total_transacoes)
+        : (calc.transacoes > 0
+          ? calc.transacoes
+          : (isTrainee && vendasComoTrainee.length > 0 ? vendasComoTrainee.length : 0));
+
+      const faturadoTitularEfetivo = rowView && rowView.faturado_titular !== undefined
+        ? Number(rowView.faturado_titular || 0)
+        : calc.volumeTotal;
+
+      const faturadoTraineeEfetivo = rowView && rowView.faturado_trainee !== undefined
+        ? Number(rowView.faturado_trainee || 0)
+        : faturadoTrainee;
 
       return {
         colaborador_id: colab.id,
@@ -389,20 +458,20 @@ export async function fetchRankingColaboradoresMensal({
         filial_id: filialEfetiva,
         competencia,
         total_transacoes: transacoesEfetivas,
-        faturado_titular: calc.volumeTotal,
-        faturado_trainee: faturadoTrainee,
+        faturado_titular: faturadoTitularEfetivo,
+        faturado_trainee: faturadoTraineeEfetivo,
         volume_total_participado: volumeExibicao,
-        ticket_medio: calc.ticketMedio > 0 ? calc.ticketMedio : (transacoesEfetivas > 0 ? volumeExibicao / transacoesEfetivas : 0),
-        total_boletos: calc.totalBoletos,
-        totalBoletos: calc.totalBoletos,
+        ticket_medio: transacoesEfetivas > 0 ? (volumeExibicao / transacoesEfetivas) : (calc.ticketMedio || 0),
+        total_boletos: totalBoletosEfetivo,
+        totalBoletos: totalBoletosEfetivo,
         totalBoletosBruto: calc.totalBoletosBruto,
-        total_acessorios: calc.totalAcessorios,
-        totalAcessorios: calc.totalAcessorios,
+        total_acessorios: totalAcessoriosEfetivo,
+        totalAcessorios: totalAcessoriosEfetivo,
         total_faturado_especiais: calc.totalFaturadoEspeciais,
         totalFaturadoEspeciais: calc.totalFaturadoEspeciais,
-        comissaoLiquida: calc.comissaoLiquida,
+        comissaoLiquida: comissaoAcumuladaEfetiva,
         comissaoTrainee: calc.comissaoTrainee,
-        comissao_acumulada: calc.comissaoLiquida,
+        comissao_acumulada: comissaoAcumuladaEfetiva,
         is_trainee: isTrainee,
         volume_exibicao: volumeExibicao,
         vendas_colaborador: vendasTotaisColab
@@ -448,9 +517,14 @@ export function useMetasRankings({
   });
 
   const invalidarERefetch = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: ['ranking-colaboradores-v3', competencia]
-    });
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: ['ranking-colaboradores-v3']
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['ranking-colaboradores']
+      })
+    ]);
     return queryResult.refetch();
   };
 
@@ -490,9 +564,14 @@ export const useMinhasMetasIndividual = ({
   });
 
   const invalidarERefetch = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: ['ranking-colaboradores', competencia]
-    });
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: ['ranking-colaboradores-v3']
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['ranking-colaboradores']
+      })
+    ]);
     return refetch();
   };
 

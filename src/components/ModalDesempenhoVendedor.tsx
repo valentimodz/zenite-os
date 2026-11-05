@@ -753,6 +753,28 @@ export default function ModalDesempenhoVendedor({
         // Enriquecimento opcional silencioso
       }
 
+      // Busca dados consolidados oficiais da view para conciliação direta
+      let rowViewOficial: any = null;
+      try {
+        let qView = supabase
+          .from('view_ranking_colaboradores_mensal')
+          .select('*')
+          .eq('competencia', competencia);
+
+        const { data: vRows } = await qView;
+        if (vRows && vRows.length > 0) {
+          rowViewOficial = vRows.find((r: any) =>
+            (isUuidValido && r.colaborador_id && String(r.colaborador_id) === vendedorId) ||
+            (vendedorNome && r.colaborador && (
+              r.colaborador.toUpperCase().includes(vendedorNome.toUpperCase()) ||
+              vendedorNome.toUpperCase().includes(r.colaborador.toUpperCase())
+            ))
+          );
+        }
+      } catch (e) {
+        console.warn('Erro ao consultar view_ranking_colaboradores_mensal no modal:', e);
+      }
+
       if (vendas) {
         const cargoNormalizado = String(colaborador?.cargo || (colaborador as any)?.funcao || '').toUpperCase().trim();
         const roleNormalizado = String(colaborador?.role || '').toUpperCase().trim();
@@ -799,13 +821,33 @@ export default function ModalDesempenhoVendedor({
           competencia
         });
 
-        // Atualiza os estados da tela com a fórmula unificada
-        setTotalVendas(resumoGeral.volumeTotal);
-        setQtdVendas(resumoGeral.transacoes);
-        setTicketMedio(resumoGeral.ticketMedio);
-        setComissoesAcumuladas(resumoGeral.comissaoLiquida);
-        setRealizadoBoletos(resumoGeral.totalBoletos);
-        setRealizadoAcessorios(resumoGeral.totalAcessorios);
+        // Atualiza os estados da tela priorizando a view PostgreSQL consolidada se existir
+        const volumeFinal = rowViewOficial && Number(rowViewOficial.volume_total_participado || 0) > 0
+          ? Number(rowViewOficial.volume_total_participado)
+          : resumoGeral.volumeTotal;
+
+        const transacoesFinal = rowViewOficial && Number(rowViewOficial.total_transacoes || 0) > 0
+          ? Number(rowViewOficial.total_transacoes)
+          : resumoGeral.transacoes;
+
+        const boletosFinal = rowViewOficial && rowViewOficial.total_boletos !== undefined && rowViewOficial.total_boletos !== null
+          ? Number(rowViewOficial.total_boletos)
+          : resumoGeral.totalBoletos;
+
+        const comissoesFinal = rowViewOficial && rowViewOficial.comissao_acumulada !== undefined && rowViewOficial.comissao_acumulada !== null
+          ? Number(rowViewOficial.comissao_acumulada)
+          : resumoGeral.comissaoLiquida;
+
+        const acessoriosFinal = rowViewOficial && rowViewOficial.total_acessorios !== undefined && rowViewOficial.total_acessorios !== null
+          ? Number(rowViewOficial.total_acessorios)
+          : resumoGeral.totalAcessorios;
+
+        setTotalVendas(volumeFinal);
+        setQtdVendas(transacoesFinal);
+        setTicketMedio(transacoesFinal > 0 ? volumeFinal / transacoesFinal : resumoGeral.ticketMedio);
+        setComissoesAcumuladas(comissoesFinal);
+        setRealizadoBoletos(boletosFinal);
+        setRealizadoAcessorios(acessoriosFinal);
         setVendasColaborador(vendasValidas as Venda[]);
         setVendasLocais(vendasValidas as any[]);
       }
@@ -958,11 +1000,27 @@ export default function ModalDesempenhoVendedor({
       competencia: mesAtivo || mesCompetencia
     });
 
-    const totalVendasGeral = desempenhoGeral.volumeTotal;
-    const salesCount = desempenhoGeral.transacoes;
-    const ticketMedioCalc = desempenhoGeral.ticketMedio;
-    const totalBoletos = desempenhoGeral.totalBoletos;
-    const totalAcessorios = desempenhoGeral.totalAcessorios;
+    // Prioridade oficial para os dados consolidados da View PostgreSQL
+    const totalVendasGeral = (dadosViewConsolidada?.volume_total_participado !== undefined && Number(dadosViewConsolidada.volume_total_participado) > 0)
+      ? Number(dadosViewConsolidada.volume_total_participado)
+      : (totalVendas > 0 ? totalVendas : desempenhoGeral.volumeTotal);
+
+    const salesCount = (dadosViewConsolidada?.total_transacoes !== undefined && Number(dadosViewConsolidada.total_transacoes) > 0)
+      ? Number(dadosViewConsolidada.total_transacoes)
+      : (qtdVendas > 0 ? qtdVendas : desempenhoGeral.transacoes);
+
+    const ticketMedioCalc = salesCount > 0
+      ? (totalVendasGeral / salesCount)
+      : (ticketMedio > 0 ? ticketMedio : desempenhoGeral.ticketMedio);
+
+    const totalBoletos = (dadosViewConsolidada?.total_boletos !== undefined && dadosViewConsolidada.total_boletos !== null)
+      ? Number(dadosViewConsolidada.total_boletos)
+      : (realizadoBoletos > 0 ? realizadoBoletos : desempenhoGeral.totalBoletos);
+
+    const totalAcessorios = (dadosViewConsolidada?.total_acessorios !== undefined && dadosViewConsolidada.total_acessorios !== null)
+      ? Number(dadosViewConsolidada.total_acessorios)
+      : (realizadoAcessorios > 0 ? realizadoAcessorios : desempenhoGeral.totalAcessorios);
+
     const totalAVista = desempenhoGeral.totalAVista;
     const progressoTotal = desempenhoGeral.progressoTotal;
     const progressoBoleto = desempenhoGeral.progressoBoleto;
@@ -975,9 +1033,12 @@ export default function ModalDesempenhoVendedor({
     const quantidadeItensEspeciais = desempenhoGeral.quantidadeItensEspeciais;
     const ticketMedioEspeciais = desempenhoGeral.ticketMedioEspeciais;
 
-    const totalComissoes = desempenhoGeral.comissaoLiquida;
-    const comissaoTitularExclusiva = desempenhoGeral.comissaoLiquida;
-    const totalComissaoComoTitular = desempenhoGeral.comissaoLiquida;
+    const totalComissoes = (dadosViewConsolidada?.comissao_acumulada !== undefined && dadosViewConsolidada.comissao_acumulada !== null && Number(dadosViewConsolidada.comissao_acumulada) > 0)
+      ? Number(dadosViewConsolidada.comissao_acumulada)
+      : (comissoesAcumuladas > 0 ? comissoesAcumuladas : desempenhoGeral.comissaoLiquida);
+
+    const comissaoTitularExclusiva = totalComissoes;
+    const totalComissaoComoTitular = totalComissoes;
     const totalComissaoComoTrainee = desempenhoGeral.comissaoTrainee;
     const totalComissaoGeradaParaTrainees = desempenhoGeral.comissaoTrainee;
 

@@ -287,20 +287,42 @@ export default function RankingVendedores({
         })
         : null;
 
-      const totalTransacoes = calc && calc.transacoes > 0
-        ? calc.transacoes
-        : Number(vr.total_transacoes || 0);
-      const volumeDestaque = calc && calc.volumeTotal > 0
-        ? calc.volumeTotal
-        : (isTrainee
-          ? (faturadoTrainee > 0 ? faturadoTrainee : volumeTotal)
-          : (faturadoTitular > 0 ? faturadoTitular : volumeTotal));
-      const ticketMedioConsistente = calc ? calc.ticketMedio : (totalTransacoes > 0 ? (volumeDestaque / totalTransacoes) : Number(vr.ticket_medio || 0));
-      const totalBoletos = calc ? calc.totalBoletos : Number(vr.totalBoletos ?? vr.total_boletos ?? 0);
-      const totalAcessorios = calc ? calc.totalAcessorios : Number(vr.totalAcessorios ?? vr.total_acessorios ?? 0);
-      const comissaoTitular = calc ? calc.comissaoLiquida : Number(vr.comissaoLiquida ?? vr.comissao_acumulada ?? 0);
+      const totalTransacoes = Number(vr.total_transacoes || 0) > 0
+        ? Number(vr.total_transacoes)
+        : (calc && calc.transacoes > 0 ? calc.transacoes : 0);
+
+      // Prioridade absoluta para o registro oficial consolidado vindo da View PostgreSQL
+      const volumeDestaque = Number(vr.volume_total_participado ?? vr.volume ?? 0) > 0
+        ? Number(vr.volume_total_participado ?? vr.volume)
+        : (calc && calc.volumeTotal > 0
+          ? calc.volumeTotal
+          : (isTrainee
+            ? (faturadoTrainee > 0 ? faturadoTrainee : volumeTotal)
+            : (faturadoTitular > 0 ? faturadoTitular : volumeTotal)));
+
+      const totalBoletos = (vr.total_boletos !== undefined && vr.total_boletos !== null && Number(vr.total_boletos) >= 0)
+        ? Number(vr.total_boletos)
+        : (vr.totalBoletos !== undefined && vr.totalBoletos !== null
+          ? Number(vr.totalBoletos)
+          : (calc ? calc.totalBoletos : 0));
+
+      const totalAcessorios = (vr.total_acessorios !== undefined && vr.total_acessorios !== null && Number(vr.total_acessorios) >= 0)
+        ? Number(vr.total_acessorios)
+        : (vr.totalAcessorios !== undefined && vr.totalAcessorios !== null
+          ? Number(vr.totalAcessorios)
+          : (calc ? calc.totalAcessorios : 0));
+
+      const comissaoTitular = (vr.comissao_acumulada !== undefined && vr.comissao_acumulada !== null && Number(vr.comissao_acumulada) > 0)
+        ? Number(vr.comissao_acumulada)
+        : (vr.comissaoLiquida !== undefined && vr.comissaoLiquida !== null && Number(vr.comissaoLiquida) > 0
+          ? Number(vr.comissaoLiquida)
+          : (calc ? calc.comissaoLiquida : Number(vr.comissaoLiquida ?? vr.comissao_acumulada ?? 0)));
+
       const comissaoTrainee = calc ? calc.comissaoTrainee : Number(vr.comissaoTrainee ?? 0);
       const comissaoTotal = comissaoTitular;
+      const ticketMedioConsistente = totalTransacoes > 0
+        ? (volumeDestaque / totalTransacoes)
+        : (calc ? calc.ticketMedio : Number(vr.ticket_medio || 0));
       const taxaEfetivaTitular = volumeDestaque > 0 ? (comissaoTotal / volumeDestaque) : 0.021;
 
       return {
