@@ -5,24 +5,37 @@ export default function ModalDetalhesVenda({ venda, onClose, onEmitirNfe }) {
     if (!venda) return null;
 
     // Blindagem e mapeamento para garantir que NUNCA fique vazio e NUNCA renderize um objeto direto
-    const clienteNome = (typeof venda.cliente_nome === 'string' && venda.cliente_nome)
-        || (typeof venda.cliente === 'string' && venda.cliente)
-        || venda.cliente?.nome
-        || venda.clientes?.nome
-        || 'Cliente não informado';
+    const clienteNome = (typeof venda.cliente_nome === 'string' && venda.cliente_nome.trim() && venda.cliente_nome.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente_nome.trim() : null)
+        || (typeof venda.cliente?.nome === 'string' && venda.cliente.nome.trim() ? venda.cliente.nome.trim() : null)
+        || (typeof venda.clientes?.nome === 'string' && venda.clientes.nome.trim() ? venda.clientes.nome.trim() : null)
+        || (typeof venda.cliente === 'string' && venda.cliente.trim() && venda.cliente.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente.trim() : null)
+        || (typeof venda.nome_cliente === 'string' && venda.nome_cliente.trim() ? venda.nome_cliente.trim() : null)
+        || venda.cliente_nome
+        || 'CONSUMIDOR FINAL';
 
-    const clienteCpf = (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj)
-        || (typeof venda.cpf === 'string' && venda.cpf)
-        || (typeof venda.cnpj === 'string' && venda.cnpj)
-        || venda.cliente?.cpf_cnpj
-        || venda.clientes?.cpf_cnpj
-        || 'Não informado';
+    const clienteCpf = (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj.trim() ? venda.cliente_cpf_cnpj.trim() : null)
+        || (typeof venda.cliente?.cpf_cnpj === 'string' && venda.cliente.cpf_cnpj.trim() ? venda.cliente.cpf_cnpj.trim() : null)
+        || (typeof venda.clientes?.cpf_cnpj === 'string' && venda.clientes.cpf_cnpj.trim() ? venda.clientes.cpf_cnpj.trim() : null)
+        || (typeof venda.cliente_cpf === 'string' && venda.cliente_cpf.trim() ? venda.cliente_cpf.trim() : null)
+        || (typeof venda.cliente?.cpf === 'string' && venda.cliente.cpf.trim() ? venda.cliente.cpf.trim() : null)
+        || (typeof venda.clientes?.cpf === 'string' && venda.clientes.cpf.trim() ? venda.clientes.cpf.trim() : null)
+        || (typeof venda.cpf === 'string' && venda.cpf.trim() ? venda.cpf.trim() : null)
+        || (typeof venda.cnpj === 'string' && venda.cnpj.trim() ? venda.cnpj.trim() : null)
+        || '';
 
-    const clienteEmail = (typeof venda.cliente_email === 'string' && venda.cliente_email)
-        || (typeof venda.email === 'string' && venda.email)
-        || venda.cliente?.email
-        || venda.clientes?.email
-        || 'Não informado';
+    const clienteTelefone = (typeof venda.cliente_telefone === 'string' && venda.cliente_telefone.trim() ? venda.cliente_telefone.trim() : null)
+        || (typeof venda.cliente?.telefone === 'string' && venda.cliente.telefone.trim() ? venda.cliente.telefone.trim() : null)
+        || (typeof venda.clientes?.telefone === 'string' && venda.clientes.telefone.trim() ? venda.clientes.telefone.trim() : null)
+        || (typeof venda.telefone === 'string' && venda.telefone.trim() ? venda.telefone.trim() : null)
+        || (typeof venda.telefone_cliente === 'string' && venda.telefone_cliente.trim() ? venda.telefone_cliente.trim() : null)
+        || '';
+
+    const clienteEmail = (typeof venda.cliente_email === 'string' && venda.cliente_email.trim() ? venda.cliente_email.trim() : null)
+        || (typeof venda.cliente?.email === 'string' && venda.cliente.email.trim() ? venda.cliente.email.trim() : null)
+        || (typeof venda.clientes?.email === 'string' && venda.clientes.email.trim() ? venda.clientes.email.trim() : null)
+        || (typeof venda.email === 'string' && venda.email.trim() ? venda.email.trim() : null)
+        || (typeof venda.email_cliente === 'string' && venda.email_cliente.trim() ? venda.email_cliente.trim() : null)
+        || '';
 
     const produtoNome = venda.produto_nome || venda.produtos_descricao || venda.descricao_produto || 'Produto não especificado';
     const imeiProduto = venda.imei || venda.imei_novo || venda.numero_imei || 'Sem IMEI';
@@ -53,8 +66,9 @@ export default function ModalDetalhesVenda({ venda, onClose, onEmitirNfe }) {
                         <div>
                             <span className="text-gray-500 font-bold text-xs flex items-center gap-1 mb-1"><User size={14} /> CLIENTE</span>
                             <p className="text-white font-medium">{clienteNome}</p>
-                            <p className="text-gray-400 text-xs">CPF/CNPJ: {clienteCpf}</p>
-                            <p className="text-gray-400 text-xs">E-mail: {clienteEmail}</p>
+                            {Boolean(clienteCpf) && <p className="text-gray-400 text-xs">CPF/CNPJ: {clienteCpf}</p>}
+                            {Boolean(clienteTelefone) && <p className="text-gray-400 text-xs">Telefone: {clienteTelefone}</p>}
+                            {Boolean(clienteEmail) && <p className="text-gray-400 text-xs">E-mail: {clienteEmail}</p>}
                         </div>
 
                         <div>

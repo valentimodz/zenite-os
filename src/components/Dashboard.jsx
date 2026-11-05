@@ -4246,14 +4246,20 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao,
             comissao_vendedor,
             produto_nome,
+            cliente_id,
             cliente_nome,
+            cliente_cpf,
+            cliente_cpf_cnpj,
+            cliente_telefone,
+            cliente_email,
             trainee_id,
             treener_id,
             trainee_nome,
             comissao_trainee,
             teve_participacao_trainee,
             filiais ( nome ),
-              itens_venda (
+            clientes:cliente_id ( id, nome, cpf, cpf_cnpj, telefone, email ),
+            itens_venda (
               id,
               produto_id,
               produto_nome,
@@ -4287,7 +4293,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao,
             comissao_vendedor,
             produto_nome,
+            cliente_id,
             cliente_nome,
+            cliente_cpf,
+            cliente_cpf_cnpj,
+            cliente_telefone,
+            cliente_email,
             trainee_id,
             treener_id,
             trainee_nome,
@@ -17237,14 +17248,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     // Se cliente_nome ainda estiver indefinido ou 'Consumidor Final', busca diretamente da tabela clientes
-    if (venda.cliente_id && (!venda.cliente_nome || venda.cliente_nome === 'Consumidor Final')) {
+    const clienteIdAlvo = venda.cliente_id || venda.cliente?.id || venda.clientes?.id;
+    const nomeAtualCliente = (venda.cliente_nome || venda.cliente?.nome || venda.clientes?.nome || '').trim().toLowerCase();
+    const semNomeValido = !nomeAtualCliente || nomeAtualCliente === 'consumidor final' || nomeAtualCliente === 'cliente não informado';
+
+    if (clienteIdAlvo && semNomeValido) {
       try {
         const { data: cData } = await supabase
           .from('clientes')
-          .select('nome, cpf, cpf_cnpj, telefone, email')
-          .eq('id', venda.cliente_id)
+          .select('id, nome, cpf, cpf_cnpj, telefone, email')
+          .eq('id', clienteIdAlvo)
           .maybeSingle();
         if (cData?.nome) {
+          venda.cliente_id = cData.id;
           venda.cliente_nome = cData.nome;
           venda.cliente_cpf = cData.cpf || cData.cpf_cnpj;
           venda.cliente_cpf_cnpj = cData.cpf_cnpj || cData.cpf;
@@ -17407,29 +17423,50 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       ];
     }
 
-    const clienteObj = clientes.find(c => String(c.id) === String(venda.cliente_id)) || null;
+    const clienteObj = clientes.find(c =>
+      (venda.cliente_id && String(c.id) === String(venda.cliente_id)) ||
+      (venda.cliente_cpf_cnpj && (c.cpf_cnpj === venda.cliente_cpf_cnpj || c.cpf === venda.cliente_cpf_cnpj))
+    ) || null;
 
     const clienteNomeFinal =
-      venda.clientes?.nome ||
-      venda.cliente?.nome ||
-      (typeof venda.cliente_nome === 'string' && venda.cliente_nome && venda.cliente_nome !== 'Consumidor Final' ? venda.cliente_nome : null) ||
-      clienteObj?.nome ||
-      (typeof venda.cliente === 'string' ? venda.cliente : null) ||
-      venda.nome_cliente ||
+      (typeof venda.cliente_nome === 'string' && venda.cliente_nome.trim() && venda.cliente_nome.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente_nome.trim() : null) ||
+      (typeof venda.cliente?.nome === 'string' && venda.cliente.nome.trim() ? venda.cliente.nome.trim() : null) ||
+      (typeof venda.clientes?.nome === 'string' && venda.clientes.nome.trim() ? venda.clientes.nome.trim() : null) ||
+      (typeof clienteObj?.nome === 'string' && clienteObj.nome.trim() ? clienteObj.nome.trim() : null) ||
+      (typeof venda.cliente === 'string' && venda.cliente.trim() && venda.cliente.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente.trim() : null) ||
+      (typeof venda.nome_cliente === 'string' && venda.nome_cliente.trim() ? venda.nome_cliente.trim() : null) ||
       venda.cliente_nome ||
-      'Consumidor Final';
+      'CONSUMIDOR FINAL';
 
     const clienteCpfCnpjFinal =
+      venda.cliente_cpf_cnpj ||
+      venda.cliente?.cpf_cnpj ||
+      venda.clientes?.cpf_cnpj ||
       venda.cliente_cpf ||
       venda.cliente?.cpf ||
-      venda.cliente?.cpf_cnpj ||
-      venda.cliente_cpf_cnpj ||
-      venda.cpf ||
-      venda.cpf_cliente ||
-      venda.clientes?.cpf_cnpj ||
       venda.clientes?.cpf ||
       clienteObj?.cpf_cnpj ||
       clienteObj?.cpf ||
+      venda.cpf ||
+      venda.cpf_cliente ||
+      '';
+
+    const clienteTelefoneFinal =
+      (typeof venda.cliente_telefone === 'string' && venda.cliente_telefone.trim() ? venda.cliente_telefone.trim() : null) ||
+      (typeof venda.cliente?.telefone === 'string' && venda.cliente.telefone.trim() ? venda.cliente.telefone.trim() : null) ||
+      (typeof venda.clientes?.telefone === 'string' && venda.clientes.telefone.trim() ? venda.clientes.telefone.trim() : null) ||
+      (typeof clienteObj?.telefone === 'string' && clienteObj.telefone.trim() ? clienteObj.telefone.trim() : null) ||
+      (typeof venda.telefone === 'string' && venda.telefone.trim() ? venda.telefone.trim() : null) ||
+      (typeof venda.telefone_cliente === 'string' && venda.telefone_cliente.trim() ? venda.telefone_cliente.trim() : null) ||
+      '';
+
+    const clienteEmailFinal =
+      (typeof venda.cliente_email === 'string' && venda.cliente_email.trim() ? venda.cliente_email.trim() : null) ||
+      (typeof venda.cliente?.email === 'string' && venda.cliente.email.trim() ? venda.cliente.email.trim() : null) ||
+      (typeof venda.clientes?.email === 'string' && venda.clientes.email.trim() ? venda.clientes.email.trim() : null) ||
+      (typeof clienteObj?.email === 'string' && clienteObj.email.trim() ? clienteObj.email.trim() : null) ||
+      (typeof venda.email === 'string' && venda.email.trim() ? venda.email.trim() : null) ||
+      (typeof venda.email_cliente === 'string' && venda.email_cliente.trim() ? venda.email_cliente.trim() : null) ||
       '';
 
     const dadosRecibo = {
@@ -17447,16 +17484,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       cliente_nome: clienteNomeFinal,
       cliente_cpf_cnpj: clienteCpfCnpjFinal,
       cliente_cpf: clienteCpfCnpjFinal,
-      cliente_email: (typeof venda.cliente_email === 'string' && venda.cliente_email)
-        || clienteObj?.email
-        || venda.cliente?.email
-        || venda.clientes?.email
-        || '',
-      cliente_telefone: (typeof venda.cliente_telefone === 'string' && venda.cliente_telefone)
-        || clienteObj?.telefone
-        || venda.cliente?.telefone
-        || venda.clientes?.telefone
-        || '',
+      cliente_email: clienteEmailFinal,
+      cliente_telefone: clienteTelefoneFinal,
       obs_garantia: venda.obs_garantia || venda.observacoes || '',
       itens: itensMapeados,
       valor_total: valorTotalNum,
@@ -30997,24 +31026,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                   (venda.cliente_cpf_cnpj && (c.cpf_cnpj === venda.cliente_cpf_cnpj || c.cpf === venda.cliente_cpf_cnpj))
                 );
 
-                // Ordem de resolução: venda.cliente_nome || venda.clientes?.nome || 'CONSUMIDOR FINAL'
+                // Ordem de resolução: venda.cliente_nome || venda.cliente?.nome || venda.clientes?.nome || 'CONSUMIDOR FINAL'
                 const nomeCliente =
+                  (typeof venda.cliente_nome === 'string' && venda.cliente_nome.trim() && venda.cliente_nome.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente_nome.trim() : null) ||
+                  (typeof venda.cliente?.nome === 'string' && venda.cliente.nome.trim() ? venda.cliente.nome.trim() : null) ||
+                  (typeof venda.clientes?.nome === 'string' && venda.clientes.nome.trim() ? venda.clientes.nome.trim() : null) ||
+                  (typeof clienteObjRecibo?.nome === 'string' && clienteObjRecibo.nome.trim() ? clienteObjRecibo.nome.trim() : null) ||
+                  (typeof venda.cliente === 'string' && venda.cliente.trim() && venda.cliente.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente.trim() : null) ||
+                  (typeof venda.nome_cliente === 'string' && venda.nome_cliente.trim() ? venda.nome_cliente.trim() : null) ||
                   venda.cliente_nome ||
-                  venda.clientes?.nome ||
-                  venda.cliente?.nome ||
-                  clienteObjRecibo?.nome ||
                   'CONSUMIDOR FINAL';
 
                 const clienteDocBruto =
+                  venda.cliente_cpf_cnpj ||
+                  venda.cliente?.cpf_cnpj ||
+                  venda.clientes?.cpf_cnpj ||
                   venda.cliente_documento ||
                   venda.cliente_cpf ||
-                  venda.cliente_cpf_cnpj ||
-                  venda.clientes?.cpf ||
-                  venda.clientes?.cpf_cnpj ||
                   venda.cliente?.cpf ||
                   venda.cliente?.cnpj ||
-                  clienteObjRecibo?.cpf ||
+                  venda.clientes?.cpf ||
                   clienteObjRecibo?.cpf_cnpj ||
+                  clienteObjRecibo?.cpf ||
+                  venda.cpf ||
+                  venda.cpf_cliente ||
                   '';
 
                 const mascararDocumento = (doc) => {
@@ -31032,22 +31067,22 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 const clienteCpfCnpj = mascararDocumento(clienteDocBruto);
 
                 const clienteTelefone =
-                  venda.cliente_telefone ||
-                  venda.telefone ||
-                  venda.telefone_cliente ||
-                  venda.cliente?.telefone ||
-                  venda.clientes?.telefone ||
-                  clienteObjRecibo?.telefone ||
+                  (typeof venda.cliente_telefone === 'string' && venda.cliente_telefone.trim() ? venda.cliente_telefone.trim() : null) ||
+                  (typeof venda.cliente?.telefone === 'string' && venda.cliente.telefone.trim() ? venda.cliente.telefone.trim() : null) ||
+                  (typeof venda.clientes?.telefone === 'string' && venda.clientes.telefone.trim() ? venda.clientes.telefone.trim() : null) ||
+                  (typeof clienteObjRecibo?.telefone === 'string' && clienteObjRecibo.telefone.trim() ? clienteObjRecibo.telefone.trim() : null) ||
+                  (typeof venda.telefone === 'string' && venda.telefone.trim() ? venda.telefone.trim() : null) ||
+                  (typeof venda.telefone_cliente === 'string' && venda.telefone_cliente.trim() ? venda.telefone_cliente.trim() : null) ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.telefone ||
                   '';
 
                 const clienteEmail =
-                  venda.cliente_email ||
-                  venda.email ||
-                  venda.email_cliente ||
-                  venda.cliente?.email ||
-                  venda.clientes?.email ||
-                  clienteObjRecibo?.email ||
+                  (typeof venda.cliente_email === 'string' && venda.cliente_email.trim() ? venda.cliente_email.trim() : null) ||
+                  (typeof venda.cliente?.email === 'string' && venda.cliente.email.trim() ? venda.cliente.email.trim() : null) ||
+                  (typeof venda.clientes?.email === 'string' && venda.clientes.email.trim() ? venda.clientes.email.trim() : null) ||
+                  (typeof clienteObjRecibo?.email === 'string' && clienteObjRecibo.email.trim() ? clienteObjRecibo.email.trim() : null) ||
+                  (typeof venda.email === 'string' && venda.email.trim() ? venda.email.trim() : null) ||
+                  (typeof venda.email_cliente === 'string' && venda.email_cliente.trim() ? venda.email_cliente.trim() : null) ||
                   (clientes || []).find(c => String(c.id) === String(venda.cliente_id))?.email ||
                   '';
 
@@ -31251,16 +31286,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <div className="flex justify-between">
                               <span className="text-zinc-400 print:text-black uppercase text-[9px] font-bold">CLIENTE:</span>
                               <span className="text-zinc-100 print:text-black font-bold uppercase text-right max-w-[180px] truncate">
-                                {venda.cliente_nome || venda.clientes?.nome || 'CONSUMIDOR FINAL'}
+                                {nomeCliente}
                               </span>
                             </div>
-                            {clienteCpfCnpj && (
+                            {Boolean(clienteCpfCnpj) && (
                               <div className="flex justify-between text-[11px] text-zinc-400 print:text-black">
                                 <span>CPF/CNPJ:</span>
                                 <span>{clienteCpfCnpj}</span>
                               </div>
                             )}
-                            {clienteTelefone && (
+                            {Boolean(clienteTelefone) && (
                               <div className="flex justify-between text-[10px] text-zinc-400 print:text-black">
                                 <span>Tel:</span>
                                 <span>{clienteTelefone}</span>
@@ -31432,15 +31467,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             <p className="font-bold text-sm print:text-xs text-black">
                               {nomeCliente}
                             </p>
-                            <p className="text-xs print:text-[10px] text-black">
-                              <strong className="font-bold">CPF/CNPJ:</strong> {clienteCpfCnpj || 'Não informado'}
-                            </p>
-                            {clienteTelefone && (
+                            {Boolean(clienteCpfCnpj) && (
+                              <p className="text-xs print:text-[10px] text-black">
+                                <strong className="font-bold">CPF/CNPJ:</strong> {clienteCpfCnpj}
+                              </p>
+                            )}
+                            {Boolean(clienteTelefone) && (
                               <p className="text-xs print:text-[10px] text-black">
                                 <strong className="font-bold">Telefone:</strong> {clienteTelefone}
                               </p>
                             )}
-                            {clienteEmail && (
+                            {Boolean(clienteEmail) && (
                               <p className="text-xs print:text-[10px] text-black">
                                 <strong className="font-bold">E-mail:</strong> {clienteEmail}
                               </p>
