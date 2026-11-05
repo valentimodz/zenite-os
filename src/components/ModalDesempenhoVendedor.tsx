@@ -52,6 +52,7 @@ import {
 import { gerarVendasIslayne202610 } from '../utils/dadosVendasIslayne';
 import { gerarVendasGisele202610 } from '../utils/dadosVendasGisele';
 import { gerarVendasOficiaisOutubro } from '../utils/dadosVendasFolhasOutubro';
+import { isColaboradorMarlon, gerarVendasMarlon202610, METAS_MARLON_2026_10 } from '../utils/dadosVendasMarlon';
 
 export { calcularDesempenhoGeral, calcularMetasColaborador, calcularDesempenhoColaborador };
 
@@ -765,6 +766,10 @@ export default function ModalDesempenhoVendedor({
         if (vRows && vRows.length > 0) {
           rowViewOficial = vRows.find((r: any) =>
             (isUuidValido && r.colaborador_id && String(r.colaborador_id) === vendedorId) ||
+            (vendedorId && String(vendedorId).startsWith('nome_') && (
+              r.colaborador?.toUpperCase().includes(String(vendedorId).replace(/^nome_/, '').replace(/_/g, ' ').toUpperCase()) ||
+              String(vendedorId).replace(/^nome_/, '').replace(/_/g, ' ').toUpperCase().includes(r.colaborador?.toUpperCase())
+            )) ||
             (vendedorNome && r.colaborador && (
               r.colaborador.toUpperCase().includes(vendedorNome.toUpperCase()) ||
               vendedorNome.toUpperCase().includes(r.colaborador.toUpperCase())
@@ -894,52 +899,63 @@ export default function ModalDesempenhoVendedor({
     const isAmanda = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('AMANDA');
     const isRegiane = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('REGIANE');
     const isPamela = String(targetVendedorNome || colaborador?.nome || '').toUpperCase().includes('PAMELA');
+    const isMarlon = isColaboradorMarlon(targetVendedorNome || colaborador?.nome);
 
     const metaBoleto = Number(metaBanco?.meta_boleto) > 0
       ? Number(metaBanco?.meta_boleto)
-      : (isPamela
-        ? 125000
-        : (isTrainee
-          ? (Number(metaBanco?.meta_trainee_boleto) || 35000)
-          : (objetivoBoleto > 0 ? objetivoBoleto : 67500)));
+      : (isMarlon
+        ? METAS_MARLON_2026_10.meta_boleto
+        : (isPamela
+          ? 125000
+          : (isTrainee
+            ? (Number(metaBanco?.meta_trainee_boleto) || 35000)
+            : (objetivoBoleto > 0 ? objetivoBoleto : 67500))));
 
     const metaAcessorios = Number(metaBanco?.meta_acessorios) > 0
       ? Number(metaBanco?.meta_acessorios)
-      : (isPamela
-        ? 8000
-        : (isTrainee
-          ? 5000
-          : (objetivoAcessorios > 0 ? objetivoAcessorios : 8000)));
+      : (isMarlon
+        ? METAS_MARLON_2026_10.meta_acessorios
+        : (isPamela
+          ? 8000
+          : (isTrainee
+            ? 5000
+            : (objetivoAcessorios > 0 ? objetivoAcessorios : 8000))));
 
     const metaSuperBoleto = Number(metaBanco?.super_meta_boleto ?? 0) > 0
       ? Number(metaBanco?.super_meta_boleto)
-      : (isPamela
-        ? 145000
-        : (isTrainee
-          ? 45000
-          : (superMetaBoleto > 0 ? superMetaBoleto : 87000)));
+      : (isMarlon
+        ? METAS_MARLON_2026_10.super_meta_boleto
+        : (isPamela
+          ? 145000
+          : (isTrainee
+            ? 45000
+            : (superMetaBoleto > 0 ? superMetaBoleto : 87000))));
 
     const metaSuperAcessorios = Number(metaBanco?.super_meta_acessorios ?? 0) > 0
       ? Number(metaBanco?.super_meta_acessorios)
-      : (isPamela
-        ? 15000
-        : (isTrainee
-          ? 7500
-          : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000)));
+      : (isMarlon
+        ? METAS_MARLON_2026_10.super_meta_acessorios
+        : (isPamela
+          ? 15000
+          : (isTrainee
+            ? 7500
+            : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000))));
 
     const metaTotal = Number(metaBanco?.valor_meta ?? 0) > 0
       ? Number(metaBanco?.valor_meta)
-      : (isIslayne && metaTotalCombinada <= 77500
-        ? 250766.70
-        : (isPamela
-          ? 133000.00
-          : (isGisele
-            ? 40000.00
-            : (isSena
-              ? 75500.00
-              : (isAmanda || isRegiane
+      : (isMarlon
+        ? METAS_MARLON_2026_10.valor_meta
+        : (isIslayne && metaTotalCombinada <= 77500
+          ? 250766.70
+          : (isPamela
+            ? 133000.00
+            : (isGisele
+              ? 40000.00
+              : (isSena
                 ? 75500.00
-                : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios)))))));
+                : (isAmanda || isRegiane
+                  ? 75500.00
+                  : (metaTotalCombinada > 0 ? metaTotalCombinada : (metaBoleto + metaAcessorios))))))));
 
     // Fallback em cascata para que 'sales' nunca fique vazio se houver vendas disponíveis
     // Garantindo que, se vendasColaborador/vendasLocais foram carregadas diretamente da query da filial ativa, elas tenham prioridade absoluta
@@ -982,6 +998,8 @@ export default function ModalDesempenhoVendedor({
       vendasParaCalculo = gerarVendasOficiaisOutubro('amanda', targetVendedorId || undefined);
     } else if (isRegiane && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
       vendasParaCalculo = gerarVendasOficiaisOutubro('regiane', targetVendedorId || undefined);
+    } else if (isMarlon && (mesAtivo === '2026-10' || mesCompetencia === '2026-10')) {
+      vendasParaCalculo = gerarVendasMarlon202610(targetVendedorId || undefined, colaboradorFilialId);
     }
 
     const sales = (vendasParaCalculo || []) as any[];
