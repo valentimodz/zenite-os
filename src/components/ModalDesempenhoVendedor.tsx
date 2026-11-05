@@ -869,7 +869,7 @@ export default function ModalDesempenhoVendedor({
           ? 5000
           : (objetivoAcessorios > 0 ? objetivoAcessorios : 8000)));
 
-    const metaSuperBoleto = Number(metaBanco?.super_meta_boleto) > 0
+    const metaSuperBoleto = Number(metaBanco?.super_meta_boleto ?? 0) > 0
       ? Number(metaBanco?.super_meta_boleto)
       : (isPamela
         ? 145000
@@ -877,7 +877,7 @@ export default function ModalDesempenhoVendedor({
           ? 45000
           : (superMetaBoleto > 0 ? superMetaBoleto : 87000)));
 
-    const metaSuperAcessorios = Number(metaBanco?.super_meta_acessorios) > 0
+    const metaSuperAcessorios = Number(metaBanco?.super_meta_acessorios ?? 0) > 0
       ? Number(metaBanco?.super_meta_acessorios)
       : (isPamela
         ? 15000
@@ -885,7 +885,7 @@ export default function ModalDesempenhoVendedor({
           ? 7500
           : (superMetaAcessorios > 0 ? superMetaAcessorios : 15000)));
 
-    const metaTotal = Number(metaBanco?.valor_meta) > 0
+    const metaTotal = Number(metaBanco?.valor_meta ?? 0) > 0
       ? Number(metaBanco?.valor_meta)
       : (isIslayne && metaTotalCombinada <= 77500
         ? 250766.70
