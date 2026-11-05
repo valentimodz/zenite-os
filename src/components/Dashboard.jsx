@@ -15598,6 +15598,35 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             throw itemInsertErr;
           }
 
+          // Registrar movimentação de saída em 'estoque_movimentacoes' com payload estritamente compatível
+          try {
+            const vendaIdFormatada = rpcRes.venda_id ? `Venda #${String(rpcRes.venda_id).slice(0, 8)}` : 'Venda PDV';
+            const observacaoTexto = `${vendaIdFormatada} - Saída de ${Number(item.quantidade || 1)}x ${item.produto?.nome || 'Produto'}${item.imei ? ` (IMEI: ${item.imei})` : ''}`;
+
+            const movPayloadSaida = {
+              empresa_id: obterUuidPuro(empresaId || profile?.empresa_id || activeEmpresaId),
+              produto_id: produtoIdFinalParaRpc,
+              imei: (item.produto?.tipo === 'CELULAR' || tenantSettings.enable_imei) ? (item.imei || null) : null,
+              tipo_movimentacao: 'SAIDA_VENDA',
+              filial_origem_id: obterUuidPuro(activeFilialId || profile?.filial_id),
+              filial_destino_id: null,
+              quantidade: Number(item.quantidade || 1),
+              observacao: observacaoTexto,
+              status: 'CONCLUIDO',
+              criado_por: obterUuidPuro(session?.user?.id || profile?.id || effectiveVendedorId || vendedor_id)
+            };
+
+            const { error: movSaidaErr } = await supabase
+              .from('estoque_movimentacoes')
+              .insert(movPayloadSaida);
+
+            if (movSaidaErr) {
+              console.warn('Aviso ao registrar estoque_movimentacoes para a venda:', movSaidaErr);
+            }
+          } catch (errMovSaida) {
+            console.warn('Aviso ao registrar log de saída em estoque_movimentacoes:', errMovSaida);
+          }
+
           if (pdvListaPagamentos.length > 0) {
             for (const pag of pdvListaPagamentos) {
               const mapMetodo = {

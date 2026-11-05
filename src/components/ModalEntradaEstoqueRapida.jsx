@@ -485,16 +485,16 @@ export default function ModalEntradaEstoqueRapida({
         throw errImeis;
       }
 
-      // 3. Registrar movimentação em 'estoque_movimentacoes' com tipo 'ENTRADA' (se tabela existir)
+      // 3. Registrar movimentação em 'estoque_movimentacoes' com tipo 'ENTRADA_AQUISICAO'
       try {
         const obsTexto = `Entrada Rápida: ${nomeAparelho} (${qtdTotal} un. - IMEIs: ${imeisBipados.map(i => i.imei).join(', ')}) - Filial: ${nomeFilialDestino}`;
         const movPayload = {
           empresa_id: targetEmpresaId,
+          filial_origem_id: null,
           filial_destino_id: selectedFilialId,
-          filial_id: selectedFilialId,
           produto_id: targetProdutoId,
           quantidade: qtdTotal,
-          tipo_movimentacao: 'ENTRADA',
+          tipo_movimentacao: 'ENTRADA_AQUISICAO',
           criado_por: userId,
           status: 'CONCLUIDO',
           observacao: obsTexto
@@ -505,10 +505,7 @@ export default function ModalEntradaEstoqueRapida({
           .insert(movPayload);
 
         if (errMov) {
-          await supabase.from('estoque_movimentacoes').insert({
-            ...movPayload,
-            tipo_movimentacao: 'ENTRADA_AQUISICAO'
-          });
+          console.warn('Aviso ao registrar log de movimentação de estoque:', errMov);
         }
       } catch (errMov) {
         console.warn('Aviso ao registrar log de movimentação de estoque:', errMov);
