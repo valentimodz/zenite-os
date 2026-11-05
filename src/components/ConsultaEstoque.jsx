@@ -864,9 +864,11 @@ export default function ConsultaEstoque({
                 {/* 1. Cabeçalho do Card (Clicável para abrir Detalhes / Ajuste) */}
                 <div
                   onClick={() => {
+                    const itemFisicoFilial = (item.itensFisicos || []).find(p => String(p.filial_id) === String(item.filialIdCard)) || null;
                     const targetProd = {
-                      ...(item.itensFisicos?.[0] || item),
-                      filial_id: item.filialIdCard || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
+                      ...(itemFisicoFilial || item.itensFisicos?.[0] || item),
+                      id: itemFisicoFilial?.id || (item.itensFisicos?.[0]?.id) || item.id,
+                      filial_id: item.filialIdCard || (itemFisicoFilial?.filial_id) || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
                       filialNome: item.filialNomeCard
                     };
                     setProdutoSelecionadoModal(targetProd);
@@ -974,9 +976,11 @@ export default function ConsultaEstoque({
                     <button
                       type="button"
                       onClick={() => {
+                        const itemFisicoFilial = (item.itensFisicos || []).find(p => String(p.filial_id) === String(item.filialIdCard)) || null;
                         const targetProd = {
-                          ...(item.itensFisicos?.[0] || item),
-                          filial_id: item.filialIdCard || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
+                          ...(itemFisicoFilial || item.itensFisicos?.[0] || item),
+                          id: itemFisicoFilial?.id || (item.itensFisicos?.[0]?.id) || item.id,
+                          filial_id: item.filialIdCard || (itemFisicoFilial?.filial_id) || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
                           filialNome: item.filialNomeCard
                         };
                         setProdutoSelecionadoModal(targetProd);

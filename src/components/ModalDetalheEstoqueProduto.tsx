@@ -109,6 +109,14 @@ export default function ModalDetalheEstoqueProduto({
   const corAtual = produto?.cor || produto?.cor_nome || 'Padrão';
   const precoBaseVenda = Number(produto?.preco_venda || produto?.preco || 0);
 
+  // Resolução da filial real vinculada a este registro de produto
+  const filialIdProdutoOrigem = propFilialId || produto?.filial_id || null;
+  const filialNomeProdutoOrigem = (filialIdProdutoOrigem && mapaFiliaisNome[String(filialIdProdutoOrigem)]) ||
+    produto?.filialNome ||
+    produto?.filial_nome ||
+    (produto?.filiais?.nome) ||
+    null;
+
   const categoriaNome = String(produto?.categoria || produto?.categoria_nome || categoria || '').toUpperCase();
   const nomeProdutoTexto = String(produtoNome || '').toUpperCase();
 
@@ -535,7 +543,8 @@ export default function ModalDetalheEstoqueProduto({
       const { error: updErr } = await supabase
         .from('produtos')
         .update(payloadUpdate)
-        .eq('id', idAlvo);
+        .eq('id', idAlvo)
+        .eq('filial_id', filialIdNumerico);
 
       if (updErr) throw updErr;
 
@@ -822,6 +831,12 @@ export default function ModalDetalheEstoqueProduto({
                 <span className="text-xs font-mono font-bold text-gray-500 uppercase tracking-wider">
                   ID: {produtoId}
                 </span>
+                {filialNomeProdutoOrigem && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-cyan-950/40 text-cyan-300 border border-cyan-800/50">
+                    <Store size={10} />
+                    {filialNomeProdutoOrigem}
+                  </span>
+                )}
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-[#6A0DAD]/20 text-purple-300 border border-[#6A0DAD]/40">
                   <Tag size={10} />
                   {categoria}
