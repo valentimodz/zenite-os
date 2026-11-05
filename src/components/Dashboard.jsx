@@ -4258,7 +4258,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao_trainee,
             teve_participacao_trainee,
             filiais ( nome ),
-            clientes:cliente_id ( id, nome, cpf, cpf_cnpj, telefone, email ),
             itens_venda (
               id,
               produto_id,
@@ -4305,7 +4304,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             comissao_trainee,
             teve_participacao_trainee,
             filiais ( nome ),
-            usuarios:vendedor_id ( id, nome ),
             itens_venda ( * )
           `;
 
@@ -4327,6 +4325,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
           // Se a query principal com produtos falhar, tentar com fallback simples de itens_venda
           if (error) {
+            console.error('Erro vendas:', error);
             console.warn('[Dashboard] Query de vendas com produtos falhou, tentando fallback com itens_venda (*):', error);
             let qFb = supabase
               .from('vendas')
@@ -4341,6 +4340,25 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             if (!resFb.error && resFb.data) {
               data = resFb.data;
               error = null;
+            } else if (resFb.error) {
+              console.error('Erro vendas no fallback com itens_venda:', resFb.error);
+              // Fallback definitivo sem relações/joins: select('*') limpo
+              let qClean = supabase
+                .from('vendas')
+                .select('*')
+                .order('created_at', { ascending: false });
+              if (dtInicio) qClean = qClean.gte('created_at', dtInicio);
+              if (dtFim) qClean = qClean.lte('created_at', dtFim);
+              if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+                qClean = qClean.eq('empresa_id', empresaId);
+              }
+              const resClean = await qClean;
+              if (!resClean.error && resClean.data) {
+                data = resClean.data;
+                error = null;
+              } else if (resClean.error) {
+                console.error('Erro vendas no select(*):', resClean.error);
+              }
             }
           }
 
@@ -4348,7 +4366,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (!data || data.length === 0 || error) {
             let fallbackQ = supabase
               .from('vendas')
-              .select(vendasSelectStr)
+              .select(vendasSelectFallbackStr)
               .order('created_at', { ascending: false })
               .limit(100);
 
@@ -4358,11 +4376,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
             let { data: fallbackSales, error: fbRecentErr } = await fallbackQ;
             if (fbRecentErr) {
+              console.error('Erro vendas fallback recentes:', fbRecentErr);
               const resRecentFb = await supabase
                 .from('vendas')
-                .select(vendasSelectFallbackStr)
+                .select('*')
                 .order('created_at', { ascending: false })
                 .limit(100);
+              if (resRecentFb.error) {
+                console.error('Erro vendas select(*) recentes:', resRecentFb.error);
+              }
               fallbackSales = resRecentFb.data;
             }
             if (fallbackSales && fallbackSales.length > 0) {
@@ -4427,43 +4449,46 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         let fData = null;
         let fErr = null;
 
-        // Tentar ordenar por created_at
+        // Tentar select completo e limpo com colunas oficiais de fechamentos
         try {
-          const res1 = await supabase
+          let qFech = supabase
             .from('fechamentos')
-            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
-            .eq('empresa_id', empresaId)
+            .select('*');
+
+          if (empresaId && empresaId !== 'MASTER' && empresaId !== 'undefined' && empresaId !== 'null') {
+            qFech = qFech.eq('empresa_id', empresaId);
+          }
+
+          const res1 = await qFech
             .order('created_at', { ascending: false })
             .limit(30);
+
           fData = res1.data;
           fErr = res1.error;
+          if (fErr) {
+            console.error('Erro fechamentos:', fErr);
+          }
         } catch (e1) {
           fErr = e1;
+          console.error('Erro fechamentos catch e1:', e1);
         }
 
-        // Se falhou (ex: erro 400 por não existir coluna created_at), tentar ordenando por id
+        // Se falhou (ex: erro 400 por ordenação ou filtro), tentar select('*') sem filtro restritivo
         if (fErr || !fData) {
           try {
             const res2 = await supabase
               .from('fechamentos')
-              .select('id, empresa_id, filial_id, status, total_financiadoras, total_dinheiro_gaveta')
-              .eq('empresa_id', empresaId)
-              .order('id', { ascending: false })
+              .select('*')
               .limit(30);
             fData = res2.data;
             fErr = res2.error;
+            if (fErr) {
+              console.error('Erro fechamentos no select(*) fallback:', fErr);
+            }
           } catch (e2) {
             fErr = e2;
+            console.error('Erro fechamentos catch e2:', e2);
           }
-        }
-
-        // Fallback resiliente sem ordenação estrita
-        if (fErr || !fData) {
-          const fallbackF = await supabase
-            .from('fechamentos')
-            .select('*')
-            .limit(30);
-          fData = fallbackF.data || [];
         }
 
         const enrichedFech = (fData || []).map(f => {
@@ -4474,9 +4499,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           };
         });
 
-        fechRes = { data: enrichedFech, error: null };
+        fechRes = { data: enrichedFech, error: fErr || null };
       } catch (err) {
-        console.warn('[Dashboard] Falha na query de fechamentos:', err);
+        console.error('Erro fechamentos:', err);
       }
 
       let imeisRes = { data: [], error: null };
@@ -7499,35 +7524,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         try {
           const res1 = await supabase
             .from('fechamentos')
-            .select('id, empresa_id, filial_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .select('*')
             .eq('empresa_id', profile.empresa_id)
             .order('created_at', { ascending: false })
             .limit(30);
           newFechamentos = res1.data;
           fetchErr = res1.error;
+          if (fetchErr) console.error('Erro fechamentos após ajuste:', fetchErr);
         } catch (e1) {
           fetchErr = e1;
-        }
-
-        if (fetchErr || !newFechamentos) {
-          try {
-            const res2 = await supabase
-              .from('fechamentos')
-              .select('id, empresa_id, filial_id, status, total_financiadoras, total_dinheiro_gaveta')
-              .eq('empresa_id', profile.empresa_id)
-              .order('id', { ascending: false })
-              .limit(30);
-            newFechamentos = res2.data;
-            fetchErr = res2.error;
-          } catch (e2) {
-            fetchErr = e2;
-          }
+          console.error('Erro fechamentos catch e1 após ajuste:', e1);
         }
 
         if (fetchErr || !newFechamentos) {
           const fbRes = await supabase.from('fechamentos')
             .select('*')
             .limit(30);
+          if (fbRes.error) console.error('Erro fechamentos fallback após ajuste:', fbRes.error);
           newFechamentos = fbRes.data || [];
         }
 
@@ -7772,35 +7785,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         try {
           const res1 = await supabase
             .from('fechamentos')
-            .select('id, empresa_id, filial_id, vendedor_id, caixa_id, created_at, status, total_financiadoras, total_dinheiro_gaveta')
+            .select('*')
             .eq('empresa_id', targetEmpresaId)
             .order('created_at', { ascending: false })
             .limit(30);
           newFechamentos = res1.data;
           fetchErr = res1.error;
+          if (fetchErr) console.error('Erro fechamentos após fechar caixa:', fetchErr);
         } catch (e1) {
           fetchErr = e1;
-        }
-
-        if (fetchErr || !newFechamentos) {
-          try {
-            const res2 = await supabase
-              .from('fechamentos')
-              .select('id, empresa_id, filial_id, vendedor_id, caixa_id, status')
-              .eq('empresa_id', targetEmpresaId)
-              .order('id', { ascending: false })
-              .limit(30);
-            newFechamentos = res2.data;
-            fetchErr = res2.error;
-          } catch (e2) {
-            fetchErr = e2;
-          }
+          console.error('Erro fechamentos catch e1 após fechar caixa:', e1);
         }
 
         if (fetchErr || !newFechamentos) {
           const fbRes = await supabase.from('fechamentos')
             .select('*')
             .limit(30);
+          if (fbRes.error) console.error('Erro fechamentos fallback após fechar caixa:', fbRes.error);
           newFechamentos = fbRes.data || [];
         }
 
