@@ -34,6 +34,7 @@ interface ModalDetalheEstoqueProdutoProps {
   onDeleteProduto?: (produto: any) => Promise<any>;
   onRefresh?: () => void;
   onSuccess?: () => void;
+  onAtualizar?: () => void;
   produtoId?: string | number;
 }
 
@@ -79,8 +80,15 @@ export default function ModalDetalheEstoqueProduto({
   onUpdateProdutoField,
   onDeleteProduto,
   onRefresh,
-  onSuccess
+  onSuccess,
+  onAtualizar
 }: ModalDetalheEstoqueProdutoProps) {
+  // Notificador unificado de sucesso / atualização para o componente pai
+  const dispararAtualizacao = useCallback(() => {
+    if (onRefresh) onRefresh();
+    if (onSuccess) onSuccess();
+    if (onAtualizar) onAtualizar();
+  }, [onRefresh, onSuccess, onAtualizar]);
   const [loading, setLoading] = useState(false);
   const [produtosIrmaos, setProdutosIrmaos] = useState<ItemProdutoDetalhado[]>([]);
   const [abaAtiva, setAbaAtiva] = useState<'filiais' | 'variacoes'>('filiais');
@@ -470,7 +478,7 @@ export default function ModalDetalheEstoqueProduto({
       // Atualiza estado local de todos os itens do produto
       setProdutosIrmaos(prev => prev.map(p => ({ ...p, preco: novoValor, preco_venda: novoValor })));
       setEditandoPrecoGeral(false);
-      if (onRefresh) onRefresh();
+      dispararAtualizacao();
     } catch (err) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao salvar preço geral:', err);
     } finally {
@@ -530,6 +538,8 @@ export default function ModalDetalheEstoqueProduto({
       }
     }
 
+    let idSalvo = idAlvo;
+
     if (idAlvo) {
       // Registro real existente (UPSERT lógico -> UPDATE direto no ID único)
       const payloadUpdate: any = {};
@@ -547,17 +557,6 @@ export default function ModalDetalheEstoqueProduto({
         .eq('filial_id', filialIdNumerico);
 
       if (updErr) throw updErr;
-
-      return {
-        ...item,
-        id: String(idAlvo),
-        filial_id: String(filialIdNumerico),
-        quantidade: qtdFinal,
-        preco: precoFinal,
-        preco_venda: precoFinal,
-        cor: corFinal,
-        isSynthetic: false
-      };
     } else {
       // Não existe no banco: INSERT do registro com filial e variação definidas
       const payloadInsert: any = {
@@ -602,30 +601,41 @@ export default function ModalDetalheEstoqueProduto({
           .single();
 
         if (insFbErr) throw insFbErr;
-
-        return {
-          ...item,
-          id: String(insFallback.id),
-          filial_id: String(filialIdNumerico),
-          quantidade: qtdFinal,
-          preco: precoFinal,
-          preco_venda: precoFinal,
-          cor: corFinal,
-          isSynthetic: false
-        };
+        idSalvo = insFallback.id;
+      } else {
+        idSalvo = inserted.id;
       }
-
-      return {
-        ...item,
-        id: String(inserted.id),
-        filial_id: String(filialIdNumerico),
-        quantidade: qtdFinal,
-        preco: precoFinal,
-        preco_venda: precoFinal,
-        cor: corFinal,
-        isSynthetic: false
-      };
     }
+
+    // Registrar log em estoque_movimentacoes caso tenha havido alteração na quantidade
+    if (novosValores.quantidade !== undefined && empresaIdReal) {
+      try {
+        const delta = qtdFinal - (item.quantidade || 0);
+        const tipoMov = delta >= 0 ? 'AJUSTE_ENTRADA' : 'AJUSTE_SAIDA';
+        const payloadMov: any = {
+          empresa_id: empresaIdReal,
+          produto_id: idSalvo,
+          tipo_movimentacao: tipoMov,
+          quantidade: Math.abs(delta) || 1,
+          filial_origem_id: filialIdNumerico,
+          observacao: `Ajuste manual de estoque via painel: de ${item.quantidade || 0} para ${qtdFinal} un`
+        };
+        await supabase.from('estoque_movimentacoes').insert(payloadMov);
+      } catch (movErr) {
+        console.warn('[ModalDetalheEstoqueProduto] Aviso ao registrar movimentação de estoque:', movErr);
+      }
+    }
+
+    return {
+      ...item,
+      id: String(idSalvo),
+      filial_id: String(filialIdNumerico),
+      quantidade: qtdFinal,
+      preco: precoFinal,
+      preco_venda: precoFinal,
+      cor: corFinal,
+      isSynthetic: false
+    };
   };
 
   // 2. AÇÃO: Salvar Edição Inline de Item (Preço, Cor ou Quantidade)
@@ -669,7 +679,7 @@ export default function ModalDetalheEstoqueProduto({
       setItemEditandoId(null);
       setCampoEditando(null);
       setValorEditando('');
-      if (onRefresh) onRefresh();
+      dispararAtualizacao();
     } catch (err) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao salvar edição inline:', err);
     } finally {
@@ -688,7 +698,7 @@ export default function ModalDetalheEstoqueProduto({
         if (!existe) return [...prev, itemAtualizado];
         return prev.map(p => (p.id === item.id ? itemAtualizado : p));
       });
-      if (onRefresh) onRefresh();
+      dispararAtualizacao();
     } catch (err) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao ajustar quantidade rápida:', err);
     }
@@ -770,7 +780,7 @@ export default function ModalDetalheEstoqueProduto({
 
       setNovoImeiInput('');
       setItemParaAdicionarImei(null);
-      if (onRefresh) onRefresh();
+      dispararAtualizacao();
     } catch (err: any) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao cadastrar novo IMEI:', err);
       setErroNovoImei(err?.message || 'Erro inesperado ao cadastrar IMEI.');
@@ -801,7 +811,7 @@ export default function ModalDetalheEstoqueProduto({
 
       setProdutosIrmaos(prev => prev.filter(p => p.id !== item.id));
       setItemParaExcluir(null);
-      if (onRefresh) onRefresh();
+      dispararAtualizacao();
     } catch (err) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao excluir item:', err);
     } finally {

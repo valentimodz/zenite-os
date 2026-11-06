@@ -1216,6 +1216,10 @@ export default function ConsultaEstoque({
             // Recarrega os dados de estoque atualizados após salvar a edição
             carregarDadosEstoque();
           }}
+          onAtualizar={() => {
+            // Callback adicional para recarregamento imediato
+            carregarDadosEstoque();
+          }}
           onTransferir={() => {
             setProdutoSelecionadoModal(null);
             if (onNavigateToTransferencias) {
