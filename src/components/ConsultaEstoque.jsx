@@ -355,11 +355,14 @@ export default function ConsultaEstoque({
 
       // Inicializa todas as filiais cadastradas com 0
       listaFiliais.forEach(f => {
-        saldosFiliaisMap.set(String(f.id), {
-          filial_id: String(f.id),
-          filial_nome: f.nome,
-          quantidade: 0
-        });
+        const fId = String(f.id || '').trim();
+        if (fId) {
+          saldosFiliaisMap.set(fId, {
+            filial_id: fId,
+            filial_nome: f.nome,
+            quantidade: 0
+          });
+        }
       });
 
       if (item.isCelular) {
@@ -371,11 +374,19 @@ export default function ConsultaEstoque({
         if (imeisDoItem.length > 0) {
           qtdRede = imeisDoItem.length;
           imeisDoItem.forEach(im => {
-            const fId = String(im.filial_id || '');
-            if (saldosFiliaisMap.has(fId)) {
-              saldosFiliaisMap.get(fId).quantidade += 1;
-            } else if (fId) {
-              const filObj = listaFiliais.find(f => String(f.id) === fId);
+            const fId = String(im.filial_id || '').trim();
+            if (!fId) return;
+
+            let entry = saldosFiliaisMap.get(fId);
+            if (!entry) {
+              const matchedKey = Array.from(saldosFiliaisMap.keys()).find(k => k.toLowerCase() === fId.toLowerCase());
+              if (matchedKey) entry = saldosFiliaisMap.get(matchedKey);
+            }
+
+            if (entry) {
+              entry.quantidade += 1;
+            } else {
+              const filObj = listaFiliais.find(f => String(f.id || '').toLowerCase() === fId.toLowerCase());
               saldosFiliaisMap.set(fId, {
                 filial_id: fId,
                 filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
@@ -384,71 +395,57 @@ export default function ConsultaEstoque({
             }
           });
         } else {
-          // Fallback para quantidade numérica direta em produtos com deduplicação rigorosa por filial e variação (cor)
-          const vistosPorFilialVariacao = new Map();
-          // Ordena priorizando registros mais recentes (maior id ou updated_at)
-          const ordenados = [...item.itensFisicos].sort((a, b) => {
-            const timeA = new Date(a.updated_at || a.created_at || 0).getTime();
-            const timeB = new Date(b.updated_at || b.created_at || 0).getTime();
-            if (timeB !== timeA) return timeB - timeA;
-            return String(b.id || '').localeCompare(String(a.id || ''));
-          });
-
-          ordenados.forEach(p => {
-            const fId = String(p.filial_id || '');
+          // Fallback para celulares sem IMEIs físicos: soma direta das quantidades de cada filial
+          (item.itensFisicos || []).forEach(p => {
+            const fId = String(p.filial_id || '').trim();
             if (!fId) return;
-            const corKey = String(p.cor || 'padrao').trim().toLowerCase();
-            const chave = `${fId}_${corKey}`;
 
-            // Deduplicação: se já consideramos esta mesma filial e cor, não soma linha duplicada antiga
-            if (!vistosPorFilialVariacao.has(chave)) {
-              vistosPorFilialVariacao.set(chave, p);
-              const q = Number(p.quantidade || 0);
-              qtdRede += q;
-              if (saldosFiliaisMap.has(fId)) {
-                saldosFiliaisMap.get(fId).quantidade += q;
-              } else {
-                const filObj = listaFiliais.find(f => String(f.id) === fId);
-                saldosFiliaisMap.set(fId, {
-                  filial_id: fId,
-                  filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
-                  quantidade: q
-                });
-              }
-            }
-          });
-        }
-      } else {
-        // Acessórios / Gerais: deduplica registros duplicados da mesma filial e variação (cor), somando apenas saldos válidos
-        const vistosPorFilialVariacao = new Map();
-        const ordenados = [...item.itensFisicos].sort((a, b) => {
-          const timeA = new Date(a.updated_at || a.created_at || 0).getTime();
-          const timeB = new Date(b.updated_at || b.created_at || 0).getTime();
-          if (timeB !== timeA) return timeB - timeA;
-          return String(b.id || '').localeCompare(String(a.id || ''));
-        });
-
-        ordenados.forEach(p => {
-          const fId = String(p.filial_id || '');
-          if (!fId) return;
-          const corKey = String(p.cor || 'padrao').trim().toLowerCase();
-          const chave = `${fId}_${corKey}`;
-
-          // Se já computamos essa filial e variação, ignoramos registros duplicados/antigos da mesma filial
-          if (!vistosPorFilialVariacao.has(chave)) {
-            vistosPorFilialVariacao.set(chave, p);
             const q = Number(p.quantidade || 0);
             qtdRede += q;
-            if (saldosFiliaisMap.has(fId)) {
-              saldosFiliaisMap.get(fId).quantidade += q;
+
+            let entry = saldosFiliaisMap.get(fId);
+            if (!entry) {
+              const matchedKey = Array.from(saldosFiliaisMap.keys()).find(k => k.toLowerCase() === fId.toLowerCase());
+              if (matchedKey) entry = saldosFiliaisMap.get(matchedKey);
+            }
+
+            if (entry) {
+              entry.quantidade += q;
             } else {
-              const filObj = listaFiliais.find(f => String(f.id) === fId);
+              const filObj = listaFiliais.find(f => String(f.id || '').toLowerCase() === fId.toLowerCase());
               saldosFiliaisMap.set(fId, {
                 filial_id: fId,
                 filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
                 quantidade: q
               });
             }
+          });
+        }
+      } else {
+        // Acessórios / Gerais (CHIP, capas, películas, etc.):
+        // Lê diretamente a coluna 'quantidade' dos registros de cada filial
+        (item.itensFisicos || []).forEach(p => {
+          const fId = String(p.filial_id || '').trim();
+          if (!fId) return;
+
+          const q = Number(p.quantidade || 0);
+          qtdRede += q;
+
+          let entry = saldosFiliaisMap.get(fId);
+          if (!entry) {
+            const matchedKey = Array.from(saldosFiliaisMap.keys()).find(k => k.toLowerCase() === fId.toLowerCase());
+            if (matchedKey) entry = saldosFiliaisMap.get(matchedKey);
+          }
+
+          if (entry) {
+            entry.quantidade += q;
+          } else {
+            const filObj = listaFiliais.find(f => String(f.id || '').toLowerCase() === fId.toLowerCase());
+            saldosFiliaisMap.set(fId, {
+              filial_id: fId,
+              filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
+              quantidade: q
+            });
           }
         });
       }
@@ -472,12 +469,31 @@ export default function ConsultaEstoque({
     const lista = [];
     const deveDesdobrarTodasFiliais = filialSelecionada === 'TODAS';
 
+    const getSaldoFilial = (prod, filialId) => {
+      const fIdClean = String(filialId || '').trim().toLowerCase();
+      if (!fIdClean) return 0;
+
+      // 1º Tenta encontrar no detalhamentoPorFilial com correspondência case-insensitive
+      const entry = (prod.detalhamentoPorFilial || []).find(df => String(df.filial_id || '').trim().toLowerCase() === fIdClean);
+      if (entry && typeof entry.quantidade === 'number') {
+        return entry.quantidade;
+      }
+
+      // 2º Fallback direto somando de prod.itensFisicos caso a filial não estivesse na lista inicial
+      const registros = (prod.itensFisicos || []).filter(p => String(p.filial_id || '').trim().toLowerCase() === fIdClean);
+      if (registros.length > 0) {
+        return registros.reduce((sum, p) => sum + Number(p.quantidade || 0), 0);
+      }
+
+      return 0;
+    };
+
     produtosComSaldosPorFilial.forEach(prod => {
       if (deveDesdobrarTodasFiliais) {
         // Se temos lista de filiais da rede, desdobra 1 card para cada filial
         if (listaFiliais.length > 0) {
           listaFiliais.forEach(f => {
-            const saldoFilial = prod.detalhamentoPorFilial.find(df => String(df.filial_id) === String(f.id))?.quantidade || 0;
+            const saldoFilial = getSaldoFilial(prod, f.id);
             const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
 
             lista.push({
@@ -509,9 +525,9 @@ export default function ConsultaEstoque({
         }
       } else {
         // Exibe somente para a filial ativa selecionada
-        const fObj = listaFiliais.find(f => String(f.id) === String(filialSelecionada));
+        const fObj = listaFiliais.find(f => String(f.id).trim().toLowerCase() === String(filialSelecionada).trim().toLowerCase());
         const fNome = fObj ? fObj.nome : 'Filial Selecionada';
-        const saldoFilial = prod.detalhamentoPorFilial.find(df => String(df.filial_id) === String(filialSelecionada))?.quantidade || 0;
+        const saldoFilial = getSaldoFilial(prod, filialSelecionada);
         const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
 
         lista.push({

@@ -481,10 +481,10 @@ export async function fetchRankingColaboradoresMensal({
     // Se for listagem geral do ranking, exibe colaboradores com vendas no período
     const filtrados = colaboradorId
       ? resultado.filter(r =>
-          String(r.colaborador_id) === String(colaboradorId) ||
-          nomesCorrespondem(r.colaborador, colaboradorId) ||
-          (String(colaboradorId).startsWith('nome_') && nomesCorrespondem(r.colaborador, String(colaboradorId).replace(/^nome_/, '').replace(/_/g, ' ')))
-        )
+        String(r.colaborador_id) === String(colaboradorId) ||
+        nomesCorrespondem(r.colaborador, colaboradorId) ||
+        (String(colaboradorId).startsWith('nome_') && nomesCorrespondem(r.colaborador, String(colaboradorId).replace(/^nome_/, '').replace(/_/g, ' ')))
+      )
       : resultado.filter(r => r.total_transacoes > 0 || r.volume_exibicao > 0 || r.faturado_trainee > 0 || (r.comissaoTrainee && r.comissaoTrainee > 0));
 
     // Ordena do maior para o menor faturamento
