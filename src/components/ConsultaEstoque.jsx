@@ -102,7 +102,10 @@ export default function ConsultaEstoque({
   }, []);
 
   // 4. Carregar Dados do Supabase com Resiliência (.select('*'))
-  const carregarDadosEstoque = useCallback(async (forcedEmpresaId = null) => {
+  const carregarDadosEstoque = useCallback(async (forcedEmpresaId = null, force = false) => {
+    if (force) {
+      isFetchingRef.current = false;
+    }
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     if (isMountedRef.current) setLoading(true);
@@ -330,8 +333,9 @@ export default function ConsultaEstoque({
         itemExistente.itensFisicos.push(prod);
         if (!itemExistente.sku && prod.sku) itemExistente.sku = prod.sku;
         if (!itemExistente.codigo_barras && prod.codigo_barras) itemExistente.codigo_barras = prod.codigo_barras;
-        if (Number(prod.preco || prod.preco_venda || 0) > 0 && itemExistente.preco === 0) {
-          itemExistente.preco = Number(prod.preco || prod.preco_venda || 0);
+        const prodPreco = Number(prod.preco || prod.preco_venda || 0);
+        if (prodPreco > 0) {
+          itemExistente.preco = prodPreco;
         }
       }
     });
@@ -496,8 +500,13 @@ export default function ConsultaEstoque({
             const saldoFilial = getSaldoFilial(prod, f.id);
             const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
 
+            // Preço específico da filial se houver item físico nessa filial
+            const itemFisicoFilial = (prod.itensFisicos || []).find(p => String(p.filial_id) === String(f.id));
+            const precoFilial = Number(itemFisicoFilial?.preco_venda || itemFisicoFilial?.preco || prod.preco || 0);
+
             lista.push({
               ...prod,
+              preco: precoFilial,
               cardKey: `${prod.id}_${f.id}`,
               filialIdCard: String(f.id),
               filialNomeCard: f.nome,
@@ -512,8 +521,12 @@ export default function ConsultaEstoque({
             const saldoFilial = df.quantidade || 0;
             const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
 
+            const itemFisicoFilial = (prod.itensFisicos || []).find(p => String(p.filial_id) === String(df.filial_id));
+            const precoFilial = Number(itemFisicoFilial?.preco_venda || itemFisicoFilial?.preco || prod.preco || 0);
+
             lista.push({
               ...prod,
+              preco: precoFilial,
               cardKey: `${prod.id}_${df.filial_id}`,
               filialIdCard: String(df.filial_id),
               filialNomeCard: df.filial_nome,
@@ -530,8 +543,12 @@ export default function ConsultaEstoque({
         const saldoFilial = getSaldoFilial(prod, filialSelecionada);
         const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
 
+        const itemFisicoFilial = (prod.itensFisicos || []).find(p => String(p.filial_id) === String(filialSelecionada));
+        const precoFilial = Number(itemFisicoFilial?.preco_venda || itemFisicoFilial?.preco || prod.preco || 0);
+
         lista.push({
           ...prod,
+          preco: precoFilial,
           cardKey: `${prod.id}_${filialSelecionada}`,
           filialIdCard: String(filialSelecionada),
           filialNomeCard: fNome,
@@ -1210,15 +1227,15 @@ export default function ConsultaEstoque({
           isOpen={!!produtoSelecionadoModal}
           onClose={() => setProdutoSelecionadoModal(null)}
           onRefresh={() => {
-            carregarDadosEstoque();
+            carregarDadosEstoque(null, true);
           }}
           onSuccess={() => {
             // Recarrega os dados de estoque atualizados após salvar a edição
-            carregarDadosEstoque();
+            carregarDadosEstoque(null, true);
           }}
           onAtualizar={() => {
             // Callback adicional para recarregamento imediato
-            carregarDadosEstoque();
+            carregarDadosEstoque(null, true);
           }}
           onTransferir={() => {
             setProdutoSelecionadoModal(null);

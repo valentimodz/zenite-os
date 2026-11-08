@@ -473,6 +473,26 @@ export default function ModalDetalheEstoqueProduto({
           .from('produtos')
           .update({ preco: novoValor, preco_venda: novoValor })
           .ilike('nome', produtoNome.trim());
+
+        // Também atualiza na tabela produtos_catalogo para que a consulta de catálogo não retorne o preço antigo
+        const targetEmpresaId = produto?.empresa_id || null;
+        try {
+          let queryCat = supabase
+            .from('produtos_catalogo')
+            .update({ preco: novoValor, preco_venda: novoValor })
+            .ilike('nome', produtoNome.trim());
+          if (targetEmpresaId) queryCat = queryCat.eq('empresa_id', targetEmpresaId);
+          await queryCat;
+        } catch (eCat) {
+          try {
+            let fallbackCat = supabase
+              .from('produtos_catalogo')
+              .update({ preco: novoValor })
+              .ilike('nome', produtoNome.trim());
+            if (targetEmpresaId) fallbackCat = fallbackCat.eq('empresa_id', targetEmpresaId);
+            await fallbackCat;
+          } catch (_) {}
+        }
       }
 
       // Atualiza estado local de todos os itens do produto
@@ -648,6 +668,27 @@ export default function ModalDetalheEstoqueProduto({
         const novoValor = parseFloat(String(valorEditando).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
         if (!isNaN(novoValor) && novoValor >= 0) {
           const itemAtualizado = await persistirEstoqueFilial(item, { preco: novoValor });
+          
+          // Sincroniza também produtos_catalogo com o novo preço
+          const targetEmpresaId = produto?.empresa_id || null;
+          try {
+            let qCat = supabase
+              .from('produtos_catalogo')
+              .update({ preco: novoValor, preco_venda: novoValor })
+              .ilike('nome', produtoNome.trim());
+            if (targetEmpresaId) qCat = qCat.eq('empresa_id', targetEmpresaId);
+            await qCat;
+          } catch (eCat) {
+            try {
+              let fCat = supabase
+                .from('produtos_catalogo')
+                .update({ preco: novoValor })
+                .ilike('nome', produtoNome.trim());
+              if (targetEmpresaId) fCat = fCat.eq('empresa_id', targetEmpresaId);
+              await fCat;
+            } catch (_) {}
+          }
+
           setProdutosIrmaos(prev => {
             const existe = prev.some(p => p.id === item.id);
             if (!existe) return [...prev, itemAtualizado];
