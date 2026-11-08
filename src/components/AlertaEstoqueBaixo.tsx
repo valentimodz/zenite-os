@@ -132,19 +132,7 @@ export default function AlertaEstoqueBaixo({
 
     setLoading(true);
     try {
-      // 1. Tentar chamar a RPC dedicada 'obter_alertas_estoque_baixo'
-      const { data: rpcData, error: rpcError } = await supabase.rpc('obter_alertas_estoque_baixo', {
-        p_limite_minimo: limiteMinimo,
-        p_filial_id: filialAtivaId || null
-      });
-
-      if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
-        setAlertas(rpcData);
-        setLoading(false);
-        return;
-      }
-
-      // 2. Fallback resiliente: consulta direta na tabela 'produtos' agrupando por quantidade crítica
+      // 1. Consulta direta na tabela 'produtos' com join em filiais e imeis
       let query = supabase
         .from('produtos')
         .select(`
@@ -200,13 +188,23 @@ export default function AlertaEstoqueBaixo({
         });
 
         setAlertas(itensAlerta);
+      } else {
+        // Fallback secundário: tenta RPC apenas se existir
+        const { data: rpcData, error: rpcError } = await supabase.rpc('obter_alertas_estoque_baixo', {
+          p_limite_minimo: limiteMinimo,
+          p_filial_id: filialAtivaId || null
+        });
+
+        if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+          setAlertas(rpcData);
+        }
       }
     } catch (err) {
       console.warn('[AlertaEstoqueBaixo] Erro ao consultar estoque baixo:', err);
     } finally {
       setLoading(false);
     }
-  }, [limiteMinimo, filialAtivaId, mapaFiliaisNome]);
+  }, [ehAdmin, limiteMinimo, filialAtivaId, mapaFiliaisNome]);
 
   // Checagem periódica: executa no mount e a cada 5 minutos
   useEffect(() => {

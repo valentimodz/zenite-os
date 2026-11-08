@@ -2063,7 +2063,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       try {
         const { data: clis } = await supabase
           .from('clientes')
-          .select('id, nome, cpf, telefone')
+          .select('id, nome, cpf_cnpj, telefone')
           .order('nome', { ascending: true });
         if (clis) setListaClientesBanco(clis);
       } catch (e) {
@@ -4252,7 +4252,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             produto_nome,
             cliente_id,
             cliente_nome,
-            cliente_cpf,
             cliente_cpf_cnpj,
             cliente_telefone,
             cliente_email,
@@ -4298,7 +4297,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             produto_nome,
             cliente_id,
             cliente_nome,
-            cliente_cpf,
             cliente_cpf_cnpj,
             cliente_telefone,
             cliente_email,
@@ -5996,8 +5994,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const token = currentSession?.access_token;
 
-      let loadedConfig = null;
-      if (token) {
+      // 1. Tentar buscar direto no Supabase (produção Vercel)
+      const { data: sbConfig } = await supabase
+        .from('configuracoes_fiscais')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+
+      let loadedConfig = sbConfig || null;
+
+      // 2. Se não encontrou no Supabase e temos token, tenta endpoint de dev se necessário
+      if (!loadedConfig && token && !window.location.hostname.includes('vercel.app')) {
         try {
           const res = await safeFetchJson(`/api/fiscal/configuracoes?tenant_id=${tenantId}`, {
             method: 'GET',
@@ -6009,19 +6016,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             loadedConfig = res.data.config;
           }
         } catch (apiErr) {
-          console.warn('Busca de config fiscal via API falhou, consultando Supabase diretamente:', apiErr);
-        }
-      }
-
-      // Fallback direto via Supabase caso a API interna não esteja rodando (ex: produção Vercel)
-      if (!loadedConfig) {
-        const { data: sbConfig } = await supabase
-          .from('configuracoes_fiscais')
-          .select('*')
-          .eq('tenant_id', tenantId)
-          .maybeSingle();
-        if (sbConfig) {
-          loadedConfig = sbConfig;
+          // Silencioso em dev
         }
       }
 
@@ -11030,7 +11025,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     // Fetch da lista oficial de clientes cadastrados no Supabase
     supabase
       .from('clientes')
-      .select('id, nome, cpf, telefone')
+      .select('id, nome, cpf_cnpj, telefone')
       .order('nome', { ascending: true })
       .then(({ data, error }) => {
         if (!error && data) {
@@ -17205,7 +17200,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             *,
             vendedor_nome,
             cliente_nome,
-            cliente_cpf,
             cliente_cpf_cnpj,
             cliente_telefone,
             cliente_email,
@@ -17291,14 +17285,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       try {
         const { data: cData } = await supabase
           .from('clientes')
-          .select('id, nome, cpf, cpf_cnpj, telefone, email')
+          .select('id, nome, cpf_cnpj, telefone, email')
           .eq('id', clienteIdAlvo)
           .maybeSingle();
         if (cData?.nome) {
           venda.cliente_id = cData.id;
           venda.cliente_nome = cData.nome;
-          venda.cliente_cpf = cData.cpf || cData.cpf_cnpj;
-          venda.cliente_cpf_cnpj = cData.cpf_cnpj || cData.cpf;
+          venda.cliente_cpf = cData.cpf_cnpj;
+          venda.cliente_cpf_cnpj = cData.cpf_cnpj;
           venda.cliente_telefone = cData.telefone;
           venda.cliente_email = cData.email;
         }

@@ -121,7 +121,6 @@ export default function ModalDetalheRelatorio({
             forma_pagamento,
             cliente_id,
             cliente_nome,
-            cliente_cpf,
             cliente_cpf_cnpj,
             cliente_telefone,
             cliente_email,

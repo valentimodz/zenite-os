@@ -391,3 +391,50 @@ CREATE POLICY "Gestão de metas para autenticados"
     (empresa_id = public.get_user_empresa_id() AND public.get_user_role() IN ('ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH_ADMIN', 'RH'))
     OR public.get_user_role() = 'SUPER_ADMIN'
   );
+
+-- 7. RPC obter_alertas_estoque_baixo
+CREATE OR REPLACE FUNCTION public.obter_alertas_estoque_baixo(
+  p_limite_minimo integer DEFAULT 3,
+  p_filial_id uuid DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_empresa_id uuid;
+  v_role text;
+  v_resultado json;
+BEGIN
+  SELECT empresa_id, role INTO v_empresa_id, v_role FROM public.profiles WHERE id = auth.uid();
+
+  SELECT json_agg(row_to_json(r))
+  INTO v_resultado
+  FROM (
+    SELECT
+      p.id,
+      p.id AS produto_id,
+      p.nome,
+      p.nome AS produto_nome,
+      p.filial_id,
+      f.nome AS filial_nome,
+      p.quantidade,
+      p.quantidade AS qtd,
+      p.categoria,
+      p.cor,
+      p.preco,
+      p.preco_venda
+    FROM public.produtos p
+    LEFT JOIN public.filiais f ON f.id = p.filial_id
+    WHERE (v_role = 'SUPER_ADMIN' OR p.empresa_id = v_empresa_id)
+      AND (p_filial_id IS NULL OR p.filial_id = p_filial_id)
+      AND p.quantidade <= p_limite_minimo
+    ORDER BY p.quantidade ASC
+    LIMIT 20
+  ) r;
+
+  RETURN COALESCE(v_resultado, '[]'::json);
+END;
+$$;
+
