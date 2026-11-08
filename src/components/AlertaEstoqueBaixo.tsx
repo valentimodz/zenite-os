@@ -270,7 +270,7 @@ export default function AlertaEstoqueBaixo({
 
   return (
     <>
-      <div 
+      <div
         role="region"
         aria-label="Notificações de Estoque Baixo"
         className="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none"
@@ -290,11 +290,10 @@ export default function AlertaEstoqueBaixo({
               {/* Header do Alerta */}
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                    isCriticoZero 
-                      ? 'bg-red-950/60 border border-red-800/60 text-red-400' 
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${isCriticoZero
+                      ? 'bg-red-950/60 border border-red-800/60 text-red-400'
                       : 'bg-amber-950/60 border border-amber-800/60 text-amber-400'
-                  }`}>
+                    }`}>
                     <AlertTriangle size={15} />
                   </div>
                   <div>

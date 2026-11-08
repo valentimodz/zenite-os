@@ -28,12 +28,10 @@ export async function atualizarVendaAposCriacao({
         produto_nome: item?.produto?.nome || item?.nome || 'Produto',
         imei: item?.imei || null,
 
-        // Dados do Cliente
+        // Dados do Cliente mapeados para as colunas reais da tabela 'vendas'
         cliente_id: cliente?.id || null,
         cliente_nome: cliente?.nome || 'Consumidor Final',
-        cliente_documento: cliente?.cpfCnpj || cliente?.documento || cliente?.cpf || null,
-        cliente_cpf: cliente?.cpfCnpj || cliente?.documento || cliente?.cpf || null,
-        cliente_cpf_cnpj: cliente?.cpfCnpj || cliente?.documento || cliente?.cpf || null,
+        cliente_cpf_cnpj: cliente?.cpf_cnpj || cliente?.documento || cliente?.cpfCnpj || cliente?.cpf || null,
         cliente_telefone: cliente?.telefone || null,
         cliente_email: cliente?.email || null,
 
@@ -68,18 +66,15 @@ export async function atualizarVendaAposCriacao({
         .update(payload)
         .eq('id', vendaId);
 
-    // Fallback resiliente caso as colunas opcionais (valor_*, used_*, cliente_documento, cliente_cpf) não existam no schema remoto
+    // Fallback resiliente caso colunas opcionais não existam no schema remoto
     if (error && (error.code === '42703' || String(error.message).includes('used_') || String(error.message).includes('valor_') || String(error.message).includes('cliente_'))) {
-        console.warn('⚠️ [vendasService] Colunas não encontradas em vendas, tentando update com fallback:', error.message);
+        console.warn('⚠️ [vendasService] Colunas opcionais não encontradas em vendas, tentando update com fallback:', error.message);
         const fallbackPayload = { ...payload };
-        if (String(error.message).includes('cliente_documento')) {
-            delete fallbackPayload.cliente_documento;
-        }
-        if (String(error.message).includes('cliente_cpf') && !String(error.message).includes('cliente_cpf_cnpj')) {
-            delete fallbackPayload.cliente_cpf;
-        }
         if (String(error.message).includes('cliente_telefone')) {
             delete fallbackPayload.cliente_telefone;
+        }
+        if (String(error.message).includes('cliente_email')) {
+            delete fallbackPayload.cliente_email;
         }
         if (String(error.message).includes('used_')) {
             delete fallbackPayload.used_produto_nome;
@@ -277,7 +272,7 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
                         protocolo_autorizacao: data.protocolo || null,
                         status: 'AUTORIZADA',
                         cliente_nome: venda.cliente_nome || 'Consumidor Final',
-                        cliente_documento: venda.cliente_cpf_cnpj || venda.cliente_cpf || null,
+                        cliente_documento: venda.cliente_cpf_cnpj || null,
                         valor_total: valorTotal,
                         danfe_pdf_url: data.pdf_url || null,
                         xml_conteudo: data.xml_conteudo || null

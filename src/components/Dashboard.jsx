@@ -9903,11 +9903,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     try {
       let query = supabase
         .from('clientes')
-        .select(`
-          *,
-          empresa:empresa_id (id, nome),
-          filiais:filial_id (id, nome)
-        `)
+        .select('*')
         .order('created_at', { ascending: false });
 
       if (targetEmpresa && currentUserId) {
@@ -9920,21 +9916,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       let { data, error } = await query;
 
-      // Fallback gracioso caso a FK relacional direta gere warning no PostgREST
       if (error) {
-        console.warn("JOIN em clientes falhou, executando fallback sem JOIN:", error);
-        let fbQuery = supabase.from('clientes').select('*').order('created_at', { ascending: false });
-        if (targetEmpresa && currentUserId) {
-          fbQuery = fbQuery.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa},vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
-        } else if (currentUserId) {
-          fbQuery = fbQuery.or(`vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
-        } else if (targetEmpresa) {
-          fbQuery = fbQuery.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa}`);
-        }
-        const { data: fallbackData, error: fbErr } = await fbQuery;
-
-        if (fbErr) throw fbErr;
-        data = fallbackData;
+        throw error;
       }
 
       // Fallback secundário se nada retornou mas o vendedor possui clientes vinculados
