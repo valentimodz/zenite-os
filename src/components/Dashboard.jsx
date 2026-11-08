@@ -3091,15 +3091,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
   }, [activeTab, currentView, profile?.empresa_id, company?.id, activeEmpresaId]);
 
-  // Carregar Transferências apenas quando a aba 'transferencias' estiver ativa
+  // Carregar Transferências quando a aba 'transferencias' estiver ativa
   useEffect(() => {
-    if (activeTab === 'transferencias' || currentView === 'transferencias') {
+    if (activeTab === 'transferencias' || activeSellerTab === 'transferencias' || currentView === 'transferencias') {
       const targetEmp = profile?.empresa_id || company?.id || activeEmpresaId;
-      if (activeFilialId) {
-        fetchTransferencias(activeFilialId, targetEmp);
+      const targetFilial = activeFilialId || profile?.filial_id || profile?.filiais?.id;
+      if (targetEmp) {
+        fetchTransferencias(targetFilial, targetEmp);
       }
     }
-  }, [activeTab, currentView, activeFilialId, profile?.empresa_id, company?.id, activeEmpresaId]);
+  }, [activeTab, activeSellerTab, currentView, activeFilialId, profile?.filial_id, profile?.empresa_id, company?.id, activeEmpresaId]);
 
   // Atualizar Sessões e Fechamentos de Caixa ao alternar para a aba de relatórios/fechamentos ou alterar filtros, com Supabase Realtime
   useEffect(() => {
@@ -9889,7 +9890,9 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const fetchClientes = async (empIdParam = null, force = false) => {
     const targetEmpresa = empIdParam || activeEmpresaId || company?.id || profile?.empresa_id;
     const currentUserId = profile?.id || session?.user?.id;
-    const cacheKey = `clientes_${targetEmpresa || 'all'}_${currentUserId || 'all'}`;
+    const userRole = String(profile?.role || '').toUpperCase();
+    const isVendedor = userRole === 'VENDEDOR' || userRole.startsWith('VENDEDOR_');
+    const cacheKey = `clientes_${targetEmpresa || 'all'}_${isVendedor ? `seller_${currentUserId}` : (currentUserId || 'all')}`;
 
     if (!force) {
       const cached = getCache(cacheKey);
@@ -9906,7 +9909,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (targetEmpresa && currentUserId) {
+      if (isVendedor && currentUserId) {
+        // Vendedor só deve visualizar os clientes que ele próprio cadastrou
+        query = query.or(`vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
+      } else if (targetEmpresa && currentUserId) {
         query = query.or(`empresa_id.eq.${targetEmpresa},filial_id.eq.${targetEmpresa},vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
       } else if (currentUserId) {
         query = query.or(`vendedor_id.eq.${currentUserId},usuario_id.eq.${currentUserId},criado_por.eq.${currentUserId}`);
@@ -17205,7 +17211,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             clientes:cliente_id (
               id,
               nome,
-              cpf,
               cpf_cnpj,
               telefone,
               email
@@ -18835,72 +18840,134 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           </div>
 
           {/* Tabela de Audit: Últimas Transferências Realizadas */}
-          <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden mt-6">
-            <div className="p-4 border-b border-[#222222] flex justify-between items-center">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <BarChart3 size={18} className="text-[#6A0DAD]" />
-                Últimas Transferências Realizadas (Auditoria de Movimentação)
-              </h3>
-              <span className="text-xs text-gray-500 font-mono">
-                {historicoRealocacoes.length} registro(s) recente(s)
-              </span>
-            </div>
+          {(() => {
+            // Unificar transferências persistidas no Supabase com transferências gravadas na sessão atual
+            const listaHistoricoUnificada = [];
+            const idsProcessados = new Set();
 
-            {historicoRealocacoes.length === 0 ? (
-              <div className="p-8 text-center text-gray-500 text-xs italic">
-                Nenhuma transferências recente gravada nesta sessão. As movimentações efetuadas aparecerão listadas aqui em tempo real.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-[#111111] text-gray-400 uppercase tracking-wider border-b border-[#222222] text-[10px]">
-                      <th className="p-3 font-bold">Data / Hora</th>
-                      <th className="p-3 font-bold">Itens / Identificador</th>
-                      <th className="p-3 font-bold">Trajeto (Origem ➔ Destino)</th>
-                      <th className="p-3 font-bold text-center">Total Qtd</th>
-                      <th className="p-3 font-bold">Responsável</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#222222]">
-                    {historicoRealocacoes.map((log) => (
-                      <tr key={log.id} className="hover:bg-[#111111] transition-colors">
-                        <td className="p-3 text-gray-400 font-mono whitespace-nowrap">
-                          {new Date(log.created_at).toLocaleString('pt-BR')}
-                        </td>
-                        <td className="p-3 font-semibold text-white">
-                          {log.itens ? (
-                            <div className="space-y-1">
-                              {log.itens.map((it, i) => (
-                                <div key={i} className="flex items-center gap-1.5">
-                                  <span className="text-white font-bold">{it.nome}</span>
-                                  {it.imei && <span className="text-[10px] text-gray-400 font-mono bg-black px-1.5 py-0.5 rounded border border-[#222222]">IMEI: {it.imei}</span>}
-                                  {it.quantidade > 1 && <span className="text-[10px] text-purple-400 font-bold">x{it.quantidade}</span>}
+            // 1. Prioriza registros da sessão recente
+            (historicoRealocacoes || []).forEach(log => {
+              if (log && log.id) {
+                idsProcessados.add(String(log.id));
+                listaHistoricoUnificada.push(log);
+              }
+            });
+
+            // 2. Mescla registros persistidos na tabela 'transferencias'
+            (transferencias || []).forEach(tr => {
+              const trId = String(tr.id);
+              if (!idsProcessados.has(trId)) {
+                idsProcessados.add(trId);
+                const origemNome = filiais.find(f => String(f.id) === String(tr.filial_origem_id))?.nome || 'Filial Origem';
+                const destinoNome = filiais.find(f => String(f.id) === String(tr.filial_destino_id))?.nome || 'Filial Destino';
+                const responsavel = tr.profiles?.nome || tr.usuario_nome || teamMembers?.find(m => String(m.id) === String(tr.criado_por || tr.usuario_id))?.nome || tr.criado_por || 'Sistema';
+
+                let itensMapeados = null;
+                if (Array.isArray(tr.transferencias_itens) && tr.transferencias_itens.length > 0) {
+                  itensMapeados = tr.transferencias_itens.map(ti => ({
+                    nome: ti.produto_nome || ti.nome || 'Produto',
+                    imei: ti.imei || null,
+                    quantidade: Number(ti.quantidade || 1)
+                  }));
+                }
+
+                const totalQtd = itensMapeados
+                  ? itensMapeados.reduce((acc, i) => acc + (i.quantidade || 1), 0)
+                  : (Number(tr.quantidade || tr.total_itens || 1));
+
+                listaHistoricoUnificada.push({
+                  id: tr.id,
+                  created_at: tr.created_at || tr.data || new Date().toISOString(),
+                  itens: itensMapeados,
+                  itens_resumo: tr.itens_resumo || tr.observacoes || (tr.status ? `Status: ${tr.status}` : 'Transferência de estoque'),
+                  origem: origemNome,
+                  destino: destinoNome,
+                  usuario: responsavel,
+                  qtd: totalQtd,
+                  status: tr.status
+                });
+              }
+            });
+
+            // Ordenar por data decrescente
+            listaHistoricoUnificada.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+            return (
+              <div className="bg-[#0A0A0A] border border-[#222222] rounded-xl overflow-hidden mt-6">
+                <div className="p-4 border-b border-[#222222] flex justify-between items-center">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <BarChart3 size={18} className="text-[#6A0DAD]" />
+                    Últimas Transferências Realizadas (Auditoria de Movimentação)
+                  </h3>
+                  <span className="text-xs text-gray-500 font-mono">
+                    {listaHistoricoUnificada.length} registro(s) encontrado(s)
+                  </span>
+                </div>
+
+                {listaHistoricoUnificada.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500 text-xs italic">
+                    {loadingTransferencias ? 'Carregando histórico de transferências...' : 'Nenhuma transferência registrada no histórico até o momento. As movimentações efetuadas aparecerão listadas aqui em tempo real.'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-[#111111] text-gray-400 uppercase tracking-wider border-b border-[#222222] text-[10px]">
+                          <th className="p-3 font-bold">Data / Hora</th>
+                          <th className="p-3 font-bold">Itens / Identificador</th>
+                          <th className="p-3 font-bold">Trajeto (Origem ➔ Destino)</th>
+                          <th className="p-3 font-bold text-center">Total Qtd</th>
+                          <th className="p-3 font-bold">Responsável / Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#222222]">
+                        {listaHistoricoUnificada.map((log) => (
+                          <tr key={log.id} className="hover:bg-[#111111] transition-colors">
+                            <td className="p-3 text-gray-400 font-mono whitespace-nowrap">
+                              {new Date(log.created_at).toLocaleString('pt-BR')}
+                            </td>
+                            <td className="p-3 font-semibold text-white">
+                              {log.itens && log.itens.length > 0 ? (
+                                <div className="space-y-1">
+                                  {log.itens.map((it, i) => (
+                                    <div key={i} className="flex items-center gap-1.5">
+                                      <span className="text-white font-bold">{it.nome}</span>
+                                      {it.imei && <span className="text-[10px] text-gray-400 font-mono bg-black px-1.5 py-0.5 rounded border border-[#222222]">IMEI: {it.imei}</span>}
+                                      {it.quantidade > 1 && <span className="text-[10px] text-purple-400 font-bold">x{it.quantidade}</span>}
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span>{log.itens_resumo || 'Mercadorias variadas'}</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <span className="text-gray-300 font-bold">{log.origem}</span>
-                          <span className="text-[#6A0DAD] mx-1.5 font-bold">➔</span>
-                          <span className="text-green-400 font-bold">{log.destino}</span>
-                        </td>
-                        <td className="p-3 text-center font-bold text-white font-mono">
-                          {log.qtd} un.
-                        </td>
-                        <td className="p-3 text-gray-400">
-                          {log.usuario}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                              ) : (
+                                <span>{log.itens_resumo || 'Mercadorias variadas'}</span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              <span className="text-gray-300 font-bold">{log.origem}</span>
+                              <span className="text-[#6A0DAD] mx-1.5 font-bold">➔</span>
+                              <span className="text-green-400 font-bold">{log.destino}</span>
+                            </td>
+                            <td className="p-3 text-center font-bold text-white font-mono">
+                              {log.qtd} un.
+                            </td>
+                            <td className="p-3 text-gray-400">
+                              <div className="flex flex-col">
+                                <span className="text-white font-medium">{log.usuario}</span>
+                                {log.status && (
+                                  <span className={`text-[10px] font-mono mt-0.5 ${log.status === 'CONCLUIDA' ? 'text-emerald-400' : log.status === 'CANCELADA' ? 'text-red-400' : 'text-amber-400'}`}>
+                                    {log.status}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
         </div>
       </div>
     );

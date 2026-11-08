@@ -646,10 +646,18 @@ export const extrairValorBoletoVenda = (v: any): number => {
 };
 
 /**
- * Identifica se a venda é de Acessório (baseado diretamente nos campos da venda)
+ * Identifica se a venda ou item é de Acessório (baseado diretamente nos campos do item ou da venda)
  */
 export const isAcessorio = (itemOuVenda: any): boolean => {
   if (!itemOuVenda) return false;
+
+  // Se tiver itens_venda (venda agregada), verifica se algum dos itens é acessório
+  if (Array.isArray(itemOuVenda.itens_venda) && itemOuVenda.itens_venda.length > 0) {
+    if (itemOuVenda.itens_venda.some((it: any) => isAcessorio(it))) {
+      return true;
+    }
+  }
+
   const cat = String(itemOuVenda.categoria || itemOuVenda.produtos?.categoria || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
   const prod = String(itemOuVenda.produto_nome || itemOuVenda.nome || itemOuVenda.produtos?.nome || itemOuVenda.descricao || itemOuVenda.produtos_descricao || itemOuVenda.itens_resumo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
 
@@ -666,7 +674,7 @@ export const isAcessorio = (itemOuVenda: any): boolean => {
     return false;
   }
 
-  return cat.includes('ACESS') || TERMOS_ACESSORIOS.some(t => cat.includes(t) || prod.includes(t));
+  return isAcessorioExplicito || cat.includes('ACESS') || TERMOS_ACESSORIOS.some(t => cat.includes(t) || prod.includes(t));
 };
 
 /**
@@ -974,10 +982,22 @@ export function calcularDesempenhoGeral(
               ? 7460.00
               : Math.round(boletosComTraineeCalc * 100) / 100)))));
 
-  // 3. Extrair acessórios
+  // 3. Extrair acessórios (calculado por item se a venda tiver itens_venda, ou pelo total da venda se for acessório)
   const totalAcessoriosCalc = vendasFiltradas
     .filter(v => isAcessorio(v))
-    .reduce((acc, v) => acc + Number(v.valor_total ?? v.total ?? v.valor ?? 0), 0);
+    .reduce((acc, v) => {
+      if (Array.isArray(v.itens_venda) && v.itens_venda.length > 0) {
+        const somaItensAcess = v.itens_venda
+          .filter((it: any) => isAcessorio(it))
+          .reduce((subAcc: number, it: any) => {
+            const val = Number(it.valor_total ?? it.subtotal ?? (Number(it.preco_unitario ?? it.preco ?? it.valor ?? 0) * (Number(it.quantidade ?? 1) || 1)));
+            return subAcc + (isNaN(val) ? 0 : val);
+          }, 0);
+        if (somaItensAcess > 0) return acc + somaItensAcess;
+      }
+      const valVenda = Number(v.valor_total ?? v.total ?? v.valor ?? 0);
+      return acc + (isNaN(valVenda) ? 0 : valVenda);
+    }, 0);
 
   const totalAcessorios = isGiselePlanilha
     ? (totalAcessoriosCalc > 0 ? Math.round(totalAcessoriosCalc * 100) / 100 : METAS_GISELE_2026_10.total_acessorios)
