@@ -33,9 +33,14 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 4. Atualizar get_ceo_financial_kpis para incluir 'DONO'
 CREATE OR REPLACE FUNCTION get_ceo_financial_kpis(p_empresa_id UUID)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   v_role TEXT;
+  v_caller_empresa_id UUID;
   v_faturamento_total NUMERIC := 0;
   v_custos_produtos NUMERIC := 0;
   v_comissoes_totais NUMERIC := 0;
@@ -43,10 +48,14 @@ DECLARE
   v_lucro_bruto NUMERIC := 0;
   v_ranking JSON;
 BEGIN
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
+  SELECT role, empresa_id INTO v_role, v_caller_empresa_id FROM public.profiles WHERE id = auth.uid();
   
   IF v_role NOT IN ('OWNER', 'DONO', 'SUPER_ADMIN') THEN
     RAISE EXCEPTION 'Acesso Negado: Você não tem permissão para acessar essa area.';
+  END IF;
+
+  IF v_role <> 'SUPER_ADMIN' AND (v_caller_empresa_id IS NULL OR v_caller_empresa_id IS DISTINCT FROM p_empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Escopo de empresa inválido para o seu perfil.';
   END IF;
 
   SELECT 

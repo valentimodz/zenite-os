@@ -8,11 +8,11 @@ export const GEMINI_MODEL =
   (typeof process !== 'undefined' && (process.env?.VITE_GEMINI_MODEL || process.env?.GEMINI_MODEL)) ||
   'gemini-1.5-flash';
 
-// Fallback OpenRouter API key (assembled dynamically or retrieved from env to comply with git push protection)
+// OpenRouter API key (retrieved strictly from environment variables)
 export const DEFAULT_OPENROUTER_API_KEY =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_OPENROUTER_API_KEY) ||
   (typeof process !== 'undefined' && (process.env?.VITE_OPENROUTER_API_KEY || process.env?.OPENROUTER_API_KEY)) ||
-  ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
+  '';
 export const OPENROUTER_MODEL = 'openrouter/free';
 
 /**

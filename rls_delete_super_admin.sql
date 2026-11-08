@@ -8,14 +8,14 @@ ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Super Admin pode deletar empresas" ON empresas;
 DROP POLICY IF EXISTS "Super Admin pode deletar companies" ON companies;
 
--- 3. Criar política de exclusão irrestrita para a role 'authenticated' ou Super Admin em 'empresas'
+-- 3. Criar política de exclusão restrita exclusivamente ao SUPER_ADMIN em 'empresas'
 CREATE POLICY "Super Admin pode deletar empresas"
 ON empresas FOR DELETE
 TO authenticated
-USING (true);
+USING (public.get_user_role() = 'SUPER_ADMIN');
 
--- 4. Criar política de exclusão irrestrita em 'companies'
+-- 4. Criar política de exclusão restrita exclusivamente ao SUPER_ADMIN em 'companies'
 CREATE POLICY "Super Admin pode deletar companies"
 ON companies FOR DELETE
 TO authenticated
-USING (true);
+USING (public.get_user_role() = 'SUPER_ADMIN');

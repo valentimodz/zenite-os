@@ -132,7 +132,7 @@ async function parseCaixaComGemini({ fileBase64, mimeType, apiKey }) {
   const DEFAULT_OPENROUTER_API_KEY =
     process.env.VITE_OPENROUTER_API_KEY ||
     process.env.OPENROUTER_API_KEY ||
-    ['sk-or-v1', '8ba40012e30099d6cf55b325358a3cbe841c673b6125b3919acbb1630ef94ca5'].join('-');
+    '';
   const effectiveKey = (
     apiKey ||
     process.env.VITE_GEMINI_API_KEY ||

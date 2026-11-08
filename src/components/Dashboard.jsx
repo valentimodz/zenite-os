@@ -2366,7 +2366,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         const empresaId = company?.id || profile?.empresa_id;
         if (!empresaId) return;
 
-        const term = pdvClienteSearchInput.trim();
+        const term = pdvClienteSearchInput.replace(/[,()"\\]/g, '').trim();
+        if (!term) return;
         // A busca na tabela public.clientes filtra obrigatoriamente por empresa_id e busca por correspondências em nome ou cpf_cnpj
         const { data, error } = await supabase
           .from('clientes')
@@ -2679,7 +2680,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       if (profileErr || !profileData) {
         console.warn('Perfil não encontrado no Supabase. Auto-recuperando perfil...', profileErr);
         const userEmail = (session?.user?.email || '').toLowerCase().trim();
-        let fallbackRole = 'ADMIN';
+        let fallbackRole = 'VENDEDOR';
         if (userEmail === 'valentimodz@gmail.com') fallbackRole = 'SUPER_ADMIN';
         else if (userEmail === 'valentimodz2@gmail.com') fallbackRole = 'ADMIN';
         else if (userEmail.includes('rodrigo')) fallbackRole = 'GERENTE';
@@ -2699,9 +2700,15 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         if (upsertProfErr) console.warn('Aviso ao salvar perfil auto-gerado:', upsertProfErr);
       }
 
+      if (profileData?.status === 'INATIVO') {
+        await supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
+
       // 1.5. Mapeamento forçado de Roles via E-mail (RBAC)
       const userEmail = (session.user.email || '').toLowerCase().trim();
-      let userRole = profileData.role || 'ADMIN';
+      let userRole = profileData.role || 'VENDEDOR';
       if (userEmail === 'valentimodz@gmail.com') userRole = 'SUPER_ADMIN';
       else if (userEmail === 'valentimodz2@gmail.com') userRole = 'ADMIN';
       else if (userEmail === 'rodrigo.gerenciamonkeyshop@gmail.com' || userEmail === 'rodrigo.gerenciaredecred@gmail.com') userRole = 'GERENTE';
@@ -2709,19 +2716,16 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       profileData.role = userRole;
 
-      // 1.6. Vincular empresa_id do perfil aos dados das filiais cadastradas na empresa para todos os perfis
-      const { data: existingFiliais } = await supabase.from('filiais').select('empresa_id').limit(1);
-      if (existingFiliais && existingFiliais.length > 0 && existingFiliais[0].empresa_id) {
-        const targetEmpId = existingFiliais[0].empresa_id;
-        if (!profileData.empresa_id || profileData.empresa_id !== targetEmpId) {
-          profileData.empresa_id = targetEmpId;
-          await supabase.from('profiles').upsert({
-            id: userId,
-            email: session.user.email,
-            nome: profileData.nome || session.user.email.split('@')[0],
-            role: userRole,
-            empresa_id: targetEmpId
-          }).catch(e => console.warn('Aviso ao sincronizar perfil do usuário:', e));
+      // 1.6. Vincular empresa_id apenas se o perfil ainda não possuir empresa_id mas já possuir filial_id atribuída
+      if (!profileData.empresa_id && profileData.filial_id) {
+        const { data: branchData } = await supabase
+          .from('filiais')
+          .select('empresa_id')
+          .eq('id', profileData.filial_id)
+          .maybeSingle();
+        if (branchData?.empresa_id) {
+          profileData.empresa_id = branchData.empresa_id;
+          await supabase.from('profiles').update({ empresa_id: branchData.empresa_id }).eq('id', userId).catch(e => console.warn('Aviso ao sincronizar perfil do usuário:', e));
         }
       }
 
@@ -6098,8 +6102,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       // Salvar ambiente escolhido nas preferências do navegador / tenant
       localStorage.setItem(`fiscal_ambiente_${tenantId}`, String(fiscalAmbiente || '2'));
 
-      // Fallback direto via Supabase
+      // Fallback direto via Supabase (sem gravar senha do certificado em texto puro caso o endpoint de criptografia esteja indisponível)
       if (!saveSuccess) {
+        if (fiscalCertificadoSenha && fiscalCertificadoSenha !== '••••••••') {
+          throw new Error('Serviço seguro de criptografia indisponível para armazenar a senha do Certificado A1. Tente novamente com a API ativa.');
+        }
         const supabasePayload = {
           tenant_id: tenantId,
           cnpj: fiscalCnpj,
@@ -6108,9 +6115,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           regime_tributario: fiscalRegimeTributario,
           certificado_a1_url: fiscalCertificadoA1Url || null
         };
-        if (fiscalCertificadoSenha && fiscalCertificadoSenha !== '••••••••') {
-          supabasePayload.certificado_senha_criptografada = fiscalCertificadoSenha;
-        }
 
         // Salva apenas as colunas válidas no Supabase (ambiente fica preservado no localStorage)
         const { error: sbErr } = await supabase
@@ -16234,12 +16238,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
 
       // 2. Tentar buscar em Produtos (por Nome, Código de Barras ou SKU em OR condicional)
+      const safeTerm = term.replace(/[,()"\\]/g, '').trim();
       const { data: prodData } = await supabase
         .from('produtos')
         .select('*')
         .eq('empresa_id', profile.empresa_id)
         .eq('filial_id', origemId)
-        .or(`nome.ilike.%${term}%,codigo_barras.eq.${term},sku.eq.${term}`)
+        .or(`nome.ilike.%${safeTerm}%,codigo_barras.eq.${safeTerm},sku.eq.${safeTerm}`)
         .limit(1)
         .maybeSingle();
 
@@ -32005,8 +32010,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 <button
                   type="button"
                   onClick={() => {
-                    const url = modalNfePdf.pdfUrl;
+                    const url = String(modalNfePdf.pdfUrl || '').trim();
                     if (!url) return;
+                    const isSafeScheme =
+                      url.startsWith('https://') ||
+                      url.startsWith('http://') ||
+                      url.startsWith('blob:') ||
+                      url.startsWith('data:application/pdf;base64,');
+                    if (!isSafeScheme) return;
                     if (url.startsWith('data:application/pdf;base64,')) {
                       try {
                         const byteCharacters = atob(url.split(',')[1]);
@@ -32033,6 +32044,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                       link.href = url;
                       link.download = `DANFE_${modalNfePdf.chave || 'NFE'}.pdf`;
                       link.target = '_blank';
+                      link.rel = 'noopener noreferrer';
                       document.body.appendChild(link);
                       link.click();
                       document.body.removeChild(link);
@@ -32046,8 +32058,14 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 <button
                   type="button"
                   onClick={() => {
-                    const url = modalNfePdf.pdfUrl;
+                    const url = String(modalNfePdf.pdfUrl || '').trim();
                     if (!url) return;
+                    const isSafeScheme =
+                      url.startsWith('https://') ||
+                      url.startsWith('http://') ||
+                      url.startsWith('blob:') ||
+                      url.startsWith('data:application/pdf;base64,');
+                    if (!isSafeScheme) return;
                     if (url.startsWith('data:application/pdf;base64,')) {
                       try {
                         const byteCharacters = atob(url.split(',')[1]);
@@ -32057,12 +32075,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         }
                         const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
                         const blobUrl = URL.createObjectURL(blob);
-                        window.open(blobUrl, '_blank');
+                        window.open(blobUrl, '_blank', 'noopener,noreferrer');
                       } catch (e) {
-                        window.open(url, '_blank');
+                        window.open(url, '_blank', 'noopener,noreferrer');
                       }
                     } else {
-                      window.open(url, '_blank');
+                      window.open(url, '_blank', 'noopener,noreferrer');
                     }
                   }}
                   className="w-full py-3.5 px-4 bg-[#6A0DAD] hover:bg-[#500885] text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-[#6A0DAD]/20 flex items-center justify-center gap-2 cursor-pointer"

@@ -618,14 +618,24 @@ export const NotasFiscaisView: React.FC<NotasFiscaisViewProps> = ({ profile, com
               </div>
 
               <div className="flex items-center gap-2">
-                <a
-                  href={modalDanfe.pdfUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 transition-all"
-                >
-                  <ExternalLink size={13} /> Abrir em Nova Aba
-                </a>
+                {(() => {
+                  const rawUrl = String(modalDanfe.pdfUrl || '').trim();
+                  const isSafePdfUrl =
+                    rawUrl.startsWith('https://') ||
+                    rawUrl.startsWith('http://') ||
+                    rawUrl.startsWith('blob:') ||
+                    rawUrl.startsWith('data:application/pdf;base64,');
+                  return isSafePdfUrl ? (
+                    <a
+                      href={rawUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 transition-all"
+                    >
+                      <ExternalLink size={13} /> Abrir em Nova Aba
+                    </a>
+                  ) : null;
+                })()}
                 <button
                   onClick={() => setModalDanfe(null)}
                   className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg transition-all"
@@ -637,11 +647,25 @@ export const NotasFiscaisView: React.FC<NotasFiscaisViewProps> = ({ profile, com
 
             {/* Modal Body / Iframe */}
             <div className="flex-1 bg-zinc-950 relative">
-              <iframe
-                src={modalDanfe.pdfUrl}
-                title="Visualizador DANFE"
-                className="w-full h-full border-none"
-              />
+              {(() => {
+                const rawUrl = String(modalDanfe.pdfUrl || '').trim();
+                const isSafePdfUrl =
+                  rawUrl.startsWith('https://') ||
+                  rawUrl.startsWith('http://') ||
+                  rawUrl.startsWith('blob:') ||
+                  rawUrl.startsWith('data:application/pdf;base64,');
+                return isSafePdfUrl ? (
+                  <iframe
+                    src={rawUrl}
+                    title="Visualizador DANFE"
+                    className="w-full h-full border-none"
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-zinc-400 text-sm">
+                    URL de documento inválida ou bloqueada por política de segurança.
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

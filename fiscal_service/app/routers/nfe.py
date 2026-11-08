@@ -1,3 +1,4 @@
+import hmac
 import logging
 from fastapi import APIRouter, HTTPException, Header, Depends
 from app.models.fiscal import EmitirNfeRequest, NfeResponse
@@ -9,13 +10,13 @@ logger = logging.getLogger("fiscal_service.router")
 
 def verificar_autenticacao(authorization: str = Header(None)):
     """
-    Verificação de segurança opcional via Bearer token para chamadas entre o Zenite e o Microserviço.
+    Verificação de segurança via Bearer token para chamadas entre o Zenite e o Microserviço.
     """
-    if settings.app_secret_token and settings.app_secret_token != "zenite_fiscal_token":
+    if settings.app_secret_token:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Token de autorização ausente ou inválido.")
-        token = authorization.split(" ")[1]
-        if token != settings.app_secret_token:
+        token = authorization.split(" ", 1)[1].strip()
+        if not hmac.compare_digest(token, settings.app_secret_token):
             raise HTTPException(status_code=403, detail="Acesso não autorizado ao serviço fiscal.")
     return True
 

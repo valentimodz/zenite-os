@@ -95,22 +95,32 @@ CREATE OR REPLACE FUNCTION public.corrigir_venda(
   p_new_comissao numeric,
   p_justificativa text
 )
-RETURNS void AS $$
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   v_old_data jsonb;
   v_new_data jsonb;
   v_user_role text;
+  v_user_empresa_id uuid;
+  v_venda_empresa_id uuid;
 BEGIN
-  -- Verificar permissões (apenas ADMIN, SUPER_ADMIN, OWNER, GERENTE)
-  SELECT role INTO v_user_role FROM public.profiles WHERE id = auth.uid();
-  IF v_user_role NOT IN ('ADMIN', 'SUPER_ADMIN', 'GERENTE', 'OWNER') THEN
+  -- Verificar permissões (apenas ADMIN, SUPER_ADMIN, OWNER, DONO, GERENTE) e isolamento de tenant
+  SELECT role, empresa_id INTO v_user_role, v_user_empresa_id FROM public.profiles WHERE id = auth.uid();
+  IF v_user_role NOT IN ('ADMIN', 'SUPER_ADMIN', 'GERENTE', 'OWNER', 'DONO') THEN
     RAISE EXCEPTION 'Acesso Negado: Apenas Administradores e Gerentes podem editar vendas concluídas.';
   END IF;
 
-  -- Capturar dados antigos
-  SELECT row_to_json(v) INTO v_old_data FROM public.vendas v WHERE id = p_venda_id;
+  -- Capturar dados antigos e empresa da venda
+  SELECT row_to_json(v), v.empresa_id INTO v_old_data, v_venda_empresa_id FROM public.vendas v WHERE id = p_venda_id;
   IF v_old_data IS NULL THEN
     RAISE EXCEPTION 'Venda não encontrada.';
+  END IF;
+
+  IF v_user_role <> 'SUPER_ADMIN' AND (v_user_empresa_id IS NULL OR v_user_empresa_id IS DISTINCT FROM v_venda_empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Não é permitido alterar vendas de outra empresa.';
   END IF;
 
   -- Atualizar a venda
@@ -119,7 +129,7 @@ BEGIN
     quantidade = p_new_qty,
     valor_total = p_new_valor_total,
     comissao = p_new_comissao
-  WHERE id = p_venda_id;
+  WHERE id = p_venda_id AND empresa_id = v_venda_empresa_id;
 
   -- Capturar dados novos
   SELECT row_to_json(v) INTO v_new_data FROM public.vendas v WHERE id = p_venda_id;

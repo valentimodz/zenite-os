@@ -153,43 +153,35 @@ CREATE POLICY "Gerentes podem gerenciar filiais da própria empresa" ON public.f
 -- Cria uma empresa e um perfil de gerente assim que a conta do Supabase Auth é criada,
 -- ou vincula o usuário como VENDEDOR se for criado pelo Gerente.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger AS $$
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   new_company_id uuid;
   company_name text;
   full_name text;
-  user_role text;
-  meta_empresa_id uuid;
-  meta_filial_id uuid;
 BEGIN
   -- Extrair dados enviados na assinatura (options.data no cliente)
-  full_name := COALESCE(new.raw_user_meta_data->>'nome_completo', 'Usuário');
-  user_role := COALESCE(new.raw_user_meta_data->>'role', 'GERENTE');
+  full_name := COALESCE(new.raw_user_meta_data->>'nome_completo', new.raw_user_meta_data->>'nome', 'Usuário');
 
-  IF user_role = 'VENDEDOR' AND (new.raw_user_meta_data->>'empresa_id') IS NOT NULL THEN
-    -- A. Obter IDs do tenant e filial dos metadados
-    meta_empresa_id := (new.raw_user_meta_data->>'empresa_id')::uuid;
-    meta_filial_id := (new.raw_user_meta_data->>'filial_id')::uuid;
+  -- Segurança Multi-Tenant: cadastros públicos via signUp NUNCA podem se auto-associar a um
+  -- empresa_id existente via raw_user_meta_data não autenticado. Colaboradores (VENDEDOR/GERENTE/ESTOQUISTA)
+  -- são provisionados exclusivamente via Admin API autenticada (service_role) que grava em public.profiles.
+  company_name := COALESCE(new.raw_user_meta_data->>'nome_empresa', 'Minha Nova Loja');
+  
+  INSERT INTO public.companies (nome)
+  VALUES (company_name)
+  RETURNING id INTO new_company_id;
 
-    -- B. Criar Perfil de Usuário como VENDEDOR vinculado ao tenant do Gerente e à filial
-    INSERT INTO public.profiles (id, empresa_id, filial_id, nome, role)
-    VALUES (new.id, meta_empresa_id, meta_filial_id, full_name, 'VENDEDOR');
-  ELSE
-    -- A. Criar Empresa para novo cadastro de Gerente
-    company_name := COALESCE(new.raw_user_meta_data->>'nome_empresa', 'Minha Nova Loja');
-    
-    INSERT INTO public.companies (nome)
-    VALUES (company_name)
-    RETURNING id INTO new_company_id;
-
-    -- B. Criar Perfil de Usuário como GERENTE vinculado ao novo tenant
-    INSERT INTO public.profiles (id, empresa_id, nome, role)
-    VALUES (new.id, new_company_id, full_name, 'GERENTE');
-  END IF;
+  INSERT INTO public.profiles (id, empresa_id, nome, role)
+  VALUES (new.id, new_company_id, full_name, 'GERENTE')
+  ON CONFLICT (id) DO NOTHING;
 
   RETURN new;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Associar a trigger ao auth.users do Supabase
 -- Remover se já existir para evitar conflitos ao reexecutar
@@ -509,9 +501,19 @@ DECLARE
   v_prod_id uuid;
   v_prod_categoria text;
   v_prod_tipo text;
+  v_caller_empresa_id uuid;
+  v_caller_role text;
 BEGIN
+  SELECT empresa_id, role INTO v_caller_empresa_id, v_caller_role
+  FROM public.profiles
+  WHERE id = auth.uid();
+
+  IF v_caller_role IS DISTINCT FROM 'SUPER_ADMIN' AND (v_caller_empresa_id IS NULL OR v_caller_empresa_id IS DISTINCT FROM p_empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Não é permitido registrar vendas em nome de outra empresa.';
+  END IF;
+
   -- 1. Obter tipo/categoria do produto novo
-  SELECT tipo, categoria INTO v_prod_tipo, v_prod_categoria FROM public.produtos WHERE id = p_produto_novo_id;
+  SELECT tipo, categoria INTO v_prod_tipo, v_prod_categoria FROM public.produtos WHERE id = p_produto_novo_id AND empresa_id = p_empresa_id;
 
   -- 2. Se for celular novo, marcar IMEI como vendido e status 'Vendido'
   IF v_prod_tipo = 'CELULAR' AND p_imei_novo IS NOT NULL AND p_imei_novo <> '' THEN

@@ -91,17 +91,17 @@ ALTER TABLE public.transferencias_itens ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Usuários podem ver transferências da empresa" ON public.transferencias;
 CREATE POLICY "Usuários podem ver transferências da empresa" ON public.transferencias
   FOR SELECT TO authenticated
-  USING (empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'ADMIN');
+  USING (empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'SUPER_ADMIN');
 
 DROP POLICY IF EXISTS "Usuários podem inserir transferências" ON public.transferencias;
 CREATE POLICY "Usuários podem inserir transferências" ON public.transferencias
   FOR INSERT TO authenticated
-  WITH CHECK (empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'ADMIN');
+  WITH CHECK (empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'SUPER_ADMIN');
 
 DROP POLICY IF EXISTS "Usuários podem atualizar transferências da empresa" ON public.transferencias;
 CREATE POLICY "Usuários podem atualizar transferências da empresa" ON public.transferencias
   FOR UPDATE TO authenticated
-  USING (empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'ADMIN');
+  USING (empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'SUPER_ADMIN');
 
 -- 6. Políticas de RLS para transferencias_itens
 DROP POLICY IF EXISTS "Usuários podem ver itens de transferências" ON public.transferencias_itens;
@@ -111,7 +111,7 @@ CREATE POLICY "Usuários podem ver itens de transferências" ON public.transfere
     EXISTS (
       SELECT 1 FROM public.transferencias t
       WHERE t.id = transferencia_id
-        AND (t.empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'ADMIN')
+        AND (t.empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'SUPER_ADMIN')
     )
   );
 
@@ -122,7 +122,7 @@ CREATE POLICY "Usuários podem inserir itens de transferências" ON public.trans
     EXISTS (
       SELECT 1 FROM public.transferencias t
       WHERE t.id = transferencia_id
-        AND (t.empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'ADMIN')
+        AND (t.empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'SUPER_ADMIN')
     )
   );
 
@@ -139,15 +139,23 @@ CREATE OR REPLACE FUNCTION public.registrar_transferencia_saida(
 RETURNS json
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_transferencia_id uuid;
   v_item jsonb;
+  v_caller_empresa_id uuid;
+  v_caller_role text;
 BEGIN
+  SELECT empresa_id, role INTO v_caller_empresa_id, v_caller_role FROM public.profiles WHERE id = auth.uid();
+  IF v_caller_role IS DISTINCT FROM 'SUPER_ADMIN' AND (v_caller_empresa_id IS NULL OR v_caller_empresa_id IS DISTINCT FROM p_empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Não é permitido criar transferências para outra empresa.';
+  END IF;
+
   INSERT INTO public.transferencias (
     empresa_id, filial_origem_id, filial_destino_id, criado_por, status, observacoes
   ) VALUES (
-    p_empresa_id, p_filial_origem_id, p_filial_destino_id, p_criado_por, 'EM_TRANSITO', p_observacoes
+    p_empresa_id, p_filial_origem_id, p_filial_destino_id, auth.uid(), 'EM_TRANSITO', p_observacoes
   )
   RETURNING id INTO v_transferencia_id;
 
@@ -182,6 +190,7 @@ CREATE OR REPLACE FUNCTION public.confirmar_recebimento_transferencia(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_item RECORD;
@@ -191,13 +200,21 @@ DECLARE
   v_dest_prod_tipo text;
   v_dest_prod_cat text;
   v_dest_prod_preco numeric;
+  v_caller_empresa_id uuid;
+  v_caller_role text;
 BEGIN
+  SELECT empresa_id, role INTO v_caller_empresa_id, v_caller_role FROM public.profiles WHERE id = auth.uid();
+
   SELECT * INTO v_transferencia
   FROM public.transferencias
   WHERE id = p_transferencia_id;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Transferência não encontrada: %', p_transferencia_id;
+  END IF;
+
+  IF v_caller_role IS DISTINCT FROM 'SUPER_ADMIN' AND (v_caller_empresa_id IS NULL OR v_caller_empresa_id IS DISTINCT FROM v_transferencia.empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Transferência pertence a outra empresa.';
   END IF;
 
   FOR v_item IN

@@ -17,41 +17,12 @@ function App() {
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
 
   useEffect(() => {
-    // Buscar sessão atual no mount
+    // Buscar sessão atual no mount (sem credenciais hardcoded de auto-login)
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
       if (currentSession) {
         setSession(currentSession);
-        setLoading(false);
-      } else {
-        const loggedOut = localStorage.getItem('zenite_logged_out');
-        if (loggedOut === 'true') {
-          setLoading(false);
-        } else {
-          // Tentar auto-login em ambiente de desenvolvimento
-          supabase.auth.signInWithPassword({
-            email: 'rodrigo.gerenciaredecred@gmail.com',
-            password: 'change123'
-          }).then(({ data, error }) => {
-            if (!error && data.session) {
-              setSession(data.session);
-              setLoading(false);
-            } else {
-              // Fallback para o email anterior em caso de banco não migrado localmente
-              supabase.auth.signInWithPassword({
-                email: 'rodrigo.gerenciamonkeyshop@gmail.com',
-                password: 'change123'
-              }).then(({ data: fbData, error: fbError }) => {
-                if (!fbError && fbData.session) {
-                  setSession(fbData.session);
-                } else {
-                  console.warn("Auto-login falhou. Redirecionando para login manual.", fbError);
-                }
-                setLoading(false);
-              });
-            }
-          });
-        }
       }
+      setLoading(false);
     });
 
     // Ouvir mudanças de autenticação
@@ -170,8 +141,13 @@ const RoleProtectedRoute = ({ session, isCeoRoute }) => {
       return;
     }
 
-    supabase.from('profiles').select('*').eq('id', userId).single().then(({ data, error }) => {
-      let userRole = data?.role || 'ADMIN';
+    supabase.from('profiles').select('*').eq('id', userId).single().then(({ data }) => {
+      if (data?.status === 'INATIVO') {
+        supabase.auth.signOut();
+        setLoadingProfile(false);
+        return;
+      }
+      let userRole = data?.role || 'VENDEDOR';
       if (session.user.email === 'valentimodz@gmail.com') userRole = 'SUPER_ADMIN';
       else if (session.user.email === 'valentimodz2@gmail.com') userRole = 'ADMIN';
       else if (session.user.email === 'rodrigo.gerenciaredecred@gmail.com' || session.user.email === 'rodrigo.gerenciamonkeyshop@gmail.com') userRole = 'GERENTE';

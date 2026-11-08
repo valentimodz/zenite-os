@@ -1,6 +1,7 @@
 import os
 import io
 import re
+import html
 from pathlib import Path
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
@@ -9,6 +10,11 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.graphics.barcode import createBarcodeDrawing
 from app.models.fiscal import EmitirNfeRequest
+
+
+def _esc(val: object) -> str:
+    """Escapa caracteres XML/HTML para prevenir injeção de tags no parser ReportLab Paragraph."""
+    return html.escape(str(val if val is not None else ""), quote=True)
 
 def obter_caminho_logo_filial(nome_filial: str) -> str | None:
     """
@@ -185,9 +191,9 @@ def gerar_danfe_pdf_bytes(req: EmitirNfeRequest, chave_acesso: str, protocolo: s
     # =========================================================================
     # 0. CANHOTO DO RECEBEDOR (TOPO DA FOLHA)
     # =========================================================================
-    razao_social = req.emitente.razao_social.upper()
-    num_formatado = _format_numero_nfe(req.numero_nfe)
-    serie_formatada = str(req.serie)
+    razao_social = _esc(req.emitente.razao_social.upper())
+    num_formatado = _esc(_format_numero_nfe(req.numero_nfe))
+    serie_formatada = _esc(req.serie)
 
     canhoto_data = [
         [
@@ -231,12 +237,12 @@ def gerar_danfe_pdf_bytes(req: EmitirNfeRequest, chave_acesso: str, protocolo: s
     identificador_filial = req.filial_nome or req.emitente.nome_fantasia or req.emitente.razao_social or ""
     caminho_logo = obter_caminho_logo_filial(identificador_filial)
 
-    nome_fantasia_txt = f"<b>{req.emitente.nome_fantasia.upper()}</b><br/>" if req.emitente.nome_fantasia else ""
+    nome_fantasia_txt = f"<b>{_esc(req.emitente.nome_fantasia.upper())}</b><br/>" if req.emitente.nome_fantasia else ""
     emitente_html = f"""{nome_fantasia_txt}<b>{razao_social}</b><br/>
 <font size=6.5>
-{req.emitente.logradouro}, {req.emitente.numero}{(' - ' + req.emitente.bairro) if req.emitente.bairro else ''}<br/>
-{req.emitente.municipio} - {req.emitente.uf}<br/>
-CEP: {_format_cep(req.emitente.cep)} {(' - FONE: ' + req.emitente.telefone) if req.emitente.telefone else ''}
+{_esc(req.emitente.logradouro)}, {_esc(req.emitente.numero)}{(' - ' + _esc(req.emitente.bairro)) if req.emitente.bairro else ''}<br/>
+{_esc(req.emitente.municipio)} - {_esc(req.emitente.uf)}<br/>
+CEP: {_esc(_format_cep(req.emitente.cep))} {(' - FONE: ' + _esc(req.emitente.telefone)) if req.emitente.telefone else ''}
 </font>
 """
     p_emitente_info = Paragraph(emitente_html, ParagraphStyle('EmitenteP', parent=styles['Normal'], fontName='Helvetica', fontSize=7.0, leading=8.5, alignment=1))
@@ -313,11 +319,11 @@ FOLHA 1/1</font>
     # Natureza da Operação e Protocolo
     data_emissao_str = datetime.now().strftime('%d/%m/%Y')
     hora_emissao_str = datetime.now().strftime('%H:%M:%S')
-    data_hora_protocolo = f"{protocolo} - {data_emissao_str} {hora_emissao_str}"
+    data_hora_protocolo = f"{_esc(protocolo)} - {data_emissao_str} {hora_emissao_str}"
 
     nat_data = [
         [
-            Paragraph(f"NATUREZA DA OPERAÇÃO<br/><b>{req.natureza_operacao.upper()}</b>", ParagraphStyle('NatP', parent=styles['Normal'], fontName='Helvetica', fontSize=6.0, leading=7.5)),
+            Paragraph(f"NATUREZA DA OPERAÇÃO<br/><b>{_esc(req.natureza_operacao.upper())}</b>", ParagraphStyle('NatP', parent=styles['Normal'], fontName='Helvetica', fontSize=6.0, leading=7.5)),
             Paragraph(f"PROTOCOLO DE AUTORIZAÇÃO DE USO<br/><b>{data_hora_protocolo}</b>", ParagraphStyle('ProtP', parent=styles['Normal'], fontName='Helvetica', fontSize=6.0, leading=7.5))
         ]
     ]
@@ -335,9 +341,9 @@ FOLHA 1/1</font>
     # Inscrição Estadual e CNPJ
     ie_data = [
         [
-            Paragraph(f"INSCRIÇÃO ESTADUAL<br/><b>{req.emitente.inscricao_estadual}</b>", lbl),
+            Paragraph(f"INSCRIÇÃO ESTADUAL<br/><b>{_esc(req.emitente.inscricao_estadual)}</b>", lbl),
             Paragraph("INSCRIÇÃO ESTADUAL DO SUBST. TRIB.<br/>", lbl),
-            Paragraph(f"CNPJ<br/><b>{_format_cnpj_cpf(req.emitente.cnpj)}</b>", lbl)
+            Paragraph(f"CNPJ<br/><b>{_esc(_format_cnpj_cpf(req.emitente.cnpj))}</b>", lbl)
         ]
     ]
     t_ie = Table(ie_data, colWidths=[185, 185, 195])
@@ -367,23 +373,23 @@ FOLHA 1/1</font>
     dest_rows = [
         # Linha 1: Nome, CNPJ/CPF, Data Emissão
         [
-            Paragraph(f"NOME / RAZÃO SOCIAL<br/><b>{req.cliente.nome.upper()}</b>", lbl),
-            Paragraph(f"CNPJ / CPF<br/><b>{_format_cnpj_cpf(req.cliente.cpf_cnpj)}</b>", lbl),
+            Paragraph(f"NOME / RAZÃO SOCIAL<br/><b>{_esc(req.cliente.nome.upper())}</b>", lbl),
+            Paragraph(f"CNPJ / CPF<br/><b>{_esc(_format_cnpj_cpf(req.cliente.cpf_cnpj))}</b>", lbl),
             Paragraph(f"DATA DA EMISSÃO<br/><b>{data_emissao_str}</b>", lbl)
         ],
         # Linha 2: Endereço, Bairro, CEP, Data Saída
         [
-            Paragraph(f"ENDEREÇO<br/><b>{req.cliente.logradouro}, {req.cliente.numero}</b>", lbl),
-            Paragraph(f"BAIRRO / DISTRITO<br/><b>{req.cliente.bairro}</b>", lbl),
-            Paragraph(f"CEP<br/><b>{_format_cep(req.cliente.cep)}</b>", lbl),
+            Paragraph(f"ENDEREÇO<br/><b>{_esc(req.cliente.logradouro)}, {_esc(req.cliente.numero)}</b>", lbl),
+            Paragraph(f"BAIRRO / DISTRITO<br/><b>{_esc(req.cliente.bairro)}</b>", lbl),
+            Paragraph(f"CEP<br/><b>{_esc(_format_cep(req.cliente.cep))}</b>", lbl),
             Paragraph(f"DATA SAÍDA / ENTRADA<br/><b>{data_emissao_str}</b>", lbl)
         ],
         # Linha 3: Município, Fone, UF, Inscrição Estadual, Hora Saída
         [
-            Paragraph(f"MUNICÍPIO<br/><b>{req.cliente.municipio}</b>", lbl),
-            Paragraph(f"FONE / FAX<br/><b>{req.cliente.telefone or ''}</b>", lbl),
-            Paragraph(f"UF<br/><b>{req.cliente.uf}</b>", lbl),
-            Paragraph(f"INSCRIÇÃO ESTADUAL<br/><b>{req.cliente.inscricao_estadual or 'ISENTO'}</b>", lbl),
+            Paragraph(f"MUNICÍPIO<br/><b>{_esc(req.cliente.municipio)}</b>", lbl),
+            Paragraph(f"FONE / FAX<br/><b>{_esc(req.cliente.telefone or '')}</b>", lbl),
+            Paragraph(f"UF<br/><b>{_esc(req.cliente.uf)}</b>", lbl),
+            Paragraph(f"INSCRIÇÃO ESTADUAL<br/><b>{_esc(req.cliente.inscricao_estadual or 'ISENTO')}</b>", lbl),
             Paragraph(f"HORA DA SAÍDA<br/><b>{hora_emissao_str}</b>", lbl)
         ]
     ]
@@ -509,10 +515,10 @@ FOLHA 1/1</font>
 
     transp_l2 = [
         [
-            Paragraph(f"ENDEREÇO<br/><b>{req.emitente.logradouro}, {req.emitente.numero}</b>", lbl),
-            Paragraph(f"MUNICÍPIO<br/><b>{req.emitente.municipio}</b>", lbl),
-            Paragraph(f"UF<br/><b>{req.emitente.uf}</b>", lbl),
-            Paragraph(f"INSCRIÇÃO ESTADUAL<br/><b>{req.emitente.inscricao_estadual}</b>", lbl)
+            Paragraph(f"ENDEREÇO<br/><b>{_esc(req.emitente.logradouro)}, {_esc(req.emitente.numero)}</b>", lbl),
+            Paragraph(f"MUNICÍPIO<br/><b>{_esc(req.emitente.municipio)}</b>", lbl),
+            Paragraph(f"UF<br/><b>{_esc(req.emitente.uf)}</b>", lbl),
+            Paragraph(f"INSCRIÇÃO ESTADUAL<br/><b>{_esc(req.emitente.inscricao_estadual)}</b>", lbl)
         ]
     ]
     t_tr2 = Table(transp_l2, colWidths=[240, 165, 30, 130])
@@ -576,17 +582,17 @@ FOLHA 1/1</font>
 
     prod_rows = [prod_header]
     for it in req.itens:
-        desc = it.nome.upper()
+        desc = _esc(it.nome.upper())
         if it.imei:
-            desc += f"<br/><font size=5.5 color='#333333'>IMEI: {it.imei}</font>"
+            desc += f"<br/><font size=5.5 color='#333333'>IMEI: {_esc(it.imei)}</font>"
         
         prod_rows.append([
-            Paragraph(str(it.codigo)[:10], tbl_val),
+            Paragraph(_esc(str(it.codigo)[:10]), tbl_val),
             Paragraph(desc, tbl_val),
-            Paragraph(str(it.ncm), tbl_val_c),
+            Paragraph(_esc(it.ncm), tbl_val_c),
             Paragraph("0102", tbl_val_c), # Simples Nacional sem crédito
-            Paragraph(str(it.cfop), tbl_val_c),
-            Paragraph(str(it.ucom), tbl_val_c),
+            Paragraph(_esc(it.cfop), tbl_val_c),
+            Paragraph(_esc(it.ucom), tbl_val_c),
             Paragraph(f"{int(it.quantidade) if it.quantidade.is_integer() else it.quantidade}", tbl_val_c),
             Paragraph(_format_moeda(it.valor_unitario), tbl_val_r),
             Paragraph(_format_moeda(it.valor_total), tbl_val_r),
@@ -624,7 +630,7 @@ FOLHA 1/1</font>
 Documento emitido por ME ou EPP optante pelo Simples Nacional.<br/>
 Não gera direito a crédito fiscal de IPI.<br/>
 Trib aprox: Fed: R$ {_format_moeda(trib_fed)} (13,45%), Est: R$ {_format_moeda(trib_est)} (17,00%), Mun: R$ 0,00 (0,00%). Fonte: IBPT/empresometro.com.br/PA.<br/>
-Identificador da Venda: {req.venda_id} | Protocolo SEFAZ-PA: {protocolo}
+Identificador da Venda: {_esc(req.venda_id)} | Protocolo SEFAZ-PA: {_esc(protocolo)}
 </font>
 """
 

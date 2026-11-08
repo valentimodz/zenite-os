@@ -42,9 +42,14 @@ EXECUTE FUNCTION block_preco_custo_for_admin();
 
 -- 4. Função Segura para os KPIs do CEO (Lucro Líquido, Custos Totais, etc)
 CREATE OR REPLACE FUNCTION get_ceo_financial_kpis(p_empresa_id UUID)
-RETURNS JSON AS $$
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   v_role TEXT;
+  v_caller_empresa_id UUID;
   v_faturamento_total NUMERIC := 0;
   v_custos_produtos NUMERIC := 0;
   v_comissoes_totais NUMERIC := 0;
@@ -52,11 +57,15 @@ DECLARE
   v_lucro_bruto NUMERIC := 0;
   v_ranking JSON;
 BEGIN
-  -- 1. Verificação Estrita de Segurança
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
+  -- 1. Verificação Estrita de Segurança e Escopo Multi-Tenant
+  SELECT role, empresa_id INTO v_role, v_caller_empresa_id FROM public.profiles WHERE id = auth.uid();
   
-  IF v_role NOT IN ('OWNER', 'SUPER_ADMIN') THEN
+  IF v_role NOT IN ('OWNER', 'DONO', 'SUPER_ADMIN') THEN
     RAISE EXCEPTION 'Acesso Negado: Você não tem permissão para acessar essa area.';
+  END IF;
+
+  IF v_role <> 'SUPER_ADMIN' AND (v_caller_empresa_id IS NULL OR v_caller_empresa_id IS DISTINCT FROM p_empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Escopo de empresa inválido para o seu perfil.';
   END IF;
 
   -- 2. Cálculos Financeiros Baseados nas Vendas (Mês Corrente)

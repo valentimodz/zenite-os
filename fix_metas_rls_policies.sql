@@ -10,17 +10,23 @@ DROP POLICY IF EXISTS "Apenas gestores autorizados podem gerenciar metas" ON pub
 DROP POLICY IF EXISTS "Leitura global de metas para autenticados" ON public.metas;
 DROP POLICY IF EXISTS "Gestão global de metas para autenticados" ON public.metas;
 
--- 3. Criar política de leitura universal para usuários autenticados
+-- 3. Criar política de leitura isolada por empresa para usuários autenticados
 CREATE POLICY "Leitura de metas para autenticados"
 ON public.metas
 FOR SELECT
 TO authenticated
-USING (true);
+USING (empresa_id = public.get_user_empresa_id() OR public.get_user_role() = 'SUPER_ADMIN');
 
--- 4. Criar política de gravação e atualização universal para usuários autenticados
+-- 4. Criar política de gravação e atualização restrita a gestores da própria empresa
 CREATE POLICY "Gestão de metas para autenticados"
 ON public.metas
 FOR ALL
 TO authenticated
-USING (true)
-WITH CHECK (true);
+USING (
+  (empresa_id = public.get_user_empresa_id() AND public.get_user_role() IN ('ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH_ADMIN', 'RH'))
+  OR public.get_user_role() = 'SUPER_ADMIN'
+)
+WITH CHECK (
+  (empresa_id = public.get_user_empresa_id() AND public.get_user_role() IN ('ADMIN', 'GERENTE', 'OWNER', 'DONO', 'RH_ADMIN', 'RH'))
+  OR public.get_user_role() = 'SUPER_ADMIN'
+);

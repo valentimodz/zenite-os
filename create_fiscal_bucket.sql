@@ -10,22 +10,24 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Habilitar RLS em storage.objects (normalmente já vem habilitado globalmente para storage)
 
--- 2. Política de INSERT: Permitir upload se a primeira pasta do path for o empresa_id do usuário
+-- 2. Política de INSERT: Permitir upload apenas para gestores da própria empresa
 DROP POLICY IF EXISTS "Permitir upload de certificados da própria empresa" ON storage.objects;
 CREATE POLICY "Permitir upload de certificados da própria empresa" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'fiscal-certificates'
     AND (storage.foldername(name))[1] = (public.get_user_empresa_id())::text
+    AND public.get_user_role() IN ('ADMIN', 'SUPER_ADMIN', 'GERENTE', 'OWNER', 'DONO')
   );
 
--- 3. Política de SELECT: Permitir leitura se a primeira pasta do path for o empresa_id do usuário
+-- 3. Política de SELECT: Permitir leitura de certificados privados apenas para gestores da própria empresa
 DROP POLICY IF EXISTS "Permitir leitura de certificados da própria empresa" ON storage.objects;
 CREATE POLICY "Permitir leitura de certificados da própria empresa" ON storage.objects
   FOR SELECT TO authenticated
   USING (
     bucket_id = 'fiscal-certificates'
     AND (storage.foldername(name))[1] = (public.get_user_empresa_id())::text
+    AND public.get_user_role() IN ('ADMIN', 'SUPER_ADMIN', 'GERENTE', 'OWNER', 'DONO')
   );
 
 -- 4. Política de DELETE: Permitir deleção se o usuário for gestor e a primeira pasta do path for o empresa_id dele

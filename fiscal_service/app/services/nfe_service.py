@@ -2,15 +2,45 @@ import os
 import re
 import random
 import base64
+import socket
+import ipaddress
 import tempfile
 import requests
 import logging
+from urllib.parse import urlparse
 from datetime import datetime
 from app.models.fiscal import EmitirNfeRequest, NfeResponse
 from app.config import settings
 from app.services.sefaz_pa import SEFAZ_PA_CONFIG
 
 logger = logging.getLogger("fiscal_service.nfe")
+
+
+def _validar_url_certificado_segura(url: str) -> bool:
+    """
+    Bloqueia SSRF: exige esquema HTTPS e impede conexões para IPs privados,
+    loopback, link-local (ex: 169.254.169.254) ou redes internas.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            return False
+        hostname = parsed.hostname
+        for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, parsed.port or 443):
+            ip_obj = ipaddress.ip_address(sockaddr[0])
+            if (
+                ip_obj.is_private
+                or ip_obj.is_loopback
+                or ip_obj.is_link_local
+                or ip_obj.is_multicast
+                or ip_obj.is_reserved
+                or ip_obj.is_unspecified
+            ):
+                return False
+        return True
+    except Exception:
+        return False
+
 
 def extrair_ou_baixar_certificado(req: EmitirNfeRequest) -> str:
     """
@@ -23,7 +53,9 @@ def extrair_ou_baixar_certificado(req: EmitirNfeRequest) -> str:
             cert_data = base64.b64decode(req.certificado_a1_b64)
             tmp_cert.write(cert_data)
         elif req.certificado_a1_url:
-            resp = requests.get(req.certificado_a1_url, timeout=15)
+            if not _validar_url_certificado_segura(req.certificado_a1_url):
+                raise ValueError("URL de certificado bloqueada pela política anti-SSRF (exige HTTPS público).")
+            resp = requests.get(req.certificado_a1_url, timeout=15, allow_redirects=False)
             resp.raise_for_status()
             tmp_cert.write(resp.content)
         else:

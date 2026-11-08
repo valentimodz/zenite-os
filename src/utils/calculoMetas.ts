@@ -1583,7 +1583,11 @@ export function baixarRelatorioVendasCSV(
   } = opcoes;
 
   const escapeCsv = (val: string | number) => {
-    const s = String(val ?? '').replace(/"/g, '""');
+    let s = String(val ?? '').replace(/"/g, '""');
+    // Neutraliza prefixos de fórmula de planilha (CSV Formula Injection: =, +, -, @, \t, \r)
+    if (typeof val === 'string' && /^[=+\-@\t\r]/.test(s)) {
+      s = `'${s}`;
+    }
     return `"${s}"`;
   };
 
@@ -1687,6 +1691,18 @@ export function imprimirRelatorioVendasPDF(
   const formatMoeda = (n: number) =>
     Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  const escapeHtml = (val: unknown) =>
+    String(val ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const safeColaboradorNome = escapeHtml(colaboradorNome);
+  const safeCompetencia = escapeHtml(competencia);
+  const safeFilialNome = escapeHtml(filialNome);
+
   let somaQtd = 0;
   let somaValor = 0;
   let somaComissao = 0;
@@ -1701,14 +1717,14 @@ export function imprimirRelatorioVendasPDF(
       return `
         <tr>
           <td style="text-align:center;color:#666;">${idx + 1}</td>
-          <td>${info.dataFormatada} <span style="color:#777;font-size:10px;">${info.horaFormatada}</span></td>
+          <td>${escapeHtml(info.dataFormatada)} <span style="color:#777;font-size:10px;">${escapeHtml(info.horaFormatada)}</span></td>
           <td>
-            <strong>${info.produtoNome}</strong>
-            ${info.imei ? `<br/><span style="color:#666;font-size:10px;">IMEI: ${info.imei}</span>` : ''}
+            <strong>${escapeHtml(info.produtoNome)}</strong>
+            ${info.imei ? `<br/><span style="color:#666;font-size:10px;">IMEI: ${escapeHtml(info.imei)}</span>` : ''}
           </td>
-          <td>${info.categoria}</td>
-          <td style="text-align:center;font-weight:bold;">${info.quantidade}</td>
-          <td style="text-align:center;">${info.pagamento}</td>
+          <td>${escapeHtml(info.categoria)}</td>
+          <td style="text-align:center;font-weight:bold;">${Number(info.quantidade || 0)}</td>
+          <td style="text-align:center;">${escapeHtml(info.pagamento)}</td>
           <td style="text-align:right;font-weight:bold;">${formatMoeda(info.valorTotal)}</td>
           <td style="text-align:right;font-weight:bold;color:#047857;">${formatMoeda(info.comissao)}</td>
         </tr>
@@ -1721,7 +1737,7 @@ export function imprimirRelatorioVendasPDF(
     <html lang="pt-BR">
     <head>
       <meta charset="UTF-8" />
-      <title>Relatório de Vendas - ${colaboradorNome} (${competencia})</title>
+      <title>Relatório de Vendas - ${safeColaboradorNome} (${safeCompetencia})</title>
       <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { margin: 24px; color: #111827; background: #ffffff; font-size: 12px; }
@@ -1747,8 +1763,8 @@ export function imprimirRelatorioVendasPDF(
       <div class="header">
         <div>
           <h1 class="title">Relatório Completo de Vendas</h1>
-          <p class="subtitle"><strong>Colaborador:</strong> ${colaboradorNome} &nbsp;|&nbsp; <strong>Filial:</strong> ${filialNome}</p>
-          <p class="subtitle"><strong>Competência:</strong> ${competencia}</p>
+          <p class="subtitle"><strong>Colaborador:</strong> ${safeColaboradorNome} &nbsp;|&nbsp; <strong>Filial:</strong> ${safeFilialNome}</p>
+          <p class="subtitle"><strong>Competência:</strong> ${safeCompetencia}</p>
         </div>
         <div style="text-align:right;">
           <p class="subtitle"><strong>Gerado em:</strong> ${new Date().toLocaleString('pt-BR')}</p>

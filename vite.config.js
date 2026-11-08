@@ -31,13 +31,26 @@ process.env.VITE_SUPABASE_ANON_KEY = supabaseAnonKey;
 const { supabase } = await import('./src/supabaseClient.js');
 
 // Encryption/decryption helpers for certificate passwords
-const ENCRYPTION_KEY = (supabaseServiceKey || 'VextronLabSaaSKeyDefault32BytesLong').substring(0, 32).padEnd(32, '0'); // Must be 32 bytes
+const rawEncryptionSecret =
+  getEnvVar('CERT_ENCRYPTION_KEY') ||
+  process.env.CERT_ENCRYPTION_KEY ||
+  supabaseServiceKey ||
+  supabaseAnonKey;
+const ENCRYPTION_KEY = crypto.createHash('sha256').update(String(rawEncryptionSecret)).digest(); // 32 bytes
 const IV_LENGTH = 16;
+const MAX_BODY_BYTES = 15 * 1024 * 1024; // 15 MB limit for base64 receipts/certificates
+const ALLOWED_GEMINI_MODELS = new Set([
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-2.0-flash',
+  'gemini-2.5-flash',
+  'gemini-3.6-flash'
+]);
 
 function encrypt(text) {
   if (!text) return '';
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+  const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
   let encrypted = cipher.update(text);
   encrypted = Buffer.concat([encrypted, cipher.final()]);
   return iv.toString('hex') + ':' + encrypted.toString('hex');
@@ -48,7 +61,7 @@ function decrypt(text) {
   const textParts = text.split(':');
   const iv = Buffer.from(textParts.shift(), 'hex');
   const encryptedText = Buffer.from(textParts.join(':'), 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+  const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
   let decrypted = decipher.update(encryptedText);
   decrypted = Buffer.concat([decrypted, decipher.final()]);
   return decrypted.toString();
@@ -82,8 +95,21 @@ export default defineConfig({
             res.setHeader('Access-Control-Allow-Headers', '*');
 
             let body = '';
-            req.on('data', chunk => { body += chunk; });
+            let bodyBytes = 0;
+            let aborted = false;
+            req.on('data', chunk => {
+              bodyBytes += chunk.length;
+              if (bodyBytes > MAX_BODY_BYTES) {
+                aborted = true;
+                res.statusCode = 413;
+                res.end(JSON.stringify({ error: 'Payload excede o limite permitido (15 MB).' }));
+                req.destroy();
+                return;
+              }
+              body += chunk;
+            });
             req.on('end', async () => {
+              if (aborted) return;
               try {
                 const payload = body ? JSON.parse(body) : {};
                 const { fileBase64, mimeType, apiKey } = payload;
@@ -130,12 +156,26 @@ export default defineConfig({
             res.setHeader('Access-Control-Allow-Methods', '*');
 
             let body = '';
-            req.on('data', chunk => { body += chunk; });
+            let bodyBytes = 0;
+            let aborted = false;
+            req.on('data', chunk => {
+              bodyBytes += chunk.length;
+              if (bodyBytes > MAX_BODY_BYTES) {
+                aborted = true;
+                res.statusCode = 413;
+                res.end(JSON.stringify({ error: 'Payload excede o limite permitido.' }));
+                req.destroy();
+                return;
+              }
+              body += chunk;
+            });
             req.on('end', async () => {
+              if (aborted) return;
               try {
                 const payload = body ? JSON.parse(body) : {};
-                const defaultModelo = getEnvVar('VITE_GEMINI_MODEL') || process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+                const defaultModelo = getEnvVar('VITE_GEMINI_MODEL') || process.env.VITE_GEMINI_MODEL || process.env.GEMINI_MODEL || 'gemini-2.0-flash';
                 const { prompt, modelo = defaultModelo, apiKey } = payload;
+                const safeModelo = ALLOWED_GEMINI_MODELS.has(String(modelo)) ? String(modelo) : 'gemini-2.0-flash';
                 const effectiveApiKey = (
                   apiKey ||
                   getEnvVar('VITE_GEMINI_API_KEY') ||
@@ -154,7 +194,7 @@ export default defineConfig({
                   return;
                 }
 
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(effectiveApiKey)}`;
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(safeModelo)}:generateContent?key=${encodeURIComponent(effectiveApiKey)}`;
                 const apiRes = await fetch(url, {
                   method: 'POST',
                   headers: {
@@ -162,7 +202,7 @@ export default defineConfig({
                     'x-goog-api-key': effectiveApiKey
                   },
                   body: JSON.stringify({
-                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    contents: [{ role: 'user', parts: [{ text: String(prompt || '').slice(0, 8000) }] }],
                     generationConfig: {
                       temperature: 0.7,
                       maxOutputTokens: 500
@@ -193,15 +233,30 @@ export default defineConfig({
           if (
             pathname.startsWith('/api/super-admin/') || 
             pathname.startsWith('/api/fiscal/') || 
-            pathname.startsWith('/api/webhooks/')
+            pathname.startsWith('/api/webhooks/') ||
+            pathname.startsWith('/api/tenant/') ||
+            pathname === '/api/vendas'
           ) {
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Headers', '*');
 
             let body = '';
-            req.on('data', chunk => { body += chunk; });
+            let bodyBytes = 0;
+            let aborted = false;
+            req.on('data', chunk => {
+              bodyBytes += chunk.length;
+              if (bodyBytes > MAX_BODY_BYTES) {
+                aborted = true;
+                res.statusCode = 413;
+                res.end(JSON.stringify({ error: 'Payload excede o limite permitido.' }));
+                req.destroy();
+                return;
+              }
+              body += chunk;
+            });
             req.on('end', async () => {
+              if (aborted) return;
               try {
                 // 1. Verify Authorization Header
                 const authHeader = req.headers['authorization'];
@@ -743,6 +798,19 @@ export default defineConfig({
                   if (fatError || !fatura) {
                     res.statusCode = 400;
                     res.end(JSON.stringify({ error: 'Fatura SaaS não localizada.' }));
+                    return;
+                  }
+
+                  // Autorização RBAC e validação de escopo de tenant
+                  const isSuperAdmin = userRole === 'SUPER_ADMIN';
+                  const isTenantOwnerOrAdmin =
+                    profile?.empresa_id &&
+                    fatura.tenant_id === profile.empresa_id &&
+                    ['ADMIN', 'OWNER', 'DONO'].includes(userRole);
+
+                  if (!isSuperAdmin && !isTenantOwnerOrAdmin) {
+                    res.statusCode = 403;
+                    res.end(JSON.stringify({ error: 'Acesso Negado: Permissão insuficiente para liquidar fatura deste tenant.' }));
                     return;
                   }
 

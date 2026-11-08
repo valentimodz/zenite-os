@@ -34,7 +34,7 @@ CREATE POLICY "Usuários podem ver movimentações da própria empresa" ON publi
   FOR SELECT TO authenticated
   USING (
     empresa_id = public.get_user_empresa_id()
-    OR public.get_user_role() = 'ADMIN'
+    OR public.get_user_role() = 'SUPER_ADMIN'
   );
 
 DROP POLICY IF EXISTS "Usuários podem inserir movimentações" ON public.estoque_movimentacoes;
@@ -42,14 +42,14 @@ CREATE POLICY "Usuários podem inserir movimentações" ON public.estoque_movime
   FOR INSERT TO authenticated
   WITH CHECK (
     empresa_id = public.get_user_empresa_id()
-    OR public.get_user_role() = 'ADMIN'
+    OR public.get_user_role() = 'SUPER_ADMIN'
   );
 
 -- =========================================================================
 -- ATUALIZAÇÃO DOS PROCEDURES DE TRANSFERÊNCIA PARA GRAVAR LOGS DE MOVIMENTAÇÃO
 -- =========================================================================
 
--- 4. RPC: Registrar Saída de Transferência (Atualizado para inserir log)
+-- 4. RPC: Registrar Saída de Transferência (Atualizado para inserir log e validar escopo de tenant)
 CREATE OR REPLACE FUNCTION public.registrar_transferencia_saida(
   p_empresa_id uuid,
   p_filial_origem_id uuid,
@@ -61,23 +61,31 @@ CREATE OR REPLACE FUNCTION public.registrar_transferencia_saida(
 RETURNS json
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_transferencia_id uuid;
   v_item jsonb;
   v_criado_por_profile_id uuid;
+  v_caller_empresa_id uuid;
+  v_caller_role text;
 BEGIN
+  SELECT empresa_id, role INTO v_caller_empresa_id, v_caller_role FROM public.profiles WHERE id = auth.uid();
+  IF v_caller_role IS DISTINCT FROM 'SUPER_ADMIN' AND (v_caller_empresa_id IS NULL OR v_caller_empresa_id IS DISTINCT FROM p_empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Não é permitido criar transferências para outra empresa.';
+  END IF;
+
   INSERT INTO public.transferencias (
     empresa_id, filial_origem_id, filial_destino_id, criado_por, status, observacoes
   ) VALUES (
-    p_empresa_id, p_filial_origem_id, p_filial_destino_id, p_criado_por, 'EM_TRANSITO', p_observacoes
+    p_empresa_id, p_filial_origem_id, p_filial_destino_id, auth.uid(), 'EM_TRANSITO', p_observacoes
   )
   RETURNING id INTO v_transferencia_id;
 
   -- Resolver ID de profile correspondente ao auth.uid() do Supabase
   SELECT id INTO v_criado_por_profile_id
   FROM public.profiles
-  WHERE id = p_criado_por;
+  WHERE id = auth.uid();
 
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_itens_json) LOOP
     INSERT INTO public.transferencias_itens (
@@ -126,13 +134,14 @@ END;
 $$;
 
 
--- 5. RPC: Confirmar Recebimento de Transferência (Atualizado para inserir log)
+-- 5. RPC: Confirmar Recebimento de Transferência (Atualizado para inserir log e validar escopo de tenant)
 CREATE OR REPLACE FUNCTION public.confirmar_recebimento_transferencia(
   p_transferencia_id uuid
 )
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_item RECORD;
@@ -142,13 +151,21 @@ DECLARE
   v_dest_prod_tipo text;
   v_dest_prod_cat text;
   v_dest_prod_preco numeric;
+  v_caller_empresa_id uuid;
+  v_caller_role text;
 BEGIN
+  SELECT empresa_id, role INTO v_caller_empresa_id, v_caller_role FROM public.profiles WHERE id = auth.uid();
+
   SELECT * INTO v_transferencia
   FROM public.transferencias
   WHERE id = p_transferencia_id;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Transferência não encontrada: %', p_transferencia_id;
+  END IF;
+
+  IF v_caller_role IS DISTINCT FROM 'SUPER_ADMIN' AND (v_caller_empresa_id IS NULL OR v_caller_empresa_id IS DISTINCT FROM v_transferencia.empresa_id) THEN
+    RAISE EXCEPTION 'Acesso Negado: Transferência pertence a outra empresa.';
   END IF;
 
   FOR v_item IN

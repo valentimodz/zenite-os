@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-secret',
 }
 
 serve(async (req) => {
@@ -16,6 +16,20 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     const groqApiKey = Deno.env.get('GROQ_API_KEY') ?? ''
+    const webhookSecret = Deno.env.get('WHATSAPP_WEBHOOK_SECRET') ?? ''
+
+    if (webhookSecret) {
+      const headerSecret =
+        req.headers.get('x-webhook-secret') ||
+        req.headers.get('apikey') ||
+        (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
+      if (headerSecret !== webhookSecret) {
+        return new Response(JSON.stringify({ error: 'Não autorizado: segredo de webhook inválido.' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+    }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {
@@ -77,24 +91,26 @@ serve(async (req) => {
       })
     }
 
-    // 2. Resolução do Tenant / Loja
+    // 2. Resolução estrita do Tenant / Loja (sem fallback para primeira empresa arbitrária)
     let resolvedTenantId: string | null = null
     let nomeLoja = "Zenite Celulares"
 
     if (id_loja) {
-      // Se id_loja for UUID, busca diretamente na tabela companies
+      // Se id_loja for UUID, verifica se a empresa existe e possui configuração ativa
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id_loja)
       
       if (isUuid) {
-        resolvedTenantId = id_loja
         const { data: comp } = await supabase
           .from('companies')
-          .select('nome')
-          .eq('id', resolvedTenantId)
+          .select('id, nome')
+          .eq('id', id_loja)
           .maybeSingle()
-        if (comp?.nome) nomeLoja = comp.nome
+        if (comp?.id) {
+          resolvedTenantId = comp.id
+          if (comp.nome) nomeLoja = comp.nome
+        }
       } else {
-        // Se for um instance_id ou chave externa, tenta cruzar com whatsapp_configuracoes
+        // Se for um instance_id ou chave externa, cruza com whatsapp_configuracoes
         const { data: config } = await supabase
           .from('whatsapp_configuracoes')
           .select('tenant_id')
@@ -113,17 +129,11 @@ serve(async (req) => {
       }
     }
 
-    // Se ainda não resolveu o tenant, pega a primeira empresa cadastrada como fallback
     if (!resolvedTenantId) {
-      const { data: firstComp } = await supabase
-        .from('companies')
-        .select('id, nome')
-        .limit(1)
-        .maybeSingle()
-      if (firstComp) {
-        resolvedTenantId = firstComp.id
-        nomeLoja = firstComp.nome
-      }
+      return new Response(JSON.stringify({ error: "Tenant / instância de loja não identificada ou não autorizada." }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
     // 3. Salvar a nova mensagem do usuário no histórico (Auditoria / Contexto)
