@@ -94,6 +94,11 @@ export default function ModalDetalheEstoqueProduto({
   const [produtosIrmaos, setProdutosIrmaos] = useState<ItemProdutoDetalhado[]>([]);
   const [abaAtiva, setAbaAtiva] = useState<'filiais' | 'variacoes'>('filiais');
 
+  // Estados de Edição de Nome do Produto no Cabeçalho
+  const [nomeEditado, setNomeEditado] = useState<string>('');
+  const [editandoNomeGeral, setEditandoNomeGeral] = useState(false);
+  const [salvandoNomeGeral, setSalvandoNomeGeral] = useState(false);
+
   // Estados de Edição de Preço Global do Cabeçalho
   const [editandoPrecoGeral, setEditandoPrecoGeral] = useState(false);
   const [valorPrecoGeral, setValorPrecoGeral] = useState('');
@@ -110,7 +115,8 @@ export default function ModalDetalheEstoqueProduto({
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
 
   // Identificadores do Produto
-  const produtoNome = produto?.nome || produto?.produto_nome || 'Produto sem nome';
+  const produtoNomeBase = produto?.nome || produto?.produto_nome || 'Produto sem nome';
+  const produtoNome = nomeEditado || produtoNomeBase;
   const produtoId = produto?.id || produto?.produto_id || '-';
   const produtoEan = produto?.codigo_barras || produto?.ean || produto?.codigoBarras || null;
   const produtoSku = produto?.sku || null;
@@ -305,6 +311,8 @@ export default function ModalDetalheEstoqueProduto({
 
   useEffect(() => {
     if (isOpen && produto) {
+      setNomeEditado(produto?.nome || produto?.produto_nome || '');
+      setEditandoNomeGeral(false);
       carregarDetalhesEstoque();
     }
   }, [isOpen, produto, carregarDetalhesEstoque]);
@@ -316,6 +324,10 @@ export default function ModalDetalheEstoqueProduto({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Esc') {
         // Se houver algum sub-modal/edição aberta, fecha ela primeiro
+        if (editandoNomeGeral) {
+          setEditandoNomeGeral(false);
+          return;
+        }
         if (editandoPrecoGeral) {
           setEditandoPrecoGeral(false);
           return;
@@ -465,6 +477,64 @@ export default function ModalDetalheEstoqueProduto({
 
     return Object.values(mapa).sort((a, b) => b.quantidadeTotal - a.quantidadeTotal);
   }, [produtosIrmaos]);
+
+  // 0. AÇÃO: Salvar Nome do Produto no Cabeçalho
+  const salvarNomeGeral = async () => {
+    const novoNomeLimpo = String(nomeEditado).trim();
+    if (!novoNomeLimpo) {
+      setNomeEditado(produtoNomeBase);
+      setEditandoNomeGeral(false);
+      return;
+    }
+
+    if (novoNomeLimpo === produtoNomeBase) {
+      setEditandoNomeGeral(false);
+      return;
+    }
+
+    setSalvandoNomeGeral(true);
+    try {
+      if (onUpdateProdutoField) {
+        await onUpdateProdutoField(produtoId, produtoNomeBase, 'nome', novoNomeLimpo, produto?.filial_id);
+      } else {
+        const targetEmpresaId = produto?.empresa_id || null;
+
+        // Atualizar produto físico por ID direto se válido
+        if (produtoId && !String(produtoId).startsWith('synth_') && produtoId !== '-') {
+          await supabase.from('produtos').update({ nome: novoNomeLimpo }).eq('id', produtoId);
+        }
+
+        // Atualizar todos os produtos físicos com o nome antigo na mesma empresa
+        let qProds = supabase.from('produtos').update({ nome: novoNomeLimpo }).ilike('nome', produtoNomeBase.trim());
+        if (targetEmpresaId) qProds = qProds.eq('empresa_id', targetEmpresaId);
+        await qProds;
+
+        // Atualizar produtos_catalogo
+        let qCat = supabase.from('produtos_catalogo').update({ nome: novoNomeLimpo }).ilike('nome', produtoNomeBase.trim());
+        if (targetEmpresaId) qCat = qCat.eq('empresa_id', targetEmpresaId);
+        await qCat;
+
+        if (produto?.produto_catalogo_id || produto?.catalogo_id) {
+          const cId = produto?.produto_catalogo_id || produto?.catalogo_id;
+          await supabase.from('produtos_catalogo').update({ nome: novoNomeLimpo }).eq('id', cId);
+        }
+      }
+
+      // Atualiza estado local de todos os itens do produto
+      setNomeEditado(novoNomeLimpo);
+      setProdutosIrmaos(prev => prev.map(p => ({ ...p, nome: novoNomeLimpo })));
+      if (produto) {
+        produto.nome = novoNomeLimpo;
+        produto.produto_nome = novoNomeLimpo;
+      }
+      setEditandoNomeGeral(false);
+      dispararAtualizacao();
+    } catch (err) {
+      console.error('[ModalDetalheEstoqueProduto] Erro ao salvar nome do produto:', err);
+    } finally {
+      setSalvandoNomeGeral(false);
+    }
+  };
 
   // 1. AÇÃO: Salvar Preço Geral do Cabeçalho
   const salvarPrecoGeral = async () => {
@@ -925,9 +995,64 @@ export default function ModalDetalheEstoqueProduto({
                   </span>
                 )}
               </div>
-              <h2 className="text-base sm:text-lg font-bold text-white truncate mt-1" title={produtoNome}>
-                {produtoNome}
-              </h2>
+
+              {/* Título Principal com Edição Inline de Nome */}
+              {editandoNomeGeral ? (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={nomeEditado}
+                    onChange={e => setNomeEditado(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') salvarNomeGeral();
+                      if (e.key === 'Escape') {
+                        setNomeEditado(produtoNomeBase);
+                        setEditandoNomeGeral(false);
+                      }
+                    }}
+                    placeholder="Nome do produto..."
+                    className="w-full sm:w-80 bg-black border border-purple-500 rounded px-2.5 py-1 text-sm text-white outline-none font-bold"
+                  />
+                  <button
+                    type="button"
+                    onClick={salvarNomeGeral}
+                    disabled={salvandoNomeGeral}
+                    className="p-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer transition-colors"
+                    title="Salvar Novo Nome"
+                  >
+                    {salvandoNomeGeral ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNomeEditado(produtoNomeBase);
+                      setEditandoNomeGeral(false);
+                    }}
+                    className="p-1.5 rounded bg-zinc-800 text-zinc-400 hover:text-white cursor-pointer transition-colors"
+                    title="Cancelar Edição"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 mt-1">
+                  <h2 className="text-base sm:text-lg font-bold text-white truncate" title={produtoNome}>
+                    {produtoNome}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNomeEditado(produtoNome);
+                      setEditandoNomeGeral(true);
+                    }}
+                    className="text-zinc-500 hover:text-purple-400 p-0.5 rounded transition-colors cursor-pointer"
+                    title="Editar Nome do Produto"
+                  >
+                    <Edit2 size={13} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

@@ -7390,6 +7390,48 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         console.error(`Erro ao atualizar ${field}:`, err);
         showToast(`Erro ao atualizar ${field}: ` + err.message, 'error');
       }
+    } else if (field === 'nome') {
+      const novoNomeLimpo = String(newValue || '').trim();
+      if (!novoNomeLimpo) {
+        showToast('Por favor, informe um nome válido para o produto.', 'error');
+        return;
+      }
+      try {
+        if (produtoId && !String(produtoId).startsWith('synth_')) {
+          let q = dbClient.from('produtos').update({ nome: novoNomeLimpo }).eq('id', produtoId);
+          if (itemFilialId) {
+            q = q.eq('filial_id', itemFilialId);
+          }
+          const { error: updErr } = await q;
+          if (updErr) throw updErr;
+        }
+
+        if (nome) {
+          let qCat = dbClient.from('produtos_catalogo').update({ nome: novoNomeLimpo }).ilike('nome', nome.trim());
+          if (targetEmpresaId) qCat = qCat.eq('empresa_id', targetEmpresaId);
+          await qCat;
+
+          let qProdAll = dbClient.from('produtos').update({ nome: novoNomeLimpo }).ilike('nome', nome.trim());
+          if (targetEmpresaId) qProdAll = qProdAll.eq('empresa_id', targetEmpresaId);
+          await qProdAll;
+        }
+
+        setProdutos(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, nome: novoNomeLimpo } : p) : []));
+        setProdutosFilial(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, nome: novoNomeLimpo } : p) : []));
+        setCatalogoProdutos(prev => (Array.isArray(prev) ? prev.map(c => isTargetItem(c) ? { ...c, nome: novoNomeLimpo } : c) : []));
+        setEstoqueConsolidadoLista(prev => (Array.isArray(prev) ? prev.map(e => isTargetItem(e) ? { ...e, nome: novoNomeLimpo } : e) : []));
+
+        invalidateCache('estoque_consolidado_');
+        showToast(`Nome do produto atualizado para "${novoNomeLimpo}" com sucesso!`, 'success');
+
+        const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
+        if (filialParaRecarregar) {
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
+        }
+      } catch (err) {
+        console.error('Erro ao atualizar nome do produto:', err);
+        showToast('Erro ao atualizar nome: ' + err.message, 'error');
+      }
     }
   };
 
