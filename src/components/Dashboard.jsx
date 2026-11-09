@@ -7432,6 +7432,47 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         console.error('Erro ao atualizar nome do produto:', err);
         showToast('Erro ao atualizar nome: ' + err.message, 'error');
       }
+    } else if (field === 'preco_custo') {
+      const precoCustoNum = typeof newValue === 'number'
+        ? newValue
+        : parseFloat(String(newValue || '').replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.'));
+
+      if (isNaN(precoCustoNum) || precoCustoNum < 0) {
+        showToast('Por favor, informe um preço de custo numérico válido.', 'error');
+        return;
+      }
+
+      try {
+        if (produtoId && !String(produtoId).startsWith('synth_')) {
+          let q = dbClient.from('produtos').update({ preco_custo: precoCustoNum }).eq('id', produtoId);
+          if (itemFilialId) {
+            q = q.eq('filial_id', itemFilialId);
+          }
+          const { error: updErr } = await q;
+          if (updErr) throw updErr;
+        }
+
+        if (nome) {
+          let qProdAll = dbClient.from('produtos').update({ preco_custo: precoCustoNum }).ilike('nome', nome.trim());
+          if (targetEmpresaId) qProdAll = qProdAll.eq('empresa_id', targetEmpresaId);
+          await qProdAll;
+        }
+
+        setProdutos(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, preco_custo: precoCustoNum } : p) : []));
+        setProdutosFilial(prev => (Array.isArray(prev) ? prev.map(p => isTargetItem(p) ? { ...p, preco_custo: precoCustoNum } : p) : []));
+        setEstoqueConsolidadoLista(prev => (Array.isArray(prev) ? prev.map(e => isTargetItem(e) ? { ...e, preco_custo: precoCustoNum } : e) : []));
+
+        invalidateCache('estoque_consolidado_');
+        showToast('Preço de custo atualizado com sucesso!', 'success');
+
+        const filialParaRecarregar = filtroFilialEstoque || resolvedFilialId || activeFilialId;
+        if (filialParaRecarregar) {
+          fetchEstoqueConsolidado(filialParaRecarregar, buscaEstoque, filtroCategoriaEstoque).catch(e => console.warn('Erro ao atualizar estoque:', e));
+        }
+      } catch (err) {
+        console.error('Erro ao atualizar preço de custo:', err);
+        showToast('Erro ao atualizar preço de custo: ' + err.message, 'error');
+      }
     }
   };
 

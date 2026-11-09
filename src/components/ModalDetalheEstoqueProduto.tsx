@@ -21,7 +21,20 @@ import {
   Check,
   DollarSign
 } from 'lucide-react';
-import { formatCurrency, formatarMoeda } from '../utils/currencyUtils';
+import { formatCurrency, formatarMoeda, parseMonetaryValue } from '../utils/currencyUtils';
+
+/**
+ * Sanitização e conversão segura de qualquer input monetário digitado para float numérico válido (2 casas decimais).
+ * Evita erro 400 de sintaxe numeric / invalid input syntax no Postgres.
+ */
+function parsePrecoToNumeric(valor: string | number): number {
+  if (typeof valor === 'number') return isNaN(valor) ? 0 : Number(valor.toFixed(2));
+  if (!valor) return 0;
+  // Remove R$, espaços e converte formato 1.234,56 ou 29,99 para 29.99
+  const limpo = String(valor).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+  const numero = parseFloat(limpo);
+  return isNaN(numero) ? 0 : Number(numero.toFixed(2));
+}
 
 interface ModalDetalheEstoqueProdutoProps {
   isOpen: boolean;
@@ -98,6 +111,15 @@ export default function ModalDetalheEstoqueProduto({
   const [nomeEditado, setNomeEditado] = useState<string>('');
   const [editandoNomeGeral, setEditandoNomeGeral] = useState(false);
   const [salvandoNomeGeral, setSalvandoNomeGeral] = useState(false);
+  // Toast local leve no modal
+  const [toastModal, setToastModal] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showModalToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    setToastModal({ message, type });
+    setTimeout(() => {
+      setToastModal(prev => (prev?.message === message ? null : prev));
+    }, 4000);
+  }, []);
 
   // Estados de Edição de Preço Global do Cabeçalho
   const [editandoPrecoGeral, setEditandoPrecoGeral] = useState(false);
@@ -538,8 +560,9 @@ export default function ModalDetalheEstoqueProduto({
 
   // 1. AÇÃO: Salvar Preço Geral do Cabeçalho
   const salvarPrecoGeral = async () => {
-    const novoValor = parseFloat(String(valorPrecoGeral).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
+    const novoValor = parsePrecoToNumeric(valorPrecoGeral);
     if (isNaN(novoValor) || novoValor < 0) {
+      showModalToast('Informe um preço numérico válido maior ou igual a zero.', 'error');
       setEditandoPrecoGeral(false);
       return;
     }
@@ -549,10 +572,19 @@ export default function ModalDetalheEstoqueProduto({
       if (onUpdateProdutoField) {
         await onUpdateProdutoField(produtoId, produtoNome, 'preco', novoValor, produto?.filial_id);
       } else {
-        await supabase
+        const { error: updErr } = await supabase
           .from('produtos')
           .update({ preco: novoValor, preco_venda: novoValor })
           .ilike('nome', produtoNome.trim());
+
+        if (updErr) {
+          console.warn('[salvarPrecoGeral] Erro update preco+preco_venda, tentando apenas preco:', updErr);
+          const { error: retryErr } = await supabase
+            .from('produtos')
+            .update({ preco: novoValor })
+            .ilike('nome', produtoNome.trim());
+          if (retryErr) throw retryErr;
+        }
 
         // Também atualiza na tabela produtos_catalogo para que a consulta de catálogo não retorne o preço antigo
         const targetEmpresaId = produto?.empresa_id || null;
@@ -571,16 +603,18 @@ export default function ModalDetalheEstoqueProduto({
               .ilike('nome', produtoNome.trim());
             if (targetEmpresaId) fallbackCat = fallbackCat.eq('empresa_id', targetEmpresaId);
             await fallbackCat;
-          } catch (_) {}
+          } catch (_) { }
         }
       }
 
       // Atualiza estado local de todos os itens do produto
       setProdutosIrmaos(prev => prev.map(p => ({ ...p, preco: novoValor, preco_venda: novoValor })));
       setEditandoPrecoGeral(false);
+      showModalToast('Preço de venda atualizado com sucesso!', 'success');
       dispararAtualizacao();
-    } catch (err) {
+    } catch (err: any) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao salvar preço geral:', err);
+      showModalToast(`Erro ao salvar preço: ${err?.message || 'Falha ao atualizar'}`, 'error');
     } finally {
       setSalvandoPrecoGeral(false);
     }
@@ -654,11 +688,21 @@ export default function ModalDetalheEstoqueProduto({
       }
       if (novosValores.cor !== undefined) payloadUpdate.cor = novosValores.cor;
 
-      const { error: updErr } = await supabase
+      let { error: updErr } = await supabase
         .from('produtos')
         .update(payloadUpdate)
-        .eq('id', idAlvo)
-        .eq('filial_id', filialIdNumerico);
+        .eq('id', idAlvo);
+
+      // Fallback caso preco_venda não exista na tabela produtos
+      if (updErr && (updErr.message?.includes('preco_venda') || (updErr as any)?.details?.includes('preco_venda'))) {
+        const payloadSemPrecoVenda = { ...payloadUpdate };
+        delete payloadSemPrecoVenda.preco_venda;
+        const { error: retryErr } = await supabase
+          .from('produtos')
+          .update(payloadSemPrecoVenda)
+          .eq('id', idAlvo);
+        updErr = retryErr;
+      }
 
       if (updErr) throw updErr;
     } else {
@@ -751,10 +795,10 @@ export default function ModalDetalheEstoqueProduto({
 
     try {
       if (campoEditando === 'preco') {
-        const novoValor = parseFloat(String(valorEditando).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
+        const novoValor = parsePrecoToNumeric(valorEditando);
         if (!isNaN(novoValor) && novoValor >= 0) {
           const itemAtualizado = await persistirEstoqueFilial(item, { preco: novoValor });
-          
+
           // Sincroniza também produtos_catalogo com o novo preço
           const targetEmpresaId = produto?.empresa_id || null;
           try {
@@ -772,7 +816,7 @@ export default function ModalDetalheEstoqueProduto({
                 .ilike('nome', produtoNome.trim());
               if (targetEmpresaId) fCat = fCat.eq('empresa_id', targetEmpresaId);
               await fCat;
-            } catch (_) {}
+            } catch (_) { }
           }
 
           setProdutosIrmaos(prev => {
@@ -780,9 +824,12 @@ export default function ModalDetalheEstoqueProduto({
             if (!existe) return [...prev, itemAtualizado];
             return prev.map(p => (p.id === item.id ? itemAtualizado : p));
           });
+          showModalToast('Preço unitário atualizado com sucesso!', 'success');
+        } else {
+          showModalToast('Informe um preço unitário numérico válido.', 'error');
         }
       } else if (campoEditando === 'preco_custo') {
-        const novoValor = parseFloat(String(valorEditando).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
+        const novoValor = parsePrecoToNumeric(valorEditando);
         if (!isNaN(novoValor) && novoValor >= 0) {
           const itemAtualizado = await persistirEstoqueFilial(item, { preco_custo: novoValor });
           setProdutosIrmaos(prev => {
@@ -790,6 +837,9 @@ export default function ModalDetalheEstoqueProduto({
             if (!existe) return [...prev, itemAtualizado];
             return prev.map(p => (p.id === item.id ? itemAtualizado : p));
           });
+          showModalToast('Preço de custo atualizado com sucesso!', 'success');
+        } else {
+          showModalToast('Informe um preço de custo numérico válido.', 'error');
         }
       } else if (campoEditando === 'cor') {
         const novaCor = String(valorEditando).trim();
@@ -800,6 +850,7 @@ export default function ModalDetalheEstoqueProduto({
             if (!existe) return [...prev, itemAtualizado];
             return prev.map(p => (p.id === item.id ? itemAtualizado : p));
           });
+          showModalToast('Cor atualizada com sucesso!', 'success');
         }
       } else if (campoEditando === 'quantidade') {
         const novaQtd = parseInt(valorEditando, 10);
@@ -810,6 +861,7 @@ export default function ModalDetalheEstoqueProduto({
             if (!existe) return [...prev, itemAtualizado];
             return prev.map(p => (p.id === item.id ? itemAtualizado : p));
           });
+          showModalToast('Quantidade atualizada com sucesso!', 'success');
         }
       }
 
@@ -817,8 +869,9 @@ export default function ModalDetalheEstoqueProduto({
       setCampoEditando(null);
       setValorEditando('');
       dispararAtualizacao();
-    } catch (err) {
+    } catch (err: any) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao salvar edição inline:', err);
+      showModalToast(`Erro ao salvar: ${err?.message || 'Falha na gravação'}`, 'error');
     } finally {
       setSalvandoInline(false);
     }
@@ -1183,8 +1236,8 @@ export default function ModalDetalheEstoqueProduto({
             type="button"
             onClick={() => setAbaAtiva('filiais')}
             className={`px-3 py-2 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${abaAtiva === 'filiais'
-                ? 'border-[#6A0DAD] text-purple-300'
-                : 'border-transparent text-zinc-400 hover:text-white'
+              ? 'border-[#6A0DAD] text-purple-300'
+              : 'border-transparent text-zinc-400 hover:text-white'
               }`}
           >
             <Store size={14} />
@@ -1194,8 +1247,8 @@ export default function ModalDetalheEstoqueProduto({
             type="button"
             onClick={() => setAbaAtiva('variacoes')}
             className={`px-3 py-2 text-xs font-bold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${abaAtiva === 'variacoes'
-                ? 'border-[#6A0DAD] text-purple-300'
-                : 'border-transparent text-zinc-400 hover:text-white'
+              ? 'border-[#6A0DAD] text-purple-300'
+              : 'border-transparent text-zinc-400 hover:text-white'
               }`}
           >
             <Layers size={14} />
@@ -1222,8 +1275,8 @@ export default function ModalDetalheEstoqueProduto({
                         <Store size={15} className={filial.quantidadeTotal > 0 ? 'text-purple-400' : 'text-zinc-600'} />
                         <span className="font-bold text-white text-xs sm:text-sm">{filial.filial_nome}</span>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${filial.quantidadeTotal > 0
-                            ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
-                            : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
+                          ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
+                          : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
                           }`}>
                           {filial.quantidadeTotal > 0 ? 'Em Estoque' : 'Esgotado'}
                         </span>
@@ -1688,7 +1741,21 @@ export default function ModalDetalheEstoqueProduto({
         )}
 
         {/* RODAPÉ COM AÇÕES */}
-        <div className="p-4 border-t border-[#27272a] bg-[#141417] flex flex-wrap items-center justify-between gap-3">
+        <div className="p-4 border-t border-[#27272a] bg-[#141417] flex flex-wrap items-center justify-between gap-3 relative">
+          {/* Toast / Notificação flutuante de sucesso/erro */}
+          {toastModal && (
+            <div
+              className={`absolute -top-12 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl text-xs font-bold shadow-xl flex items-center gap-2 animate-fadeIn z-50 ${
+                toastModal.type === 'success'
+                  ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/50'
+                  : 'bg-rose-950/90 text-rose-300 border border-rose-500/50'
+              }`}
+            >
+              {toastModal.type === 'success' ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+              <span>{toastModal.message}</span>
+            </div>
+          )}
+
           <div className="text-[11px] text-zinc-500">
             * Clique em Fechar ou pressione ESC para retornar à lista.
           </div>
