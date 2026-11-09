@@ -538,20 +538,33 @@ export default function ConsultaEstoque({
         }
       } else {
         // Exibe somente para a filial ativa selecionada
-        const fObj = listaFiliais.find(f => String(f.id).trim().toLowerCase() === String(filialSelecionada).trim().toLowerCase());
+        const fClean = String(filialSelecionada).trim().toLowerCase();
+        const fObj = listaFiliais.find(f => String(f.id).trim().toLowerCase() === fClean);
         const fNome = fObj ? fObj.nome : 'Filial Selecionada';
+
+        // Procura os itens físicos do produto associados a esta filial específica
+        const itensFisicosFilial = (prod.itensFisicos || []).filter(p => String(p.filial_id || '').trim().toLowerCase() === fClean);
+
+        // Se o produto NÃO possui registro físico ou estoque real nesta filial selecionada, NÃO exibe card órfão de catálogo
         const saldoFilial = getSaldoFilial(prod, filialSelecionada);
+        if (itensFisicosFilial.length === 0 && saldoFilial === 0) {
+          return;
+        }
+
         const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
 
-        const itemFisicoFilial = (prod.itensFisicos || []).find(p => String(p.filial_id) === String(filialSelecionada));
+        const itemFisicoFilial = itensFisicosFilial[0];
         const precoFilial = Number(itemFisicoFilial?.preco_venda || itemFisicoFilial?.preco || prod.preco || 0);
+
+        // Rótulo da filial: usa o nome real da filial cadastrado no item ou fNome
+        const nomeRealFilial = itemFisicoFilial?.filiais?.nome || itemFisicoFilial?.filial_nome || fNome;
 
         lista.push({
           ...prod,
           preco: precoFilial,
           cardKey: `${prod.id}_${filialSelecionada}`,
           filialIdCard: String(filialSelecionada),
-          filialNomeCard: fNome,
+          filialNomeCard: nomeRealFilial,
           qtdFilial: saldoFilial,
           statusEstoque,
           isMultiLojaDesdobrado: false
