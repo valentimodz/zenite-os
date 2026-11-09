@@ -47,6 +47,7 @@ interface ItemProdutoDetalhado {
   cor: string;
   preco: number;
   preco_venda: number;
+  preco_custo?: number;
   quantidade: number;
   imeis: string[];
   updated_at?: string;
@@ -116,6 +117,7 @@ export default function ModalDetalheEstoqueProduto({
   const categoria = produto?.categoria || produto?.tipo || 'GERAL';
   const corAtual = produto?.cor || produto?.cor_nome || 'Padrão';
   const precoBaseVenda = Number(produto?.preco_venda || produto?.preco || 0);
+  const precoBaseCusto = Number(produto?.preco_custo || 0);
 
   // Mapeamento de Filiais por ID para lookup rápido
   const mapaFiliaisNome = useMemo(() => {
@@ -285,6 +287,7 @@ export default function ModalDetalheEstoqueProduto({
           cor: corLimpa,
           preco: Number(p.preco || p.preco_venda || precoBaseVenda),
           preco_venda: Number(p.preco_venda || p.preco || precoBaseVenda),
+          preco_custo: Number(p.preco_custo !== undefined && p.preco_custo !== null ? p.preco_custo : precoBaseCusto),
           quantidade: qtdValida,
           imeis: imeisStrings,
           updated_at: p.updated_at,
@@ -347,6 +350,12 @@ export default function ModalDetalheEstoqueProduto({
     const comPreco = produtosIrmaos.find(p => p.preco_venda > 0 || p.preco > 0);
     return comPreco ? (comPreco.preco_venda || comPreco.preco) : precoBaseVenda;
   }, [produtosIrmaos, precoBaseVenda]);
+
+  // Preço de custo exibido no cabeçalho (item principal ou base)
+  const precoCustoExibicaoCabecalho = useMemo(() => {
+    const comCusto = produtosIrmaos.find(p => p.preco_custo !== undefined && p.preco_custo !== null && p.preco_custo > 0);
+    return comCusto && comCusto.preco_custo !== undefined ? comCusto.preco_custo : precoBaseCusto;
+  }, [produtosIrmaos, precoBaseCusto]);
 
   // Agrupamento de Estoque por Filial
   const estoqueFiliais = useMemo(() => {
@@ -414,6 +423,7 @@ export default function ModalDetalheEstoqueProduto({
           cor: (corAtual || 'Padrão').trim(),
           preco: precoBaseVenda,
           preco_venda: precoBaseVenda,
+          preco_custo: precoBaseCusto,
           quantidade: 0,
           imeis: [],
           isSynthetic: true
@@ -509,7 +519,7 @@ export default function ModalDetalheEstoqueProduto({
   // Função auxiliar para inserir ou atualizar estoque de uma filial no Supabase
   const persistirEstoqueFilial = async (
     item: ItemProdutoDetalhado,
-    novosValores: { quantidade?: number; preco?: number; cor?: string }
+    novosValores: { quantidade?: number; preco?: number; preco_custo?: number; cor?: string }
   ): Promise<ItemProdutoDetalhado> => {
     const fIdReal = item.filial_id;
     if (!fIdReal || fIdReal === 'sem_filial') {
@@ -523,6 +533,7 @@ export default function ModalDetalheEstoqueProduto({
 
     const qtdFinal = novosValores.quantidade !== undefined ? novosValores.quantidade : item.quantidade;
     const precoFinal = novosValores.preco !== undefined ? novosValores.preco : (item.preco_venda || item.preco || precoBaseVenda);
+    const precoCustoFinal = novosValores.preco_custo !== undefined ? novosValores.preco_custo : Number(item.preco_custo !== undefined ? item.preco_custo : precoBaseCusto);
     const corFinal = (novosValores.cor !== undefined ? novosValores.cor : (item.cor || corAtual || 'Padrão')).trim();
     const nomeFinal = item.nome || produtoNome;
     const categoriaFinal = item.categoria || categoria;
@@ -532,7 +543,7 @@ export default function ModalDetalheEstoqueProduto({
 
     let queryCheck = supabase
       .from('produtos')
-      .select('id, quantidade, preco, preco_venda, cor, filial_id')
+      .select('id, quantidade, preco, preco_venda, preco_custo, cor, filial_id')
       .eq('filial_id', filialIdNumerico)
       .ilike('nome', nomeFinal.trim());
 
@@ -568,6 +579,9 @@ export default function ModalDetalheEstoqueProduto({
         payloadUpdate.preco = novosValores.preco;
         payloadUpdate.preco_venda = novosValores.preco;
       }
+      if (novosValores.preco_custo !== undefined) {
+        payloadUpdate.preco_custo = novosValores.preco_custo;
+      }
       if (novosValores.cor !== undefined) payloadUpdate.cor = novosValores.cor;
 
       const { error: updErr } = await supabase
@@ -585,7 +599,7 @@ export default function ModalDetalheEstoqueProduto({
         quantidade: qtdFinal,
         preco: precoFinal,
         preco_venda: precoFinal,
-        preco_custo: Number(produto?.preco_custo || 0),
+        preco_custo: precoCustoFinal,
         cor: corFinal,
         categoria: categoriaFinal,
         status: 'ATIVO'
@@ -609,6 +623,7 @@ export default function ModalDetalheEstoqueProduto({
           quantidade: qtdFinal,
           preco: precoFinal,
           preco_venda: precoFinal,
+          preco_custo: precoCustoFinal,
           cor: corFinal,
           categoria: categoriaFinal
         };
@@ -653,6 +668,7 @@ export default function ModalDetalheEstoqueProduto({
       quantidade: qtdFinal,
       preco: precoFinal,
       preco_venda: precoFinal,
+      preco_custo: precoCustoFinal,
       cor: corFinal,
       isSynthetic: false
     };
@@ -689,6 +705,16 @@ export default function ModalDetalheEstoqueProduto({
             } catch (_) {}
           }
 
+          setProdutosIrmaos(prev => {
+            const existe = prev.some(p => p.id === item.id);
+            if (!existe) return [...prev, itemAtualizado];
+            return prev.map(p => (p.id === item.id ? itemAtualizado : p));
+          });
+        }
+      } else if (campoEditando === 'preco_custo') {
+        const novoValor = parseFloat(String(valorEditando).replace('R$', '').replace(/\s/g, '').replace(',', '.'));
+        if (!isNaN(novoValor) && novoValor >= 0) {
+          const itemAtualizado = await persistirEstoqueFilial(item, { preco_custo: novoValor });
           setProdutosIrmaos(prev => {
             const existe = prev.some(p => p.id === item.id);
             if (!existe) return [...prev, itemAtualizado];
@@ -916,7 +942,7 @@ export default function ModalDetalheEstoqueProduto({
         </div>
 
         {/* CARDS COM MÉTRICAS EM DESTAQUE */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-[#141417] border-b border-[#222]">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-4 bg-[#141417] border-b border-[#222]">
           {/* Card 1: Preço de Venda com Edição Inline */}
           <div className="bg-[#1a1a1e] border border-[#27272a] rounded-xl p-3 flex flex-col justify-between">
             <div className="flex items-center justify-between">
@@ -977,7 +1003,19 @@ export default function ModalDetalheEstoqueProduto({
             )}
           </div>
 
-          {/* Card 2: Estoque Total Rede (Soma de todas as variações e filiais) */}
+          {/* Card 2: Preço de Custo */}
+          <div className="bg-[#1a1a1e] border border-[#27272a] rounded-xl p-3 flex flex-col justify-between">
+            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+              <DollarSign size={11} /> Preço de Custo
+            </span>
+            <div className="flex items-baseline gap-1 mt-1">
+              <span className="text-base sm:text-lg font-extrabold font-mono text-amber-400">
+                {formatCurrency(precoCustoExibicaoCabecalho)}
+              </span>
+            </div>
+          </div>
+
+          {/* Card 3: Estoque Total Rede (Soma de todas as variações e filiais) */}
           <div className="bg-[#1a1a1e] border border-[#27272a] rounded-xl p-3">
             <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1">
               Total em Rede
@@ -990,7 +1028,7 @@ export default function ModalDetalheEstoqueProduto({
             </div>
           </div>
 
-          {/* Card 3: Variações de Cores */}
+          {/* Card 4: Variações de Cores */}
           <div className="bg-[#1a1a1e] border border-[#27272a] rounded-xl p-3">
             <span className="text-[10px] font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1">
               <Palette size={11} /> Cores Cadastradas
@@ -1000,7 +1038,7 @@ export default function ModalDetalheEstoqueProduto({
             </span>
           </div>
 
-          {/* Card 4: Filiais com Estoque */}
+          {/* Card 5: Filiais com Estoque */}
           <div className="bg-[#1a1a1e] border border-[#27272a] rounded-xl p-3">
             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
               <Store size={11} /> Lojas Abastecidas
@@ -1081,6 +1119,7 @@ export default function ModalDetalheEstoqueProduto({
                           <tr className="border-b border-[#222] text-zinc-500 uppercase text-[10px] tracking-wider bg-black/30">
                             <th className="py-2.5 px-3">Cor / Variação</th>
                             <th className="py-2.5 px-3">Preço Unitário</th>
+                            <th className="py-2.5 px-3">Preço de Custo</th>
                             <th className="py-2.5 px-3 text-center">Quantidade</th>
                             {ehCelular && <th className="py-2.5 px-3">IMEIs / Seriais</th>}
                             <th className="py-2.5 px-3 text-right">Ações</th>
@@ -1090,6 +1129,7 @@ export default function ModalDetalheEstoqueProduto({
                           {filial.itens.map(item => {
                             const isEditandoCor = itemEditandoId === item.id && campoEditando === 'cor';
                             const isEditandoPreco = itemEditandoId === item.id && campoEditando === 'preco';
+                            const isEditandoPrecoCusto = itemEditandoId === item.id && campoEditando === 'preco_custo';
                             const isEditandoQtd = itemEditandoId === item.id && campoEditando === 'quantidade';
 
                             return (
@@ -1172,6 +1212,47 @@ export default function ModalDetalheEstoqueProduto({
                                         }}
                                         className="text-zinc-600 hover:text-emerald-400 transition-colors p-0.5"
                                         title="Editar Preço Deste Item"
+                                      >
+                                        <Edit2 size={11} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* Preço de Custo com Edição Inline */}
+                                <td className="py-2.5 px-3 font-mono font-bold align-middle">
+                                  {isEditandoPrecoCusto ? (
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="text"
+                                        autoFocus
+                                        value={valorEditando}
+                                        onChange={e => setValorEditando(e.target.value)}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter') salvarEdicaoInline(item);
+                                          if (e.key === 'Escape') setItemEditandoId(null);
+                                        }}
+                                        className="w-20 bg-black border border-amber-500 rounded px-1.5 py-0.5 text-xs text-white font-mono"
+                                      />
+                                      <button type="button" onClick={() => salvarEdicaoInline(item)} className="text-emerald-400 hover:text-emerald-300">
+                                        <Check size={12} />
+                                      </button>
+                                      <button type="button" onClick={() => setItemEditandoId(null)} className="text-zinc-500 hover:text-white">
+                                        <X size={12} />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1.5 text-amber-400">
+                                      <span>{formatCurrency(item.preco_custo || 0)}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setItemEditandoId(item.id);
+                                          setCampoEditando('preco_custo');
+                                          setValorEditando(String(item.preco_custo || 0));
+                                        }}
+                                        className="text-zinc-600 hover:text-amber-400 transition-colors p-0.5"
+                                        title="Editar Preço de Custo Deste Item"
                                       >
                                         <Edit2 size={11} />
                                       </button>
@@ -1333,6 +1414,7 @@ export default function ModalDetalheEstoqueProduto({
                         <tr className="border-b border-[#222] text-zinc-500 uppercase text-[10px] tracking-wider bg-black/20">
                           <th className="py-2.5 px-3">Filial</th>
                           <th className="py-2.5 px-3">Preço</th>
+                          <th className="py-2.5 px-3">Preço de Custo</th>
                           <th className="py-2.5 px-3 text-center">Quantidade</th>
                           <th className="py-2.5 px-3 text-right">Ações</th>
                         </tr>
@@ -1345,6 +1427,9 @@ export default function ModalDetalheEstoqueProduto({
                             </td>
                             <td className="py-2.5 px-3 font-mono font-bold text-emerald-400">
                               {formatCurrency(item.preco_venda || item.preco)}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono font-bold text-amber-400">
+                              {formatCurrency(item.preco_custo || 0)}
                             </td>
                             <td className="py-2.5 px-3 text-center font-mono font-bold text-white">
                               {item.quantidade} unids

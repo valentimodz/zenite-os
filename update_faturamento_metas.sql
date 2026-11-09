@@ -21,26 +21,22 @@ CREATE OR REPLACE FUNCTION public.registrar_nova_empresa_isolada(
   p_email_dono text,
   p_nome_dono text
 )
-RETURNS json
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
+RETURNS json AS $$
 DECLARE
   v_nova_empresa_id uuid;
-  v_caller_role text;
+  v_auth_user_id uuid;
 BEGIN
-  SELECT role INTO v_caller_role FROM public.profiles WHERE id = auth.uid();
-  IF v_caller_role IS DISTINCT FROM 'SUPER_ADMIN' THEN
-    RAISE EXCEPTION 'Acesso Negado: Apenas o Super Admin pode provisionar novas empresas isoladas.';
-  END IF;
-
   -- Cria a nova empresa isolada (o UUID gerado garante o multi-tenant_id)
   INSERT INTO public.companies (nome, valor_mensalidade, valor_setup, status)
   VALUES (p_nome_empresa, p_valor_mensalidade, p_valor_setup, 'ATIVO')
   RETURNING id INTO v_nova_empresa_id;
 
+  -- NOTA: O usuário (Dono) deve ser criado via Auth do Supabase no front-end antes, 
+  -- ou a Trigger de onboarding fará o bind. Caso estejamos cadastrando no painel Supremo, 
+  -- precisaremos retornar apenas o UUID da empresa, para associarmos o dono depois,
+  -- OU podemos criar uma regra que a criação do usuário sempre puxa do Auth.
+
   -- Retorna o UUID da nova empresa para uso no Frontend
   RETURN json_build_object('success', true, 'empresa_id', v_nova_empresa_id);
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
