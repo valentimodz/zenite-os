@@ -520,29 +520,41 @@ export default function ModalDetalheEstoqueProduto({
         await onUpdateProdutoField(produtoId, produtoNomeBase, 'nome', novoNomeLimpo, produto?.filial_id);
       } else {
         const targetEmpresaId = produto?.empresa_id || null;
+        let teveSucesso = false;
 
-        // Atualizar produto físico por ID direto se válido
-        if (produtoId && !String(produtoId).startsWith('synth_') && produtoId !== '-') {
-          await supabase.from('produtos').update({ nome: novoNomeLimpo }).eq('id', produtoId);
+        // 1. Atualizar produto físico por ID direto se válido
+        const idValido = produto?.id || produtoId;
+        if (idValido && !String(idValido).startsWith('synth_') && !String(idValido).startsWith('temp_') && idValido !== '-') {
+          const { error: errProdId } = await supabase.from('produtos').update({ nome: novoNomeLimpo }).eq('id', idValido);
+          if (!errProdId) teveSucesso = true;
+          else console.warn('[salvarNomeGeral] Erro ao atualizar por ID direto em produtos:', errProdId);
         }
 
-        // Atualizar todos os produtos físicos com o nome antigo na mesma empresa
+        // 2. Atualizar todos os produtos físicos com o nome antigo na mesma empresa
         let qProds = supabase.from('produtos').update({ nome: novoNomeLimpo }).ilike('nome', produtoNomeBase.trim());
         if (targetEmpresaId) qProds = qProds.eq('empresa_id', targetEmpresaId);
-        await qProds;
+        const { error: errProdsNome } = await qProds;
+        if (!errProdsNome) teveSucesso = true;
 
-        // Atualizar produtos_catalogo
+        // 3. Atualizar produtos_catalogo por nome
         let qCat = supabase.from('produtos_catalogo').update({ nome: novoNomeLimpo }).ilike('nome', produtoNomeBase.trim());
         if (targetEmpresaId) qCat = qCat.eq('empresa_id', targetEmpresaId);
-        await qCat;
+        const { error: errCatNome } = await qCat;
+        if (!errCatNome) teveSucesso = true;
 
-        if (produto?.produto_catalogo_id || produto?.catalogo_id) {
-          const cId = produto?.produto_catalogo_id || produto?.catalogo_id;
-          await supabase.from('produtos_catalogo').update({ nome: novoNomeLimpo }).eq('id', cId);
+        // 4. Se o produto possuir catalogo_id ou produto_catalogo_id, atualiza diretamente por ID:
+        const catId = produto?.produto_catalogo_id || produto?.catalogo_id || null;
+        if (catId) {
+          const { error: errCatId } = await supabase.from('produtos_catalogo').update({ nome: novoNomeLimpo }).eq('id', catId);
+          if (!errCatId) teveSucesso = true;
+        }
+
+        if (!teveSucesso && errProdsNome) {
+          throw errProdsNome;
         }
       }
 
-      // Atualiza estado local de todos os itens do produto
+      // 5. Atualiza o estado local imediatamente para refletir na interface
       setNomeEditado(novoNomeLimpo);
       setProdutosIrmaos(prev => prev.map(p => ({ ...p, nome: novoNomeLimpo })));
       if (produto) {
@@ -550,9 +562,13 @@ export default function ModalDetalheEstoqueProduto({
         produto.produto_nome = novoNomeLimpo;
       }
       setEditandoNomeGeral(false);
+      showModalToast('Nome do produto atualizado com sucesso!', 'success');
+
+      // 6. Notifica componente pai e invalida as queries da listagem
       dispararAtualizacao();
-    } catch (err) {
+    } catch (err: any) {
       console.error('[ModalDetalheEstoqueProduto] Erro ao salvar nome do produto:', err);
+      showModalToast('Erro ao salvar nome: ' + (err?.message || 'Falha no banco'), 'error');
     } finally {
       setSalvandoNomeGeral(false);
     }
