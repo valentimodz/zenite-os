@@ -572,22 +572,38 @@ export default function ModalDetalheEstoqueProduto({
       if (onUpdateProdutoField) {
         await onUpdateProdutoField(produtoId, produtoNome, 'preco', novoValor, produto?.filial_id);
       } else {
-        const { error: updErr } = await supabase
+        const targetEmpresaId = produto?.empresa_id || null;
+
+        // 1. Atualizar por ID direto na tabela produtos se ID válido
+        if (produtoId && !String(produtoId).startsWith('synth_') && !String(produtoId).startsWith('temp_') && produtoId !== '-') {
+          let { error: errId } = await supabase
+            .from('produtos')
+            .update({ preco: novoValor, preco_venda: novoValor })
+            .eq('id', produtoId);
+
+          if (errId && (errId.message?.includes('preco_venda') || (errId as any)?.details?.includes('preco_venda'))) {
+            await supabase.from('produtos').update({ preco: novoValor }).eq('id', produtoId);
+          }
+        }
+
+        // 2. Atualizar em massa todas as instâncias do produto com este nome
+        let qProds = supabase
           .from('produtos')
           .update({ preco: novoValor, preco_venda: novoValor })
           .ilike('nome', produtoNome.trim());
+        if (targetEmpresaId) qProds = qProds.eq('empresa_id', targetEmpresaId);
 
-        if (updErr) {
-          console.warn('[salvarPrecoGeral] Erro update preco+preco_venda, tentando apenas preco:', updErr);
-          const { error: retryErr } = await supabase
+        let { error: updErr } = await qProds;
+        if (updErr && (updErr.message?.includes('preco_venda') || (updErr as any)?.details?.includes('preco_venda'))) {
+          let qRetry = supabase
             .from('produtos')
             .update({ preco: novoValor })
             .ilike('nome', produtoNome.trim());
-          if (retryErr) throw retryErr;
+          if (targetEmpresaId) qRetry = qRetry.eq('empresa_id', targetEmpresaId);
+          await qRetry;
         }
 
-        // Também atualiza na tabela produtos_catalogo para que a consulta de catálogo não retorne o preço antigo
-        const targetEmpresaId = produto?.empresa_id || null;
+        // 3. Atualizar também na tabela produtos_catalogo por nome
         try {
           let queryCat = supabase
             .from('produtos_catalogo')
@@ -605,6 +621,28 @@ export default function ModalDetalheEstoqueProduto({
             await fallbackCat;
           } catch (_) { }
         }
+
+        // 4. Se tiver produto_catalogo_id ou catalogo_id, atualiza diretamente por ID
+        const catIdDirect = produto?.produto_catalogo_id || produto?.catalogo_id || null;
+        if (catIdDirect) {
+          try {
+            let qCatId = supabase
+              .from('produtos_catalogo')
+              .update({ preco: novoValor, preco_venda: novoValor })
+              .eq('id', catIdDirect);
+            await qCatId;
+          } catch (_) {
+            try {
+              await supabase.from('produtos_catalogo').update({ preco: novoValor }).eq('id', catIdDirect);
+            } catch (_) { }
+          }
+        }
+      }
+
+      // Atualiza objeto produto recebido nas props para reflexão imediata
+      if (produto) {
+        produto.preco = novoValor;
+        produto.preco_venda = novoValor;
       }
 
       // Atualiza estado local de todos os itens do produto
@@ -817,6 +855,25 @@ export default function ModalDetalheEstoqueProduto({
               if (targetEmpresaId) fCat = fCat.eq('empresa_id', targetEmpresaId);
               await fCat;
             } catch (_) { }
+          }
+
+          const catIdDirect = produto?.produto_catalogo_id || produto?.catalogo_id || null;
+          if (catIdDirect) {
+            try {
+              await supabase
+                .from('produtos_catalogo')
+                .update({ preco: novoValor, preco_venda: novoValor })
+                .eq('id', catIdDirect);
+            } catch (_) {
+              try {
+                await supabase.from('produtos_catalogo').update({ preco: novoValor }).eq('id', catIdDirect);
+              } catch (_) { }
+            }
+          }
+
+          if (produto) {
+            produto.preco = novoValor;
+            produto.preco_venda = novoValor;
           }
 
           setProdutosIrmaos(prev => {
