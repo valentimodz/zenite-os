@@ -23,10 +23,12 @@ import {
   Store,
   ChevronUp,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Plus
 } from 'lucide-react';
 import { formatCurrency, formatarMoeda } from '../utils/currencyUtils';
 import ModalDetalheEstoqueProduto from './ModalDetalheEstoqueProduto';
+import ModalAdicionarProdutoFilial from './ModalAdicionarProdutoFilial';
 
 export default function ConsultaEstoque({
   filiais = [],
@@ -73,6 +75,8 @@ export default function ConsultaEstoque({
   const [produtoImeisModal, setProdutoImeisModal] = useState(null);
   const [filialImeisModal, setFilialImeisModal] = useState(null);
   const [imeisDoProdutoModal, setImeisDoProdutoModal] = useState([]);
+  const [modalAdicionarProdutoAberto, setModalAdicionarProdutoAberto] = useState(false);
+  const [sucessoToast, setSucessoToast] = useState(null);
 
   // Debounce na busca de texto
   useEffect(() => {
@@ -689,6 +693,14 @@ export default function ConsultaEstoque({
 
   return (
     <div className="w-full max-w-7xl mx-auto overflow-x-hidden space-y-6 animate-fadeIn pb-12">
+      {/* Toast Flutuante de Sucesso */}
+      {sucessoToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-950/95 border border-emerald-500/60 text-emerald-300 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 animate-fadeIn backdrop-blur-md">
+          <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+          <span className="text-xs font-bold">{sucessoToast}</span>
+        </div>
+      )}
+
       {/* 1. Menu e Cabeçalho */}
       <div className="bg-gradient-to-r from-[#0d0914] via-[#120d1c] to-[#0a0a0a] border border-[#8B5CF6]/30 p-4 md:p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xl relative overflow-hidden w-full">
         <div className="absolute -right-10 -bottom-10 w-44 h-44 bg-[#8B5CF6]/10 rounded-full blur-3xl pointer-events-none" />
@@ -871,32 +883,84 @@ export default function ConsultaEstoque({
           <p className="text-sm font-semibold text-gray-400">Carregando dados de estoque e filiais...</p>
         </div>
       ) : itensFiltrados.length === 0 ? (
-        <div className="py-16 px-4 text-center bg-[#0e0e11] border border-dashed border-[#222228] rounded-2xl flex flex-col items-center justify-center space-y-3">
-          <div className="p-4 bg-purple-950/30 border border-purple-800/40 rounded-full text-purple-400">
-            <Search size={32} />
-          </div>
-          <h4 className="text-base font-bold text-white">Nenhum produto encontrado</h4>
-          <p className="text-xs text-gray-400 max-w-md mx-auto">
-            Não encontramos itens com os critérios de busca e filtros selecionados. Tente limpar os filtros ou buscar por outro termo.
-          </p>
-          {(busca || categoriaSelecionada !== 'TODAS' || statusFiltro !== 'TODOS') && (
-            <button
-              type="button"
-              onClick={() => {
-                setBusca('');
-                setCategoriaSelecionada('TODAS');
-                setStatusFiltro('TODOS');
-              }}
-              className="mt-2 px-4 py-2 bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <X size={14} />
-              <span>Limpar Todos os Filtros</span>
-            </button>
+        <div className="space-y-6">
+          {/* Card de Adição quando a lista estiver vazia para a filial selecionada */}
+          {filialSelecionada !== 'TODAS' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div
+                onClick={() => setModalAdicionarProdutoAberto(true)}
+                className="group border-2 border-dashed border-purple-500/40 hover:border-purple-400 bg-purple-950/10 hover:bg-purple-950/25 rounded-xl p-6 flex flex-col items-center justify-center text-center gap-3 transition-all duration-200 cursor-pointer hover:shadow-xl hover:shadow-purple-950/30 min-h-[220px]"
+                title={`Vincular novo produto do catálogo à ${nomeFilialAtiva}`}
+              >
+                <div className="w-12 h-12 rounded-2xl bg-purple-950/60 border border-purple-500/50 group-hover:scale-110 group-hover:bg-purple-900/60 text-purple-300 group-hover:text-white flex items-center justify-center transition-all shadow-lg shadow-purple-950/50">
+                  <Plus size={24} />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-white group-hover:text-purple-300 transition-colors">
+                    Adicionar Produto à Filial
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Vincular item de <strong className="text-purple-300">{nomeFilialAtiva}</strong>
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 bg-purple-950/80 border border-purple-500/30 px-3 py-1 rounded-full group-hover:bg-purple-600 group-hover:text-white transition-all">
+                  + Vincular Catálogo
+                </span>
+              </div>
+            </div>
           )}
+
+          <div className="py-16 px-4 text-center bg-[#0e0e11] border border-dashed border-[#222228] rounded-2xl flex flex-col items-center justify-center space-y-3">
+            <div className="p-4 bg-purple-950/30 border border-purple-800/40 rounded-full text-purple-400">
+              <Search size={32} />
+            </div>
+            <h4 className="text-base font-bold text-white">Nenhum produto encontrado</h4>
+            <p className="text-xs text-gray-400 max-w-md mx-auto">
+              Não encontramos itens com os critérios de busca e filtros selecionados. Tente limpar os filtros ou buscar por outro termo.
+            </p>
+            {(busca || categoriaSelecionada !== 'TODAS' || statusFiltro !== 'TODOS') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBusca('');
+                  setCategoriaSelecionada('TODAS');
+                  setStatusFiltro('TODOS');
+                }}
+                className="mt-2 px-4 py-2 bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <X size={14} />
+                <span>Limpar Todos os Filtros</span>
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Card Interativo: Adicionar Produto à Filial (Exibido no início quando uma filial específica estiver ativa) */}
+            {filialSelecionada !== 'TODAS' && paginaValida === 1 && (
+              <div
+                onClick={() => setModalAdicionarProdutoAberto(true)}
+                className="group border-2 border-dashed border-purple-500/40 hover:border-purple-400 bg-purple-950/10 hover:bg-purple-950/25 rounded-xl p-5 flex flex-col items-center justify-center text-center gap-3 transition-all duration-200 cursor-pointer hover:shadow-xl hover:shadow-purple-950/30 min-h-[220px]"
+                title={`Vincular novo produto do catálogo à ${nomeFilialAtiva}`}
+              >
+                <div className="w-12 h-12 rounded-2xl bg-purple-950/60 border border-purple-500/50 group-hover:scale-110 group-hover:bg-purple-900/60 text-purple-300 group-hover:text-white flex items-center justify-center transition-all shadow-lg shadow-purple-950/50">
+                  <Plus size={24} />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-white group-hover:text-purple-300 transition-colors">
+                    Adicionar Produto à Filial
+                  </h4>
+                  <p className="text-xs text-zinc-400">
+                    Vincular à <strong className="text-cyan-300">{nomeFilialAtiva}</strong>
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 bg-purple-950/80 border border-purple-500/30 px-3 py-1 rounded-full group-hover:bg-purple-600 group-hover:text-white transition-all">
+                  + Vincular Catálogo
+                </span>
+              </div>
+            )}
+
             {cardsExibidos.map((item) => {
             const isEsgotado = item.qtdFilial === 0;
             const isCritico = item.qtdFilial > 0 && item.qtdFilial < 5;
@@ -1255,6 +1319,28 @@ export default function ConsultaEstoque({
             if (onNavigateToTransferencias) {
               onNavigateToTransferencias();
             }
+          }}
+        />
+      )}
+
+      {/* 6. Modal de Adicionar Produto à Filial (Anti-Duplicidade com Catálogo) */}
+      {modalAdicionarProdutoAberto && (
+        <ModalAdicionarProdutoFilial
+          isOpen={modalAdicionarProdutoAberto}
+          onClose={() => setModalAdicionarProdutoAberto(false)}
+          filialId={filialSelecionada}
+          filialNome={nomeFilialAtiva}
+          produtosCatalogo={produtosCatalogo}
+          produtosFisicos={produtos}
+          empresaId={profile?.empresa_id}
+          userId={profile?.id}
+          onSuccess={(novoProd) => {
+            // Notificação rápida
+            setSucessoToast(`Produto "${novoProd.nome}" adicionado com sucesso à ${nomeFilialAtiva}!`);
+            setTimeout(() => setSucessoToast(null), 4500);
+
+            // Invalidação imediata do estoque para atualizar a tela
+            carregarDadosEstoque(null, true);
           }}
         />
       )}
