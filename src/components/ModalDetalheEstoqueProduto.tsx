@@ -102,6 +102,10 @@ export default function ModalDetalheEstoqueProduto({
     if (onRefresh) onRefresh();
     if (onSuccess) onSuccess();
     if (onAtualizar) onAtualizar();
+    try {
+      window.dispatchEvent(new CustomEvent('catalogo_updated'));
+      window.dispatchEvent(new CustomEvent('estoque_updated'));
+    } catch (_) {}
   }, [onRefresh, onSuccess, onAtualizar]);
   const [loading, setLoading] = useState(false);
   const [produtosIrmaos, setProdutosIrmaos] = useState<ItemProdutoDetalhado[]>([]);

@@ -27491,10 +27491,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     activeFilialId={activeFilialId}
                     profile={profile}
                     onNavigateToTransferencias={() => setActiveTab('transferencias')}
-                    onOpenDetalhesProduto={(prod) => {
-                      setProdutoSelecionadoEstoque(prod);
-                      setModalDetalhesEstoqueAberto(true);
-                    }}
                   />
                 )}
 

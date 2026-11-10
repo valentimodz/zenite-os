@@ -230,6 +230,21 @@ export default function ConsultaEstoque({
     carregarDadosEstoque();
   }, [carregarDadosEstoque]);
 
+  // Listener para eventos globais de atualização de catálogo e estoque
+  useEffect(() => {
+    const handleAtualizacao = () => {
+      carregarDadosEstoque(null, true);
+    };
+
+    window.addEventListener('catalogo_updated', handleAtualizacao);
+    window.addEventListener('estoque_updated', handleAtualizacao);
+
+    return () => {
+      window.removeEventListener('catalogo_updated', handleAtualizacao);
+      window.removeEventListener('estoque_updated', handleAtualizacao);
+    };
+  }, [carregarDadosEstoque]);
+
   // Lista unificada e garantida de Filiais da Rede
   const listaFiliais = useMemo(() => {
     const mapa = new Map();
