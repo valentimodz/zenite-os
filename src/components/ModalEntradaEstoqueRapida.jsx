@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../supabaseClient';
+import ColorBadge from './ColorBadge';
 import {
   X,
   Smartphone,
@@ -12,21 +13,73 @@ import {
   AlertCircle,
   Trash2,
   Sparkles,
-  Palette
+  Palette,
+  ChevronDown,
+  Plus
 } from 'lucide-react';
 
 const CORES_SUGESTOES = [
+  // Básicas
   'Preto',
-  'Azul',
   'Branco',
   'Prata',
-  'Titânio',
   'Cinza',
-  'Dourado',
+  'Grafite',
+  'Azul',
+  'Azul Claro',
+  'Azul Escuro',
   'Verde',
+  'Verde Menta',
   'Roxo',
-  'Grafite'
+  'Lavanda',
+  'Rosa',
+  'Vermelho',
+  'Dourado',
+  'Amarelo',
+  'Laranja',
+  'Marrom',
+  'Creme',
+  'Bege',
+  // Padrões de Mercado (Apple/Samsung/Xiaomi/Tecno)
+  'Titânio Natural',
+  'Titânio Preto',
+  'Titânio Branco',
+  'Titânio Azul',
+  'Titânio Deserto',
+  'Meia-Noite',
+  'Estelar',
+  'Obsidian Black',
+  'Metallic Black',
+  'Dusk Gray',
+  'Pulse Purple',
+  'Forest Owl',
+  'Veil White'
 ];
+
+/**
+ * Formata qualquer nome de cor para Title Case sem espaços redundantes.
+ * Ex: "  azul   marinho " -> "Azul Marinho"
+ */
+function normalizarNomeCor(valor) {
+  if (!valor || typeof valor !== 'string') return '';
+  const limpo = valor.trim().replace(/\s+/g, ' ');
+  if (!limpo) return '';
+  return limpo
+    .toLowerCase()
+    .split(' ')
+    .map(palavra => {
+      if (!palavra) return '';
+      // Trata casos com hífen (ex: Meia-Noite)
+      if (palavra.includes('-')) {
+        return palavra
+          .split('-')
+          .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+          .join('-');
+      }
+      return palavra.charAt(0).toUpperCase() + palavra.slice(1);
+    })
+    .join(' ');
+}
 
 export default function ModalEntradaEstoqueRapida({
   isOpen,
@@ -47,6 +100,21 @@ export default function ModalEntradaEstoqueRapida({
   // Estado de Cor
   const [corSelecionada, setCorSelecionada] = useState('Preto');
   const [sugestoesCores, setSugestoesCores] = useState(CORES_SUGESTOES);
+  const [comboCorAberto, setComboCorAberto] = useState(false);
+  const comboCorContainerRef = useRef(null);
+
+  // Fecha o dropdown ao clicar fora
+  useEffect(() => {
+    function handleClickFora(event) {
+      if (comboCorContainerRef.current && !comboCorContainerRef.current.contains(event.target)) {
+        setComboCorAberto(false);
+      }
+    }
+    if (comboCorAberto) {
+      document.addEventListener('mousedown', handleClickFora);
+      return () => document.removeEventListener('mousedown', handleClickFora);
+    }
+  }, [comboCorAberto]);
 
   // Estado de Leitura de IMEI / Serial
   const [inputImei, setInputImei] = useState('');
@@ -161,7 +229,7 @@ export default function ModalEntradaEstoqueRapida({
           .select('nome');
 
         if (resCores && resCores.length > 0) {
-          const nomesCores = resCores.map(c => c.nome).filter(Boolean);
+          const nomesCores = resCores.map(c => normalizarNomeCor(c.nome)).filter(Boolean);
           const unicas = Array.from(new Set([...CORES_SUGESTOES, ...nomesCores]));
           setSugestoesCores(unicas);
         }
@@ -334,7 +402,7 @@ export default function ModalEntradaEstoqueRapida({
         }
       }
 
-      const corFinalAtual = (corSelecionada || '').trim() || 'Preto';
+      const corFinalAtual = normalizarNomeCor(corSelecionada) || 'Preto';
 
       // Adicionar à lista de bipados com a cor selecionada
       setImeisBipados(prev => [
@@ -392,8 +460,8 @@ export default function ModalEntradaEstoqueRapida({
       return;
     }
 
-    // Determinar a cor final escolhida/digitada
-    const corFinal = (corSelecionada || '').trim() || 'Preto';
+    // Determinar a cor final escolhida/digitada com normalização Title Case
+    const corFinal = normalizarNomeCor(corSelecionada) || 'Preto';
 
     setLoadingSalvando(true);
     try {
@@ -759,31 +827,120 @@ export default function ModalEntradaEstoqueRapida({
             )}
           </div>
 
-          {/* CAMPO 2: Cor do Aparelho */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-gray-300 flex items-center gap-1.5">
-              <Palette size={14} className="text-purple-400" />
-              <span>2. Cor do Aparelho *</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <select
-                value={corSelecionada}
-                onChange={(e) => setCorSelecionada(e.target.value)}
-                className="w-full bg-black border border-[#222222] focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white outline-none font-bold cursor-pointer"
-              >
-                {sugestoesCores.map((cor) => (
-                  <option key={cor} value={cor}>
-                    {cor}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="text"
-                placeholder="Ou digite outra cor..."
-                value={corSelecionada}
-                onChange={(e) => setCorSelecionada(e.target.value)}
-                className="w-1/2 bg-black border border-[#222222] focus:border-purple-500 rounded-xl px-3 py-2.5 text-xs text-white outline-none font-medium"
-              />
+          {/* CAMPO 2: Cor do Aparelho (Combobox Unificado com Autocompletar) */}
+          <div className="space-y-1.5" ref={comboCorContainerRef}>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-300 flex items-center gap-1.5">
+                <Palette size={14} className="text-purple-400" />
+                <span>2. Cor do Aparelho *</span>
+              </label>
+              {corSelecionada && (
+                <ColorBadge cor={corSelecionada} className="scale-95 origin-right" />
+              )}
+            </div>
+
+            <div className="relative">
+              <div className="relative flex items-center">
+                <input
+                  type="text"
+                  value={corSelecionada}
+                  onChange={(e) => {
+                    setCorSelecionada(e.target.value);
+                    if (!comboCorAberto) setComboCorAberto(true);
+                  }}
+                  onFocus={() => setComboCorAberto(true)}
+                  onBlur={() => {
+                    const formatado = normalizarNomeCor(corSelecionada);
+                    if (formatado) setCorSelecionada(formatado);
+                  }}
+                  placeholder="Selecione ou digite a cor do aparelho..."
+                  className="w-full bg-black border border-[#222222] focus:border-purple-500 rounded-xl pl-3.5 pr-10 py-2.5 text-xs text-white outline-none font-bold placeholder:font-normal placeholder:text-gray-500 transition-all shadow-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setComboCorAberto(prev => !prev)}
+                  tabIndex={-1}
+                  className="absolute right-2.5 p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Abrir lista de cores"
+                >
+                  <ChevronDown
+                    size={15}
+                    className={`transition-transform duration-200 ${comboCorAberto ? 'rotate-180 text-purple-400' : ''}`}
+                  />
+                </button>
+              </div>
+
+              {/* Dropdown Customizado de Cores */}
+              {comboCorAberto && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 bg-[#0e0e12] border border-[#282832] rounded-xl shadow-2xl shadow-purple-950/40 z-50 max-h-56 overflow-y-auto divide-y divide-[#1b1b22] custom-scrollbar animate-fadeIn">
+                  {(() => {
+                    const termoLimpo = (corSelecionada || '').trim().toLowerCase();
+                    const coresFiltradas = sugestoesCores.filter(c =>
+                      c.toLowerCase().includes(termoLimpo)
+                    );
+
+                    const matchExato = sugestoesCores.some(c =>
+                      c.toLowerCase() === termoLimpo
+                    );
+
+                    const corDigitadaFormatada = normalizarNomeCor(corSelecionada);
+
+                    return (
+                      <>
+                        {/* Opção rápida de criar/usar nova cor personalizada se não existir correspondência exata */}
+                        {corDigitadaFormatada && !matchExato && (
+                          <button
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setCorSelecionada(corDigitadaFormatada);
+                              setComboCorAberto(false);
+                            }}
+                            className="w-full text-left px-3.5 py-2.5 hover:bg-purple-950/40 text-purple-300 hover:text-white flex items-center justify-between text-xs font-bold transition-colors group cursor-pointer bg-purple-950/20"
+                          >
+                            <span className="flex items-center gap-2 truncate">
+                              <Plus size={13} className="text-purple-400 group-hover:scale-110 transition-transform" />
+                              <span>Usar cor: <strong className="text-white">"{corDigitadaFormatada}"</strong></span>
+                            </span>
+                            <span className="text-[10px] text-purple-400/80 bg-purple-900/40 px-2 py-0.5 rounded border border-purple-700/40 font-mono">
+                              Personalizada
+                            </span>
+                          </button>
+                        )}
+
+                        {coresFiltradas.length > 0 ? (
+                          coresFiltradas.map((cor) => {
+                            const isAtiva = (corSelecionada || '').trim().toLowerCase() === cor.toLowerCase();
+                            return (
+                              <button
+                                key={cor}
+                                type="button"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setCorSelecionada(cor);
+                                  setComboCorAberto(false);
+                                }}
+                                className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                                  isAtiva
+                                    ? 'bg-purple-600/20 text-purple-200 font-bold border-l-2 border-purple-500'
+                                    : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                                }`}
+                              >
+                                <span className="truncate">{cor}</span>
+                                <ColorBadge cor={cor} className="pointer-events-none scale-90 origin-right shrink-0" />
+                              </button>
+                            );
+                          })
+                        ) : !corDigitadaFormatada ? (
+                          <div className="px-3.5 py-3 text-xs text-gray-500 text-center">
+                            Nenhuma cor encontrada
+                          </div>
+                        ) : null}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           </div>
 
