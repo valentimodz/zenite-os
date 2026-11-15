@@ -249,11 +249,56 @@ const carrinhoPossuiItemCritico = (carrinho) => {
   return carrinho.some(item => isItemCritico(item));
 };
 
+// Normaliza nomes de categoria removendo acentos e convertendo para caixa alta
+const normalizeCategoryKey = (val) =>
+  String(val || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+
+// Categorias explicitamente não-celulares (acessórios e serviços)
+const NON_CELLULAR_CATEGORY_KEYS = new Set([
+  'PELICULAS', 'PELICULA',
+  'CAPINHAS', 'CAPINHA', 'CAPAS', 'CAPA',
+  'CARREGADORES', 'CARREGADOR',
+  'CAR WIRELESS',
+  'CABOS', 'CABO',
+  'FONES', 'FONE',
+  'ACESSORIOS', 'ACESSORIO',
+  'SERVICOS', 'SERVICO',
+]);
+
+// Resolve ID e nome normalizado de categoria frente à lista de categorias cadastradas
+const resolveCategoryInfo = (catValue, catIdValue, categoriasList) => {
+  const list = Array.isArray(categoriasList) ? categoriasList : [];
+  const rawId = String(catIdValue ?? '').trim();
+  const rawNameNorm = normalizeCategoryKey(catValue);
+
+  let matchedCat = null;
+  if (rawId) {
+    matchedCat = list.find(c => String(c.id || '').trim() === rawId) || null;
+  }
+  if (!matchedCat && catValue !== undefined && catValue !== null && String(catValue).trim() !== '') {
+    const valStr = String(catValue).trim();
+    matchedCat = list.find(c =>
+      String(c.id || '').trim() === valStr ||
+      normalizeCategoryKey(c.nome) === rawNameNorm
+    ) || null;
+  }
+
+  return {
+    id: matchedCat?.id ? String(matchedCat.id).trim() : (rawId || null),
+    nomeNorm: matchedCat?.nome ? normalizeCategoryKey(matchedCat.nome) : rawNameNorm,
+    matchedCat
+  };
+};
+
 // Detecta especificamente se um item no carrinho do PDV é Celular / Smartphone / Aparelho com IMEI
 const isItemCelularPdv = (item) => {
   if (!item) return false;
   const prod = item.produto || item;
-  const categoria = String(prod.categoria || item.categoria || '').toUpperCase().trim();
+  const categoria = normalizeCategoryKey(prod.categoria || item.categoria);
   const tipo = String(prod.tipo || item.tipo || '').toUpperCase().trim();
 
   const hasImei = Boolean(
@@ -265,6 +310,8 @@ const isItemCelularPdv = (item) => {
     (Array.isArray(item.imeis_selecionados) && item.imeis_selecionados.length > 0)
   );
   if (hasImei) return true;
+
+  if (categoria && NON_CELLULAR_CATEGORY_KEYS.has(categoria)) return false;
 
   const isTipoCelular =
     tipo === 'CELULAR' ||
@@ -18798,31 +18845,40 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     return base || String(nome).trim();
   }, []);
 
-  // Utilidade de Agrupamento por Modelo utilizando .reduce() com chave única pelo nome principal do produto
+  // Utilidade de Agrupamento por Modelo utilizando .reduce() com chave única por categoria + nome principal do produto
   const agruparPorModelo = React.useCallback((produtosArray) => {
     if (!Array.isArray(produtosArray) || produtosArray.length === 0) return [];
 
-    // .reduce() acumulador agrupando pelo nome principal do produto
+    // .reduce() acumulador agrupando por categoria normalizada + nome principal do produto (evita mesclar Películas com Celulares)
     const accModelos = (produtosArray || []).reduce((acc, p) => {
       if (!p || !p.nome) return acc;
 
-      const isCelular = (p.tipo && String(p.tipo).toUpperCase().includes('CELULAR')) ||
-        (p.categoria && String(p.categoria).toUpperCase().includes('CELULAR')) ||
-        p.categoria === 'IOS' || p.categoria === 'ANDROID';
+      const catInfo = resolveCategoryInfo(p.categoria, p.categoria_id, categorias);
+      const catNorm = catInfo.nomeNorm;
+      const isAcessorioOuServicoExplicito = Boolean(catNorm && NON_CELLULAR_CATEGORY_KEYS.has(catNorm));
+
+      const isCelular = !isAcessorioOuServicoExplicito && (
+        (p.tipo && String(p.tipo).toUpperCase().includes('CELULAR')) ||
+        (p.tipo && String(p.tipo).toUpperCase() === 'APARELHO') ||
+        (catNorm && (catNorm.includes('CELULAR') || catNorm.includes('SMARTPHONE') || catNorm === 'IOS' || catNorm === 'ANDROID'))
+      );
 
       // Para celulares, utiliza o nome base do modelo (ex: "GALAXY A07 128GB") unificando cores
       const nomeBase = isCelular ? extrairNomeBaseModelo(p.nome, p.cor) : String(p.nome).trim();
       const nomeKey = nomeBase.toLowerCase().trim();
+      const catKey = catNorm || normalizeCategoryKey(p.categoria_id) || 'GERAL';
+      const groupKey = `${catKey}::${nomeKey}`;
 
-      // Chave única do acumulador (acc) baseada no nome principal do produto
-      if (!acc[nomeKey]) {
-        acc[nomeKey] = {
+      // Chave única do acumulador (acc) baseada na categoria + nome principal do produto
+      if (!acc[groupKey]) {
+        acc[groupKey] = {
           ...p,
-          id: p.catalogo_id || p.id || `mod_${nomeKey}`,
+          id: p.catalogo_id || p.id || `mod_${groupKey}`,
           catalogo_id: p.catalogo_id || p.id,
           nome: nomeBase,
           tipo: p.tipo || (isCelular ? 'CELULAR' : 'ACESSORIO'),
           categoria: p.categoria || 'GERAL',
+          categoria_id: catInfo.id || p.categoria_id || null,
           preco: parseFloat(p.preco || 0),
           isModelBase: isCelular,
           estoqueTotal: 0,
@@ -18840,13 +18896,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
 
       // Adiciona os IDs aos rastreadores do modelo
-      if (p.id) acc[nomeKey].allProductIds.add(String(p.id));
-      if (p.catalogo_id) acc[nomeKey].allProductIds.add(String(p.catalogo_id));
+      if (p.id) acc[groupKey].allProductIds.add(String(p.id));
+      if (p.catalogo_id) acc[groupKey].allProductIds.add(String(p.catalogo_id));
 
       // Evita duplicar o mesmo registro bruto se ele tiver o mesmo ID
-      const jaExisteRaw = acc[nomeKey].rawItems.some(r => r.id && p.id && String(r.id) === String(p.id));
+      const jaExisteRaw = acc[groupKey].rawItems.some(r => r.id && p.id && String(r.id) === String(p.id));
       if (!jaExisteRaw) {
-        acc[nomeKey].rawItems.push(p);
+        acc[groupKey].rawItems.push(p);
       }
       return acc;
     }, {});
@@ -19054,12 +19110,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         filial_nome: activeFilialNome
       };
     });
-  }, [produtos, catalogoProdutos, activeFilialId, activeFilialNome, profile?.filial_id, profile?.filiais?.id, disponiveisImeis, filiais]);
+  }, [produtos, catalogoProdutos, activeFilialId, activeFilialNome, profile?.filial_id, profile?.filiais?.id, disponiveisImeis, filiais, categorias]);
 
   // Consolidar produtos para o PDV através da utilidade agruparPorModelo
   const listaProdutosPdvDinamica = React.useMemo(() => {
     return agruparPorModelo(listaProdutosConsolidada);
   }, [agruparPorModelo, listaProdutosConsolidada]);
+
+  const targetPdvCatInfo = resolveCategoryInfo(pdvCategoria, null, categorias);
+  const pdvCatNorm = targetPdvCatInfo.nomeNorm || normalizeCategoryKey(pdvCategoria);
+  const isPdvCatAll = !pdvCatNorm || ['TUDO', 'TODAS', 'ALL'].includes(pdvCatNorm);
+  const isAbaCelularOuBusca = Boolean(pdvBusca && pdvBusca.trim()) ||
+    ['CELULARES', 'CELULAR', 'SMARTPHONES', 'SMARTPHONE', 'IOS', 'ANDROID'].includes(pdvCatNorm);
 
   const filteredProdutosPdv = listaProdutosPdvDinamica.filter(p => {
     // 1. Busca por Múltiplos Termos (AND lógico, dividindo por espaços)
@@ -19084,58 +19146,23 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       variantsStr.includes(t)
     );
 
-    const catUpper = p.categoria ? String(p.categoria).toUpperCase() : '';
-    const tipoUpper = p.tipo ? String(p.tipo).toUpperCase() : '';
+    // 2. Filtro estrito por categoria exata (`categoria_id` ou nome exato vinculado em `categorias`)
+    const prodCatInfo = resolveCategoryInfo(p.categoria, p.categoria_id, categorias);
+    const matchesCat = isPdvCatAll ? true : Boolean(
+      (targetPdvCatInfo.id && prodCatInfo.id && targetPdvCatInfo.id === prodCatInfo.id) ||
+      (targetPdvCatInfo.id && p.categoria_id !== undefined && p.categoria_id !== null && String(p.categoria_id).trim() === targetPdvCatInfo.id) ||
+      (prodCatInfo.id && String(pdvCategoria || '').trim() === prodCatInfo.id) ||
+      (pdvCatNorm && prodCatInfo.nomeNorm && prodCatInfo.nomeNorm === pdvCatNorm)
+    );
 
-    const isAcessorioCategory = tipoUpper === 'ACESSORIO' || tipoUpper === 'ACESSÓRIO' ||
-      catUpper.includes('ACESSOR') || catUpper.includes('CAPA') || catUpper.includes('PELICULA') ||
-      catUpper.includes('CARREGADOR') || catUpper.includes('CABO') || catUpper.includes('FONE');
-
-    const matchesCat = (() => {
-      if (!pdvCategoria || pdvCategoria === 'TUDO' || pdvCategoria === 'TODAS' || pdvCategoria === 'ALL' || pdvCategoria === '') {
-        return true;
-      }
-
-      const pdvCatUpper = String(pdvCategoria).toUpperCase().trim();
-      const pdvCatLower = String(pdvCategoria).toLowerCase().trim();
-
-      // 1. Casamento direto por ID ou Nome de Categoria cadastrada
-      if (catUpper === pdvCatUpper || String(p.categoria_id) === String(pdvCategoria) || String(p.categoria || '').toLowerCase() === pdvCatLower) {
-        return true;
-      }
-
-      // 2. Apelidos e Categorias Específicas
-      if (pdvCatUpper === 'IOS' || pdvCatUpper === 'APPLE' || pdvCatUpper === 'IPHONE') {
-        return catUpper === 'IOS' || catUpper === 'APPLE' || nomeLower.includes('iphone') || nomeLower.includes('apple') || nomeLower.includes('ipad');
-      }
-      if (pdvCatUpper === 'ANDROID' || pdvCatUpper === 'CELULARES' || pdvCatUpper === 'SMARTPHONES') {
-        return catUpper === 'ANDROID' || catUpper === 'CELULARES' || nomeLower.includes('android') || nomeLower.includes('samsung') || nomeLower.includes('xiaomi') || nomeLower.includes('motorola');
-      }
-      if (pdvCatUpper === 'APPLE_JBL_CONSOLE' || pdvCatUpper.includes('JBL') || pdvCatUpper.includes('CONSOLE')) {
-        return catUpper === 'APPLE_JBL_CONSOLE' || catUpper.includes('JBL') || catUpper.includes('CONSOLE') || nomeLower.includes('jbl') || nomeLower.includes('ps5') || nomeLower.includes('xbox') || nomeLower.includes('nintendo');
-      }
-      if (pdvCatUpper === 'ACESSORIO' || pdvCatUpper === 'ACESSÓRIOS' || pdvCatUpper === 'ACESSORIOS') {
-        return isAcessorioCategory && catUpper !== 'SERVICO';
-      }
-      if (pdvCatUpper === 'SERVICO' || pdvCatUpper === 'SERVIÇO' || pdvCatUpper === 'SERVIÇOS') {
-        return catUpper === 'SERVICO' || tipoUpper === 'SERVICO';
-      }
-
-      // 3. Casamento por inclusão de texto (flexível)
-      return catUpper.includes(pdvCatUpper) || nomeLower.includes(pdvCatLower) || (p.tipo && String(p.tipo).toUpperCase().includes(pdvCatUpper));
-    })();
-
-    // 4. Para celulares, estoque vem estritamente de IMEIs disponíveis na filial (p.estoqueTotal); mantém celulares cadastrados/filtrados visíveis como Esgotado quando 0 un.
+    // 3. Para celulares, estoque vem estritamente de IMEIs disponíveis na filial (p.estoqueTotal); mantém celulares cadastrados/filtrados visíveis como Esgotado quando 0 un.
     const isCelularProd = isItemCelularPdv(p);
     const estoqueLocal = isCelularProd
       ? Number(p.estoqueTotal ?? 0)
       : Number(p.estoqueTotal ?? p.total_estoque ?? p.estoque_local ?? p.quantidade_local ?? p.estoque ?? p.quantidade ?? p.qtd ?? 0);
-    const pdvCatNorm = String(pdvCategoria || '').toUpperCase().trim();
-    const isAbaCelularOuBusca = Boolean(pdvBusca && pdvBusca.trim()) ||
-      ['CELULAR', 'SMARTPHONE', 'IOS', 'APPLE', 'IPHONE', 'ANDROID'].some(k => pdvCatNorm.includes(k));
     const hasEstoque = p.categoria === 'SERVICO' ||
       estoqueLocal > 0 ||
-      (isCelularProd && (p.hasFilialRecord || isAbaCelularOuBusca));
+      (isCelularProd && (p.hasFilialRecord || (matchesCat && isAbaCelularOuBusca)));
 
     return matchesSearch && matchesCat && hasEstoque;
   }).sort((a, b) => {
