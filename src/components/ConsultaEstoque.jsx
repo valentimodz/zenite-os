@@ -16,19 +16,50 @@ import {
   ArrowRightLeft,
   ChevronDown,
   Layers,
-  Sparkles,
-  SlidersHorizontal,
-  ExternalLink,
   History,
   Store,
-  ChevronUp,
   ChevronLeft,
   ChevronRight,
   Plus
 } from 'lucide-react';
-import { formatCurrency, formatarMoeda } from '../utils/currencyUtils';
+import { formatCurrency } from '../utils/currencyUtils';
 import ModalDetalheEstoqueProduto from './ModalDetalheEstoqueProduto';
 import ModalAdicionarProdutoFilial from './ModalAdicionarProdutoFilial';
+import ModalRastrearImei from './ModalRastrearImei';
+
+/**
+ * Verifica estritamente se um registro da tabela `public.imeis` está DISPONÍVEL para venda/conferência.
+ * Regra obrigatória: status === 'DISPONIVEL' (ou 'DISPONÍVEL') E vendido === false.
+ */
+function isImeiEstritamenteDisponivel(im) {
+  if (!im) return false;
+  if (im.vendido !== false) return false;
+  const stNorm = String(im.status || '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return stNorm === 'DISPONIVEL';
+}
+
+/**
+ * Identifica se um registro de produto ou catálogo pertence à categoria de Celulares / Aparelhos.
+ */
+function verificarSeEhCelular(obj) {
+  if (!obj) return false;
+  const tipoStr = String(obj.tipo || '').trim().toUpperCase();
+  const catStr = String(obj.categoria || '').trim().toUpperCase();
+  return (
+    tipoStr.includes('CELULAR') ||
+    tipoStr.includes('SMARTPHONE') ||
+    tipoStr.includes('APARELHO') ||
+    catStr.includes('CELULAR') ||
+    catStr.includes('SMARTPHONE') ||
+    catStr.includes('APARELHO') ||
+    catStr === 'IOS' ||
+    catStr === 'ANDROID'
+  );
+}
 
 export default function ConsultaEstoque({
   filiais = [],
@@ -40,7 +71,7 @@ export default function ConsultaEstoque({
   // 1. Estados dos Filtros
   const [busca, setBusca] = useState('');
   const [buscaDebounced, setBuscaDebounced] = useState('');
-  
+
   // Inicia com a filial ativa do contexto do sistema se existir, senão 'TODAS'
   const [filialSelecionada, setFilialSelecionada] = useState(() => {
     if (activeFilialId && activeFilialId !== 'null' && activeFilialId !== 'undefined') {
@@ -50,9 +81,10 @@ export default function ConsultaEstoque({
   });
 
   const [categoriaSelecionada, setCategoriaSelecionada] = useState('TODAS');
-  const [statusFiltro, setStatusFiltro] = useState('TODOS'); // 'TODOS' | 'CRITICO' | 'ZERADO' | 'DISPONIVEL'
+  // Por padrão 'TODOS' exibe APENAS produtos com quantidade > 0 (Ocultar Zerados por padrão)
+  const [statusFiltro, setStatusFiltro] = useState('TODOS'); // 'TODOS' (> 0) | 'CRITICO' | 'ZERADO' | 'DISPONIVEL'
 
-  // Paginação para desempenho de renderização ultra-rápido (evita travar o navegador com milhares de cards)
+  // Paginação para desempenho de renderização ultra-rápido
   const [paginaAtual, setPaginaAtual] = useState(1);
   const itensPorPagina = 24;
 
@@ -67,6 +99,7 @@ export default function ConsultaEstoque({
   const [produtos, setProdutos] = useState([]);
   const [produtosCatalogo, setProdutosCatalogo] = useState([]);
   const [imeisDisponiveis, setImeisDisponiveis] = useState([]);
+  const [idsProdutosComHistoricoImei, setIdsProdutosComHistoricoImei] = useState(new Set());
   const [categoriasLista, setCategoriasLista] = useState([]);
 
   // 3. Estado dos Modais
@@ -76,6 +109,8 @@ export default function ConsultaEstoque({
   const [filialImeisModal, setFilialImeisModal] = useState(null);
   const [imeisDoProdutoModal, setImeisDoProdutoModal] = useState([]);
   const [modalAdicionarProdutoAberto, setModalAdicionarProdutoAberto] = useState(false);
+  const [modalRastrearImeiAberto, setModalRastrearImeiAberto] = useState(false);
+  const [imeiInicialRastreio, setImeiInicialRastreio] = useState('');
   const [sucessoToast, setSucessoToast] = useState(null);
 
   // Debounce na busca de texto
@@ -93,7 +128,7 @@ export default function ConsultaEstoque({
     }
   }, [activeFilialId]);
 
-  // Refs de controle para evitar chamadas concorrentes contínuas e loops de re-renderização
+  // Refs de controle para evitar chamadas concorrentes contínuas
   const isFetchingRef = useRef(false);
   const isMountedRef = useRef(true);
   const empresaIdPrimitivo = profile?.empresa_id ? String(profile.empresa_id) : '';
@@ -105,7 +140,7 @@ export default function ConsultaEstoque({
     };
   }, []);
 
-  // 4. Carregar Dados do Supabase com Resiliência (.select('*'))
+  // 4. Carregar Dados do Supabase
   const carregarDadosEstoque = useCallback(async (forcedEmpresaId = null, force = false) => {
     if (force) {
       isFetchingRef.current = false;
@@ -129,8 +164,8 @@ export default function ConsultaEstoque({
         setFiliaisCarregadas(dataFiliais);
       }
 
-      // 4.1 Carregar produtos físicos da tabela 'produtos' com .select('*')
-      let qProdutos = supabase.from('produtos').select('*');
+      // 4.1 Carregar produtos físicos da tabela 'produtos'
+      let qProdutos = supabase.from('produtos').select('*, filiais(id, nome)');
       if (empresaId) {
         qProdutos = qProdutos.eq('empresa_id', empresaId);
       }
@@ -140,17 +175,18 @@ export default function ConsultaEstoque({
         if (!errAtivos && dataProdutosAtivos && dataProdutosAtivos.length > 0) {
           prods = dataProdutosAtivos.filter(p => p.status !== 'INATIVO' && p.ativo !== false);
         } else {
-          const { data: dataProdutos, error: errProdutos } = await supabase.from('produtos').select('*').eq(empresaId ? 'empresa_id' : 'id', empresaId || undefined);
+          let qFallback = supabase.from('produtos').select('*');
+          if (empresaId) qFallback = qFallback.eq('empresa_id', empresaId);
+          const { data: dataProdutos, error: errProdutos } = await qFallback;
           if (errProdutos) console.warn('Erro ao carregar produtos:', errProdutos);
           prods = (dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false);
         }
       } catch (e) {
-        const { data: dataProdutos, error: errProdutos } = await qProdutos;
-        if (errProdutos) console.warn('Erro ao carregar produtos:', errProdutos);
+        const { data: dataProdutos } = await supabase.from('produtos').select('*');
         prods = (dataProdutos || []).filter(p => p.status !== 'INATIVO' && p.ativo !== false);
       }
 
-      // 4.2 Carregar catálogo mestre de produtos_catalogo com .select('*')
+      // 4.2 Carregar catálogo mestre de produtos_catalogo
       let qCatalogo = supabase.from('produtos_catalogo').select('*');
       if (empresaId) {
         qCatalogo = qCatalogo.eq('empresa_id', empresaId);
@@ -166,17 +202,17 @@ export default function ConsultaEstoque({
           catsMestre = (dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false);
         }
       } catch (e) {
-        const { data: dataCatalogo, error: errCatalogo } = await qCatalogo;
-        if (errCatalogo) console.warn('Erro ao carregar produtos_catalogo:', errCatalogo);
+        const { data: dataCatalogo } = await qCatalogo;
         catsMestre = (dataCatalogo || []).filter(c => c.status !== 'INATIVO' && c.ativo !== false);
       }
 
-      // 4.3 Carregar IMEIs disponíveis com .select('*')
+      // 4.3 Carregar IMEIs da tabela `public.imeis`
+      // Filtramos obrigatoriamente status === 'DISPONIVEL' e vendido === false para a contagem física
       let qImeis = supabase
         .from('imeis')
         .select('*')
-        .or('vendido.is.null,vendido.eq.false');
-      
+        .eq('vendido', false);
+
       if (empresaId) {
         qImeis = qImeis.eq('empresa_id', empresaId);
       }
@@ -184,6 +220,17 @@ export default function ConsultaEstoque({
       if (errImeis) {
         console.warn('Erro ao carregar imeis:', errImeis);
       }
+
+      // Identificar também quais produto_ids já tiveram qualquer IMEI (mesmo vendido) para nunca cair em fallback de acessório
+      let qTodosImeisIds = supabase.from('imeis').select('produto_id');
+      if (empresaId) {
+        qTodosImeisIds = qTodosImeisIds.eq('empresa_id', empresaId);
+      }
+      const { data: dataTodosImeisIds } = await qTodosImeisIds;
+      const setProdIdsComImei = new Set();
+      (dataTodosImeisIds || []).forEach(r => {
+        if (r && r.produto_id) setProdIdsComImei.add(String(r.produto_id));
+      });
 
       // 4.4 Carregar categorias distintas
       let qCategorias = supabase.from('categorias').select('*');
@@ -194,15 +241,13 @@ export default function ConsultaEstoque({
 
       if (!isMountedRef.current) return;
 
-
-      const ims = (dataImeis || []).filter((im) => {
-        const st = String(im.status || '').toUpperCase();
-        return !im.vendido && !st.includes('VEND') && st !== 'DEFEITO' && st !== 'RESERVADO_OUTRO';
-      });
+      // Filtro OBRIGATÓRIO e ESTRITO: somente status === 'DISPONIVEL' e vendido === false
+      const imsDisponiveis = (dataImeis || []).filter(isImeiEstritamenteDisponivel);
 
       setProdutos(prods);
       setProdutosCatalogo(catsMestre);
-      setImeisDisponiveis(ims);
+      setImeisDisponiveis(imsDisponiveis);
+      setIdsProdutosComHistoricoImei(setProdIdsComImei);
 
       // Consolidar lista de categorias
       const catsSet = new Set();
@@ -249,14 +294,12 @@ export default function ConsultaEstoque({
   const listaFiliais = useMemo(() => {
     const mapa = new Map();
 
-    // 1. Filiais passadas via props
     if (Array.isArray(filiais)) {
       filiais.forEach(f => {
         if (f && f.id) mapa.set(String(f.id), f);
       });
     }
 
-    // 2. Filiais carregadas diretamente do banco
     if (Array.isArray(filiaisCarregadas)) {
       filiaisCarregadas.forEach(f => {
         if (f && f.id && !mapa.has(String(f.id))) {
@@ -265,12 +308,11 @@ export default function ConsultaEstoque({
       });
     }
 
-    // 3. Fallback: Filiais presentes nos produtos físicos se houver filial_id
     produtos.forEach(p => {
       if (p.filial_id && !mapa.has(String(p.filial_id))) {
         mapa.set(String(p.filial_id), {
           id: p.filial_id,
-          nome: p.filial_nome || `Filial ${String(p.filial_id).slice(0, 6)}`
+          nome: p.filiais?.nome || p.filial_nome || `Filial ${String(p.filial_id).slice(0, 6)}`
         });
       }
     });
@@ -278,57 +320,57 @@ export default function ConsultaEstoque({
     return Array.from(mapa.values()).sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || '')));
   }, [filiais, filiaisCarregadas, produtos]);
 
-  // 5. Agrupamento Base dos Modelos de Produtos (Catálogo + Produtos Físicos)
+  // 5. Agrupamento Base dos Modelos de Produtos por UPPER(TRIM(nome))
   const produtosConsolidados = useMemo(() => {
-    const mapa = new Map();
+    const mapaPorNome = new Map();
 
-    // 1º Passo: Catálogo Mestre
+    // 1º Passo: Catálogo Mestre agrupado por UPPER(TRIM(nome))
     (produtosCatalogo || []).forEach(cat => {
-      const nomeNorm = String(cat.nome || '').trim();
-      if (!nomeNorm) return;
-      // Normalização da chave base por Nome (case-insensitive e sem acentos redundantes)
-      const nomeLower = nomeNorm.toLowerCase();
-      const key = cat.codigo_barras ? `ean_${String(cat.codigo_barras).trim().toLowerCase()}` : `nome_${nomeLower}`;
+      const nomeLimpo = String(cat.nome || '').trim();
+      if (!nomeLimpo) return;
+      const chaveNomeUpper = nomeLimpo.toUpperCase();
 
-      const tipoStr = String(cat.tipo || '').toUpperCase();
-      const catStr = String(cat.categoria || '').toUpperCase();
-      const isCelular = tipoStr.includes('CELULAR') || tipoStr.includes('SMARTPHONE') || catStr === 'IOS' || catStr === 'ANDROID';
+      const isCelular =
+        verificarSeEhCelular(cat) ||
+        (cat.id && idsProdutosComHistoricoImei.has(String(cat.id)));
 
-      mapa.set(key, {
-        id: cat.id,
-        nome: cat.nome,
-        sku: cat.sku || '',
-        codigo_barras: cat.codigo_barras || '',
-        categoria: cat.categoria || 'GERAL',
-        tipo: cat.tipo || (isCelular ? 'CELULAR' : 'ACESSORIO'),
-        preco: Number(cat.preco || cat.preco_venda || 0),
-        isCelular,
-        itensFisicos: [],
-        catalogoItem: cat
-      });
+      if (!mapaPorNome.has(chaveNomeUpper)) {
+        mapaPorNome.set(chaveNomeUpper, {
+          id: cat.id,
+          nome: nomeLimpo,
+          sku: cat.sku || '',
+          codigo_barras: cat.codigo_barras || '',
+          categoria: cat.categoria || (isCelular ? 'CELULARES' : 'GERAL'),
+          tipo: cat.tipo || (isCelular ? 'CELULAR' : 'ACESSORIO'),
+          preco: Number(cat.preco_venda || cat.preco || 0),
+          isCelular,
+          itensFisicos: [],
+          catalogoItem: cat
+        });
+      }
     });
 
-    // 2º Passo: Produtos Físicos (Casamento prioritário por Código de Barras / EAN, depois por Nome)
+    // 2º Passo: Produtos Físicos agrupados por UPPER(TRIM(nome)) (ou EAN/Catálogo correspondente)
     (produtos || []).forEach(prod => {
-      const nomeNorm = String(prod.nome || '').trim();
-      if (!nomeNorm) return;
-      const nomeLower = nomeNorm.toLowerCase();
+      const nomeLimpo = String(prod.nome || '').trim();
+      if (!nomeLimpo) return;
+      const chaveNomeUpper = nomeLimpo.toUpperCase();
       const prodEan = prod.codigo_barras ? String(prod.codigo_barras).trim().toLowerCase() : '';
 
-      const tipoStr = String(prod.tipo || '').toUpperCase();
-      const catStr = String(prod.categoria || '').toUpperCase();
-      const isCelular = tipoStr.includes('CELULAR') || tipoStr.includes('SMARTPHONE') || catStr === 'IOS' || catStr === 'ANDROID';
+      const isCelularProd =
+        verificarSeEhCelular(prod) ||
+        (prod.id && idsProdutosComHistoricoImei.has(String(prod.id)));
 
-      // Procura primeiro pelo EAN no mapa
-      let itemExistente = prodEan ? mapa.get(`ean_${prodEan}`) : null;
-      // Se não achou por EAN, procura pelo nome
-      if (!itemExistente) {
-        itemExistente = mapa.get(`nome_${nomeLower}`);
-      }
-      // Se ainda não achou, procura por similaridade de nome entre chaves existentes
-      if (!itemExistente) {
-        for (const [k, v] of mapa.entries()) {
-          if (String(v.nome || '').trim().toLowerCase() === nomeLower) {
+      let itemExistente = mapaPorNome.get(chaveNomeUpper);
+
+      // Se não achou pelo nome exato, tenta casar pelo produto_catalogo_id ou código de barras
+      if (!itemExistente && (prod.produto_catalogo_id || prodEan)) {
+        for (const v of mapaPorNome.values()) {
+          if (prod.produto_catalogo_id && String(v.id) === String(prod.produto_catalogo_id)) {
+            itemExistente = v;
+            break;
+          }
+          if (prodEan && v.codigo_barras && String(v.codigo_barras).trim().toLowerCase() === prodEan) {
             itemExistente = v;
             break;
           }
@@ -336,34 +378,36 @@ export default function ConsultaEstoque({
       }
 
       if (!itemExistente) {
-        const key = prodEan ? `ean_${prodEan}` : `nome_${nomeLower}`;
-        mapa.set(key, {
+        mapaPorNome.set(chaveNomeUpper, {
           id: prod.id,
-          nome: prod.nome,
+          nome: nomeLimpo,
           sku: prod.sku || '',
           codigo_barras: prod.codigo_barras || '',
-          categoria: prod.categoria || 'GERAL',
-          tipo: prod.tipo || (isCelular ? 'CELULAR' : 'ACESSORIO'),
-          preco: Number(prod.preco || prod.preco_venda || 0),
-          isCelular,
+          categoria: prod.categoria || (isCelularProd ? 'CELULARES' : 'GERAL'),
+          tipo: prod.tipo || (isCelularProd ? 'CELULAR' : 'ACESSORIO'),
+          preco: Number(prod.preco_venda || prod.preco || 0),
+          isCelular: isCelularProd,
           itensFisicos: [prod]
         });
       } else {
         itemExistente.itensFisicos.push(prod);
+        if (isCelularProd) itemExistente.isCelular = true;
         if (!itemExistente.sku && prod.sku) itemExistente.sku = prod.sku;
         if (!itemExistente.codigo_barras && prod.codigo_barras) itemExistente.codigo_barras = prod.codigo_barras;
-        const prodPreco = Number(prod.preco || prod.preco_venda || 0);
+        const prodPreco = Number(prod.preco_venda || prod.preco || 0);
         if (prodPreco > 0) {
           itemExistente.preco = prodPreco;
         }
       }
     });
 
-    return Array.from(mapa.values());
-  }, [produtos, produtosCatalogo]);
+    return Array.from(mapaPorNome.values());
+  }, [produtos, produtosCatalogo, idsProdutosComHistoricoImei]);
 
-  // 6. Cálculo dos Saldos por Filial para cada Produto
-  // Cada item recebe: totalRede + detalhamentoPorFilial [{ filial_id, filial_nome, quantidade }]
+  // 6. Cálculo dos Saldos por Filial para cada Modelo
+  // REGRA CRÍTICA: Para Celulares (`item.isCelular === true`), a quantidade disponível
+  // é calculada EXCLUSIVAMENTE pelos registros de `imeisDisponiveis` (`status === 'DISPONIVEL'` e `vendido === false`).
+  // NUNCA usa fallback de `produtos.quantidade` para celulares, eliminando aparelhos fantasmas!
   const produtosComSaldosPorFilial = useMemo(() => {
     return produtosConsolidados.map(item => {
       const produtoIds = new Set();
@@ -372,7 +416,6 @@ export default function ConsultaEstoque({
         if (p.id) produtoIds.add(String(p.id));
       });
 
-      // Mapear saldos para cada filial cadastrada na rede
       let qtdRede = 0;
       const saldosFiliaisMap = new Map();
 
@@ -388,70 +431,49 @@ export default function ConsultaEstoque({
         }
       });
 
-      if (item.isCelular) {
-        // Contabiliza IMEIs disponíveis por filial
-        const imeisDoItem = (imeisDisponiveis || []).filter(im => {
-          return im.produto_id && produtoIds.has(String(im.produto_id));
+      // Verifica IMEIs estritamente disponíveis (`status === 'DISPONIVEL'` & `vendido === false`) vinculados a este modelo
+      const imeisDoItem = (imeisDisponiveis || []).filter(im => {
+        return im.produto_id && produtoIds.has(String(im.produto_id)) && isImeiEstritamenteDisponivel(im);
+      });
+
+      const ehCelularOuTemImei = item.isCelular || imeisDoItem.length > 0;
+
+      if (ehCelularOuTemImei) {
+        // Contagem 100% baseada nos IMEIs disponíveis (status === 'DISPONIVEL' e vendido === false)
+        qtdRede = imeisDoItem.length;
+        imeisDoItem.forEach(im => {
+          // Usa o filial_id do IMEI; se vazio, busca o filial_id do registro físico do produto
+          let fId = String(im.filial_id || '').trim();
+          if (!fId) {
+            const prodFisico = (item.itensFisicos || []).find(p => String(p.id) === String(im.produto_id));
+            if (prodFisico?.filial_id) fId = String(prodFisico.filial_id).trim();
+          }
+          if (!fId) return;
+
+          let entry = saldosFiliaisMap.get(fId);
+          if (!entry) {
+            const matchedKey = Array.from(saldosFiliaisMap.keys()).find(k => k.toLowerCase() === fId.toLowerCase());
+            if (matchedKey) entry = saldosFiliaisMap.get(matchedKey);
+          }
+
+          if (entry) {
+            entry.quantidade += 1;
+          } else {
+            const filObj = listaFiliais.find(f => String(f.id || '').toLowerCase() === fId.toLowerCase());
+            saldosFiliaisMap.set(fId, {
+              filial_id: fId,
+              filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
+              quantidade: 1
+            });
+          }
         });
-
-        if (imeisDoItem.length > 0) {
-          qtdRede = imeisDoItem.length;
-          imeisDoItem.forEach(im => {
-            const fId = String(im.filial_id || '').trim();
-            if (!fId) return;
-
-            let entry = saldosFiliaisMap.get(fId);
-            if (!entry) {
-              const matchedKey = Array.from(saldosFiliaisMap.keys()).find(k => k.toLowerCase() === fId.toLowerCase());
-              if (matchedKey) entry = saldosFiliaisMap.get(matchedKey);
-            }
-
-            if (entry) {
-              entry.quantidade += 1;
-            } else {
-              const filObj = listaFiliais.find(f => String(f.id || '').toLowerCase() === fId.toLowerCase());
-              saldosFiliaisMap.set(fId, {
-                filial_id: fId,
-                filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
-                quantidade: 1
-              });
-            }
-          });
-        } else {
-          // Fallback para celulares sem IMEIs físicos: soma direta das quantidades de cada filial
-          (item.itensFisicos || []).forEach(p => {
-            const fId = String(p.filial_id || '').trim();
-            if (!fId) return;
-
-            const q = Number(p.quantidade || 0);
-            qtdRede += q;
-
-            let entry = saldosFiliaisMap.get(fId);
-            if (!entry) {
-              const matchedKey = Array.from(saldosFiliaisMap.keys()).find(k => k.toLowerCase() === fId.toLowerCase());
-              if (matchedKey) entry = saldosFiliaisMap.get(matchedKey);
-            }
-
-            if (entry) {
-              entry.quantidade += q;
-            } else {
-              const filObj = listaFiliais.find(f => String(f.id || '').toLowerCase() === fId.toLowerCase());
-              saldosFiliaisMap.set(fId, {
-                filial_id: fId,
-                filial_nome: filObj ? filObj.nome : 'Filial ' + fId.slice(0, 6),
-                quantidade: q
-              });
-            }
-          });
-        }
       } else {
-        // Acessórios / Gerais (CHIP, capas, películas, etc.):
-        // Lê diretamente a coluna 'quantidade' dos registros de cada filial
+        // Acessórios / Gerais (capas, películas, chips, cabos): lê a coluna 'quantidade' por filial
         (item.itensFisicos || []).forEach(p => {
           const fId = String(p.filial_id || '').trim();
           if (!fId) return;
 
-          const q = Number(p.quantidade || 0);
+          const q = Math.max(0, Number(p.quantidade || 0));
           qtdRede += q;
 
           let entry = saldosFiliaisMap.get(fId);
@@ -477,105 +499,86 @@ export default function ConsultaEstoque({
 
       return {
         ...item,
+        isCelular: ehCelularOuTemImei,
         qtdRede,
         detalhamentoPorFilial
       };
     });
   }, [produtosConsolidados, imeisDisponiveis, listaFiliais]);
 
-  // 7. Desdobramento dos Cards:
-  // - Quando filialSelecionada === 'TODAS' (Rede Completa):
-  //   Gera UM CARD INDIVIDUAL PARA CADA FILIAL da rede (ou que possui saldo/registro).
-  // - Quando uma filial específica for selecionada (ex: MONKEY SHOP TUCURUÍ):
-  //   Gera o card ESTRITAMENTE daquela filial selecionada (inclusive durante buscas por texto).
+  // 7. Montagem dos Cards:
+  // - Quando filialSelecionada === 'TODAS' ("Todas as Filiais (Rede Completa)"):
+  //   Agrupa por nome (UPPER(TRIM(nome))) gerando 1 ÚNICO CARD CONSOLIDADO por modelo somando a quantidade disponível da rede!
+  // - Quando uma filial específica está selecionada:
+  //   Exibe o card daquela filial com a quantidade real disponível na filial.
   const cardsDesdobrados = useMemo(() => {
     const lista = [];
-    const deveDesdobrarTodasFiliais = filialSelecionada === 'TODAS';
+    const isVisaoConsolidadaRede = filialSelecionada === 'TODAS';
 
     const getSaldoFilial = (prod, filialId) => {
       const fIdClean = String(filialId || '').trim().toLowerCase();
       if (!fIdClean) return 0;
 
-      // 1º Tenta encontrar no detalhamentoPorFilial com correspondência case-insensitive
-      const entry = (prod.detalhamentoPorFilial || []).find(df => String(df.filial_id || '').trim().toLowerCase() === fIdClean);
+      const entry = (prod.detalhamentoPorFilial || []).find(
+        df => String(df.filial_id || '').trim().toLowerCase() === fIdClean
+      );
       if (entry && typeof entry.quantidade === 'number') {
         return entry.quantidade;
       }
 
-      // 2º Fallback direto somando de prod.itensFisicos caso a filial não estivesse na lista inicial
-      const registros = (prod.itensFisicos || []).filter(p => String(p.filial_id || '').trim().toLowerCase() === fIdClean);
+      // Nunca usar fallback de itensFisicos.quantidade se for celular!
+      if (prod.isCelular) {
+        return 0;
+      }
+
+      const registros = (prod.itensFisicos || []).filter(
+        p => String(p.filial_id || '').trim().toLowerCase() === fIdClean
+      );
       if (registros.length > 0) {
-        return registros.reduce((sum, p) => sum + Number(p.quantidade || 0), 0);
+        return registros.reduce((sum, p) => sum + Math.max(0, Number(p.quantidade || 0)), 0);
       }
 
       return 0;
     };
 
     produtosComSaldosPorFilial.forEach(prod => {
-      if (deveDesdobrarTodasFiliais) {
-        // Se temos lista de filiais da rede, desdobra 1 card para cada filial
-        if (listaFiliais.length > 0) {
-          listaFiliais.forEach(f => {
-            const saldoFilial = getSaldoFilial(prod, f.id);
-            const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
+      if (isVisaoConsolidadaRede) {
+        // Visão Consolidada em "Todas as Filiais": 1 único card por modelo com a soma da rede
+        const saldoRede = prod.qtdRede;
+        const statusEstoque = saldoRede === 0 ? 'ZERADO' : saldoRede < 5 ? 'CRITICO' : 'DISPONIVEL';
 
-            // Preço específico da filial se houver item físico nessa filial
-            const itemFisicoFilial = (prod.itensFisicos || []).find(p => String(p.filial_id) === String(f.id));
-            const precoFilial = Number(itemFisicoFilial?.preco_venda || itemFisicoFilial?.preco || prod.preco || 0);
+        const filiaisComSaldo = (prod.detalhamentoPorFilial || []).filter(df => df.quantidade > 0);
 
-            lista.push({
-              ...prod,
-              preco: precoFilial,
-              cardKey: `${prod.id}_${f.id}`,
-              filialIdCard: String(f.id),
-              filialNomeCard: f.nome,
-              qtdFilial: saldoFilial,
-              statusEstoque,
-              isMultiLojaDesdobrado: true
-            });
-          });
-        } else {
-          // Fallback caso não haja filiais cadastradas ainda
-          prod.detalhamentoPorFilial.forEach(df => {
-            const saldoFilial = df.quantidade || 0;
-            const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
-
-            const itemFisicoFilial = (prod.itensFisicos || []).find(p => String(p.filial_id) === String(df.filial_id));
-            const precoFilial = Number(itemFisicoFilial?.preco_venda || itemFisicoFilial?.preco || prod.preco || 0);
-
-            lista.push({
-              ...prod,
-              preco: precoFilial,
-              cardKey: `${prod.id}_${df.filial_id}`,
-              filialIdCard: String(df.filial_id),
-              filialNomeCard: df.filial_nome,
-              qtdFilial: saldoFilial,
-              statusEstoque,
-              isMultiLojaDesdobrado: true
-            });
-          });
-        }
+        lista.push({
+          ...prod,
+          cardKey: `rede_${prod.id}_${String(prod.nome || '').toUpperCase()}`,
+          filialIdCard: 'TODAS',
+          filialNomeCard: 'Todas as Filiais (Rede)',
+          qtdFilial: saldoRede,
+          filiaisComSaldo,
+          statusEstoque,
+          isConsolidadoRede: true
+        });
       } else {
-        // Exibe somente para a filial ativa selecionada
+        // Visão de Filial Específica
         const fClean = String(filialSelecionada).trim().toLowerCase();
         const fObj = listaFiliais.find(f => String(f.id).trim().toLowerCase() === fClean);
         const fNome = fObj ? fObj.nome : 'Filial Selecionada';
 
-        // Procura os itens físicos do produto associados a esta filial específica
-        const itensFisicosFilial = (prod.itensFisicos || []).filter(p => String(p.filial_id || '').trim().toLowerCase() === fClean);
+        const itensFisicosFilial = (prod.itensFisicos || []).filter(
+          p => String(p.filial_id || '').trim().toLowerCase() === fClean
+        );
 
-        // Se o produto NÃO possui registro físico ou estoque real nesta filial selecionada, NÃO exibe card órfão de catálogo
         const saldoFilial = getSaldoFilial(prod, filialSelecionada);
+
+        // Não exibir itens órfãos de catálogo que não possuem vínculo nem saldo nesta filial
         if (itensFisicosFilial.length === 0 && saldoFilial === 0) {
           return;
         }
 
         const statusEstoque = saldoFilial === 0 ? 'ZERADO' : saldoFilial < 5 ? 'CRITICO' : 'DISPONIVEL';
-
         const itemFisicoFilial = itensFisicosFilial[0];
         const precoFilial = Number(itemFisicoFilial?.preco_venda || itemFisicoFilial?.preco || prod.preco || 0);
-
-        // Rótulo da filial: usa o nome real da filial cadastrado no item ou fNome
         const nomeRealFilial = itemFisicoFilial?.filiais?.nome || itemFisicoFilial?.filial_nome || fNome;
 
         lista.push({
@@ -585,29 +588,32 @@ export default function ConsultaEstoque({
           filialIdCard: String(filialSelecionada),
           filialNomeCard: nomeRealFilial,
           qtdFilial: saldoFilial,
+          filiaisComSaldo: [],
           statusEstoque,
-          isMultiLojaDesdobrado: false
+          isConsolidadoRede: false
         });
       }
     });
 
-    return lista;
+    // Ordenar colocando modelos com maior saldo ou ordem alfabética limpa
+    return lista.sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || '')));
   }, [produtosComSaldosPorFilial, filialSelecionada, listaFiliais]);
 
-  // 8. Filtros de Interface (Busca Textual, Categoria e Status de Estoque)
+  // 8. Filtros de Interface (Ocultar Zerados por padrão + Busca + Categoria + Status)
   const itensFiltrados = useMemo(() => {
     return cardsDesdobrados.filter(item => {
-      // Filtro de Categoria (normalizado sem espaços)
+      // Filtro de Categoria
       if (categoriaSelecionada !== 'TODAS') {
         const catItem = String(item.categoria || '').trim().toUpperCase();
         if (catItem !== categoriaSelecionada.trim().toUpperCase()) return false;
       }
 
       // Filtro de Status de Estoque:
-      // CRITICO: saldo entre 1 e 4 (item.qtdFilial > 0 && item.qtdFilial < 5)
-      // ZERADO: saldo 0 (item.qtdFilial === 0)
-      // DISPONIVEL: saldo >= 5 (item.qtdFilial >= 5)
-      if (statusFiltro === 'CRITICO') {
+      // REGRA OBRIGATÓRIA: Por padrão ('TODOS'), exibe APENAS modelos com quantidade disponível > 0!
+      // Os itens zerados (0 un) só aparecem quando o usuário clica explicitamente em "Estoque Zerado" ('ZERADO').
+      if (statusFiltro === 'TODOS') {
+        if (item.qtdFilial <= 0) return false;
+      } else if (statusFiltro === 'CRITICO') {
         if (!(item.qtdFilial > 0 && item.qtdFilial < 5)) return false;
       } else if (statusFiltro === 'ZERADO') {
         if (item.qtdFilial !== 0) return false;
@@ -631,7 +637,7 @@ export default function ConsultaEstoque({
     });
   }, [cardsDesdobrados, categoriaSelecionada, statusFiltro, buscaDebounced]);
 
-  // 9. Fatiamento dos Dados com Paginação (Garante performance ultra-rápida sem travar o navegador)
+  // 9. Paginação
   const totalPaginas = Math.max(1, Math.ceil(itensFiltrados.length / itensPorPagina));
   const paginaValida = Math.min(Math.max(1, paginaAtual), totalPaginas);
   const indiceInicio = (paginaValida - 1) * itensPorPagina;
@@ -640,7 +646,7 @@ export default function ConsultaEstoque({
     return itensFiltrados.slice(indiceInicio, indiceFim);
   }, [itensFiltrados, indiceInicio, indiceFim]);
 
-  // Contadores para as Pílulas de Status (respeitando a categoria selecionada e busca)
+  // Contadores para as Pílulas de Status (respeitando categoria e busca)
   const contadores = useMemo(() => {
     const base = cardsDesdobrados.filter(item => {
       if (categoriaSelecionada !== 'TODAS') {
@@ -660,21 +666,26 @@ export default function ConsultaEstoque({
       return true;
     });
 
-    let todos = base.length;
-    let critico = 0;
-    let zerado = 0;
-    let disponivel = 0;
+    let emEstoque = 0; // quantidade > 0
+    let critico = 0;   // 1 a 4
+    let zerado = 0;    // 0
+    let disponivel = 0; // >= 5
 
     base.forEach(i => {
-      if (i.qtdFilial === 0) zerado++;
-      else if (i.qtdFilial < 5) critico++;
-      else disponivel++;
+      if (i.qtdFilial === 0) {
+        zerado++;
+      } else {
+        emEstoque++;
+        if (i.qtdFilial < 5) critico++;
+        else disponivel++;
+      }
     });
 
-    return { todos, critico, zerado, disponivel };
+    return { todos: emEstoque, critico, zerado, disponivel };
   }, [cardsDesdobrados, categoriaSelecionada, buscaDebounced]);
 
-  // Abrir Modal de IMEIs para o Produto e Filial do Card
+  // Abrir Modal de IMEIs Disponíveis para o Produto e Filial do Card
+  // Filtra EXCLUSIVAMENTE status === 'DISPONIVEL' e vendido === false
   const handleAbrirImeis = (item) => {
     const produtoIds = new Set();
     if (item.id) produtoIds.add(String(item.id));
@@ -684,11 +695,17 @@ export default function ConsultaEstoque({
 
     const targetFilialId = item.filialIdCard;
     const imeisRelacionados = (imeisDisponiveis || []).filter(im => {
+      if (!isImeiEstritamenteDisponivel(im)) return false;
       const matchProd = im.produto_id && produtoIds.has(String(im.produto_id));
       if (!matchProd) return false;
 
       if (targetFilialId && targetFilialId !== 'TODAS') {
-        return String(im.filial_id || '') === String(targetFilialId);
+        let fIdImei = String(im.filial_id || '').trim();
+        if (!fIdImei) {
+          const prodFisico = (item.itensFisicos || []).find(p => String(p.id) === String(im.produto_id));
+          if (prodFisico?.filial_id) fIdImei = String(prodFisico.filial_id).trim();
+        }
+        return fIdImei.toLowerCase() === String(targetFilialId).trim().toLowerCase();
       }
       return true;
     });
@@ -716,7 +733,7 @@ export default function ConsultaEstoque({
         </div>
       )}
 
-      {/* 1. Menu e Cabeçalho */}
+      {/* 1. Menu e Cabeçalho com botão de destaque "🔍 Rastrear IMEI / Vendas" */}
       <div className="bg-gradient-to-r from-[#0d0914] via-[#120d1c] to-[#0a0a0a] border border-[#8B5CF6]/30 p-4 md:p-6 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xl relative overflow-hidden w-full">
         <div className="absolute -right-10 -bottom-10 w-44 h-44 bg-[#8B5CF6]/10 rounded-full blur-3xl pointer-events-none" />
         <div className="w-full md:w-auto">
@@ -726,22 +743,34 @@ export default function ConsultaEstoque({
             </div>
             <div>
               <h2 className="text-lg md:text-xl font-extrabold text-white tracking-tight flex items-center gap-2">
-                Posição de Estoque & Auditoria
+                Posição de Estoque & Auditoria de Prateleira
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                Consulte a disponibilidade de produtos por filial e na rede com alertas de estoque crítico e zerado.
+                Conferência física de aparelhos e produtos disponíveis em loja, separada do histórico de vendas.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Botão de Atualização Rápida */}
-        <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+        {/* Botões de Ação no Cabeçalho: Rastrear IMEI / Vendas + Atualizar */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
           <button
             type="button"
-            onClick={carregarDadosEstoque}
+            onClick={() => {
+              setImeiInicialRastreio('');
+              setModalRastrearImeiAberto(true);
+            }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-400/40 text-white rounded-xl text-xs font-extrabold transition-all shadow-lg shadow-purple-900/40 active:scale-95 cursor-pointer flex-1 sm:flex-initial"
+          >
+            <Search size={15} className="text-purple-100" />
+            <span>🔍 Rastrear IMEI / Vendas</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => carregarDadosEstoque(null, true)}
             disabled={loading}
-            className="flex items-center justify-center gap-2 px-3.5 py-2 bg-black/60 hover:bg-[#1a1226] border border-[#33254d] hover:border-[#8B5CF6]/60 text-purple-300 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer w-full md:w-auto"
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-black/60 hover:bg-[#1a1226] border border-[#33254d] hover:border-[#8B5CF6]/60 text-purple-300 rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer"
             title="Recarregar Dados"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin text-[#8B5CF6]' : ''} />
@@ -758,7 +787,7 @@ export default function ConsultaEstoque({
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
             <input
               type="text"
-              placeholder="Buscar por nome do produto, SKU ou código..."
+              placeholder="Buscar modelo na prateleira por nome, SKU ou código de barras..."
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               className="w-full bg-black/70 border border-[#282830] focus:border-[#8B5CF6] focus:ring-1 focus:ring-[#8B5CF6]/40 text-xs text-white placeholder-gray-500 rounded-xl pl-10 pr-9 py-2.5 outline-none font-medium transition-all"
@@ -812,10 +841,10 @@ export default function ConsultaEstoque({
           </div>
         </div>
 
-        {/* Pílulas/Abas de Status de Estoque (Filtro Rápido em 1 clique) */}
+        {/* Pílulas de Status de Estoque (Oculta Zerados por padrão!) */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2 border-t border-[#1f1f26] w-full">
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            {/* Todos os Itens */}
+            {/* Em Estoque (> 0 un) — PADRÃO */}
             <button
               type="button"
               onClick={() => setStatusFiltro('TODOS')}
@@ -826,43 +855,9 @@ export default function ConsultaEstoque({
               }`}
             >
               <Layers size={13} />
-              <span>Todos os Itens</span>
+              <span>Em Estoque (&gt; 0)</span>
               <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-black/30 font-mono">
                 {contadores.todos}
-              </span>
-            </button>
-
-            {/* Crítico (< 5 un) */}
-            <button
-              type="button"
-              onClick={() => setStatusFiltro('CRITICO')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
-                statusFiltro === 'CRITICO'
-                  ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/20'
-                  : 'bg-black/50 border-[#282830] text-amber-400/70 hover:text-amber-300 hover:border-amber-500/40'
-              }`}
-            >
-              <AlertTriangle size={13} className="text-amber-400" />
-              <span>Crítico (&lt; 5 un)</span>
-              <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/40 font-mono">
-                {contadores.critico}
-              </span>
-            </button>
-
-            {/* Estoque Zerado */}
-            <button
-              type="button"
-              onClick={() => setStatusFiltro('ZERADO')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
-                statusFiltro === 'ZERADO'
-                  ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-md shadow-rose-500/20'
-                  : 'bg-black/50 border-[#282830] text-rose-400/70 hover:text-rose-300 hover:border-rose-500/40'
-              }`}
-            >
-              <XCircle size={13} className="text-rose-400" />
-              <span>Estoque Zerado</span>
-              <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-rose-950/60 text-rose-300 border border-rose-800/40 font-mono">
-                {contadores.zerado}
               </span>
             </button>
 
@@ -882,24 +877,57 @@ export default function ConsultaEstoque({
                 {contadores.disponivel}
               </span>
             </button>
+
+            {/* Crítico (< 5 un) */}
+            <button
+              type="button"
+              onClick={() => setStatusFiltro('CRITICO')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
+                statusFiltro === 'CRITICO'
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/20'
+                  : 'bg-black/50 border-[#282830] text-amber-400/70 hover:text-amber-300 hover:border-amber-500/40'
+              }`}
+            >
+              <AlertTriangle size={13} className="text-amber-400" />
+              <span>Crítico (1 a 4 un)</span>
+              <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/40 font-mono">
+                {contadores.critico}
+              </span>
+            </button>
+
+            {/* Estoque Zerado (0 un — Oculto por padrão, visível apenas quando clicado) */}
+            <button
+              type="button"
+              onClick={() => setStatusFiltro('ZERADO')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer flex-1 sm:flex-initial ${
+                statusFiltro === 'ZERADO'
+                  ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-md shadow-rose-500/20'
+                  : 'bg-black/50 border-[#282830] text-rose-400/70 hover:text-rose-300 hover:border-rose-500/40'
+              }`}
+            >
+              <XCircle size={13} className="text-rose-400" />
+              <span>Estoque Zerado</span>
+              <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-rose-950/60 text-rose-300 border border-rose-800/40 font-mono">
+                {contadores.zerado}
+              </span>
+            </button>
           </div>
 
           {/* Indicador de Filtro Ativo */}
           <div className="text-[11px] text-gray-400 font-medium w-full md:w-auto text-left md:text-right pt-1 md:pt-0">
-            Exibindo <span className="text-white font-bold">{itensFiltrados.length}</span> cards em <span className="text-[#A78BFA] font-semibold">{nomeFilialAtiva}</span>
+            Exibindo <span className="text-white font-bold">{itensFiltrados.length}</span> modelos em <span className="text-[#A78BFA] font-semibold">{nomeFilialAtiva}</span>
           </div>
         </div>
       </div>
 
-      {/* 3. Cards dos Produtos (Grid Responsivo Desdobrado por Filial) */}
+      {/* 3. Grade Limpa de Cards para Auditoria de Prateleira */}
       {loading ? (
         <div className="py-20 text-center flex flex-col items-center justify-center space-y-3">
           <RefreshCw size={32} className="animate-spin text-[#8B5CF6]" />
-          <p className="text-sm font-semibold text-gray-400">Carregando dados de estoque e filiais...</p>
+          <p className="text-sm font-semibold text-gray-400">Carregando posição física de estoque...</p>
         </div>
       ) : itensFiltrados.length === 0 ? (
         <div className="space-y-6">
-          {/* Card de Adição quando a lista estiver vazia para a filial selecionada */}
           {filialSelecionada !== 'TODAS' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div
@@ -929,9 +957,9 @@ export default function ConsultaEstoque({
             <div className="p-4 bg-purple-950/30 border border-purple-800/40 rounded-full text-purple-400">
               <Search size={32} />
             </div>
-            <h4 className="text-base font-bold text-white">Nenhum produto encontrado</h4>
+            <h4 className="text-base font-bold text-white">Nenhum modelo com saldo neste filtro</h4>
             <p className="text-xs text-gray-400 max-w-md mx-auto">
-              Não encontramos itens com os critérios de busca e filtros selecionados. Tente limpar os filtros ou buscar por outro termo.
+              Os itens esgotados (0 un) ficam ocultos por padrão para facilitar a conferência de prateleira. Clique em &quot;Estoque Zerado&quot; caso queira visualizá-los, ou use o botão &quot;🔍 Rastrear IMEI / Vendas&quot; para consultar aparelhos vendidos.
             </p>
             {(busca || categoriaSelecionada !== 'TODAS' || statusFiltro !== 'TODOS') && (
               <button
@@ -944,7 +972,7 @@ export default function ConsultaEstoque({
                 className="mt-2 px-4 py-2 bg-[#8B5CF6]/20 hover:bg-[#8B5CF6]/30 border border-[#8B5CF6]/50 text-purple-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <X size={14} />
-                <span>Limpar Todos os Filtros</span>
+                <span>Voltar para Estoque Disponível (&gt; 0)</span>
               </button>
             )}
           </div>
@@ -952,7 +980,7 @@ export default function ConsultaEstoque({
       ) : (
         <div className="space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Card Interativo: Adicionar Produto à Filial (Exibido no início quando uma filial específica estiver ativa) */}
+            {/* Card Interativo: Adicionar Produto à Filial */}
             {filialSelecionada !== 'TODAS' && paginaValida === 1 && (
               <div
                 onClick={() => setModalAdicionarProdutoAberto(true)}
@@ -977,182 +1005,200 @@ export default function ConsultaEstoque({
             )}
 
             {cardsExibidos.map((item) => {
-            const isEsgotado = item.qtdFilial === 0;
-            const isCritico = item.qtdFilial > 0 && item.qtdFilial < 5;
-            const isDisponivel = item.qtdFilial >= 5;
+              const isEsgotado = item.qtdFilial === 0;
+              const isCritico = item.qtdFilial > 0 && item.qtdFilial < 5;
+              const isDisponivel = item.qtdFilial >= 5;
 
-            return (
-              <div
-                key={item.cardKey}
-                className="bg-[#0d1117] border border-zinc-800/80 hover:border-purple-500/50 rounded-xl p-4 flex flex-col justify-between gap-3 transition-all duration-200 group hover:shadow-xl hover:shadow-purple-950/20 relative"
-              >
-                {/* 1. Cabeçalho do Card (Clicável para abrir Detalhes / Ajuste) */}
+              return (
                 <div
-                  onClick={() => {
-                    const itemFisicoFilial = (item.itensFisicos || []).find(p => String(p.filial_id) === String(item.filialIdCard)) || null;
-                    const targetProd = {
-                      ...(itemFisicoFilial || item.itensFisicos?.[0] || item),
-                      id: itemFisicoFilial?.id || (item.itensFisicos?.[0]?.id) || item.id,
-                      filial_id: item.filialIdCard || (itemFisicoFilial?.filial_id) || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
-                      filialNome: item.filialNomeCard
-                    };
-                    setProdutoSelecionadoModal(targetProd);
-                  }}
-                  className="cursor-pointer group/header"
-                  title="Clique para ver detalhes e ajustes do produto"
+                  key={item.cardKey}
+                  className="bg-[#0d1117] border border-zinc-800/80 hover:border-purple-500/50 rounded-xl p-4 flex flex-col justify-between gap-3.5 transition-all duration-200 group hover:shadow-xl hover:shadow-purple-950/20 relative"
                 >
-                  {/* Topo Superior: Ícone de loja + [NOME DA FILIAL] e Preço Verde Vibrante */}
-                  <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-zinc-800/60">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Store size={15} className="text-cyan-400 shrink-0" />
-                      <span className="text-xs font-black uppercase tracking-wider text-cyan-300 truncate">
-                        [{item.filialNomeCard}]
-                      </span>
-                    </div>
-                    <span className="text-sm font-mono font-bold text-emerald-400 shrink-0 tracking-tight">
-                      {formatCurrency(item.preco)}
-                    </span>
-                  </div>
-
-                  {/* Linha Secundária: Tag/Pill de categoria e SKU */}
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/60 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
-                      {item.isCelular ? <Smartphone size={10} className="text-purple-400" /> : <Tag size={10} className="text-purple-400" />}
-                      {item.categoria || 'Geral'}
-                    </span>
-                    <span className="text-[10px] text-zinc-400 font-mono">
-                      SKU: <strong className="text-zinc-300">{item.sku || 'N/D'}</strong>
-                    </span>
-                  </div>
-
-                  {/* Nome do Produto: Em branco brilhante com tracking-wide */}
-                  <h3 className="text-xs md:text-sm font-bold text-white tracking-wide mt-2 group-hover/header:text-purple-300 transition-colors line-clamp-2 leading-snug">
-                    {item.nome}
-                  </h3>
-                  {item.codigo_barras && (
-                    <span className="text-[10px] text-zinc-500 font-mono mt-0.5 block truncate">
-                      EAN: {item.codigo_barras}
-                    </span>
-                  )}
-                </div>
-
-                {/* 2. Bloco Central de Estoque (Painel interno com bg-black/40 e borda sutil) */}
-                <div className="bg-black/40 border border-zinc-800/60 rounded-lg p-3 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">
-                        ESTOQUE NESTA FILIAL
-                      </span>
-                      <span className="text-xs font-bold text-cyan-300 truncate max-w-[140px] block mt-0.5">
-                        {item.filialNomeCard}
+                  {/* 1. Cabeçalho Limpo e Objetivo: Filial/Rede + Preço + Nome do Modelo */}
+                  <div
+                    onClick={() => {
+                      const itemFisicoFilial =
+                        item.filialIdCard !== 'TODAS'
+                          ? (item.itensFisicos || []).find(p => String(p.filial_id) === String(item.filialIdCard))
+                          : item.itensFisicos?.[0];
+                      const targetProd = {
+                        ...(itemFisicoFilial || item.itensFisicos?.[0] || item),
+                        id: itemFisicoFilial?.id || item.itensFisicos?.[0]?.id || item.id,
+                        filial_id:
+                          item.filialIdCard !== 'TODAS'
+                            ? item.filialIdCard
+                            : (itemFisicoFilial?.filial_id || item.itensFisicos?.[0]?.filial_id || activeFilialId),
+                        filialNome: item.filialNomeCard
+                      };
+                      setProdutoSelecionadoModal(targetProd);
+                    }}
+                    className="cursor-pointer group/header"
+                    title="Clique para abrir ajustes e distribuição do modelo"
+                  >
+                    <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-zinc-800/60">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Store size={14} className="text-cyan-400 shrink-0" />
+                        <span className="text-[11px] font-black uppercase tracking-wider text-cyan-300 truncate">
+                          [{item.filialNomeCard}]
+                        </span>
+                      </div>
+                      <span className="text-sm font-mono font-bold text-emerald-400 shrink-0 tracking-tight">
+                        {formatCurrency(item.preco)}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-xl font-bold text-white font-mono leading-none">
-                        {item.qtdFilial} <span className="text-[11px] text-gray-400 font-sans font-normal">un</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] bg-purple-950/60 text-purple-300 border border-purple-800/60 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1">
+                        {item.isCelular ? <Smartphone size={10} className="text-purple-400" /> : <Tag size={10} className="text-purple-400" />}
+                        {item.categoria || 'Geral'}
                       </span>
-
-                      {/* Badges de Status com fundo escuro, borda e texto vivo */}
-                      {isEsgotado && (
-                        <span className="text-[10px] bg-red-950/80 text-red-400 border border-red-600/80 px-2 py-0.5 rounded font-bold tracking-wide">
-                          ESGOTADO
-                        </span>
-                      )}
-                      {isCritico && (
-                        <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-500/80 px-2 py-0.5 rounded font-bold tracking-wide">
-                          CRÍTICO
-                        </span>
-                      )}
-                      {isDisponivel && (
-                        <span className="text-[10px] bg-emerald-950/80 text-emerald-400 border border-emerald-500/80 px-2 py-0.5 rounded font-bold tracking-wide">
-                          DISPONÍVEL
+                      {item.sku && (
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          SKU: <strong className="text-zinc-300">{item.sku}</strong>
                         </span>
                       )}
                     </div>
+
+                    {/* Nome do Modelo em Destaque */}
+                    <h3 className="text-sm md:text-base font-extrabold text-white tracking-wide mt-2 group-hover/header:text-purple-300 transition-colors line-clamp-2 leading-snug">
+                      {item.nome}
+                    </h3>
                   </div>
 
-                  {/* Rodapé interno do bloco: Ícone de rede + "Disponível na Rede: X unidades" */}
-                  <div className="border-t border-zinc-800/60 pt-2 flex items-center justify-between text-[11px]">
-                    <span className="text-gray-400 font-medium flex items-center gap-1.5">
-                      <Building2 size={13} className="text-purple-400" />
-                      Disponível na Rede:
-                    </span>
-                    <span className="font-mono font-bold text-purple-300">
-                      {item.qtdRede} {item.qtdRede === 1 ? 'unidade' : 'unidades'}
-                    </span>
+                  {/* 2. Bloco Central de Auditoria Física: Quantidade Real Disponível */}
+                  <div className="bg-black/50 border border-zinc-800/70 rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block">
+                          {item.isConsolidadoRede ? 'DISPONÍVEL NA REDE' : 'DISPONÍVEL NA FILIAL'}
+                        </span>
+                        <span className="text-xs font-bold text-cyan-300 truncate max-w-[160px] block mt-0.5">
+                          {item.filialNomeCard}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-2xl font-black text-white font-mono leading-none">
+                          {item.qtdFilial} <span className="text-xs text-gray-400 font-sans font-semibold">un</span>
+                        </span>
+
+                        {isEsgotado && (
+                          <span className="text-[10px] bg-red-950/80 text-red-400 border border-red-600/80 px-2 py-0.5 rounded font-bold tracking-wide">
+                            ZERADO
+                          </span>
+                        )}
+                        {isCritico && (
+                          <span className="text-[10px] bg-amber-950/80 text-amber-300 border border-amber-500/80 px-2 py-0.5 rounded font-bold tracking-wide">
+                            CRÍTICO
+                          </span>
+                        )}
+                        {isDisponivel && (
+                          <span className="text-[10px] bg-emerald-950/80 text-emerald-400 border border-emerald-500/80 px-2 py-0.5 rounded font-bold tracking-wide">
+                            DISPONÍVEL
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Se estiver na visão consolidada da rede, mostra resumo rápido de quais filiais têm saldo */}
+                    {item.isConsolidadoRede && item.filiaisComSaldo?.length > 0 ? (
+                      <div className="border-t border-zinc-800/60 pt-2 flex flex-wrap gap-1.5">
+                        {item.filiaisComSaldo.map(df => (
+                          <span
+                            key={df.filial_id}
+                            className="text-[10px] bg-zinc-900/90 border border-zinc-700/70 text-zinc-300 px-2 py-0.5 rounded-md font-medium"
+                          >
+                            {df.filial_nome}: <strong className="text-emerald-400 font-mono">{df.quantidade}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      !item.isConsolidadoRede && (
+                        <div className="border-t border-zinc-800/60 pt-2 flex items-center justify-between text-[11px]">
+                          <span className="text-gray-400 font-medium flex items-center gap-1.5">
+                            <Building2 size={12} className="text-purple-400" />
+                            Total na Rede:
+                          </span>
+                          <span className="font-mono font-bold text-purple-300">
+                            {item.qtdRede} {item.qtdRede === 1 ? 'unidade' : 'unidades'}
+                          </span>
+                        </div>
+                      )
+                    )}
+                  </div>
+
+                  {/* 3. Botões de Conferência de Prateleira e Ações */}
+                  <div className="space-y-2 pt-0.5">
+                    {item.isCelular && (
+                      <button
+                        type="button"
+                        onClick={() => handleAbrirImeis(item)}
+                        className="w-full bg-gradient-to-r from-[#201435] to-[#2c1b4b] hover:from-[#2c1b4b] hover:to-[#3b2364] border border-purple-500/50 hover:border-purple-400 text-purple-100 hover:text-white font-extrabold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-purple-950/30"
+                      >
+                        <QrCode size={14} className="text-purple-300 shrink-0" />
+                        <span>Conferir IMEIs Disponíveis ({item.qtdFilial})</span>
+                      </button>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const itemFisicoFilial =
+                            item.filialIdCard !== 'TODAS'
+                              ? (item.itensFisicos || []).find(p => String(p.filial_id) === String(item.filialIdCard))
+                              : item.itensFisicos?.[0];
+                          const targetProd = {
+                            ...(itemFisicoFilial || item.itensFisicos?.[0] || item),
+                            id: itemFisicoFilial?.id || item.itensFisicos?.[0]?.id || item.id,
+                            filial_id:
+                              item.filialIdCard !== 'TODAS'
+                                ? item.filialIdCard
+                                : (itemFisicoFilial?.filial_id || item.itensFisicos?.[0]?.filial_id || activeFilialId),
+                            filialNome: item.filialNomeCard
+                          };
+                          setProdutoSelecionadoModal(targetProd);
+                          if (onOpenDetalhesProduto) {
+                            onOpenDetalhesProduto(targetProd);
+                          }
+                        }}
+                        className="w-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/60 hover:border-zinc-500 text-zinc-300 hover:text-white font-semibold py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate shadow-sm"
+                        title="Ajustar preço ou saldo"
+                      >
+                        <History size={13} className="text-zinc-400 shrink-0" />
+                        <span className="truncate">Ajustar / Preço</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onNavigateToTransferencias) {
+                            onNavigateToTransferencias();
+                          }
+                        }}
+                        className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate shadow-md shadow-purple-900/30"
+                        title="Solicitar transferência entre filiais"
+                      >
+                        <ArrowRightLeft size={13} className="text-white shrink-0" />
+                        <span className="truncate">Transferir</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
-
-                {/* 3. Botões de Ação no Rodapé */}
-                <div className="space-y-1.5 pt-0.5">
-                  {item.isCelular && (
-                    <button
-                      type="button"
-                      onClick={() => handleAbrirImeis(item)}
-                      className="w-full bg-[#1b122c] hover:bg-[#281845] border border-purple-500/40 hover:border-purple-400 text-purple-200 hover:text-white font-bold py-1.5 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
-                    >
-                      <QrCode size={13} className="text-purple-400" />
-                      <span>Ver IMEIs nesta Filial</span>
-                    </button>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const itemFisicoFilial = (item.itensFisicos || []).find(p => String(p.filial_id) === String(item.filialIdCard)) || null;
-                        const targetProd = {
-                          ...(itemFisicoFilial || item.itensFisicos?.[0] || item),
-                          id: itemFisicoFilial?.id || (item.itensFisicos?.[0]?.id) || item.id,
-                          filial_id: item.filialIdCard || (itemFisicoFilial?.filial_id) || (item.itensFisicos?.[0]?.filial_id) || filialSelecionada,
-                          filialNome: item.filialNomeCard
-                        };
-                        setProdutoSelecionadoModal(targetProd);
-                        if (onOpenDetalhesProduto) {
-                          onOpenDetalhesProduto(targetProd);
-                        }
-                      }}
-                      className="w-full bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/60 hover:border-zinc-500 text-zinc-300 hover:text-white font-medium py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate shadow-sm"
-                      title="Ver histórico e ajustes"
-                    >
-                      <History size={13} className="text-zinc-400 shrink-0" />
-                      <span className="truncate">Histórico / Ajuste</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onNavigateToTransferencias) {
-                          onNavigateToTransferencias();
-                        }
-                      }}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer truncate shadow-md shadow-purple-900/30"
-                      title="Solicitar transferência entre filiais"
-                    >
-                      <ArrowRightLeft size={13} className="text-white shrink-0" />
-                      <span className="truncate font-semibold">Transferir</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
           </div>
 
-          {/* Barra de Paginação Simples no Rodapé */}
+          {/* Barra de Paginação */}
           {totalPaginas > 1 && (
             <div className="bg-[#0e0e11] border border-[#222228] rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
-              {/* Indicação de Cards Exibidos */}
               <div className="text-xs text-gray-400">
-                Mostrando <span className="font-bold text-white font-mono">{itensFiltrados.length === 0 ? 0 : indiceInicio + 1}</span> - <span className="font-bold text-white font-mono">{indiceFim}</span> de <span className="font-bold text-purple-400 font-mono">{itensFiltrados.length}</span> cards
+                Mostrando <span className="font-bold text-white font-mono">{itensFiltrados.length === 0 ? 0 : indiceInicio + 1}</span> - <span className="font-bold text-white font-mono">{indiceFim}</span> de <span className="font-bold text-purple-400 font-mono">{itensFiltrados.length}</span> modelos
                 <span className="ml-2 text-zinc-600">|</span>
                 <span className="ml-2 text-zinc-400">Página <strong className="text-white">{paginaValida}</strong> de <strong className="text-white">{totalPaginas}</strong></span>
               </div>
 
-              {/* Controles de Navegação */}
               <div className="flex items-center gap-2">
-                {/* Botão Anterior */}
                 <button
                   type="button"
                   onClick={() => setPaginaAtual(prev => Math.max(1, prev - 1))}
@@ -1163,13 +1209,12 @@ export default function ConsultaEstoque({
                   <span>Anterior</span>
                 </button>
 
-                {/* Botões Numéricos Inteligentes */}
                 <div className="flex items-center gap-1">
                   {Array.from({ length: totalPaginas }, (_, i) => i + 1)
                     .filter(p => p === 1 || p === totalPaginas || Math.abs(p - paginaValida) <= 1)
                     .reduce((acc, p, idx, arr) => {
                       if (idx > 0 && p - arr[idx - 1] > 1) {
-                        acc.push(-1 * p); // Marca ellipsis
+                        acc.push(-1 * p);
                       }
                       acc.push(p);
                       return acc;
@@ -1200,7 +1245,6 @@ export default function ConsultaEstoque({
                     })}
                 </div>
 
-                {/* Botão Próxima */}
                 <button
                   type="button"
                   onClick={() => setPaginaAtual(prev => Math.min(totalPaginas, prev + 1))}
@@ -1216,20 +1260,20 @@ export default function ConsultaEstoque({
         </div>
       )}
 
-      {/* 4. Modal Simples de IMEIs Disponíveis */}
+      {/* 4. Modal de Conferência de IMEIs Disponíveis na Prateleira */}
       {modalImeisAberto && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-[#0e0e11] border border-[#2a2a36] rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative">
             <div className="flex items-start justify-between gap-3 border-b border-[#202028] pb-4">
               <div>
-                <span className="text-[10px] bg-purple-950/40 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded font-bold uppercase">
-                  Disponibilidade de Aparelhos
+                <span className="text-[10px] bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded font-bold uppercase">
+                  Conferência Física de Prateleira (Somente Disponíveis)
                 </span>
-                <h3 className="text-base font-extrabold text-white mt-1">
+                <h3 className="text-base font-extrabold text-white mt-1.5">
                   {produtoImeisModal?.nome}
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Filial: <strong className="text-purple-300">[{filialImeisModal || nomeFilialAtiva}]</strong>
+                  Local: <strong className="text-cyan-300">[{filialImeisModal || nomeFilialAtiva}]</strong>
                 </p>
               </div>
               <button
@@ -1246,19 +1290,22 @@ export default function ConsultaEstoque({
               </button>
             </div>
 
-            {/* Lista de IMEIs */}
-            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+            {/* Lista de IMEIs Disponíveis */}
+            <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
               {imeisDoProdutoModal.length === 0 ? (
                 <div className="py-8 text-center text-gray-400 text-xs">
-                  Nenhum IMEI disponível encontrado para esta filial.
+                  Nenhum IMEI disponível na prateleira para esta seleção.
                 </div>
               ) : (
                 imeisDoProdutoModal.map((im, idx) => {
-                  const filialDoImei = listaFiliais.find(f => String(f.id) === String(im.filial_id))?.nome || 'Filial não identificada';
+                  const filialDoImei =
+                    listaFiliais.find(f => String(f.id) === String(im.filial_id))?.nome ||
+                    filialImeisModal ||
+                    'Filial identificada';
                   return (
                     <div
                       key={im.id || idx}
-                      className="bg-black/60 border border-[#22222a] p-3 rounded-xl flex items-center justify-between text-xs"
+                      className="bg-black/60 border border-[#22222a] hover:border-purple-500/40 p-3 rounded-xl flex items-center justify-between gap-2 text-xs transition-colors"
                     >
                       <div className="space-y-0.5">
                         <span className="font-mono font-bold text-white text-xs block tracking-wide">
@@ -1269,13 +1316,27 @@ export default function ConsultaEstoque({
                           {filialDoImei}
                         </span>
                       </div>
-                      <div className="text-right">
-                        <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-bold uppercase">
-                          DISPONÍVEL
-                        </span>
+                      <div className="text-right flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded font-bold uppercase">
+                            DISPONÍVEL
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setModalImeisAberto(false);
+                              setImeiInicialRastreio(im.imei);
+                              setModalRastrearImeiAberto(true);
+                            }}
+                            className="text-[10px] bg-purple-950/80 hover:bg-purple-800 text-purple-300 hover:text-white border border-purple-500/40 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                            title="Abrir histórico completo deste IMEI"
+                          >
+                            🔍 Rastrear
+                          </button>
+                        </div>
                         {im.cor && (
-                          <span className="text-[10px] text-gray-400 block mt-0.5">
-                            Cor: {im.cor}
+                          <span className="text-[10px] text-gray-400 block">
+                            Cor: <strong className="text-gray-200">{im.cor}</strong>
                           </span>
                         )}
                       </div>
@@ -1287,7 +1348,9 @@ export default function ConsultaEstoque({
 
             {/* Rodapé do Modal */}
             <div className="pt-2 border-t border-[#202028] flex justify-between items-center text-xs text-gray-400">
-              <span>Total: <strong className="text-white">{imeisDoProdutoModal.length}</strong> disponível(is)</span>
+              <span>
+                Total em gaveta/vitrine: <strong className="text-emerald-400 font-mono">{imeisDoProdutoModal.length}</strong> disponível(is)
+              </span>
               <button
                 type="button"
                 onClick={() => {
@@ -1305,7 +1368,20 @@ export default function ConsultaEstoque({
         </div>
       )}
 
-      {/* 5. Modal de Detalhes, Histórico e Ajuste de Estoque */}
+      {/* 5. Novo Modal: "🔍 Rastrear IMEI & Histórico de Vendas" */}
+      <ModalRastrearImei
+        isOpen={modalRastrearImeiAberto}
+        onClose={() => {
+          setModalRastrearImeiAberto(false);
+          setImeiInicialRastreio('');
+        }}
+        empresaId={profile?.empresa_id}
+        filiais={listaFiliais}
+        produtos={produtos}
+        initialSearch={imeiInicialRastreio}
+      />
+
+      {/* 6. Modal de Detalhes e Ajuste de Estoque */}
       {produtoSelecionadoModal && (
         <ModalDetalheEstoqueProduto
           produtoId={produtoSelecionadoModal.id || produtoSelecionadoModal.produto_id}
@@ -1322,11 +1398,9 @@ export default function ConsultaEstoque({
             carregarDadosEstoque(null, true);
           }}
           onSuccess={() => {
-            // Recarrega os dados de estoque atualizados após salvar a edição
             carregarDadosEstoque(null, true);
           }}
           onAtualizar={() => {
-            // Callback adicional para recarregamento imediato
             carregarDadosEstoque(null, true);
           }}
           onTransferir={() => {
@@ -1338,7 +1412,7 @@ export default function ConsultaEstoque({
         />
       )}
 
-      {/* 6. Modal de Adicionar Produto à Filial (Anti-Duplicidade com Catálogo) */}
+      {/* 7. Modal de Adicionar Produto à Filial */}
       {modalAdicionarProdutoAberto && (
         <ModalAdicionarProdutoFilial
           isOpen={modalAdicionarProdutoAberto}
@@ -1350,11 +1424,8 @@ export default function ConsultaEstoque({
           empresaId={profile?.empresa_id}
           userId={profile?.id}
           onSuccess={(novoProd) => {
-            // Notificação rápida
             setSucessoToast(`Produto "${novoProd.nome}" adicionado com sucesso à ${nomeFilialAtiva}!`);
             setTimeout(() => setSucessoToast(null), 4500);
-
-            // Invalidação imediata do estoque para atualizar a tela
             carregarDadosEstoque(null, true);
           }}
         />

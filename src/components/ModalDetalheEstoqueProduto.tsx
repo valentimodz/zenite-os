@@ -298,15 +298,28 @@ export default function ModalDetalheEstoqueProduto({
         vistosChave.set(chaveDeduplicacao, p);
 
         const seriais = Array.isArray(p.imeis)
-          ? p.imeis.filter((i: any) => !i.vendido && String(i.status || '').toUpperCase() !== 'VENDIDO')
+          ? p.imeis.filter((i: any) => {
+              const stNorm = String(i.status || '')
+                .trim()
+                .toUpperCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '');
+              return i.vendido === false && stNorm === 'DISPONIVEL';
+            })
           : [];
 
         const imeisStrings: string[] = seriais.map((i: any) => String(i.imei).trim()).filter(Boolean);
 
-        let qtdValida = imeisStrings.length;
-        if (qtdValida === 0) {
-          qtdValida = Number(p.quantidade || 0);
-        }
+        const catUpper = String(p.categoria || categoria || '').trim().toUpperCase();
+        const isAparelhoCelular =
+          catUpper.includes('CELULAR') ||
+          catUpper.includes('SMARTPHONE') ||
+          catUpper.includes('APARELHO') ||
+          catUpper === 'IOS' ||
+          catUpper === 'ANDROID' ||
+          (Array.isArray(p.imeis) && p.imeis.length > 0);
+
+        const qtdValida = isAparelhoCelular ? imeisStrings.length : Number(p.quantidade || 0);
 
         const fNome = p.filiais?.nome || mapaFiliaisNome[fId] || `Filial ${fId}`;
 

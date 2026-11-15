@@ -582,7 +582,7 @@ export default function ModalEntradaEstoqueRapida({
       // 4. Limpar o formulário, zerar a lista de bipados e exibir toast de sucesso
       const mensagemSucesso = `${qtdTotal} aparelho(s) adicionados ao estoque com sucesso!`;
       setSucessoMsg(mensagemSucesso);
-      
+
       if (onSuccess) {
         onSuccess(qtdTotal, nomeAparelho, selectedFilialId);
       }
@@ -614,7 +614,7 @@ export default function ModalEntradaEstoqueRapida({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
       <div className="bg-[#0A0A0A] border border-purple-500/40 rounded-2xl w-full max-w-xl shadow-2xl shadow-purple-950/30 overflow-hidden flex flex-col">
-        
+
         {/* Cabeçalho */}
         <div className="p-5 border-b border-[#222222] flex items-center justify-between bg-gradient-to-r from-[#17002e] via-[#0e001c] to-[#0A0A0A]">
           <div className="flex items-center gap-3">
@@ -641,13 +641,13 @@ export default function ModalEntradaEstoqueRapida({
 
         {/* Formulário */}
         <form onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); }} className="p-6 space-y-5 overflow-y-auto max-h-[80vh]">
-          
+
           {/* Filial de Destino: Dinâmica com suporte a troca para Gestores/Admin */}
           <div className="bg-black/60 border border-[#222222] rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs flex-1">
               <Store size={16} className="text-purple-400 shrink-0" />
               <span className="text-gray-400 font-medium whitespace-nowrap">Filial de Destino:</span>
-              
+
               {podeTrocarFilial ? (
                 <select
                   value={selectedFilialId}
@@ -729,17 +729,15 @@ export default function ModalEntradaEstoqueRapida({
                   }
                 }}
                 placeholder="Busque o modelo (ex: Honor X5c Plus 256GB, Poco X8 Pro)..."
-                className={`w-full bg-black border rounded-xl pl-10 pr-4 py-3 text-xs text-white outline-none font-medium transition-all ${
-                  produtoSelecionado
-                    ? 'border-emerald-500/60 bg-emerald-950/10'
-                    : 'border-[#222222] focus:border-purple-500'
-                }`}
+                className={`w-full bg-black border rounded-xl pl-10 pr-4 py-3 text-xs text-white outline-none font-medium transition-all ${produtoSelecionado
+                  ? 'border-emerald-500/60 bg-emerald-950/10'
+                  : 'border-[#222222] focus:border-purple-500'
+                  }`}
               />
               <Search
                 size={17}
-                className={`absolute left-3.5 top-3.5 transition-colors ${
-                  produtoSelecionado ? 'text-emerald-400' : 'text-gray-500'
-                }`}
+                className={`absolute left-3.5 top-3.5 transition-colors ${produtoSelecionado ? 'text-emerald-400' : 'text-gray-500'
+                  }`}
               />
               {loadingCatalogo && (
                 <Loader2
@@ -920,11 +918,10 @@ export default function ModalEntradaEstoqueRapida({
                                   setCorSelecionada(cor);
                                   setComboCorAberto(false);
                                 }}
-                                className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer ${
-                                  isAtiva
-                                    ? 'bg-purple-600/20 text-purple-200 font-bold border-l-2 border-purple-500'
-                                    : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                                }`}
+                                className={`w-full text-left px-3.5 py-2 text-xs flex items-center justify-between transition-colors cursor-pointer ${isAtiva
+                                  ? 'bg-purple-600/20 text-purple-200 font-bold border-l-2 border-purple-500'
+                                  : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                                  }`}
                               >
                                 <span className="truncate">{cor}</span>
                                 <ColorBadge cor={cor} className="pointer-events-none scale-90 origin-right shrink-0" />
