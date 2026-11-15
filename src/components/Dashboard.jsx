@@ -249,6 +249,93 @@ const carrinhoPossuiItemCritico = (carrinho) => {
   return carrinho.some(item => isItemCritico(item));
 };
 
+// Detecta especificamente se um item no carrinho do PDV é Celular / Smartphone / Aparelho com IMEI
+const isItemCelularPdv = (item) => {
+  if (!item) return false;
+  const prod = item.produto || item;
+  const categoria = String(prod.categoria || item.categoria || '').toUpperCase().trim();
+  const tipo = String(prod.tipo || item.tipo || '').toUpperCase().trim();
+
+  const hasImei = Boolean(
+    (item.imei && String(item.imei).trim()) ||
+    (item.imei_selecionado && String(item.imei_selecionado).trim()) ||
+    (item.imei_codigo && String(item.imei_codigo).trim()) ||
+    (item.numero_serie && String(item.numero_serie).trim()) ||
+    (prod.imei && String(prod.imei).trim()) ||
+    (Array.isArray(item.imeis_selecionados) && item.imeis_selecionados.length > 0)
+  );
+  if (hasImei) return true;
+
+  const isTipoCelular =
+    tipo === 'CELULAR' ||
+    tipo === 'SMARTPHONE' ||
+    tipo === 'APARELHO' ||
+    tipo.includes('CELULAR') ||
+    tipo.includes('SMARTPHONE');
+  if (isTipoCelular) return true;
+
+  const isCategoriaCelular =
+    categoria === 'CELULARES' ||
+    categoria === 'CELULAR' ||
+    categoria === 'SMARTPHONE' ||
+    categoria === 'SMARTPHONES' ||
+    categoria.includes('CELULAR') ||
+    categoria.includes('SMARTPHONE') ||
+    categoria.includes('APARELHO') ||
+    categoria === 'IOS' ||
+    categoria === 'ANDROID';
+  if (isCategoriaCelular) return true;
+
+  return false;
+};
+
+// Verifica se o carrinho possui pelo menos 1 celular / aparelho com IMEI
+const carrinhoPossuiCelular = (carrinho) => {
+  if (!Array.isArray(carrinho) || carrinho.length === 0) return false;
+  return carrinho.some((item) => isItemCelularPdv(item));
+};
+
+// Valida se o cliente informado/vinculado no PDV atende aos requisitos obrigatórios para venda de celular
+const validarClienteParaCelular = ({ clienteId, nome, cpfCnpj, telefone }) => {
+  const CONSUMIDOR_FINAL_UUID = '00000000-0000-0000-0000-000000000000';
+  const GENERIC_CONSUMIDOR_UUID = '3788fcc4-423c-46ce-a02e-5906d805925d';
+
+  const cleanId = String(clienteId || '').trim();
+  const nomeTrim = String(nome || '').trim();
+  const nomeLower = nomeTrim.toLowerCase();
+  const cpfDigits = String(cpfCnpj || '').replace(/\D/g, '');
+  const telDigits = String(telefone || '').replace(/\D/g, '');
+
+  const nomesGenericos = [
+    'consumidor final',
+    'consumidor balcão',
+    'consumidor balcao',
+    'consumidor',
+    'cliente balcão',
+    'cliente balcao',
+    'cliente padrao',
+    'cliente padrão',
+    'sem cliente'
+  ];
+
+  const isIdGenerico = cleanId === CONSUMIDOR_FINAL_UUID || cleanId === GENERIC_CONSUMIDOR_UUID;
+  const isNomeValido = nomeTrim.length >= 3 && !nomesGenericos.includes(nomeLower);
+  const isCpfValido =
+    (cpfDigits.length === 11 || cpfDigits.length === 14) &&
+    cpfDigits !== '00000000001' &&
+    cpfDigits !== '00000000000' &&
+    !/^(\d)\1+$/.test(cpfDigits);
+  const isTelValido = telDigits.length >= 10 && !/^(\d)\1+$/.test(telDigits);
+
+  return {
+    valido: !isIdGenerico && isNomeValido && isCpfValido && isTelValido,
+    isIdGenerico,
+    isNomeValido,
+    isCpfValido,
+    isTelValido
+  };
+};
+
 function ProductTableRow({
   produto: p,
   filiais = [],
@@ -1343,6 +1430,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
   const [isSavingTaxas, setIsSavingTaxas] = useState(false);
   const [tempTaxasMap, setTempTaxasMap] = useState({});
   const [isQuickClientFormOpen, setIsQuickClientFormOpen] = useState(true);
+  const [isModalSelecaoRapidaClientePdvOpen, setIsModalSelecaoRapidaClientePdvOpen] = useState(false);
+  const [salvandoClienteRapidoPdv, setSalvandoClienteRapidoPdv] = useState(false);
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -2211,6 +2300,37 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     carregarListaTrainees();
   }, [teamMembers]);
 
+  // Trava Automática de Celular no PDV: se houver celular com IMEI no carrinho, limpa seleção genérica de "Consumidor Final"
+  useEffect(() => {
+    if (!carrinhoPossuiCelular(pdvCart)) return;
+
+    const nomeNorm = String(pdvClienteNome || pdvClienteSearchInput || '').trim().toLowerCase();
+    const isGenericoSelecionado =
+      selectedPdvClienteId === '00000000-0000-0000-0000-000000000000' ||
+      selectedPdvClienteId === '3788fcc4-423c-46ce-a02e-5906d805925d' ||
+      [
+        'consumidor final',
+        'consumidor balcão',
+        'consumidor balcao',
+        'consumidor',
+        'cliente balcão',
+        'cliente balcao'
+      ].includes(nomeNorm) ||
+      String(pdvClienteCpfCnpj || '').trim() === '000.000.000-01';
+
+    if (isGenericoSelecionado) {
+      setSelectedPdvCliente(null);
+      setSelectedPdvClienteId(null);
+      setPdvClienteNome('');
+      setPdvClienteSearchInput('');
+      setPdvClienteCpfCnpj('');
+      setPdvClienteEmail('');
+      setPdvClienteTelefone('');
+      setPdvClienteDataNascimento('');
+      setIsPdvClienteFieldsEditable(false);
+    }
+  }, [pdvCart, selectedPdvClienteId, pdvClienteNome, pdvClienteSearchInput, pdvClienteCpfCnpj]);
+
   // Trava de Trainee: Se o carrinho for esvaziado, limpa a seleção de Treener Responsável
   useEffect(() => {
     if (!permiteParticipacaoTreener(pdvCart)) {
@@ -2267,8 +2387,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       if (e.key === 'F2') {
         e.preventDefault();
+        const temCelular = carrinhoPossuiCelular(pdvCart);
         const temItemCritico = carrinhoPossuiItemCritico(pdvCart);
-        if (!temItemCritico && pdvCart.length > 0) {
+        if (temCelular || temItemCritico) {
+          const msgBloqueio = 'Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI';
+          showToast(msgBloqueio, 'error');
+          alert(msgBloqueio);
+          setIsModalSelecaoRapidaClientePdvOpen(true);
+          setTimeout(() => {
+            const modalInput = document.getElementById('modal-rapido-cliente-nome');
+            if (modalInput) modalInput.focus();
+          }, 100);
+        } else if (pdvCart.length > 0) {
           setSelectedPdvCliente(null);
           setSelectedPdvClienteId('00000000-0000-0000-0000-000000000000');
           setPdvClienteNome('Consumidor Final');
@@ -2459,6 +2589,147 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     setPdvClienteDataNascimento(client?.data_nascimento || '');
     setIsPdvClienteFieldsEditable(false);
     setIsPdvClienteDropdownOpen(false);
+  };
+
+  // Cadastro / Vinculação Rápida de Cliente diretamente pelo Modal de Trava de Celular no PDV
+  const handleSalvarOuVincularClienteRapidoPdv = async (e) => {
+    if (e) e.preventDefault();
+
+    const nomeTrim = String(pdvClienteNome || pdvClienteSearchInput || '').trim();
+    const cpfTrim = String(pdvClienteCpfCnpj || '').trim();
+    const telTrim = String(pdvClienteTelefone || '').trim();
+
+    const check = validarClienteParaCelular({
+      clienteId: selectedPdvClienteId,
+      nome: nomeTrim,
+      cpfCnpj: cpfTrim,
+      telefone: telTrim
+    });
+
+    if (!check.isNomeValido) {
+      const msg = 'Informe o Nome Completo real do cliente (não é permitido "Consumidor Final").';
+      showToast(msg, 'error');
+      alert(msg);
+      document.getElementById('modal-rapido-cliente-nome')?.focus();
+      return;
+    }
+
+    if (!check.isCpfValido) {
+      const msg = 'Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido para o cliente.';
+      showToast(msg, 'error');
+      alert(msg);
+      document.getElementById('modal-rapido-cliente-cpf')?.focus();
+      return;
+    }
+
+    if (!check.isTelValido) {
+      const msg = 'Informe um Telefone / WhatsApp válido com DDD (mínimo 10 dígitos).';
+      showToast(msg, 'error');
+      alert(msg);
+      document.getElementById('modal-rapido-cliente-telefone')?.focus();
+      return;
+    }
+
+    const currentEmpresaId = activeEmpresaId || company?.id || profile?.empresa_id;
+    const currentFilialId = profile?.filial_id || activeFilialId || currentEmpresaId;
+    const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
+    const isValidUuid = (id) =>
+      typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id.trim());
+
+    setSalvandoClienteRapidoPdv(true);
+    try {
+      const cpfDigits = cpfTrim.replace(/\D/g, '');
+      let clienteIdAlvo =
+        isValidUuid(selectedPdvClienteId) &&
+        selectedPdvClienteId !== '00000000-0000-0000-0000-000000000000' &&
+        selectedPdvClienteId !== '3788fcc4-423c-46ce-a02e-5906d805925d'
+          ? selectedPdvClienteId.trim()
+          : null;
+
+      if (!clienteIdAlvo && currentEmpresaId) {
+        const { data: existenteByCpf } = await supabase
+          .from('clientes')
+          .select('id, nome, cpf_cnpj, telefone, email, data_nascimento')
+          .eq('empresa_id', currentEmpresaId)
+          .or(`cpf_cnpj.eq.${cpfTrim},cpf_cnpj.eq.${cpfDigits}`)
+          .limit(1)
+          .maybeSingle();
+
+        if (existenteByCpf?.id && isValidUuid(existenteByCpf.id)) {
+          clienteIdAlvo = existenteByCpf.id;
+        }
+      }
+
+      const payloadBasico = {
+        empresa_id: currentEmpresaId,
+        filial_id: currentFilialId,
+        vendedor_id: currentUserId,
+        usuario_id: currentUserId,
+        criado_por: currentUserId,
+        nome: nomeTrim,
+        cpf_cnpj: cpfDigits,
+        telefone: telTrim,
+        email: (pdvClienteEmail || '').trim() || 'naoinformado@cliente.local',
+        data_nascimento: (pdvClienteDataNascimento || '').trim() || '2000-01-01',
+        cep: '00000-000',
+        logradouro: 'Não informado',
+        numero: 'S/N',
+        bairro: 'Não informado',
+        cidade: 'Não informado',
+        uf: 'PA'
+      };
+
+      let clienteFinalDb = null;
+
+      if (clienteIdAlvo) {
+        const { data: updData, error: updErr } = await supabase
+          .from('clientes')
+          .update({
+            nome: nomeTrim,
+            cpf_cnpj: cpfDigits,
+            telefone: telTrim,
+            ...(pdvClienteEmail?.trim() ? { email: pdvClienteEmail.trim() } : {}),
+            ...(pdvClienteDataNascimento?.trim() ? { data_nascimento: pdvClienteDataNascimento.trim() } : {})
+          })
+          .eq('id', clienteIdAlvo)
+          .select()
+          .single();
+
+        if (updErr) throw updErr;
+        clienteFinalDb = updData;
+      } else {
+        const { data: insData, error: insErr } = await supabase
+          .from('clientes')
+          .insert([payloadBasico])
+          .select()
+          .single();
+
+        if (insErr) throw insErr;
+        clienteFinalDb = insData;
+      }
+
+      if (clienteFinalDb?.id) {
+        setSelectedPdvCliente(clienteFinalDb);
+        setSelectedPdvClienteId(clienteFinalDb.id);
+        setPdvClienteNome(clienteFinalDb.nome || nomeTrim);
+        setPdvClienteSearchInput(clienteFinalDb.nome || nomeTrim);
+        setPdvClienteCpfCnpj(clienteFinalDb.cpf_cnpj || cpfDigits);
+        setPdvClienteTelefone(clienteFinalDb.telefone || telTrim);
+        setPdvClienteEmail(clienteFinalDb.email && clienteFinalDb.email !== 'naoinformado@cliente.local' ? clienteFinalDb.email : (pdvClienteEmail || ''));
+        setIsPdvClienteFieldsEditable(false);
+        setIsModalSelecaoRapidaClientePdvOpen(false);
+        invalidateCache('clientes_');
+        if (currentEmpresaId) fetchClientes(currentEmpresaId, true);
+        showToast(`✅ Cliente "${clienteFinalDb.nome}" vinculado com sucesso!`, 'success');
+      }
+    } catch (err) {
+      console.error('Erro ao salvar/vincular cliente rápido no PDV:', err);
+      const msgErro = `Erro ao salvar cliente: ${err.message || 'verifique os dados informados'}`;
+      showToast(msgErro, 'error');
+      alert(msgErro);
+    } finally {
+      setSalvandoClienteRapidoPdv(false);
+    }
   };
 
   const dispararImpressao = (formato) => {
@@ -14620,6 +14891,33 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
     }
 
+    // TRAVA OBRIGATÓRIA PARA CELULARES / APARELHOS COM IMEI:
+    // Impede finalizar como "Consumidor Final", nulo ou sem Nome Completo, CPF/CNPJ e Telefone/WhatsApp.
+    const temCelularNoCarrinho = carrinhoPossuiCelular(pdvCart);
+    if (temCelularNoCarrinho) {
+      const checkClienteCelular = validarClienteParaCelular({
+        clienteId: selectedPdvClienteId,
+        nome: pdvClienteNome || pdvClienteSearchInput,
+        cpfCnpj: pdvClienteCpfCnpj,
+        telefone: pdvClienteTelefone
+      });
+
+      if (!checkClienteCelular.valido) {
+        const msgBloqueioCelular = "Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI";
+        toastHelper.warning(msgBloqueioCelular);
+        showToast(msgBloqueioCelular, 'error');
+        alert(msgBloqueioCelular);
+        setIsModalSelecaoRapidaClientePdvOpen(true);
+        setTimeout(() => {
+          const modalNomeInput = document.getElementById('modal-rapido-cliente-nome');
+          const inlineNomeInput = document.getElementById('pdv-cliente-busca-input');
+          if (modalNomeInput) modalNomeInput.focus();
+          else if (inlineNomeInput) inlineNomeInput.focus();
+        }, 120);
+        return;
+      }
+    }
+
     // Auto-inclusão de retoma/troca preenchida pelo operador antes de validar
     let effectiveUsadoList = [...pdvUsadoList];
 
@@ -14833,7 +15131,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     }
 
     // REGRA DAS DUAS ESTEIRAS: Verificação de Itens Críticos vs Acessórios Comuns
-    const carrinhoTemCritico = carrinhoPossuiItemCritico(pdvCart);
+    const carrinhoTemCritico = temCelularNoCarrinho || carrinhoPossuiItemCritico(pdvCart);
     const nomeClienteRaw = (pdvClienteNome || pdvClienteSearchInput || '').trim();
     const isConsumidorBalcao = !nomeClienteRaw ||
       nomeClienteRaw.toLowerCase() === 'consumidor balcão' ||
@@ -14843,43 +15141,62 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       nomeClienteRaw.toLowerCase() === 'cliente balcão' ||
       nomeClienteRaw.toLowerCase() === 'cliente balcao' ||
       pdvClienteCpfCnpj.trim() === '000.000.000-01' ||
-      selectedPdvClienteId === '00000000-0000-0000-0000-000000000000';
+      selectedPdvClienteId === '00000000-0000-0000-0000-000000000000' ||
+      selectedPdvClienteId === '3788fcc4-423c-46ce-a02e-5906d805925d';
 
     if (carrinhoTemCritico) {
       // ESTEIRA CRÍTICA (Aparelhos / Alto Valor / IMEI / Serial):
-      // Bloqueia a finalização se o cliente for "Consumidor Balcão" ou nulo / não identificado.
+      // Bloqueia a finalização se o cliente for "Consumidor Final / Balcão" ou nulo / não identificado.
       // Nome, CPF e Telefone são OBRIGATÓRIOS.
       if (isConsumidorBalcao) {
-        const msgAlertaCritico = "Identificação obrigatória: O carrinho contém produtos da Esteira Crítica (Celulares, Videogames, Caixas de Som, Tablets ou aparelhos com IMEI/Serial). É obrigatório vincular ou cadastrar um cliente com Nome, CPF e Telefone.";
+        const msgAlertaCritico = temCelularNoCarrinho
+          ? "Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI"
+          : "Identificação obrigatória: O carrinho contém produtos da Esteira Crítica (Celulares, Videogames, Caixas de Som, Tablets ou aparelhos com IMEI/Serial). É obrigatório vincular ou cadastrar um cliente com Nome, CPF e Telefone.";
         toastHelper.warning(msgAlertaCritico);
+        showToast(msgAlertaCritico, 'error');
         alert(msgAlertaCritico);
-        handleOpenNewClienteModal(nomeClienteRaw && !isConsumidorBalcao ? nomeClienteRaw : '');
+        setIsModalSelecaoRapidaClientePdvOpen(true);
+        setTimeout(() => {
+          document.getElementById('modal-rapido-cliente-nome')?.focus();
+        }, 120);
         return;
       }
 
       if (!pdvClienteNome.trim()) {
-        const msg = "Para venda de produtos críticos/aparelhos, o Nome do cliente é obrigatório.";
+        const msg = temCelularNoCarrinho
+          ? "Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI"
+          : "Para venda de produtos críticos/aparelhos, o Nome do cliente é obrigatório.";
         showToast(msg, 'error');
         alert(msg);
+        if (temCelularNoCarrinho) setIsModalSelecaoRapidaClientePdvOpen(true);
         return;
       }
 
       const cleanCpfCnpj = pdvClienteCpfCnpj.replace(/\D/g, '');
       if (cleanCpfCnpj.length !== 11 && cleanCpfCnpj.length !== 14) {
-        const msg = "Para venda de produtos críticos/aparelhos, informe um CPF válido (11 dígitos) ou CNPJ válido (14 dígitos).";
+        const msg = temCelularNoCarrinho
+          ? "Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI"
+          : "Para venda de produtos críticos/aparelhos, informe um CPF válido (11 dígitos) ou CNPJ válido (14 dígitos).";
         showToast(msg, 'error');
         alert(msg);
-        setTimeout(() => {
-          document.getElementById('pdv-cliente-cpf-input')?.focus();
-        }, 100);
+        if (temCelularNoCarrinho) {
+          setIsModalSelecaoRapidaClientePdvOpen(true);
+        } else {
+          setTimeout(() => {
+            document.getElementById('pdv-cliente-cpf-input')?.focus();
+          }, 100);
+        }
         return;
       }
 
       const cleanTelefone = pdvClienteTelefone.replace(/\D/g, '');
       if (cleanTelefone.length < 10) {
-        const msg = "Para venda de produtos críticos/aparelhos, o Telefone do cliente com DDD é obrigatório.";
+        const msg = temCelularNoCarrinho
+          ? "Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI"
+          : "Para venda de produtos críticos/aparelhos, o Telefone do cliente com DDD é obrigatório.";
         showToast(msg, 'error');
         alert(msg);
+        if (temCelularNoCarrinho) setIsModalSelecaoRapidaClientePdvOpen(true);
         return;
       }
     } else {
@@ -14981,7 +15298,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
       const hasValidSelectedClient = !!clienteIdBanco && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID;
-      const isConsumidorFinal = !hasValidSelectedClient && (
+      const isConsumidorFinal = !temCelularNoCarrinho && !hasValidSelectedClient && (
         !nomeClienteFinal ||
         nomeClienteFinal.toLowerCase() === 'consumidor balcão' ||
         nomeClienteFinal.toLowerCase() === 'consumidor balcao' ||
@@ -14999,31 +15316,33 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // Resolução dinâmica de Cliente Padrão / Consumidor Final existente no banco para a empresa (apenas para fallback quando for Consumidor Final)
       let idPadraoConsumidor = null;
-      try {
-        const { data: clientePadraoDb } = await supabase
-          .from('clientes')
-          .select('id')
-          .eq('empresa_id', currentEmpresaId)
-          .ilike('nome', '%consumidor%')
-          .limit(1)
-          .maybeSingle();
-
-        if (clientePadraoDb?.id && isValidUuid(clientePadraoDb.id)) {
-          idPadraoConsumidor = clientePadraoDb.id;
-        } else {
-          // Fallback: qualquer cliente válido da empresa
-          const { data: anyClienteDb } = await supabase
+      if (!temCelularNoCarrinho) {
+        try {
+          const { data: clientePadraoDb } = await supabase
             .from('clientes')
             .select('id')
             .eq('empresa_id', currentEmpresaId)
+            .ilike('nome', '%consumidor%')
             .limit(1)
             .maybeSingle();
-          if (anyClienteDb?.id && isValidUuid(anyClienteDb.id)) {
-            idPadraoConsumidor = anyClienteDb.id;
+
+          if (clientePadraoDb?.id && isValidUuid(clientePadraoDb.id)) {
+            idPadraoConsumidor = clientePadraoDb.id;
+          } else {
+            // Fallback: qualquer cliente válido da empresa
+            const { data: anyClienteDb } = await supabase
+              .from('clientes')
+              .select('id')
+              .eq('empresa_id', currentEmpresaId)
+              .limit(1)
+              .maybeSingle();
+            if (anyClienteDb?.id && isValidUuid(anyClienteDb.id)) {
+              idPadraoConsumidor = anyClienteDb.id;
+            }
           }
+        } catch (errBuscaPadrao) {
+          console.warn("Aviso ao buscar cliente padrão da empresa:", errBuscaPadrao);
         }
-      } catch (errBuscaPadrao) {
-        console.warn("Aviso ao buscar cliente padrão da empresa:", errBuscaPadrao);
       }
 
       if (isConsumidorFinal) {
@@ -15045,7 +15364,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           }
         }
 
-        const payloadCliente = {
+        const payloadUpdateCliente = {
           empresa_id: currentEmpresaId,
           filial_id: currentFilialId,
           vendedor_id: currentUserId,
@@ -15053,18 +15372,30 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           criado_por: currentUserId,
           nome: nomeClienteFinal,
           cpf_cnpj: pdvClienteCpfCnpj.trim() || null,
-          email: pdvClienteEmail.trim() || null,
           telefone: pdvClienteTelefone.trim() || null,
-          data_nascimento: pdvClienteDataNascimento.trim() || null,
+          ...(pdvClienteEmail.trim() ? { email: pdvClienteEmail.trim() } : {}),
+          ...(pdvClienteDataNascimento.trim() ? { data_nascimento: pdvClienteDataNascimento.trim() } : {})
         };
 
-        console.log("🔥 [PDV CLIENTE PAYLOAD] Salvar/Atualizar cliente PDV com autoria:", payloadCliente);
+        const payloadInsertCliente = {
+          ...payloadUpdateCliente,
+          email: pdvClienteEmail.trim() || 'naoinformado@cliente.local',
+          data_nascimento: pdvClienteDataNascimento.trim() || '2000-01-01',
+          cep: '00000-000',
+          logradouro: 'Não informado',
+          numero: 'S/N',
+          bairro: 'Não informado',
+          cidade: 'Não informado',
+          uf: 'PA'
+        };
+
+        console.log("🔥 [PDV CLIENTE PAYLOAD] Salvar/Atualizar cliente PDV com autoria:", payloadUpdateCliente);
 
         if (clienteIdBanco) {
-          // Se já possui cliente selecionado por ID verificado, atualiza o cadastro no banco para manter dados síncronos
+          // Se já possui cliente selecionado por ID verificado, atualiza o cadastro no banco para manter dados síncronos sem apagar endereço/email existentes
           const { error: updateErr } = await supabase
             .from('clientes')
-            .update(payloadCliente)
+            .update(payloadUpdateCliente)
             .eq('id', clienteIdBanco);
 
           if (updateErr) {
@@ -15079,11 +15410,13 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           let clienteExistente = null;
 
           if (pdvClienteCpfCnpj.trim()) {
+            const cpfApenasDigitos = pdvClienteCpfCnpj.replace(/\D/g, '');
             const { data: byCpf } = await supabase
               .from('clientes')
               .select('id')
               .eq('empresa_id', currentEmpresaId)
-              .eq('cpf_cnpj', pdvClienteCpfCnpj.trim())
+              .or(`cpf_cnpj.eq.${pdvClienteCpfCnpj.trim()},cpf_cnpj.eq.${cpfApenasDigitos}`)
+              .limit(1)
               .maybeSingle();
             clienteExistente = byCpf;
           }
@@ -15094,6 +15427,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               .select('id')
               .eq('empresa_id', currentEmpresaId)
               .ilike('nome', nomeClienteFinal)
+              .limit(1)
               .maybeSingle();
             clienteExistente = byNome;
           }
@@ -15101,7 +15435,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
           if (clienteExistente?.id && isValidUuid(clienteExistente.id)) {
             const { error: updateExistenteErr } = await supabase
               .from('clientes')
-              .update(payloadCliente)
+              .update(payloadUpdateCliente)
               .eq('id', clienteExistente.id);
 
             if (updateExistenteErr) {
@@ -15113,12 +15447,12 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             }
             clienteIdBanco = clienteExistente.id;
           } else {
-            console.log("📦 Payload enviado para o banco (PDV Novo Cliente):", payloadCliente);
+            console.log("📦 Payload enviado para o banco (PDV Novo Cliente):", payloadInsertCliente);
 
             // SALVA novo cliente no banco obrigatoriamente
             const { data: novoCliente, error: erroCliente } = await supabase
               .from('clientes')
-              .insert([payloadCliente])
+              .insert([payloadInsertCliente])
               .select();
 
             if (erroCliente) {
@@ -15144,10 +15478,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       let cliente_id = null;
       if (isValidUuid(rawCandidateId) && rawCandidateId !== CONSUMIDOR_FINAL_UUID && rawCandidateId !== GENERIC_CONSUMIDOR_UUID) {
         cliente_id = rawCandidateId;
-      } else if (isConsumidorFinal) {
+      } else if (isConsumidorFinal && !temCelularNoCarrinho) {
         cliente_id = idPadraoConsumidor || null;
       } else {
-        cliente_id = rawCandidateId || idPadraoConsumidor || null;
+        cliente_id = rawCandidateId || (!temCelularNoCarrinho ? idPadraoConsumidor : null) || null;
       }
 
       // Resolução estrita e infalível de Vendedor (vendedor_id e vendedor_nome nunca podem ser nulos)
@@ -15228,12 +15562,17 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
       }
 
-      // GUARD CLAUSE 1: Se o usuário informou um cliente customizado (não consumidor final), o ID NÃO PODE ser nulo ou inválido.
-      if (!isConsumidorFinal && (!cliente_id || cliente_id === CONSUMIDOR_FINAL_UUID || cliente_id === GENERIC_CONSUMIDOR_UUID)) {
-        const msgErrCliente = "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo ou inválido. Venda abortada.";
+      // GUARD CLAUSE 1: Venda de celular exige cliente_id real; cliente customizado também não pode ter ID nulo/genérico.
+      if ((temCelularNoCarrinho || !isConsumidorFinal) && (!cliente_id || cliente_id === CONSUMIDOR_FINAL_UUID || cliente_id === GENERIC_CONSUMIDOR_UUID)) {
+        const msgErrCliente = temCelularNoCarrinho
+          ? "Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI"
+          : "Erro de Mapeamento: Cliente selecionado/informado, mas o ID do cliente está nulo ou inválido. Venda abortada.";
         console.error("🔥 [GUARD CLAUSE TRIGGERED]:", msgErrCliente);
         showToast(msgErrCliente, "error");
         alert(msgErrCliente);
+        if (temCelularNoCarrinho) {
+          setIsModalSelecaoRapidaClientePdvOpen(true);
+        }
         setLoadingPdvVenda(false);
         return; // Interrompe a função ANTES de bater no banco
       }
@@ -20060,11 +20399,19 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 {/* CADASTRO RÁPIDO DE CLIENTE */}
                 <div className="border-t border-border pt-4">
                   {(() => {
-                    const isEsteiraCritica = carrinhoPossuiItemCritico(pdvCart);
+                    const temCelularCart = carrinhoPossuiCelular(pdvCart);
+                    const isEsteiraCritica = temCelularCart || carrinhoPossuiItemCritico(pdvCart);
+                    const validacaoCelularOk = !temCelularCart || validarClienteParaCelular({
+                      clienteId: selectedPdvClienteId,
+                      nome: pdvClienteNome || pdvClienteSearchInput,
+                      cpfCnpj: pdvClienteCpfCnpj,
+                      telefone: pdvClienteTelefone
+                    }).valido;
+
                     return (
                       <div className="space-y-2.5">
-                        {/* CABEÇALHO DO BLOCO: Título + Badge ou Botão Consumidor Balcão */}
-                        <div className="flex justify-between items-center w-full">
+                        {/* CABEÇALHO DO BLOCO: Título + Badge ou Botão Consumidor Final */}
+                        <div className="flex flex-wrap justify-between items-center gap-2 w-full">
                           <span className="flex items-center gap-1.5 text-xs font-bold text-foreground">
                             <User size={14} className="text-primary" />
                             <span>Identificação do Cliente</span>
@@ -20072,11 +20419,27 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
                           <div className="flex items-center gap-2">
                             {isEsteiraCritica ? (
-                              /* ESTEIRA CRÍTICA: Badge sutil âmbar/dourado */
-                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 shadow-sm">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                                Exige Cadastro Completo
-                              </span>
+                              /* ESTEIRA CRÍTICA / CELULARES: Botão rápido + Badge */
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsModalSelecaoRapidaClientePdvOpen(true);
+                                    setTimeout(() => {
+                                      document.getElementById('modal-rapido-cliente-nome')?.focus();
+                                    }, 100);
+                                  }}
+                                  className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-md border shadow-sm transition-all cursor-pointer ${
+                                    validacaoCelularOk
+                                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                                      : 'bg-amber-500/15 border-amber-500/50 text-amber-300 hover:bg-amber-500/25'
+                                  }`}
+                                  title="Abrir seleção ou cadastro rápido de cliente (Atalho: F8)"
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${validacaoCelularOk ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
+                                  <span>{validacaoCelularOk ? 'Cliente Vinculado' : 'Vincular / Cadastrar Cliente'}</span>
+                                </button>
+                              </>
                             ) : (
                               /* ESTEIRA ACESSÓRIOS: Botão nítido Consumidor Final (F2) */
                               <button
@@ -20131,7 +20494,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         </div>
 
                         {/* Banner Informativo da Esteira */}
-                        {isEsteiraCritica ? (
+                        {temCelularCart ? (
+                          <div className={`text-[10px] p-2.5 rounded-lg flex items-center justify-between gap-2 border ${
+                            validacaoCelularOk
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                              : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+                          }`}>
+                            <div className="flex items-center gap-1.5">
+                              {validacaoCelularOk ? (
+                                <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                              ) : (
+                                <AlertTriangle size={13} className="text-rose-400 shrink-0" />
+                              )}
+                              <span>
+                                {validacaoCelularOk
+                                  ? 'Cliente válido vinculado para venda de aparelho com IMEI.'
+                                  : 'Venda com Celular/IMEI: Consumidor Final bloqueado. Obrigatório Nome Completo, CPF/CNPJ e Telefone/WhatsApp.'}
+                              </span>
+                            </div>
+                          </div>
+                        ) : isEsteiraCritica ? (
                           <div className="text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-300 p-2 rounded-lg flex items-center gap-1.5">
                             <AlertTriangle size={13} className="text-amber-400 shrink-0" />
                             <span><strong>Esteira Crítica (Aparelhos):</strong> Identificação com Nome, CPF e Telefone é obrigatória para emissão do termo de garantia.</span>
@@ -20139,7 +20521,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                         ) : (
                           <div className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-2 rounded-lg flex items-center gap-1.5">
                             <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-                            <span><strong>Esteira Balcão (Acessórios):</strong> Venda rápida permitida com <em>Consumidor Balcão</em> ou atalho [F2].</span>
+                            <span><strong>Esteira Balcão (Acessórios):</strong> Venda rápida permitida com <em>Consumidor Final</em> ou atalho [F2].</span>
                           </div>
                         )}
                       </div>
@@ -21040,8 +21422,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                             loadingPdvVenda ||
                             pdvCart.length === 0 ||
                             faltaPagar > 0.01 ||
-                            pdvListaPagamentos.length === 0 ||
-                            !pdvClienteNome.trim()
+                            pdvListaPagamentos.length === 0
                           }
                           className="flex-1 bg-primary hover:bg-[#500885] disabled:bg-surface-elevated disabled:text-foreground-subtle disabled:cursor-not-allowed text-primary-foreground text-xs font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-1 shadow-md cursor-pointer"
                         >
@@ -32797,6 +33178,201 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                     <Check size={14} />
                     Validar e Inserir
                   </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE SELEÇÃO / CADASTRO RÁPIDO DE CLIENTE OBRIGATÓRIO (TRAVA DE CELULAR COM IMEI NO PDV) */}
+        {isModalSelecaoRapidaClientePdvOpen && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-[#0b0b10] border border-purple-500/40 w-full max-w-xl rounded-2xl overflow-hidden shadow-2xl shadow-purple-950/50 animate-scaleUp">
+              <div className="bg-gradient-to-r from-[#1a0b2e] via-[#120b1c] to-[#0b0b10] p-4 md:p-5 border-b border-zinc-800 flex justify-between items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-400">
+                    <User size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">
+                      Vincular / Cadastrar Cliente Obrigatório
+                    </h3>
+                    <p className="text-[11px] text-zinc-400">
+                      Identificação exigida para venda de celulares / aparelhos com IMEI
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsModalSelecaoRapidaClientePdvOpen(false)}
+                  className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Fechar"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSalvarOuVincularClienteRapidoPdv} className="p-4 md:p-5 space-y-4 max-h-[82vh] overflow-y-auto custom-scrollbar">
+                {/* Alerta da regra de bloqueio */}
+                <div className="bg-rose-500/10 border border-rose-500/40 text-rose-200 p-3 rounded-xl flex items-start gap-2.5 text-xs">
+                  <AlertTriangle size={16} className="text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block text-rose-300 font-bold">
+                      Obrigatório vincular Cliente (Nome, CPF e WhatsApp) para vendas de celulares com IMEI
+                    </strong>
+                    <span className="text-[11px] text-rose-200/80">
+                      Pesquise um cliente já cadastrado pelo nome/CPF ou preencha os dados abaixo para cadastrar rapidamente.
+                    </span>
+                  </div>
+                </div>
+
+                {/* 1. Pesquisa Rápida de Cliente Existente */}
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-purple-300 uppercase tracking-wider">
+                    1. Buscar Cliente Cadastrado (ou digitar novo Nome Completo) *
+                  </label>
+                  <div className="relative">
+                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                    <input
+                      id="modal-rapido-cliente-nome"
+                      type="text"
+                      autoFocus
+                      value={pdvClienteSearchInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPdvClienteSearchInput(val);
+                        setPdvClienteNome(val);
+                        if (selectedPdvClienteId) {
+                          setSelectedPdvClienteId(null);
+                          setSelectedPdvCliente(null);
+                        }
+                      }}
+                      placeholder="Digite o Nome Completo ou CPF/CNPJ para buscar..."
+                      required
+                      className="w-full bg-black border border-zinc-700 focus:border-purple-500 rounded-xl text-white pl-9 pr-3 py-2.5 text-sm outline-none transition-all"
+                    />
+                  </div>
+
+                  {/* Resultados do Autocomplete no Modal */}
+                  {pdvClienteSearchInput.trim().length > 0 && (pdvClienteSearchLoading || pdvClienteSearchResults.length > 0) && !selectedPdvClienteId && (
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl max-h-40 overflow-y-auto divide-y divide-zinc-800/70 shadow-inner">
+                      {pdvClienteSearchLoading ? (
+                        <div className="p-2.5 text-xs text-zinc-400 flex items-center justify-center gap-2">
+                          <Loader2 size={13} className="animate-spin text-purple-400" />
+                          <span>Buscando clientes...</span>
+                        </div>
+                      ) : (
+                        pdvClienteSearchResults
+                          .filter((c) => {
+                            const n = String(c.nome || '').trim().toLowerCase();
+                            return n !== 'consumidor final' && n !== 'consumidor balcão' && n !== 'consumidor balcao';
+                          })
+                          .map((client) => (
+                            <button
+                              key={client.id}
+                              type="button"
+                              onClick={() => {
+                                handleSelectPdvCliente(client);
+                                const cpfOk = String(client?.cpf || client?.cpf_cnpj || '').replace(/\D/g, '').length >= 11;
+                                const telOk = String(client?.telefone || '').replace(/\D/g, '').length >= 10;
+                                if (cpfOk && telOk) {
+                                  setIsModalSelecaoRapidaClientePdvOpen(false);
+                                  showToast(`✅ Cliente "${client.nome}" selecionado!`, 'success');
+                                } else {
+                                  showToast('Complete o CPF ou WhatsApp do cliente selecionado para liberar a venda.', 'info');
+                                }
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-purple-950/40 transition-colors flex items-center justify-between gap-2 cursor-pointer"
+                            >
+                              <div className="min-w-0">
+                                <span className="text-xs font-bold text-white block truncate">{client.nome}</span>
+                                <span className="text-[10px] text-zinc-400 font-mono block">
+                                  CPF/CNPJ: {client.cpf_cnpj || client.cpf || 'Não inf.'} • WhatsApp: {client.telefone || 'Não inf.'}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-bold text-purple-300 bg-purple-950/70 border border-purple-500/30 px-2 py-0.5 rounded shrink-0">
+                                Selecionar
+                              </span>
+                            </button>
+                          ))
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Campos Obrigatórios: CPF/CNPJ e Telefone/WhatsApp */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1 font-mono">
+                      CPF / CNPJ <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      id="modal-rapido-cliente-cpf"
+                      type="text"
+                      value={pdvClienteCpfCnpj}
+                      onChange={(e) => setPdvClienteCpfCnpj(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Somente números (11 ou 14 dígitos)"
+                      maxLength={14}
+                      required
+                      className="w-full bg-black border border-zinc-700 focus:border-purple-500 rounded-xl text-white px-3.5 py-2.5 text-sm font-mono outline-none transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                      Telefone / WhatsApp <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      id="modal-rapido-cliente-telefone"
+                      type="text"
+                      value={pdvClienteTelefone}
+                      onChange={(e) => setPdvClienteTelefone(e.target.value)}
+                      placeholder="(00) 90000-0000"
+                      required
+                      className="w-full bg-black border border-zinc-700 focus:border-purple-500 rounded-xl text-white px-3.5 py-2.5 text-sm font-mono outline-none transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Rodapé de Ações do Modal */}
+                <div className="pt-3 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsModalSelecaoRapidaClientePdvOpen(false);
+                      handleOpenNewClienteModal(pdvClienteNome || pdvClienteSearchInput || '');
+                    }}
+                    className="text-xs font-bold text-purple-300 hover:text-purple-200 underline cursor-pointer"
+                  >
+                    + Abrir Cadastro Completo (com Endereço)
+                  </button>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsModalSelecaoRapidaClientePdvOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-bold text-zinc-300 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={salvandoClienteRapidoPdv}
+                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#6A0DAD] to-[#8B5CF6] hover:from-[#5A0B9D] hover:to-[#7C3AED] text-white text-xs font-extrabold shadow-lg shadow-purple-950/50 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {salvandoClienteRapidoPdv ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Salvando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check size={14} />
+                          <span>Confirmar e Vincular Cliente</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
