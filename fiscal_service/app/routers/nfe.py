@@ -8,15 +8,24 @@ from app.config import settings
 router = APIRouter(prefix="/api/v1/nfe", tags=["NF-e Modelo 55"])
 logger = logging.getLogger("fiscal_service.router")
 
-def verificar_autenticacao(authorization: str = Header(None)):
+def verificar_autenticacao(
+    authorization: str = Header(None),
+    x_api_key: str = Header(None, alias="X-API-Key"),
+):
     """
-    Verificação de segurança via Bearer token para chamadas entre o Zenite e o Microserviço.
+    Verificação de segurança via Bearer token (Authorization) ou X-API-Key para chamadas entre o Zenite e o Microserviço.
     """
-    if settings.app_secret_token:
-        if not authorization or not authorization.startswith("Bearer "):
+    expected_token = (settings.app_secret_token or "").strip()
+    if expected_token:
+        token = None
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ", 1)[1].strip()
+        elif x_api_key:
+            token = x_api_key.strip()
+
+        if not token:
             raise HTTPException(status_code=401, detail="Token de autorização ausente ou inválido.")
-        token = authorization.split(" ", 1)[1].strip()
-        if not hmac.compare_digest(token, settings.app_secret_token):
+        if not hmac.compare_digest(token, expected_token):
             raise HTTPException(status_code=403, detail="Acesso não autorizado ao serviço fiscal.")
     return True
 

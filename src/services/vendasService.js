@@ -105,6 +105,27 @@ export async function atualizarVendaAposCriacao({
 }
 
 /**
+ * Resolve a URL base e os cabeçalhos de autenticação do micro-serviço fiscal.
+ */
+function getFiscalServiceConfig() {
+    const fiscalServiceBaseUrl = (import.meta.env.VITE_FISCAL_SERVICE_URL || 'http://localhost:8000').replace(/\/$/, '');
+    const fiscalServiceToken = (
+        import.meta.env.VITE_FISCAL_SERVICE_TOKEN ||
+        import.meta.env.VITE_APP_SECRET_TOKEN ||
+        'zenite_fiscal_token'
+    ).trim();
+
+    return {
+        fiscalServiceBaseUrl,
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${fiscalServiceToken}`,
+            'X-API-Key': fiscalServiceToken
+        }
+    };
+}
+
+/**
  * Emite Nota Fiscal Eletrônica (NF-e modelo 55) via micro-serviço Python (FastAPI + PyNFe)
  * para a SEFAZ-PA (SVRS), utilizando o Certificado A1 configurado para o Tenant.
  *
@@ -161,7 +182,7 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
     }
 
     // 4. Montar o payload para a rota do micro-serviço FastAPI
-    const fiscalServiceBaseUrl = (import.meta.env.VITE_FISCAL_SERVICE_URL || 'http://localhost:8000').replace(/\/$/, '');
+    const { fiscalServiceBaseUrl, headers: fiscalHeaders } = getFiscalServiceConfig();
     
     // Gerar um número sequencial de NF-e caso não exista
     const numeroNfe = Number(venda.nfe_numero || Math.floor(1000 + Math.random() * 9000));
@@ -228,9 +249,7 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
     try {
         const response = await fetch(`${fiscalServiceBaseUrl}/api/v1/nfe/emitir`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: fiscalHeaders,
             body: JSON.stringify(payload)
         });
 
@@ -312,8 +331,10 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
  * Consulta o status operacional dos servidores da SEFAZ-PA (SVRS)
  */
 export async function consultarStatusSefazPa() {
-    const fiscalServiceBaseUrl = (import.meta.env.VITE_FISCAL_SERVICE_URL || 'http://localhost:8000').replace(/\/$/, '');
-    const res = await fetch(`${fiscalServiceBaseUrl}/api/v1/nfe/status-sefaz`);
+    const { fiscalServiceBaseUrl, headers: fiscalHeaders } = getFiscalServiceConfig();
+    const res = await fetch(`${fiscalServiceBaseUrl}/api/v1/nfe/status-sefaz`, {
+        headers: fiscalHeaders
+    });
     if (!res.ok) throw new Error('Não foi possível consultar o status da SEFAZ.');
     return await res.json();
 }

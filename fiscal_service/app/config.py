@@ -1,5 +1,11 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+if _ENV_FILE.exists():
+    load_dotenv(dotenv_path=_ENV_FILE, override=False)
 
 class Settings(BaseSettings):
     app_name: str = "Zenite OS - Fiscal Microservice"
@@ -21,7 +27,7 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
     class Config:
-        env_file = ".env"
+        env_file = str(_ENV_FILE)
         extra = "allow"
 
 settings = Settings()
