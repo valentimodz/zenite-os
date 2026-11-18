@@ -4,35 +4,43 @@ import { X, Receipt, User, Smartphone, Calendar, DollarSign, FileText } from 'lu
 export default function ModalDetalhesVenda({ venda, onClose, onEmitirNfe }) {
     if (!venda) return null;
 
-    // Blindagem e mapeamento para garantir que NUNCA fique vazio e NUNCA renderize um objeto direto
-    const clienteNome = (typeof venda.cliente_nome === 'string' && venda.cliente_nome.trim() && venda.cliente_nome.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente_nome.trim() : null)
-        || (typeof venda.cliente?.nome === 'string' && venda.cliente.nome.trim() ? venda.cliente.nome.trim() : null)
+    // Blindagem e mapeamento priorizando relacionamento `venda.clientes` com fallback nas colunas espelhadas de `venda`
+    const ehNomeValido = (v) => {
+        if (typeof v !== 'string' || !v.trim()) return null;
+        const s = v.trim();
+        return s.toUpperCase() !== 'CONSUMIDOR FINAL' ? s : null;
+    };
+
+    const clienteNome = ehNomeValido(venda.clientes?.nome)
+        || ehNomeValido(venda.cliente?.nome)
+        || ehNomeValido(venda.cliente_nome)
+        || (typeof venda.cliente === 'string' ? ehNomeValido(venda.cliente) : null)
+        || ehNomeValido(venda.nome_cliente)
         || (typeof venda.clientes?.nome === 'string' && venda.clientes.nome.trim() ? venda.clientes.nome.trim() : null)
-        || (typeof venda.cliente === 'string' && venda.cliente.trim() && venda.cliente.trim().toUpperCase() !== 'CONSUMIDOR FINAL' ? venda.cliente.trim() : null)
-        || (typeof venda.nome_cliente === 'string' && venda.nome_cliente.trim() ? venda.nome_cliente.trim() : null)
-        || venda.cliente_nome
+        || (typeof venda.cliente_nome === 'string' && venda.cliente_nome.trim() ? venda.cliente_nome.trim() : null)
         || 'CONSUMIDOR FINAL';
 
-    const clienteCpf = (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj.trim() ? venda.cliente_cpf_cnpj.trim() : null)
+    const clienteCpf = (typeof venda.clientes?.cpf_cnpj === 'string' && venda.clientes.cpf_cnpj.trim() ? venda.clientes.cpf_cnpj.trim() : null)
+        || (typeof venda.cliente_cpf_cnpj === 'string' && venda.cliente_cpf_cnpj.trim() ? venda.cliente_cpf_cnpj.trim() : null)
+        || (typeof venda.cliente_documento === 'string' && venda.cliente_documento.trim() ? venda.cliente_documento.trim() : null)
         || (typeof venda.cliente?.cpf_cnpj === 'string' && venda.cliente.cpf_cnpj.trim() ? venda.cliente.cpf_cnpj.trim() : null)
-        || (typeof venda.clientes?.cpf_cnpj === 'string' && venda.clientes.cpf_cnpj.trim() ? venda.clientes.cpf_cnpj.trim() : null)
         || (typeof venda.cliente_cpf === 'string' && venda.cliente_cpf.trim() ? venda.cliente_cpf.trim() : null)
         || (typeof venda.cliente?.cpf === 'string' && venda.cliente.cpf.trim() ? venda.cliente.cpf.trim() : null)
         || (typeof venda.clientes?.cpf === 'string' && venda.clientes.cpf.trim() ? venda.clientes.cpf.trim() : null)
         || (typeof venda.cpf === 'string' && venda.cpf.trim() ? venda.cpf.trim() : null)
         || (typeof venda.cnpj === 'string' && venda.cnpj.trim() ? venda.cnpj.trim() : null)
-        || '';
+        || '***.000.000-**';
 
-    const clienteTelefone = (typeof venda.cliente_telefone === 'string' && venda.cliente_telefone.trim() ? venda.cliente_telefone.trim() : null)
+    const clienteTelefone = (typeof venda.clientes?.telefone === 'string' && venda.clientes.telefone.trim() ? venda.clientes.telefone.trim() : null)
+        || (typeof venda.cliente_telefone === 'string' && venda.cliente_telefone.trim() ? venda.cliente_telefone.trim() : null)
         || (typeof venda.cliente?.telefone === 'string' && venda.cliente.telefone.trim() ? venda.cliente.telefone.trim() : null)
-        || (typeof venda.clientes?.telefone === 'string' && venda.clientes.telefone.trim() ? venda.clientes.telefone.trim() : null)
         || (typeof venda.telefone === 'string' && venda.telefone.trim() ? venda.telefone.trim() : null)
         || (typeof venda.telefone_cliente === 'string' && venda.telefone_cliente.trim() ? venda.telefone_cliente.trim() : null)
-        || '';
+        || '(xx) xxxxx-xxxx';
 
-    const clienteEmail = (typeof venda.cliente_email === 'string' && venda.cliente_email.trim() ? venda.cliente_email.trim() : null)
+    const clienteEmail = (typeof venda.clientes?.email === 'string' && venda.clientes.email.trim() ? venda.clientes.email.trim() : null)
+        || (typeof venda.cliente_email === 'string' && venda.cliente_email.trim() ? venda.cliente_email.trim() : null)
         || (typeof venda.cliente?.email === 'string' && venda.cliente.email.trim() ? venda.cliente.email.trim() : null)
-        || (typeof venda.clientes?.email === 'string' && venda.clientes.email.trim() ? venda.clientes.email.trim() : null)
         || (typeof venda.email === 'string' && venda.email.trim() ? venda.email.trim() : null)
         || (typeof venda.email_cliente === 'string' && venda.email_cliente.trim() ? venda.email_cliente.trim() : null)
         || '';

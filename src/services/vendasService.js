@@ -21,6 +21,8 @@ export async function atualizarVendaAposCriacao({
         throw new Error('ID da venda não fornecido para atualização.');
     }
 
+    const docCliente = cliente?.cpf_cnpj || cliente?.documento || cliente?.cpfCnpj || cliente?.cpf || null;
+
     const payload = {
         empresa_id: empresaId,
         filial_id: filialId,
@@ -28,10 +30,11 @@ export async function atualizarVendaAposCriacao({
         produto_nome: item?.produto?.nome || item?.nome || 'Produto',
         imei: item?.imei || null,
 
-        // Dados do Cliente mapeados para as colunas reais da tabela 'vendas'
+        // Dados do Cliente mapeados e espelhados na tabela 'vendas'
         cliente_id: cliente?.id || null,
         cliente_nome: cliente?.nome || 'Consumidor Final',
-        cliente_cpf_cnpj: cliente?.cpf_cnpj || cliente?.documento || cliente?.cpfCnpj || cliente?.cpf || null,
+        cliente_cpf_cnpj: docCliente,
+        cliente_documento: docCliente,
         cliente_telefone: cliente?.telefone || null,
         cliente_email: cliente?.email || null,
 
@@ -61,39 +64,69 @@ export async function atualizarVendaAposCriacao({
         used_valor_avaliacao: Number(usedDevice?.valor_avaliacao ?? usedDevice?.valor ?? 0) || 0
     };
 
-    let { data, error } = await supabase
-        .from('vendas')
-        .update(payload)
-        .eq('id', vendaId);
+    const attemptPayload = { ...payload };
+    let data = null;
+    let error = null;
 
-    // Fallback resiliente caso colunas opcionais não existam no schema remoto
-    if (error && (error.code === '42703' || String(error.message).includes('used_') || String(error.message).includes('valor_') || String(error.message).includes('cliente_'))) {
-        console.warn('⚠️ [vendasService] Colunas opcionais não encontradas em vendas, tentando update com fallback:', error.message);
-        const fallbackPayload = { ...payload };
-        if (String(error.message).includes('cliente_telefone')) {
-            delete fallbackPayload.cliente_telefone;
-        }
-        if (String(error.message).includes('cliente_email')) {
-            delete fallbackPayload.cliente_email;
-        }
-        if (String(error.message).includes('used_')) {
-            delete fallbackPayload.used_produto_nome;
-            delete fallbackPayload.used_imei;
-            delete fallbackPayload.used_valor_avaliacao;
-        }
-        if (String(error.message).includes('valor_pix') || String(error.message).includes('valor_cartao') || String(error.message).includes('valor_dinheiro')) {
-            delete fallbackPayload.valor_pix;
-            delete fallbackPayload.valor_cartao;
-            delete fallbackPayload.valor_dinheiro;
-            delete fallbackPayload.valor_boleto;
-            delete fallbackPayload.valor_troca;
-        }
-        const retryRes = await supabase
+    for (let attempt = 0; attempt < 6; attempt++) {
+        const res = await supabase
             .from('vendas')
-            .update(fallbackPayload)
+            .update(attemptPayload)
             .eq('id', vendaId);
-        data = retryRes.data;
-        error = retryRes.error;
+
+        data = res.data;
+        error = res.error;
+
+        if (!error) break;
+
+        const errText = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`;
+        const isMissingCol =
+            error.code === '42703' ||
+            error.code === 'PGRST204' ||
+            /column .* does not exist|Could not find the '.*' column/i.test(errText);
+
+        if (!isMissingCol) break;
+
+        console.warn(`⚠️ [vendasService] Coluna opcional ausente em vendas (tentativa ${attempt + 1}), ajustando payload:`, error.message);
+
+        let removedAny = false;
+        const explicitMatch =
+            errText.match(/Could not find the '([^']+)' column/i) ||
+            errText.match(/column\s+(?:"?[a-zA-Z0-9_]+"?\.)?"?([a-zA-Z0-9_]+)"?\s+(?:of relation|does not exist)/i);
+
+        if (explicitMatch && explicitMatch[1] && Object.prototype.hasOwnProperty.call(attemptPayload, explicitMatch[1])) {
+            delete attemptPayload[explicitMatch[1]];
+            removedAny = true;
+        } else {
+            const optionalGroups = [
+                { key: 'cliente_documento', test: /cliente_documento/i },
+                { key: 'cliente_telefone', test: /cliente_telefone/i },
+                { key: 'cliente_email', test: /cliente_email/i },
+                { key: 'used_', keys: ['used_produto_nome', 'used_imei', 'used_valor_avaliacao'], test: /used_/i },
+                { key: 'valor_', keys: ['valor_pix', 'valor_cartao', 'valor_dinheiro', 'valor_boleto', 'valor_troca'], test: /valor_(pix|cartao|dinheiro|boleto|troca)/i },
+                { key: 'trainee_', keys: ['trainee_id', 'trainee_nome', 'teve_participacao_trainee'], test: /trainee/i },
+                { key: 'caixa_id', test: /caixa_id/i },
+                { key: 'criado_por', test: /criado_por/i },
+                { key: 'usuario_id', test: /usuario_id/i },
+            ];
+            for (const grp of optionalGroups) {
+                if (grp.test.test(errText)) {
+                    const keysToRemove = grp.keys || [grp.key];
+                    for (const k of keysToRemove) {
+                        if (Object.prototype.hasOwnProperty.call(attemptPayload, k)) {
+                            delete attemptPayload[k];
+                            removedAny = true;
+                        }
+                    }
+                }
+            }
+            if (!removedAny && Object.prototype.hasOwnProperty.call(attemptPayload, 'cliente_documento')) {
+                delete attemptPayload.cliente_documento;
+                removedAny = true;
+            }
+        }
+
+        if (!removedAny) break;
     }
 
     if (error) {
