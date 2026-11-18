@@ -56,6 +56,61 @@ const CORES_SUGESTOES = [
   'Veil White'
 ];
 
+const MARCAS_CATALOGO_SMARTPHONES = [
+  'MOTOROLA',
+  'APPLE',
+  'SAMSUNG',
+  'XIAOMI',
+  'REALME',
+  'INFINIX',
+  'TECNO',
+  'HONOR',
+  'OUTRA'
+];
+
+const ADMIN_CATALOGO_ROLES = new Set([
+  'ADMIN',
+  'SUPER_ADMIN',
+  'ADMINISTRADOR',
+  'OWNER',
+  'DONO',
+  'MASTER'
+]);
+
+/**
+ * Padroniza marca, modelo e nome_completo em MAIÚSCULO, sem espaços extras e sem duplicar a marca.
+ */
+function formatarNovoModeloCatalogo(marcaRaw, modeloRaw) {
+  const marca = String(marcaRaw || 'OUTRA').replace(/\s+/g, ' ').trim().toUpperCase();
+  let modelo = String(modeloRaw || '').replace(/\s+/g, ' ').trim().toUpperCase();
+
+  if (marca && modelo.startsWith(`${marca} `)) {
+    modelo = modelo.slice(marca.length).replace(/\s+/g, ' ').trim();
+  } else if (marca && modelo === marca) {
+    modelo = '';
+  }
+
+  const nome_completo = modelo ? `${marca} ${modelo}`.replace(/\s+/g, ' ').trim() : '';
+  return { marca, modelo, nome_completo };
+}
+
+/**
+ * Infere a marca inicial a partir do termo digitado na busca.
+ */
+function detectarMarcaInicialBusca(termoRaw) {
+  const termo = String(termoRaw || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  if (!termo) return 'MOTOROLA';
+  if (termo.includes('MOTOROLA') || /\bMOTO\b/.test(termo)) return 'MOTOROLA';
+  if (termo.includes('APPLE') || /\bIPHONE\b/.test(termo) || /\bIPAD\b/.test(termo)) return 'APPLE';
+  if (termo.includes('SAMSUNG') || /\bGALAXY\b/.test(termo)) return 'SAMSUNG';
+  if (termo.includes('XIAOMI') || /\bREDMI\b/.test(termo) || /\bPOCO\b/.test(termo)) return 'XIAOMI';
+  if (termo.includes('REALME')) return 'REALME';
+  if (termo.includes('INFINIX')) return 'INFINIX';
+  if (termo.includes('TECNO')) return 'TECNO';
+  if (termo.includes('HONOR')) return 'HONOR';
+  return 'MOTOROLA';
+}
+
 /**
  * Formata qualquer nome de cor para Title Case sem espaços redundantes.
  * Ex: "  azul   marinho " -> "Azul Marinho"
@@ -96,6 +151,13 @@ export default function ModalEntradaEstoqueRapida({
   const [produtoSelecionado, setProdutoSelecionado] = useState(null);
   const [loadingCatalogo, setLoadingCatalogo] = useState(false);
   const [catalogoAparelhos, setCatalogoAparelhos] = useState([]);
+
+  // Estado de cadastro rápido de novo modelo no catálogo (exclusivo ADMIN)
+  const [profileRoleFallback, setProfileRoleFallback] = useState('');
+  const [mostrarFormNovoModelo, setMostrarFormNovoModelo] = useState(false);
+  const [novaMarcaCatalogo, setNovaMarcaCatalogo] = useState('MOTOROLA');
+  const [novoModeloCatalogo, setNovoModeloCatalogo] = useState('');
+  const [salvandoNovoModelo, setSalvandoNovoModelo] = useState(false);
 
   // Estado de Cor
   const [corSelecionada, setCorSelecionada] = useState('Preto');
@@ -196,9 +258,22 @@ export default function ModalEntradaEstoqueRapida({
   }, [selectedFilialObj, activeFilialNome, selectedFilialId, activeFilialId, perfilUsuario]);
 
   const podeTrocarFilial = useMemo(() => {
-    const role = (perfilUsuario?.role || '').toUpperCase();
+    const role = (perfilUsuario?.role || profileRoleFallback || '').toUpperCase();
     return ['ADMIN', 'SUPER_ADMIN', 'GERENTE', 'OWNER', 'DONO'].includes(role) && listaFiliais.length > 1;
-  }, [perfilUsuario, listaFiliais]);
+  }, [perfilUsuario, profileRoleFallback, listaFiliais]);
+
+  const isAdmin = useMemo(() => {
+    const roleNorm = String(
+      perfilUsuario?.role ||
+      perfilUsuario?.cargo ||
+      profileRoleFallback ||
+      session?.user?.user_metadata?.role ||
+      ''
+    )
+      .toUpperCase()
+      .trim();
+    return ADMIN_CATALOGO_ROLES.has(roleNorm);
+  }, [perfilUsuario, profileRoleFallback, session]);
 
   const empresaId = useMemo(() => {
     return (
@@ -207,6 +282,24 @@ export default function ModalEntradaEstoqueRapida({
       null
     );
   }, [perfilUsuario, session]);
+
+  // Fallback para carregar role do usuário caso perfilUsuario ainda não tenha sido carregado
+  useEffect(() => {
+    if (!isOpen) return;
+    const roleDireto = perfilUsuario?.role || perfilUsuario?.cargo || session?.user?.user_metadata?.role;
+    if (roleDireto || !session?.user?.id) return;
+
+    supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', session.user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.role) {
+          setProfileRoleFallback(String(data.role).toUpperCase().trim());
+        }
+      });
+  }, [isOpen, perfilUsuario, session]);
 
   // Carregar cores personalizadas ao abrir
   useEffect(() => {
@@ -219,6 +312,9 @@ export default function ModalEntradaEstoqueRapida({
       setErroMsg(null);
       setSucessoMsg(null);
       setCatalogoAparelhos([]);
+      setMostrarFormNovoModelo(false);
+      setNovaMarcaCatalogo('MOTOROLA');
+      setNovoModeloCatalogo('');
       return;
     }
 
@@ -349,6 +445,7 @@ export default function ModalEntradaEstoqueRapida({
     setProdutoSelecionado(item);
     setBuscaModelo(item.nome_completo);
     setCatalogoAparelhos([]);
+    setMostrarFormNovoModelo(false);
     setErroMsg(null);
 
     // Mover o foco imediatamente para o campo "3. Leitura de IMEI / Serial"
@@ -357,6 +454,144 @@ export default function ModalEntradaEstoqueRapida({
         inputImeiRef.current.focus();
       }
     }, 60);
+  };
+
+  // Abrir mini-painel de cadastro rápido no catálogo (somente ADMIN)
+  const handleAbrirFormNovoModelo = () => {
+    if (!isAdmin) return;
+    const termoLimpo = buscaModelo.replace(/\s+/g, ' ').trim().toUpperCase();
+    const marcaSugerida = detectarMarcaInicialBusca(termoLimpo);
+    const { modelo: modeloSemMarca } = formatarNovoModeloCatalogo(marcaSugerida, termoLimpo);
+
+    setNovaMarcaCatalogo(marcaSugerida);
+    setNovoModeloCatalogo(modeloSemMarca || termoLimpo);
+    setMostrarFormNovoModelo(true);
+    setErroMsg(null);
+    setSucessoMsg(null);
+  };
+
+  // Salvar novo modelo padronizado em catalogo_smartphones (anti-duplicidade, restrito a ADMIN)
+  const handleSalvarNovoModeloCatalogo = async () => {
+    if (!isAdmin) return;
+    setErroMsg(null);
+    setSucessoMsg(null);
+
+    const { marca: marcaFinal, modelo: modeloFinal, nome_completo: nomeCompletoFinal } = formatarNovoModeloCatalogo(
+      novaMarcaCatalogo,
+      novoModeloCatalogo
+    );
+
+    if (!modeloFinal || !nomeCompletoFinal) {
+      setErroMsg('Informe o modelo e armazenamento do aparelho para cadastrar no catálogo.');
+      return;
+    }
+
+    setSalvandoNovoModelo(true);
+    try {
+      // 1. Verificar se já existe um registro com o mesmo nome_completo (case-insensitive)
+      let registroCatalogo = null;
+      let existePrevia = false;
+
+      let { data: existente, error: errExistente } = await supabase
+        .from('catalogo_smartphones')
+        .select('id, marca, modelo, nome_completo, categoria')
+        .ilike('nome_completo', nomeCompletoFinal)
+        .limit(1)
+        .maybeSingle();
+
+      if (errExistente && (errExistente.code === '42703' || /categoria/i.test(errExistente.message || ''))) {
+        const retryExistente = await supabase
+          .from('catalogo_smartphones')
+          .select('id, marca, modelo, nome_completo')
+          .ilike('nome_completo', nomeCompletoFinal)
+          .limit(1)
+          .maybeSingle();
+        existente = retryExistente.data;
+        errExistente = retryExistente.error;
+      }
+
+      if (errExistente && errExistente.code !== 'PGRST116') {
+        throw errExistente;
+      }
+
+      if (existente) {
+        registroCatalogo = existente;
+        existePrevia = true;
+      } else {
+        // 2. Inserir novo registro padronizado em public.catalogo_smartphones
+        let { data: inserido, error: errInsert } = await supabase
+          .from('catalogo_smartphones')
+          .insert({
+            marca: marcaFinal,
+            modelo: modeloFinal,
+            nome_completo: nomeCompletoFinal,
+            categoria: 'Celulares'
+          })
+          .select('id, marca, modelo, nome_completo, categoria')
+          .single();
+
+        if (errInsert && (errInsert.code === '42703' || errInsert.code === 'PGRST204' || /categoria/i.test(errInsert.message || ''))) {
+          const retryInsert = await supabase
+            .from('catalogo_smartphones')
+            .insert({
+              marca: marcaFinal,
+              modelo: modeloFinal,
+              nome_completo: nomeCompletoFinal
+            })
+            .select('id, marca, modelo, nome_completo')
+            .single();
+          inserido = retryInsert.data;
+          errInsert = retryInsert.error;
+        }
+
+        if (errInsert) {
+          throw errInsert;
+        }
+        registroCatalogo = inserido;
+      }
+
+      if (!registroCatalogo) {
+        throw new Error('Não foi possível obter os dados do modelo salvo no catálogo.');
+      }
+
+      // 3. Verificar se já existe cadastro físico desse modelo na filial selecionada
+      let prodFilial = null;
+      if (selectedFilialId) {
+        const { data: pFil } = await supabase
+          .from('produtos')
+          .select('id, nome, quantidade')
+          .eq('filial_id', selectedFilialId)
+          .ilike('nome', registroCatalogo.nome_completo || nomeCompletoFinal)
+          .limit(1)
+          .maybeSingle();
+        prodFilial = pFil || null;
+      }
+
+      const itemEnriquecido = {
+        ...registroCatalogo,
+        cadastrado: !!prodFilial,
+        produto_id_filial: prodFilial ? prodFilial.id : null,
+        saldo_atual_filial: prodFilial ? Number(prodFilial.quantidade || 0) : 0
+      };
+
+      setCatalogoAparelhos(prev => {
+        const semDuplicado = (prev || []).filter(i => String(i.id) !== String(itemEnriquecido.id));
+        return [itemEnriquecido, ...semDuplicado];
+      });
+
+      handleSelecionarModelo(itemEnriquecido);
+      setSucessoMsg(
+        existePrevia
+          ? `Modelo "${itemEnriquecido.nome_completo}" já existia no catálogo e foi selecionado.`
+          : `Modelo "${itemEnriquecido.nome_completo}" cadastrado no catálogo e selecionado!`
+      );
+      window.dispatchEvent(new Event('catalogo_updated'));
+    } catch (err) {
+      console.error('Erro ao cadastrar modelo em catalogo_smartphones:', err);
+      setErroMsg(err?.message || 'Erro ao cadastrar novo modelo no catálogo.');
+    } finally {
+      setSalvandoNovoModelo(false);
+    }
   };
 
   // Sanitizar e processar leitura de IMEI
@@ -724,7 +959,10 @@ export default function ModalEntradaEstoqueRapida({
                 value={buscaModelo}
                 onChange={(e) => {
                   setBuscaModelo(e.target.value);
-                  if (produtoSelecionado && e.target.value !== produtoSelecionado.nome) {
+                  if (mostrarFormNovoModelo) {
+                    setMostrarFormNovoModelo(false);
+                  }
+                  if (produtoSelecionado && e.target.value !== produtoSelecionado.nome_completo && e.target.value !== produtoSelecionado.nome) {
                     setProdutoSelecionado(null);
                   }
                 }}
@@ -748,8 +986,8 @@ export default function ModalEntradaEstoqueRapida({
             </div>
 
             {/* Dropdown de sugestões do catálogo inteligente */}
-            {!produtoSelecionado && catalogoAparelhos.length > 0 && buscaModelo.trim().length > 0 && (
-              <div className="bg-[#111111] border border-[#222222] rounded-xl shadow-2xl max-h-56 overflow-y-auto divide-y divide-[#222222] mt-1 z-20">
+            {!produtoSelecionado && !mostrarFormNovoModelo && catalogoAparelhos.length > 0 && buscaModelo.trim().length > 0 && (
+              <div className="bg-[#111111] border border-[#222222] rounded-xl shadow-2xl max-h-60 overflow-y-auto divide-y divide-[#222222] mt-1 z-20">
                 {catalogoAparelhos.map((item) => (
                   <button
                     key={item.id}
@@ -781,13 +1019,136 @@ export default function ModalEntradaEstoqueRapida({
                     </div>
                   </button>
                 ))}
+
+                {isAdmin && (
+                  <div className="p-2.5 bg-[#0c0c12]">
+                    <button
+                      type="button"
+                      onClick={handleAbrirFormNovoModelo}
+                      className="w-full px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-900/30 transition-all cursor-pointer"
+                    >
+                      <span>+ Cadastrar novo modelo no catálogo</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
             {/* Aviso quando pesquisou e nenhum modelo foi encontrado */}
-            {!produtoSelecionado && !loadingCatalogo && buscaModelo.trim().length >= 2 && catalogoAparelhos.length === 0 && (
-              <div className="bg-[#111111] border border-[#222222] rounded-xl p-3 text-xs text-gray-400 mt-1 text-center">
-                Nenhum aparelho encontrado no catálogo para "<span className="text-white font-semibold">{buscaModelo}</span>".
+            {!produtoSelecionado && !mostrarFormNovoModelo && !loadingCatalogo && buscaModelo.trim().length >= 2 && catalogoAparelhos.length === 0 && (
+              <div className="bg-[#111111] border border-[#222222] rounded-xl p-3.5 text-xs text-gray-400 mt-1 text-center space-y-2.5">
+                <p>
+                  Nenhum aparelho encontrado no catálogo para "<span className="text-white font-semibold">{buscaModelo}</span>".
+                </p>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleAbrirFormNovoModelo}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-900/30 transition-all cursor-pointer"
+                  >
+                    <span>+ Cadastrar novo modelo no catálogo</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Mini-painel de Cadastro Rápido de Novo Modelo (exclusivo ADMIN) */}
+            {isAdmin && mostrarFormNovoModelo && !produtoSelecionado && (
+              <div className="bg-[#120b1c] border border-purple-500/50 rounded-xl p-4 mt-2 space-y-3 shadow-xl shadow-purple-950/30 animate-fadeIn">
+                <div className="flex items-center justify-between border-b border-purple-800/40 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={14} className="text-purple-400" />
+                    <span className="text-xs font-extrabold text-white">
+                      Novo Modelo no Catálogo
+                    </span>
+                    <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-900/70 text-purple-200 border border-purple-600/40 font-bold">
+                      ADMIN
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarFormNovoModelo(false)}
+                    className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                    title="Fechar formulário"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-bold text-gray-300">
+                      Marca *
+                    </label>
+                    <select
+                      value={novaMarcaCatalogo}
+                      onChange={(e) => setNovaMarcaCatalogo(e.target.value)}
+                      className="w-full bg-black border border-[#2a2a38] focus:border-purple-500 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none cursor-pointer"
+                    >
+                      {MARCAS_CATALOGO_SMARTPHONES.map((marca) => (
+                        <option key={marca} value={marca}>
+                          {marca}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-gray-300">
+                      Modelo e Armazenamento *
+                    </label>
+                    <input
+                      type="text"
+                      value={novoModeloCatalogo}
+                      onChange={(e) => setNovoModeloCatalogo(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleSalvarNovoModeloCatalogo();
+                        }
+                      }}
+                      placeholder="Ex: MOTO G06 128GB ou IPHONE 16 PRO 256GB"
+                      className="w-full bg-black border border-[#2a2a38] focus:border-purple-500 rounded-lg px-3 py-2 text-xs text-white font-bold uppercase placeholder:normal-case placeholder:font-normal placeholder:text-gray-500 outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-black/60 border border-[#222230] rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-[11px]">
+                  <span className="text-gray-400">Nome padronizado:</span>
+                  <span className="font-mono font-bold text-purple-300 truncate">
+                    {formatarNovoModeloCatalogo(novaMarcaCatalogo, novoModeloCatalogo).nome_completo || '---'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setMostrarFormNovoModelo(false)}
+                    disabled={salvandoNovoModelo}
+                    className="px-3 py-2 rounded-lg border border-[#2a2a38] text-gray-300 hover:text-white hover:bg-white/5 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSalvarNovoModeloCatalogo}
+                    disabled={salvandoNovoModelo || !formatarNovoModeloCatalogo(novaMarcaCatalogo, novoModeloCatalogo).modelo}
+                    className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-purple-900/30 transition-all cursor-pointer"
+                  >
+                    {salvandoNovoModelo ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>Salvando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={14} />
+                        <span>Salvar e Selecionar</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             )}
 

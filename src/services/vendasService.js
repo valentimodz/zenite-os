@@ -216,7 +216,7 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
 
     // 4. Montar o payload para a rota do micro-serviço FastAPI
     const { fiscalServiceBaseUrl, headers: fiscalHeaders } = getFiscalServiceConfig();
-    
+
     // Gerar um número sequencial de NF-e caso não exista
     const numeroNfe = Number(venda.nfe_numero || Math.floor(1000 + Math.random() * 9000));
     const valorTotal = Number(venda.valor_total || (
@@ -370,4 +370,4 @@ export async function consultarStatusSefazPa() {
     });
     if (!res.ok) throw new Error('Não foi possível consultar o status da SEFAZ.');
     return await res.json();
-}
+}
