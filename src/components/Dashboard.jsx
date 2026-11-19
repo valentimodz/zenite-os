@@ -364,33 +364,36 @@ const resolverClienteRecibo = (venda, clientesList = []) => {
     };
   }
 
+  const relCli = Array.isArray(venda.clientes) ? (venda.clientes[0] || null) : (venda.clientes || null);
+  const cliSingular = Array.isArray(venda.cliente) ? (venda.cliente[0] || null) : (typeof venda.cliente === 'object' ? venda.cliente : null);
+
   const lista = Array.isArray(clientesList) ? clientesList : [];
-  const docBusca = venda.clientes?.cpf_cnpj || venda.cliente_cpf_cnpj || venda.cliente_documento || '';
+  const docBusca = relCli?.cpf_cnpj || venda.cliente_cpf_cnpj || venda.cliente_documento || '';
   const clienteObj = lista.find(c =>
     (venda.cliente_id && String(c.id) === String(venda.cliente_id)) ||
     (docBusca && (c.cpf_cnpj === docBusca || c.cpf === docBusca))
   ) || null;
 
   const nome =
-    ehNomeReal(venda.clientes?.nome) ||
-    ehNomeReal(venda.cliente?.nome) ||
+    ehNomeReal(relCli?.nome) ||
+    ehNomeReal(cliSingular?.nome) ||
     ehNomeReal(venda.cliente_nome) ||
     ehNomeReal(clienteObj?.nome) ||
     (typeof venda.cliente === 'string' ? ehNomeReal(venda.cliente) : null) ||
     ehNomeReal(venda.nome_cliente) ||
-    limparTexto(venda.clientes?.nome) ||
+    limparTexto(relCli?.nome) ||
     limparTexto(venda.cliente_nome) ||
     'CONSUMIDOR FINAL';
 
   const cpfCnpj =
-    limparTexto(venda.clientes?.cpf_cnpj) ||
+    limparTexto(relCli?.cpf_cnpj) ||
     limparTexto(venda.cliente_cpf_cnpj) ||
     limparTexto(venda.cliente_documento) ||
-    limparTexto(venda.cliente?.cpf_cnpj) ||
+    limparTexto(cliSingular?.cpf_cnpj) ||
     limparTexto(venda.cliente_cpf) ||
-    limparTexto(venda.cliente?.cpf) ||
-    limparTexto(venda.cliente?.cnpj) ||
-    limparTexto(venda.clientes?.cpf) ||
+    limparTexto(cliSingular?.cpf) ||
+    limparTexto(cliSingular?.cnpj) ||
+    limparTexto(relCli?.cpf) ||
     limparTexto(clienteObj?.cpf_cnpj) ||
     limparTexto(clienteObj?.cpf) ||
     limparTexto(venda.cpf) ||
@@ -398,31 +401,31 @@ const resolverClienteRecibo = (venda, clientesList = []) => {
     '';
 
   const telefone =
-    limparTexto(venda.clientes?.telefone) ||
+    limparTexto(relCli?.telefone) ||
     limparTexto(venda.cliente_telefone) ||
-    limparTexto(venda.cliente?.telefone) ||
+    limparTexto(cliSingular?.telefone) ||
     limparTexto(clienteObj?.telefone) ||
     limparTexto(venda.telefone) ||
     limparTexto(venda.telefone_cliente) ||
     '';
 
   const email =
-    limparTexto(venda.clientes?.email) ||
+    limparTexto(relCli?.email) ||
     limparTexto(venda.cliente_email) ||
-    limparTexto(venda.cliente?.email) ||
+    limparTexto(cliSingular?.email) ||
     limparTexto(clienteObj?.email) ||
     limparTexto(venda.email) ||
     limparTexto(venda.email_cliente) ||
     '';
 
   return {
-    id: venda.clientes?.id || venda.cliente_id || clienteObj?.id || null,
+    id: relCli?.id || venda.cliente_id || clienteObj?.id || null,
     nome,
     cpfCnpj,
     telefone,
     email,
     clienteObj,
-    clientesRel: venda.clientes || clienteObj || null
+    clientesRel: relCli || clienteObj || null
   };
 };
 
@@ -10715,6 +10718,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         alert('Cliente atualizado com sucesso!');
         // Atualiza os dados no PDV se for o cliente atualmente selecionado
         if (selectedPdvClienteId === editingCliente.id || pdvClienteNome === editingCliente.nome) {
+          setSelectedPdvCliente(updatedClients && updatedClients[0] ? updatedClients[0] : { ...editingCliente, ...payload });
           setPdvClienteNome(payload.nome);
           setPdvClienteSearchInput(payload.nome);
           setPdvClienteCpfCnpj(payload.cpf_cnpj || '');
@@ -10737,6 +10741,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         // Seleciona automaticamente o cliente recém-criado no PDV
         if (insertedClients && insertedClients.length > 0) {
           const newClient = insertedClients[0];
+          setSelectedPdvCliente(newClient);
           setSelectedPdvClienteId(newClient.id);
           setPdvClienteNome(newClient.nome);
           setPdvClienteSearchInput(newClient.nome);
@@ -15489,26 +15494,26 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       let clienteIdBanco = (isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID)
         ? selectedPdvClienteId.trim()
-        : null;
+        : ((isValidUuid(selectedPdvCliente?.id) && selectedPdvCliente.id !== CONSUMIDOR_FINAL_UUID && selectedPdvCliente.id !== GENERIC_CONSUMIDOR_UUID)
+          ? String(selectedPdvCliente.id).trim()
+          : null);
 
       if (selectedPdvClienteId && !isValidUuid(selectedPdvClienteId) && selectedPdvClienteId !== CONSUMIDOR_FINAL_UUID && selectedPdvClienteId !== GENERIC_CONSUMIDOR_UUID) {
         console.warn("⚠️ [PDV CHECKOUT] selectedPdvClienteId não é um UUID válido. Resetando:", selectedPdvClienteId);
         setSelectedPdvClienteId(null);
       }
 
-      const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || '').trim();
-      const hasValidSelectedClient = !!clienteIdBanco && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID;
-      const isConsumidorFinal = !temCelularNoCarrinho && !hasValidSelectedClient && (
-        !nomeClienteFinal ||
-        nomeClienteFinal.toLowerCase() === 'consumidor balcão' ||
-        nomeClienteFinal.toLowerCase() === 'consumidor balcao' ||
-        nomeClienteFinal.toLowerCase() === 'consumidor final' ||
-        nomeClienteFinal.toLowerCase() === 'consumidor' ||
-        nomeClienteFinal.toLowerCase() === 'cliente balcão' ||
-        nomeClienteFinal.toLowerCase() === 'cliente balcao' ||
-        selectedPdvClienteId === CONSUMIDOR_FINAL_UUID ||
-        selectedPdvClienteId === GENERIC_CONSUMIDOR_UUID
-      );
+      const nomeClienteFinal = (pdvClienteNome || pdvClienteSearchInput || selectedPdvCliente?.nome || '').trim();
+      const hasValidSelectedClient = Boolean(clienteIdBanco && clienteIdBanco !== CONSUMIDOR_FINAL_UUID && clienteIdBanco !== GENERIC_CONSUMIDOR_UUID);
+      const isNomeGenericoConsumidor = !nomeClienteFinal || [
+        'consumidor final',
+        'consumidor balcão',
+        'consumidor balcao',
+        'consumidor',
+        'cliente balcão',
+        'cliente balcao'
+      ].includes(nomeClienteFinal.toLowerCase());
+      const isConsumidorFinal = !temCelularNoCarrinho && !hasValidSelectedClient && isNomeGenericoConsumidor;
 
       const currentUserId = profile?.id || session?.user?.id || session?.user?.user_metadata?.sub;
       const currentEmpresaId = empresaId || activeEmpresaId || company?.id || profile?.empresa_id;
@@ -15516,7 +15521,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
       // Resolução dinâmica de Cliente Padrão / Consumidor Final existente no banco para a empresa (apenas para fallback quando for Consumidor Final)
       let idPadraoConsumidor = null;
-      if (!temCelularNoCarrinho) {
+      if (isConsumidorFinal) {
         try {
           const { data: clientePadraoDb } = await supabase
             .from('clientes')
@@ -15528,17 +15533,6 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
           if (clientePadraoDb?.id && isValidUuid(clientePadraoDb.id)) {
             idPadraoConsumidor = clientePadraoDb.id;
-          } else {
-            // Fallback: qualquer cliente válido da empresa
-            const { data: anyClienteDb } = await supabase
-              .from('clientes')
-              .select('id')
-              .eq('empresa_id', currentEmpresaId)
-              .limit(1)
-              .maybeSingle();
-            if (anyClienteDb?.id && isValidUuid(anyClienteDb.id)) {
-              idPadraoConsumidor = anyClienteDb.id;
-            }
           }
         } catch (errBuscaPadrao) {
           console.warn("Aviso ao buscar cliente padrão da empresa:", errBuscaPadrao);
@@ -16075,7 +16069,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             ? clienteSelecionadoObj.id
             : (cliente_id && isValidUuid(cliente_id) && cliente_id !== CONSUMIDOR_FINAL_UUID && cliente_id !== GENERIC_CONSUMIDOR_UUID
               ? cliente_id
-              : (isConsumidorFinal ? (idPadraoConsumidor || '3788fcc4-423c-46ce-a02e-5906d805925d') : (clienteIdBanco || idPadraoConsumidor || '3788fcc4-423c-46ce-a02e-5906d805925d')));
+              : (clienteIdBanco || (isConsumidorFinal ? idPadraoConsumidor : null) || null));
 
           // Salvar o nome textual diretamente na coluna cliente_nome (prioriza nome do cliente selecionado)
           const rawNomeCliente = clienteSelecionadoObj?.nome ||
@@ -16116,7 +16110,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 documento: finalClienteCpfCnpj,
                 cpfCnpj: finalClienteCpfCnpj,
                 telefone: finalClienteTelefone,
-                email: finalClienteEmail
+                email: finalClienteEmail,
+                isConsumidorFinal: isConsumidorFinal && !rawNomeCliente
               },
               vendedor: {
                 id: finalVendedorId,
@@ -17857,7 +17852,8 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
     let venda = { ...vendaParam };
 
     // Fetch dedicado da venda pelo ID para garantir todos os campos financeiros, itens_venda e cliente completo sem erro 400
-    if (venda.id) {
+    const vendaIdAlvo = venda.id || venda.venda_id;
+    if (vendaIdAlvo) {
       try {
         let { data: vendaBanco, error: vendaErr } = await supabase
           .from('vendas')
@@ -17870,26 +17866,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
               nome,
               cpf_cnpj,
               telefone,
-              email,
-              cep,
-              logradouro,
-              numero,
-              bairro,
-              cidade,
-              uf
+              email
             )
           `)
-          .eq('id', venda.id)
+          .eq('id', vendaIdAlvo)
           .maybeSingle();
 
         if (vendaErr) {
-          console.warn('Tentando query de venda para recibo com campos básicos de cliente:', vendaErr);
-          const { data: vBasicRel, error: errBasicRel } = await supabase
+          console.warn('Tentando query de venda para 2a via mantendo relacionamento clientes:cliente_id:', vendaErr);
+          const { data: vCliRel, error: errCliRel } = await supabase
             .from('vendas')
             .select(`
               *,
-              itens_venda (*),
-              vendas_pagamentos (*),
               clientes:cliente_id (
                 id,
                 nome,
@@ -17898,22 +17886,18 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                 email
               )
             `)
-            .eq('id', venda.id)
+            .eq('id', vendaIdAlvo)
             .maybeSingle();
 
-          if (!errBasicRel && vBasicRel) {
-            vendaBanco = vBasicRel;
+          if (!errCliRel && vCliRel) {
+            vendaBanco = vCliRel;
             vendaErr = null;
           } else {
-            console.warn('Fallback da query de venda para recibo sem relations:', errBasicRel || vendaErr);
+            console.warn('Fallback da query de venda para recibo sem relations:', errCliRel || vendaErr);
             const { data: vFallback, error: errFallback } = await supabase
               .from('vendas')
-              .select(`
-                *,
-                itens_venda (*),
-                vendas_pagamentos (*)
-              `)
-              .eq('id', venda.id)
+              .select('*')
+              .eq('id', vendaIdAlvo)
               .maybeSingle();
             if (!errFallback && vFallback) {
               vendaBanco = vFallback;
@@ -17923,7 +17907,44 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
         }
 
         if (vendaBanco && !vendaErr) {
-          venda = { ...venda, ...vendaBanco };
+          const cliBancoNorm = Array.isArray(vendaBanco.clientes)
+            ? (vendaBanco.clientes[0] || null)
+            : (vendaBanco.clientes || null);
+          const cliAtualNorm = Array.isArray(venda.clientes)
+            ? (venda.clientes[0] || null)
+            : (venda.clientes || null);
+          const nomeBancoEhReal = vendaBanco.cliente_nome && String(vendaBanco.cliente_nome).trim().toUpperCase() !== 'CONSUMIDOR FINAL';
+          const nomeAtualEhReal = venda.cliente_nome && String(venda.cliente_nome).trim().toUpperCase() !== 'CONSUMIDOR FINAL';
+
+          venda = {
+            ...venda,
+            ...vendaBanco,
+            id: vendaBanco.id || vendaIdAlvo,
+            cliente_id: vendaBanco.cliente_id || venda.cliente_id || cliBancoNorm?.id || cliAtualNorm?.id || null,
+            cliente_nome: nomeBancoEhReal
+              ? vendaBanco.cliente_nome
+              : (nomeAtualEhReal ? venda.cliente_nome : (vendaBanco.cliente_nome || venda.cliente_nome || null)),
+            cliente_cpf_cnpj: vendaBanco.cliente_cpf_cnpj || venda.cliente_cpf_cnpj || null,
+            cliente_documento: vendaBanco.cliente_documento || venda.cliente_documento || null,
+            cliente_telefone: vendaBanco.cliente_telefone || venda.cliente_telefone || null,
+            cliente_email: vendaBanco.cliente_email || venda.cliente_email || null,
+            clientes: cliBancoNorm || cliAtualNorm || null
+          };
+        }
+
+        // Se itens_venda estiver ausente ou vazio (ex.: fallback intermediário), busca explicitamente por venda_id
+        if (!Array.isArray(venda.itens_venda) || venda.itens_venda.length === 0) {
+          try {
+            const { data: itensData } = await supabase
+              .from('itens_venda')
+              .select('*')
+              .eq('venda_id', vendaIdAlvo);
+            if (Array.isArray(itensData) && itensData.length > 0) {
+              venda.itens_venda = itensData;
+            }
+          } catch (eItens) {
+            console.warn('Aviso ao consultar itens_venda por venda_id:', eItens);
+          }
         }
 
         // Se vendas_pagamentos estiver ausente ou vazio, busca explicitamente na tabela vendas_pagamentos
@@ -17932,7 +17953,7 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
             const { data: pagsData } = await supabase
               .from('vendas_pagamentos')
               .select('*')
-              .eq('venda_id', venda.id);
+              .eq('venda_id', vendaIdAlvo);
             if (Array.isArray(pagsData) && pagsData.length > 0) {
               venda.vendas_pagamentos = pagsData;
             }
@@ -17945,6 +17966,10 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
       }
     }
 
+    if (Array.isArray(venda.clientes)) {
+      venda.clientes = venda.clientes[0] || null;
+    }
+
     // Se venda.cliente_id existir e venda.clientes ainda não estiver preenchido ou completo, busca diretamente em public.clientes
     const clienteIdAlvo = venda.cliente_id || venda.cliente?.id || venda.clientes?.id;
     const faltaDadosCliente =
@@ -17955,20 +17980,11 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
 
     if (clienteIdAlvo && faltaDadosCliente) {
       try {
-        let { data: cData, error: cErr } = await supabase
+        const { data: cData } = await supabase
           .from('clientes')
-          .select('id, nome, cpf_cnpj, telefone, email, cep, logradouro, numero, bairro, cidade, uf')
+          .select('id, nome, cpf_cnpj, telefone, email')
           .eq('id', clienteIdAlvo)
           .maybeSingle();
-
-        if (cErr) {
-          const resBasicCli = await supabase
-            .from('clientes')
-            .select('id, nome, cpf_cnpj, telefone, email')
-            .eq('id', clienteIdAlvo)
-            .maybeSingle();
-          cData = resBasicCli.data;
-        }
 
         if (cData) {
           venda.clientes = cData;
@@ -20826,12 +20842,21 @@ export default function Dashboard({ session, profileDataProps, initialView }) {
                           setPdvClienteSearchInput(val);
                           setPdvClienteNome(val);
                           setIsPdvClienteDropdownOpen(true);
-                          if (selectedPdvClienteId && selectedPdvClienteId !== '00000000-0000-0000-0000-000000000000') {
-                            const trimmedVal = val.trim().toLowerCase();
-                            const currentNome = (pdvClienteNome || '').trim().toLowerCase();
+                          const trimmedVal = val.trim().toLowerCase();
+                          if (
+                            selectedPdvClienteId === '00000000-0000-0000-0000-000000000000' ||
+                            selectedPdvClienteId === '3788fcc4-423c-46ce-a02e-5906d805925d'
+                          ) {
+                            if (trimmedVal && trimmedVal !== 'consumidor final') {
+                              setSelectedPdvClienteId(null);
+                              setSelectedPdvCliente(null);
+                            }
+                          } else if (selectedPdvClienteId) {
+                            const currentNome = (selectedPdvCliente?.nome || pdvClienteNome || '').trim().toLowerCase();
                             // Só desassocia o ID do cliente se o usuário alterar substancialmente o nome digitado
                             if (currentNome && trimmedVal !== currentNome && !currentNome.startsWith(trimmedVal)) {
                               setSelectedPdvClienteId(null);
+                              setSelectedPdvCliente(null);
                             }
                           }
                         }}

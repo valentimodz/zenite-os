@@ -35,6 +35,7 @@ export interface RepasseFinanceira {
     created_at?: string | null;
     clientes?: {
       nome?: string | null;
+      cpf_cnpj?: string | null;
       cpf?: string | null;
     } | null;
   } | null;
@@ -135,7 +136,7 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
             created_at,
             clientes:cliente_id (
               nome,
-              cpf
+              cpf_cnpj
             )
           )
         `)
@@ -177,7 +178,7 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
                 created_at,
                 clientes:cliente_id (
                   nome,
-                  cpf
+                  cpf_cnpj
                 )
               `)
               .in('id', vendaIds);
@@ -340,7 +341,7 @@ export const ContasAReceber: React.FC<ContasAReceberProps> = ({ profile, filiais
         const t = termoBusca.toLowerCase().trim();
         const cliente = (item.vendas?.clientes?.nome || item.vendas?.cliente_nome || item.cliente_nome || '').toLowerCase();
         const vendedor = (item.vendas?.vendedor_nome || item.vendedor_nome || '').toLowerCase();
-        const cpf = (item.vendas?.clientes?.cpf || '').toLowerCase();
+        const cpf = (item.vendas?.clientes?.cpf_cnpj || item.vendas?.clientes?.cpf || '').toLowerCase();
         const vendaId = (item.venda_id || '').toLowerCase();
         const repasseId = (item.id || '').toLowerCase();
         const financeira = (item.financeira || '').toLowerCase();

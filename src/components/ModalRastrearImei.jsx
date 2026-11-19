@@ -460,7 +460,7 @@ export default function ModalRastrearImei({
             if (vendaDetalhe.cliente_id && (!cpfCliente || !telCliente)) {
               const { data: cliDb } = await supabase
                 .from('clientes')
-                .select('nome, cpf, cpf_cnpj, telefone')
+                .select('nome, cpf_cnpj, telefone')
                 .eq('id', vendaDetalhe.cliente_id)
                 .maybeSingle();
               if (cliDb) {

@@ -1,8 +1,87 @@
 import { supabase } from '../supabaseClient';
 
 /**
+ * Executa update resiliente em public.vendas removendo colunas opcionais inexistentes no schema
+ * ou referências opcionais que violem FK sem comprometer outros campos.
+ */
+async function executarUpdateResilienteVendas(
+    vendaId,
+    initialPayload,
+    { verifyUpdated = false, optionalGroups = [] } = {}
+) {
+    const attemptPayload = { ...initialPayload };
+    let data = null;
+    let error = null;
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+        const query = supabase
+            .from('vendas')
+            .update(attemptPayload)
+            .eq('id', vendaId);
+
+        const res = verifyUpdated
+            ? await query.select('id, cliente_id, cliente_nome')
+            : await query;
+
+        data = res.data;
+        error = res.error;
+
+        if (!error) {
+            if (verifyUpdated && (!Array.isArray(data) || data.length === 0)) {
+                console.warn('⚠️ [vendasService] UPDATE em vendas não retornou linhas atualizadas (verifique política RLS de UPDATE em public.vendas):', vendaId);
+            }
+            return { data, error: null };
+        }
+
+        const errText = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`;
+        const isMissingCol =
+            error.code === '42703' ||
+            error.code === 'PGRST204' ||
+            /column .* does not exist|Could not find the '.*' column/i.test(errText);
+        const isOptionalFkErr =
+            error.code === '23503' ||
+            /foreign key|violates foreign key constraint/i.test(errText);
+
+        if (!isMissingCol && !isOptionalFkErr) break;
+
+        console.warn(`⚠️ [vendasService] Ajuste resiliente de payload em vendas (tentativa ${attempt + 1}):`, error.message);
+
+        let removedAny = false;
+
+        if (isMissingCol) {
+            const explicitMatch =
+                errText.match(/Could not find the '([^']+)' column/i) ||
+                errText.match(/column\s+(?:"?[a-zA-Z0-9_]+"?\.)?"?([a-zA-Z0-9_]+)"?\s+(?:of relation|does not exist)/i);
+
+            if (explicitMatch && explicitMatch[1] && Object.prototype.hasOwnProperty.call(attemptPayload, explicitMatch[1])) {
+                delete attemptPayload[explicitMatch[1]];
+                removedAny = true;
+            }
+        }
+
+        if (!removedAny) {
+            for (const grp of optionalGroups) {
+                if (grp.test.test(errText)) {
+                    const keysToRemove = grp.keys || [grp.key];
+                    for (const k of keysToRemove) {
+                        if (Object.prototype.hasOwnProperty.call(attemptPayload, k)) {
+                            delete attemptPayload[k];
+                            removedAny = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!removedAny) break;
+    }
+
+    return { data, error };
+}
+
+/**
  * Atualiza os metadados de uma venda após a criação via RPC.
- * Centraliza e valida apenas as colunas suportadas pela tabela 'vendas'.
+ * Persiste os dados do cliente em fase isolada e prioritária antes dos metadados operacionais.
  */
 export async function atualizarVendaAposCriacao({
     vendaId,
@@ -21,22 +100,52 @@ export async function atualizarVendaAposCriacao({
         throw new Error('ID da venda não fornecido para atualização.');
     }
 
+    const clienteIdLimpo =
+        cliente?.id &&
+        String(cliente.id).trim() &&
+        String(cliente.id).trim() !== '00000000-0000-0000-0000-000000000000'
+            ? String(cliente.id).trim()
+            : null;
+    const clienteNomeRaw = typeof cliente?.nome === 'string' ? cliente.nome.trim() : '';
+    const isNomeGenerico = !clienteNomeRaw || clienteNomeRaw.toUpperCase() === 'CONSUMIDOR FINAL';
     const docCliente = cliente?.cpf_cnpj || cliente?.documento || cliente?.cpfCnpj || cliente?.cpf || null;
 
-    const payload = {
+    // Fase 1 (prioritária e isolada): garante gravação de cliente_id e colunas espelhadas em public.vendas
+    const clientePayload = {
+        cliente_id: clienteIdLimpo,
+        ...(clienteNomeRaw && !isNomeGenerico
+            ? { cliente_nome: clienteNomeRaw }
+            : (!clienteIdLimpo || cliente?.isConsumidorFinal === true ? { cliente_nome: 'Consumidor Final' } : {})),
+        cliente_cpf_cnpj: docCliente,
+        cliente_documento: docCliente,
+        cliente_telefone: cliente?.telefone || null,
+        cliente_email: cliente?.email || null
+    };
+
+    const clienteOptionalGroups = [
+        { key: 'cliente_documento', test: /cliente_documento/i },
+        { key: 'cliente_telefone', test: /cliente_telefone/i },
+        { key: 'cliente_email', test: /cliente_email/i },
+        { key: 'cliente_cpf_cnpj', test: /cliente_cpf_cnpj/i }
+    ];
+
+    const clienteRes = await executarUpdateResilienteVendas(vendaId, clientePayload, {
+        verifyUpdated: true,
+        optionalGroups: clienteOptionalGroups
+    });
+
+    if (clienteRes.error) {
+        console.error('❌ [vendasService.atualizarVendaAposCriacao] Falha ao gravar dados do cliente na venda:', clienteRes.error);
+        throw clienteRes.error;
+    }
+
+    // Fase 2: metadados operacionais/financeiros em chamada separada para nunca comprometer os campos do cliente
+    const metaPayload = {
         empresa_id: empresaId,
         filial_id: filialId,
         caixa_id: caixaId || null,
         produto_nome: item?.produto?.nome || item?.nome || 'Produto',
         imei: item?.imei || null,
-
-        // Dados do Cliente mapeados e espelhados na tabela 'vendas'
-        cliente_id: cliente?.id || null,
-        cliente_nome: cliente?.nome || 'Consumidor Final',
-        cliente_cpf_cnpj: docCliente,
-        cliente_documento: docCliente,
-        cliente_telefone: cliente?.telefone || null,
-        cliente_email: cliente?.email || null,
 
         // Dados do Vendedor
         vendedor_id: vendedor?.id || null,
@@ -64,77 +173,29 @@ export async function atualizarVendaAposCriacao({
         used_valor_avaliacao: Number(usedDevice?.valor_avaliacao ?? usedDevice?.valor ?? 0) || 0
     };
 
-    const attemptPayload = { ...payload };
-    let data = null;
-    let error = null;
+    const metaOptionalGroups = [
+        { key: 'used_', keys: ['used_produto_nome', 'used_imei', 'used_valor_avaliacao'], test: /used_/i },
+        { key: 'valor_', keys: ['valor_pix', 'valor_cartao', 'valor_dinheiro', 'valor_boleto', 'valor_troca'], test: /valor_(pix|cartao|dinheiro|boleto|troca)/i },
+        { key: 'trainee_', keys: ['trainee_id', 'trainee_nome', 'teve_participacao_trainee'], test: /trainee/i },
+        { key: 'caixa_id', test: /caixa_id|caixas/i },
+        { key: 'criado_por', test: /criado_por/i },
+        { key: 'usuario_id', test: /usuario_id/i },
+        { key: 'imei', test: /\bimei\b/i },
+        { key: 'metodo_pagamento', test: /metodo_pagamento/i },
+        { key: 'forma_pagamento', test: /forma_pagamento/i }
+    ];
 
-    for (let attempt = 0; attempt < 6; attempt++) {
-        const res = await supabase
-            .from('vendas')
-            .update(attemptPayload)
-            .eq('id', vendaId);
+    const metaRes = await executarUpdateResilienteVendas(vendaId, metaPayload, {
+        verifyUpdated: false,
+        optionalGroups: metaOptionalGroups
+    });
 
-        data = res.data;
-        error = res.error;
-
-        if (!error) break;
-
-        const errText = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`;
-        const isMissingCol =
-            error.code === '42703' ||
-            error.code === 'PGRST204' ||
-            /column .* does not exist|Could not find the '.*' column/i.test(errText);
-
-        if (!isMissingCol) break;
-
-        console.warn(`⚠️ [vendasService] Coluna opcional ausente em vendas (tentativa ${attempt + 1}), ajustando payload:`, error.message);
-
-        let removedAny = false;
-        const explicitMatch =
-            errText.match(/Could not find the '([^']+)' column/i) ||
-            errText.match(/column\s+(?:"?[a-zA-Z0-9_]+"?\.)?"?([a-zA-Z0-9_]+)"?\s+(?:of relation|does not exist)/i);
-
-        if (explicitMatch && explicitMatch[1] && Object.prototype.hasOwnProperty.call(attemptPayload, explicitMatch[1])) {
-            delete attemptPayload[explicitMatch[1]];
-            removedAny = true;
-        } else {
-            const optionalGroups = [
-                { key: 'cliente_documento', test: /cliente_documento/i },
-                { key: 'cliente_telefone', test: /cliente_telefone/i },
-                { key: 'cliente_email', test: /cliente_email/i },
-                { key: 'used_', keys: ['used_produto_nome', 'used_imei', 'used_valor_avaliacao'], test: /used_/i },
-                { key: 'valor_', keys: ['valor_pix', 'valor_cartao', 'valor_dinheiro', 'valor_boleto', 'valor_troca'], test: /valor_(pix|cartao|dinheiro|boleto|troca)/i },
-                { key: 'trainee_', keys: ['trainee_id', 'trainee_nome', 'teve_participacao_trainee'], test: /trainee/i },
-                { key: 'caixa_id', test: /caixa_id/i },
-                { key: 'criado_por', test: /criado_por/i },
-                { key: 'usuario_id', test: /usuario_id/i },
-            ];
-            for (const grp of optionalGroups) {
-                if (grp.test.test(errText)) {
-                    const keysToRemove = grp.keys || [grp.key];
-                    for (const k of keysToRemove) {
-                        if (Object.prototype.hasOwnProperty.call(attemptPayload, k)) {
-                            delete attemptPayload[k];
-                            removedAny = true;
-                        }
-                    }
-                }
-            }
-            if (!removedAny && Object.prototype.hasOwnProperty.call(attemptPayload, 'cliente_documento')) {
-                delete attemptPayload.cliente_documento;
-                removedAny = true;
-            }
-        }
-
-        if (!removedAny) break;
+    if (metaRes.error) {
+        console.error('❌ [vendasService.atualizarVendaAposCriacao]:', metaRes.error);
+        throw metaRes.error;
     }
 
-    if (error) {
-        console.error('❌ [vendasService.atualizarVendaAposCriacao]:', error);
-        throw error;
-    }
-
-    return data;
+    return metaRes.data || clienteRes.data;
 }
 
 /**
