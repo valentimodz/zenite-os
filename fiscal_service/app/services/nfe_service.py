@@ -385,28 +385,59 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
             )
             
             # 3. Configurar Destinatário (Cliente)
-            # Higienização de endereço do cliente
+            # Higienização e mapeamento completo do endereço real do cliente
+            lgr_cli_raw = (req.cliente.logradouro or "").strip()
+            if not lgr_cli_raw or sanitizar_campo_fiscal(lgr_cli_raw, 60, "").lower() in ("nao informado", ""):
+                lgr_cli_raw = "Rua Principal"
+            nro_cli_raw = (req.cliente.numero or "").strip() or "S/N"
+
             lgr_cli, nro_cli, cpl_cli = extrair_partes_endereco(
-                req.cliente.logradouro or "Rua Principal",
-                req.cliente.numero or "S/N"
+                lgr_cli_raw,
+                nro_cli_raw
             )
             if getattr(req.cliente, 'complemento', None):
                 cpl_cli = sanitizar_campo_fiscal(req.cliente.complemento, 60)
 
             doc_cliente = "".join(filter(str.isdigit, req.cliente.cpf_cnpj or ""))
-            clean_cep_cli = "".join(filter(str.isdigit, req.cliente.cep or "68500000")).zfill(8)[:8]
-            mun_cli = sanitizar_campo_fiscal(req.cliente.municipio or "Maraba", 60, "Maraba")
-            uf_cli = (req.cliente.uf or "PA").strip().upper()[:2]
+            cep_cli_digits = "".join(filter(str.isdigit, req.cliente.cep or ""))
+            clean_cep_cli = cep_cli_digits[:8] if len(cep_cli_digits) == 8 and set(cep_cli_digits) != {"0"} else "68500000"
+            uf_cli = ((req.cliente.uf or "PA").strip().upper()[:2]) or "PA"
+
+            cidade_cli_bruta = (getattr(req.cliente, "cidade", None) or req.cliente.municipio or "").strip()
+            cidade_cli_norm = sanitizar_campo_fiscal(cidade_cli_bruta, 60, "").lower()
+            if not cidade_cli_bruta or cidade_cli_norm in ("", "nao informado"):
+                cidade_cli_exibicao = "Marabá" if uf_cli == "PA" else "Não Informado"
+            else:
+                cidade_cli_exibicao = cidade_cli_bruta
+
+            bairro_cli_bruto = (req.cliente.bairro or "").strip()
+            if not bairro_cli_bruto or sanitizar_campo_fiscal(bairro_cli_bruto, 60, "").lower() in ("nao informado", ""):
+                bairro_cli_bruto = "Centro"
+            bairro_cli_san = sanitizar_campo_fiscal(bairro_cli_bruto, 60, "Centro")
+
+            mun_cli = sanitizar_campo_fiscal(cidade_cli_exibicao, 60, "Maraba")
+
+            # Sincroniza campos normalizados em req.cliente para consistência entre XML e DANFE
+            req.cliente.cpf_cnpj = doc_cliente
+            req.cliente.cep = clean_cep_cli
+            req.cliente.uf = uf_cli
+            req.cliente.logradouro = lgr_cli
+            req.cliente.numero = nro_cli
+            req.cliente.bairro = bairro_cli_san
+            req.cliente.cidade = cidade_cli_exibicao
+            req.cliente.municipio = cidade_cli_exibicao
+            if cpl_cli:
+                req.cliente.complemento = cpl_cli
 
             cliente = Cliente(
-                razao_social=sanitizar_campo_fiscal(req.cliente.nome, 60, "NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL" if ambiente == "2" else "CONSUMIDOR"),
+                razao_social=sanitizar_campo_fiscal(req.cliente.nome, 60, "NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL" if str(ambiente) == "2" else "CONSUMIDOR"),
                 tipo_documento="CPF" if len(doc_cliente) <= 11 else "CNPJ",
                 numero_documento=doc_cliente,
                 email=req.cliente.email,
                 endereco_logradouro=lgr_cli,
                 endereco_numero=nro_cli,
                 endereco_complemento=cpl_cli or None,
-                endereco_bairro=sanitizar_campo_fiscal(req.cliente.bairro or "Centro", 60, "Centro"),
+                endereco_bairro=bairro_cli_san,
                 endereco_municipio=mun_cli,
                 endereco_uf=uf_cli,
                 endereco_cep=clean_cep_cli,
@@ -485,8 +516,16 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
 
                 item_dict = item.dict() if hasattr(item, "dict") else (item.model_dump() if hasattr(item, "model_dump") else getattr(item, "__dict__", {}))
 
-                # Higienização da descrição do produto (xProd)
-                desc_bruta = str(item_dict.get("nome") or getattr(item, "nome", None) or item_dict.get("descricao") or "PRODUTO DIVERSO")
+                # Higienização da descrição do produto (xProd) com anexo obrigatório do IMEI quando disponível
+                desc_bruta = str(item_dict.get("nome") or getattr(item, "nome", None) or item_dict.get("descricao") or "PRODUTO DIVERSO").strip()
+                imei_item = str(item_dict.get("imei") or getattr(item, "imei", None) or "").strip()
+                inf_ad_prod = str(item_dict.get("inf_ad_prod") or getattr(item, "inf_ad_prod", None) or "").strip()
+
+                if imei_item and imei_item.upper() not in desc_bruta.upper():
+                    desc_bruta = f"{desc_bruta} - IMEI: {imei_item}"
+                if imei_item and not inf_ad_prod:
+                    inf_ad_prod = f"IMEI: {imei_item}"
+
                 x_prod_limpo = " ".join(desc_bruta.replace("\n", " ").replace("\r", " ").split())[:120].strip()
                 if not x_prod_limpo:
                     x_prod_limpo = "PRODUTO DIVERSO"
@@ -525,6 +564,8 @@ def processar_emissao_nfe_pa(req: EmitirNfeRequest) -> NfeResponse:
                 prod_obj.ean = "SEM GTIN"
                 prod_obj.ean_tributavel = "SEM GTIN"
                 prod_obj.descricao = x_prod_limpo
+                if inf_ad_prod:
+                    setattr(prod_obj, "informacoes_adicionais", sanitizar_campo_fiscal(inf_ad_prod, 500, ""))
                 setattr(prod_obj, "valor_tributos_aprox", Decimal("0.00"))
             
             # 5. Adicionar Grupo de Pagamento (NF-e 4.00)

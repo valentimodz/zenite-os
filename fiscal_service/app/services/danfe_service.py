@@ -370,6 +370,16 @@ FOLHA 1/1</font>
     ]))
     elements.append(hdr_dest)
 
+    cli_uf = (req.cliente.uf or "PA").strip().upper()[:2] or "PA"
+    cli_numero = req.cliente.numero.strip() if (req.cliente.numero and req.cliente.numero.strip()) else "S/N"
+    cli_complemento = f" - {req.cliente.complemento.strip()}" if getattr(req.cliente, "complemento", None) and str(req.cliente.complemento).strip() else ""
+    cli_municipio_raw = (getattr(req.cliente, "cidade", None) or req.cliente.municipio or "").strip()
+    cli_municipio = (
+        "Marabá"
+        if (not cli_municipio_raw or re.sub(r"[ãa]", "a", cli_municipio_raw.lower()) == "nao informado") and cli_uf == "PA"
+        else (cli_municipio_raw or "Não Informado")
+    )
+
     dest_rows = [
         # Linha 1: Nome, CNPJ/CPF, Data Emissão
         [
@@ -379,16 +389,16 @@ FOLHA 1/1</font>
         ],
         # Linha 2: Endereço, Bairro, CEP, Data Saída
         [
-            Paragraph(f"ENDEREÇO<br/><b>{_esc(req.cliente.logradouro)}, {_esc(req.cliente.numero)}</b>", lbl),
+            Paragraph(f"ENDEREÇO<br/><b>{_esc(req.cliente.logradouro)}, {_esc(cli_numero)}{_esc(cli_complemento)}</b>", lbl),
             Paragraph(f"BAIRRO / DISTRITO<br/><b>{_esc(req.cliente.bairro)}</b>", lbl),
             Paragraph(f"CEP<br/><b>{_esc(_format_cep(req.cliente.cep))}</b>", lbl),
             Paragraph(f"DATA SAÍDA / ENTRADA<br/><b>{data_emissao_str}</b>", lbl)
         ],
         # Linha 3: Município, Fone, UF, Inscrição Estadual, Hora Saída
         [
-            Paragraph(f"MUNICÍPIO<br/><b>{_esc(req.cliente.municipio)}</b>", lbl),
+            Paragraph(f"MUNICÍPIO<br/><b>{_esc(cli_municipio)}</b>", lbl),
             Paragraph(f"FONE / FAX<br/><b>{_esc(req.cliente.telefone or '')}</b>", lbl),
-            Paragraph(f"UF<br/><b>{_esc(req.cliente.uf)}</b>", lbl),
+            Paragraph(f"UF<br/><b>{_esc(cli_uf)}</b>", lbl),
             Paragraph(f"INSCRIÇÃO ESTADUAL<br/><b>{_esc(req.cliente.inscricao_estadual or 'ISENTO')}</b>", lbl),
             Paragraph(f"HORA DA SAÍDA<br/><b>{hora_emissao_str}</b>", lbl)
         ]
@@ -578,16 +588,16 @@ FOLHA 1/1</font>
         Paragraph("%IPI", tbl_hdr)
     ]
 
-    prod_col_widths = [38, 160, 48, 30, 26, 18, 28, 45, 48, 34, 30, 26, 26, 26] # Soma = 563 pt
+    prod_col_widths = [45, 153, 48, 30, 26, 18, 28, 45, 48, 34, 30, 26, 26, 26] # Soma = 563 pt
 
     prod_rows = [prod_header]
     for it in req.itens:
         desc = _esc(it.nome.upper())
-        if it.imei:
+        if it.imei and str(it.imei).strip().upper() not in it.nome.upper():
             desc += f"<br/><font size=5.5 color='#333333'>IMEI: {_esc(it.imei)}</font>"
         
         prod_rows.append([
-            Paragraph(_esc(str(it.codigo)[:10]), tbl_val),
+            Paragraph(_esc(str(it.codigo)[:15]), tbl_val),
             Paragraph(desc, tbl_val),
             Paragraph(_esc(it.ncm), tbl_val_c),
             Paragraph("0102", tbl_val_c), # Simples Nacional sem crédito

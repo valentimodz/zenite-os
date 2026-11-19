@@ -11,6 +11,7 @@ class ItemVendaModel(BaseModel):
     valor_unitario: float
     valor_total: float
     imei: Optional[str] = None
+    inf_ad_prod: Optional[str] = None
     codigo_barras: Optional[str] = None
     ean: Optional[str] = None
 
@@ -20,13 +21,15 @@ class ClienteFiscalModel(BaseModel):
     email: Optional[str] = None
     telefone: Optional[str] = None
     inscricao_estadual: Optional[str] = None
-    logradouro: Optional[str] = "Não Informado"
+    logradouro: Optional[str] = "Rua Principal"
     numero: Optional[str] = "S/N"
+    complemento: Optional[str] = None
     bairro: Optional[str] = "Centro"
-    municipio: Optional[str] = "Belém"
-    codigo_municipio: Optional[str] = "1501402" # Código IBGE Belém-PA
+    cidade: Optional[str] = None
+    municipio: Optional[str] = "Marabá"
+    codigo_municipio: Optional[str] = "1504208" # Código IBGE Marabá-PA
     uf: Optional[str] = "PA"
-    cep: Optional[str] = "66000000"
+    cep: Optional[str] = "68500000"
 
 class EmitenteFiscalModel(BaseModel):
     cnpj: str
@@ -37,10 +40,10 @@ class EmitenteFiscalModel(BaseModel):
     logradouro: Optional[str] = "Rua Principal"
     numero: Optional[str] = "100"
     bairro: Optional[str] = "Centro"
-    municipio: Optional[str] = "Belém"
-    codigo_municipio: Optional[str] = "1501402"
+    municipio: Optional[str] = "Marabá"
+    codigo_municipio: Optional[str] = "1504208"
     uf: Optional[str] = "PA"
-    cep: Optional[str] = "66000000"
+    cep: Optional[str] = "68500000"
     telefone: Optional[str] = None
 
 class EmitirNfeRequest(BaseModel):

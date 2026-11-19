@@ -248,17 +248,74 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
         throw new Error('Venda não possui vínculo com nenhuma empresa/tenant.');
     }
 
-    // 2. Carregar os dados da empresa, filial (se houver) e as configurações fiscais (incluindo certificado A1)
+    // 2. Carregar empresa, filial, configurações fiscais, itens reais da venda e destinatário (public.clientes)
     const filialId = venda.filial_id;
-    const [empresaRes, configFiscalRes, filialRes] = await Promise.all([
+    const [empresaRes, configFiscalRes, filialRes, itensVendaRes, clienteRes] = await Promise.all([
         supabase.from('companies').select('*').eq('id', empresaId).single(),
         supabase.from('configuracoes_fiscais').select('*').eq('tenant_id', empresaId).maybeSingle(),
-        filialId ? supabase.from('filiais').select('*').eq('id', filialId).maybeSingle() : Promise.resolve({ data: null })
+        filialId ? supabase.from('filiais').select('*').eq('id', filialId).maybeSingle() : Promise.resolve({ data: null }),
+        supabase.from('itens_venda').select('*').eq('venda_id', venda.id),
+        venda.cliente_id
+            ? supabase
+                .from('clientes')
+                .select('id, nome, cpf_cnpj, telefone, email, logradouro, numero, complemento, bairro, cidade, uf, cep')
+                .eq('id', venda.cliente_id)
+                .maybeSingle()
+            : Promise.resolve({ data: null })
     ]);
 
     const empresa = empresaRes.data;
     const configFiscal = configFiscalRes.data;
     const filial = filialRes?.data || null;
+    const itensVenda = Array.isArray(itensVendaRes?.data) ? itensVendaRes.data : [];
+
+    // Fallback caso a tabela clientes ainda não possua a coluna complemento ou cliente_id não esteja vinculado
+    let clienteDb = clienteRes?.data || null;
+    if (venda.cliente_id && clienteRes?.error) {
+        const { data: cliFallback } = await supabase
+            .from('clientes')
+            .select('id, nome, cpf_cnpj, telefone, email, logradouro, numero, bairro, cidade, uf, cep')
+            .eq('id', venda.cliente_id)
+            .maybeSingle();
+        clienteDb = cliFallback || null;
+    }
+
+    const cpfBuscaFallback = String(venda.cliente_cpf_cnpj || venda.cliente_documento || '').trim();
+    const cpfDigitsBusca = cpfBuscaFallback.replace(/\D/g, '');
+    if (!clienteDb && cpfDigitsBusca) {
+        const { data: cliByCpf } = await supabase
+            .from('clientes')
+            .select('id, nome, cpf_cnpj, telefone, email, logradouro, numero, bairro, cidade, uf, cep')
+            .eq('empresa_id', empresaId)
+            .or(`cpf_cnpj.eq.${cpfBuscaFallback},cpf_cnpj.eq.${cpfDigitsBusca}`)
+            .limit(1)
+            .maybeSingle();
+        clienteDb = cliByCpf || null;
+    }
+
+    // Buscar dados dos produtos vinculados aos itens da venda (para sku, nome, ncm, cfop)
+    const produtoIdsSet = new Set();
+    itensVenda.forEach((it) => {
+        if (it?.produto_id) produtoIdsSet.add(String(it.produto_id));
+    });
+    if (venda.produto_id) {
+        produtoIdsSet.add(String(venda.produto_id));
+    }
+
+    const produtosMap = {};
+    const produtoIds = Array.from(produtoIdsSet);
+    if (produtoIds.length > 0) {
+        const { data: produtosData } = await supabase
+            .from('produtos')
+            .select('*')
+            .in('id', produtoIds);
+
+        if (Array.isArray(produtosData)) {
+            produtosData.forEach((p) => {
+                if (p?.id) produtosMap[String(p.id)] = p;
+            });
+        }
+    }
 
     if (!configFiscal || !configFiscal.certificado_senha_criptografada) {
         throw new Error('Configuração fiscal incompleta ou certificado digital A1 não configurado para esta empresa.');
@@ -278,8 +335,6 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
     // 4. Montar o payload para a rota do micro-serviço FastAPI
     const { fiscalServiceBaseUrl, headers: fiscalHeaders } = getFiscalServiceConfig();
 
-    // Gerar um número sequencial de NF-e caso não exista
-    const numeroNfe = Number(venda.nfe_numero || Math.floor(1000 + Math.random() * 9000));
     const valorTotal = Number(venda.valor_total || (
         Number(venda.valor_pix || 0) +
         Number(venda.valor_cartao || 0) +
@@ -289,6 +344,141 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
 
     const localAmbiente = typeof localStorage !== 'undefined' ? localStorage.getItem(`fiscal_ambiente_${empresaId}`) : null;
     const ambienteFinal = Number(ambiente || configFiscal.ambiente || localAmbiente || 2);
+
+    const isPlaceholderTexto = (val) => {
+        const limpo = String(val || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim()
+            .toLowerCase();
+        return !limpo || limpo === 'nao informado';
+    };
+
+    const clienteNomeFinal = String(clienteDb?.nome || venda.cliente_nome || 'Consumidor Final').trim();
+    const clienteCpfDigits = String(
+        clienteDb?.cpf_cnpj ||
+        venda.cliente_cpf_cnpj ||
+        venda.cliente_documento ||
+        ''
+    ).replace(/\D/g, '');
+    const clienteCpfFinal = clienteCpfDigits || '00000000000';
+    const clienteTelefoneFinal = String(clienteDb?.telefone || venda.cliente_telefone || '').trim() || null;
+    const clienteEmailFinal = String(clienteDb?.email || venda.cliente_email || '').trim() || null;
+    const clienteUfFinal = String(clienteDb?.uf || 'PA').trim().toUpperCase().slice(0, 2) || 'PA';
+    const clienteCidadeFinal = !isPlaceholderTexto(clienteDb?.cidade)
+        ? String(clienteDb.cidade).trim()
+        : (clienteUfFinal === 'PA' ? 'Marabá' : 'Não Informado');
+    const clienteLogradouroFinal = !isPlaceholderTexto(clienteDb?.logradouro)
+        ? String(clienteDb.logradouro).trim()
+        : 'Rua Principal';
+    const clienteNumeroFinal = String(clienteDb?.numero || '').trim() || 'S/N';
+    const clienteComplementoFinal = String(clienteDb?.complemento || '').trim() || null;
+    const clienteBairroFinal = !isPlaceholderTexto(clienteDb?.bairro)
+        ? String(clienteDb.bairro).trim()
+        : 'Centro';
+    const clienteCepDigits = String(clienteDb?.cep || '').replace(/\D/g, '');
+    const clienteCepFinal = (clienteCepDigits.length === 8 && !/^0+$/.test(clienteCepDigits))
+        ? clienteCepDigits
+        : '68500000';
+
+    const buildFiscalItem = ({
+        nomeBase,
+        imei,
+        sku,
+        codigo,
+        codigoBarras,
+        ean,
+        ncm,
+        cfop,
+        quantidade,
+        valorUnitario,
+        valorTotalItem,
+        produtoId
+    }) => {
+        const nomeLimpo = String(nomeBase || '').replace(/\s+/g, ' ').trim();
+        const imeiLimpo = String(imei || '').trim() || null;
+        const descricao = !nomeLimpo
+            ? (imeiLimpo ? `Aparelho - IMEI: ${imeiLimpo}` : 'Produto / Mercadoria')
+            : (imeiLimpo && !nomeLimpo.toUpperCase().includes(imeiLimpo.toUpperCase())
+                ? `${nomeLimpo} - IMEI: ${imeiLimpo}`
+                : nomeLimpo);
+
+        const qtd = Number(quantidade || 1) || 1;
+        const vTot = Number(valorTotalItem || 0);
+        const vUnit = Number(valorUnitario || 0) || (qtd > 0 ? vTot / qtd : vTot);
+        const ncmDigits = String(ncm || '').replace(/\D/g, '');
+        const cfopDigits = String(cfop || '').replace(/\D/g, '');
+        const codigoResolvido = String(
+            sku ||
+            codigo ||
+            codigoBarras ||
+            ean ||
+            imeiLimpo ||
+            (produtoId ? String(produtoId).slice(0, 8) : '') ||
+            venda.id.slice(0, 8)
+        ).trim();
+
+        return {
+            codigo: codigoResolvido,
+            nome: descricao,
+            ncm: ncmDigits.length === 8 ? ncmDigits : '85171300',
+            cfop: cfopDigits.length === 4 ? cfopDigits : '5102',
+            ucom: 'UN',
+            quantidade: qtd,
+            valor_unitario: Number(vUnit.toFixed(2)),
+            valor_total: Number((vTot > 0 ? vTot : vUnit * qtd).toFixed(2)),
+            imei: imeiLimpo,
+            inf_ad_prod: imeiLimpo ? `IMEI: ${imeiLimpo}` : null,
+            codigo_barras: codigoBarras || ean || 'SEM GTIN',
+            ean: ean || codigoBarras || 'SEM GTIN'
+        };
+    };
+
+    const itensPayload = itensVenda.length > 0
+        ? itensVenda.map((it) => {
+            const prod = it.produto_id ? produtosMap[String(it.produto_id)] : null;
+            const singleFallbackNome = itensVenda.length === 1
+                ? (venda.produto_nome || venda.produtos_descricao || venda.itens_resumo)
+                : '';
+            const imeiItem = it.imei || it.serial || it.numero_serie || (itensVenda.length === 1 ? (venda.imei || venda.imei_novo) : null);
+            const qtdItem = Number(it.quantidade ?? it.qtd ?? 1) || 1;
+            const vTotItem = Number(it.valor_total ?? it.subtotal ?? 0) || (itensVenda.length === 1 ? valorTotal : 0);
+            const vUnitItem = Number(it.preco_unitario_vendido ?? it.preco_unitario ?? it.valor_unitario ?? it.preco ?? 0);
+
+            return buildFiscalItem({
+                nomeBase: it.produto_nome || it.nome || it.descricao || prod?.nome || singleFallbackNome,
+                imei: imeiItem,
+                sku: prod?.sku || it.sku,
+                codigo: it.codigo,
+                codigoBarras: prod?.codigo_barras || it.codigo_barras,
+                ean: prod?.ean || it.ean,
+                ncm: it.ncm || prod?.ncm,
+                cfop: it.cfop || prod?.cfop,
+                quantidade: qtdItem,
+                valorUnitario: vUnitItem,
+                valorTotalItem: vTotItem > 0 ? vTotItem : (vUnitItem * qtdItem),
+                produtoId: it.produto_id || prod?.id
+            });
+        })
+        : [
+            (() => {
+                const prodVenda = venda.produto_id ? produtosMap[String(venda.produto_id)] : null;
+                return buildFiscalItem({
+                    nomeBase: venda.produto_nome || prodVenda?.nome || venda.produtos_descricao || venda.itens_resumo,
+                    imei: venda.imei || venda.imei_novo,
+                    sku: prodVenda?.sku,
+                    codigo: venda.codigo,
+                    codigoBarras: prodVenda?.codigo_barras || venda.codigo_barras,
+                    ean: prodVenda?.ean || venda.ean,
+                    ncm: prodVenda?.ncm || venda.ncm,
+                    cfop: prodVenda?.cfop || venda.cfop,
+                    quantidade: venda.quantidade || 1,
+                    valorUnitario: valorTotal / (Number(venda.quantidade || 1) || 1),
+                    valorTotalItem: valorTotal,
+                    produtoId: venda.produto_id || prodVenda?.id
+                });
+            })()
+        ];
 
     const payload = {
         venda_id: venda.id,
@@ -314,27 +504,20 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
             telefone: filial?.telefone || filial?.whatsapp || empresa?.telefone || null
         },
         cliente: {
-            nome: venda.cliente_nome || 'Consumidor Final',
-            cpf_cnpj: venda.cliente_cpf_cnpj || '00000000000',
-            email: venda.cliente_email || null,
-            telefone: venda.cliente_telefone || null,
-            uf: 'PA'
+            nome: clienteNomeFinal,
+            cpf_cnpj: clienteCpfFinal,
+            email: clienteEmailFinal,
+            telefone: clienteTelefoneFinal,
+            logradouro: clienteLogradouroFinal,
+            numero: clienteNumeroFinal,
+            complemento: clienteComplementoFinal,
+            bairro: clienteBairroFinal,
+            cidade: clienteCidadeFinal,
+            municipio: clienteCidadeFinal,
+            uf: clienteUfFinal,
+            cep: clienteCepFinal
         },
-        itens: [
-            {
-                codigo: venda.imei || venda.id.slice(0, 8),
-                nome: venda.produto_nome || 'Produto / Mercadoria',
-                ncm: '85171300', // Padrão telecomunicações/smartphones
-                cfop: '5102',
-                ucom: 'UN',
-                quantidade: 1.0,
-                valor_unitario: valorTotal,
-                valor_total: valorTotal,
-                imei: venda.imei || null,
-                codigo_barras: venda.codigo_barras || venda.ean || 'SEM GTIN',
-                ean: venda.ean || venda.codigo_barras || 'SEM GTIN'
-            }
-        ],
+        itens: itensPayload,
         certificado_a1_url: certUrl,
         certificado_senha: configFiscal.certificado_senha_criptografada
     };
@@ -384,8 +567,8 @@ export async function emitirNfeVenda({ vendaId, ambiente = 2 }) {
                         chave_acesso: data.chave_acesso,
                         protocolo_autorizacao: data.protocolo || null,
                         status: 'AUTORIZADA',
-                        cliente_nome: venda.cliente_nome || 'Consumidor Final',
-                        cliente_documento: venda.cliente_cpf_cnpj || null,
+                        cliente_nome: clienteNomeFinal,
+                        cliente_documento: clienteCpfFinal !== '00000000000' ? clienteCpfFinal : null,
                         valor_total: valorTotal,
                         danfe_pdf_url: data.pdf_url || null,
                         xml_conteudo: data.xml_conteudo || null
